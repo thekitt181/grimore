@@ -151,11 +151,15 @@ function emitRollPayload(io: Server, payload: DdbRollBridgePayload): void {
 /** Atomically claim a game-log message id before emitting (shared by WS + REST poll). */
 async function claimDdbRollMessage(sessionId: string, messageId: string | null): Promise<boolean> {
   if (!messageId) return true;
-  const seenKey = `ddb:roll-seen:${sessionId}`;
-  const isNew = await redis.sadd(seenKey, messageId);
-  if (isNew === 0) return false;
-  await redis.expire(seenKey, SEEN_TTL);
-  return true;
+  try {
+    const seenKey = `ddb:roll-seen:${sessionId}`;
+    const isNew = await redis.sadd(seenKey, messageId);
+    if (isNew === 0) return false;
+    await redis.expire(seenKey, SEEN_TTL);
+    return true;
+  } catch {
+    return true;
+  }
 }
 
 const ROLL_FP_TTL_SEC = 15;
@@ -169,9 +173,13 @@ async function claimDdbRollFingerprint(sessionId: string, parsed: ParsedDdbRoll)
     parsed.notation,
     parsed.diceResults.join(','),
   ].join('|');
-  const key = `ddb:roll-fp:${sessionId}:${fp}`;
-  const ok = await redis.set(key, '1', 'EX', ROLL_FP_TTL_SEC, 'NX');
-  return ok === 'OK';
+  try {
+    const key = `ddb:roll-fp:${sessionId}:${fp}`;
+    const ok = await redis.set(key, '1', 'EX', ROLL_FP_TTL_SEC, 'NX');
+    return ok === 'OK';
+  } catch {
+    return true;
+  }
 }
 
 async function claimDdbRollEmit(
@@ -525,15 +533,24 @@ export async function fetchNewDdbRollsForSession(sessionId: string): Promise<Ddb
 
   const seenKey = `ddb:roll-seen:${sessionId}`;
   const initKey = `ddb:roll-seeded:${sessionId}`;
-  const seeded = await redis.get(initKey);
+  let seeded: string | null = null;
+  try {
+    seeded = await redis.get(initKey);
+  } catch {
+    seeded = null;
+  }
 
   if (!seeded) {
-    for (const msg of msgs) {
-      const id = (msg as Record<string, unknown>).id;
-      if (typeof id === 'string') await redis.sadd(seenKey, id);
+    try {
+      for (const msg of msgs) {
+        const id = (msg as Record<string, unknown>).id;
+        if (typeof id === 'string') await redis.sadd(seenKey, id);
+      }
+      await redis.setex(initKey, SEEN_TTL, '1');
+      await redis.expire(seenKey, SEEN_TTL);
+    } catch {
+      /* seed without redis */
     }
-    await redis.setex(initKey, SEEN_TTL, '1');
-    await redis.expire(seenKey, SEEN_TTL);
     console.log(`[DDB] roll poll seeded session=${sessionId} (${msgs.length} messages)`);
     return [];
   }

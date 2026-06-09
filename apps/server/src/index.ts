@@ -5,7 +5,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
 import { prisma } from './lib/prisma';
-import { redis } from './lib/redis';
+import { connectRedisOptional, isRedisOperational, redis } from './lib/redis';
 import { initSocket } from './socket';
 import campaignRoutes from './routes/campaigns';
 import userRoutes from './routes/users';
@@ -58,7 +58,11 @@ app.use('/api/compendium', compendiumRoutes);
 app.use('/api/ddb', ddbRoutes);
 
 app.get('/health', (_req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  res.json({
+    status: 'ok',
+    redis: isRedisOperational() ? 'connected' : 'degraded',
+    timestamp: new Date().toISOString(),
+  });
 });
 
 mountClientSpa(app);
@@ -88,8 +92,10 @@ async function start() {
     await prisma.$connect();
     console.log('[DB] PostgreSQL connected');
 
-    await redis.connect();
-    // Redis emits its own connect log
+    const redisOk = await connectRedisOptional();
+    if (!redisOk) {
+      console.warn('[Redis] Running without Redis — session caches and DDB dedup are degraded');
+    }
 
     httpServer.on('error', (err: NodeJS.ErrnoException) => {
       if (err.code === 'EADDRINUSE') {
