@@ -1,10 +1,11 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { fetchSyncStatus } from './compendiumApi';
 import { useCompendiumUiStore } from './compendiumStore';
 import { getSocket } from '@/lib/socket';
 
-const POLL_MS = 5_000;
+const POLL_MS = 12_000;
+const POLL_SLOW_MS = 45_000;
 
 function refetchAllCompendium(queryClient: ReturnType<typeof useQueryClient>) {
   void queryClient.invalidateQueries({
@@ -23,6 +24,7 @@ export function useCompendiumSyncPoll(enabled = true) {
   const lastSyncAt = useCompendiumUiStore((s) => s.lastSyncAt);
   const setLastSyncAt = useCompendiumUiStore((s) => s.setLastSyncAt);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [pollMs, setPollMs] = useState(POLL_MS);
 
   const scheduleRefetch = () => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -31,14 +33,24 @@ export function useCompendiumSyncPoll(enabled = true) {
     }, 150);
   };
 
-  const { data } = useQuery({
+  const { data, isError } = useQuery({
     queryKey: ['compendium', 'sync-status'],
     queryFn: fetchSyncStatus,
     enabled,
-    staleTime: 2_000,
-    refetchInterval: POLL_MS,
+    staleTime: 5_000,
+    refetchInterval: enabled ? pollMs : false,
     refetchOnWindowFocus: true,
+    retry: 1,
   });
+
+  useEffect(() => {
+    if (!enabled) return;
+    if (isError || data?.mongoConnected === false) {
+      setPollMs(POLL_SLOW_MS);
+    } else if (data?.mongoConnected) {
+      setPollMs(POLL_MS);
+    }
+  }, [enabled, isError, data?.mongoConnected]);
 
   useEffect(() => {
     if (!enabled) return;

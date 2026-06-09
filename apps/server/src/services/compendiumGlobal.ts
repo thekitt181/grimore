@@ -1,6 +1,6 @@
 import type { CompendiumGlobalDoc, OwlbearRawGlobalDoc } from '@grimoire/shared';
 import { normalizeOwlbearGlobalDoc } from '@grimoire/shared';
-import { getCollection, resetMongoClient, shouldResetMongoClient, withMongoTimeout } from '../lib/mongo';
+import { getCollection, isMongoCircuitOpen, resetMongoClient, shouldResetMongoClient, withMongoTimeout } from '../lib/mongo';
 import {
   clearGlobalFallbackCache,
   globalFallbackFileRevision,
@@ -335,6 +335,7 @@ export async function readMongoEntryImageHistory(entryName: string): Promise<str
 
 /** Lightweight version probe — avoids loading the multi-MB global doc. */
 export async function readMongoGlobalVersion(): Promise<string | null> {
+  if (isMongoCircuitOpen()) return null;
   try {
     const col = await getCollection<OwlbearRawGlobalDoc>('data');
     if (!col) return null;

@@ -37,7 +37,12 @@ function compendiumErrorHint(error: unknown): string {
     if (error.response.status === 403) return 'Admin password required to edit. Unlock admin mode or sign in.';
     if (error.response.status >= 500) {
       const msg = error.response.data?.error;
-      if (typeof msg === 'string' && msg.trim()) return msg;
+      if (typeof msg === 'string' && msg.trim()) {
+        if (msg.includes('Mongo operation timed out') || msg.includes('MongoDB temporarily unavailable')) {
+          return 'Compendium database is slow — using cached data. It should recover shortly.';
+        }
+        return msg;
+      }
       return 'Compendium server error. Check the server console.';
     }
   }

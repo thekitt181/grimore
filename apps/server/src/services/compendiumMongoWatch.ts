@@ -1,6 +1,6 @@
 import type { ChangeStreamDocument } from 'mongodb';
 import type { OwlbearRawGlobalDoc } from '@grimoire/shared';
-import { getCollection, isMongoConfigured } from '../lib/mongo';
+import { getCollection, isMongoConfigured, isMongoCircuitOpen } from '../lib/mongo';
 import { notifyCompendiumChanged } from './compendiumChangeNotify';
 
 let started = false;
@@ -14,7 +14,7 @@ export function markCompendiumWritePending(): void {
 }
 
 export function startCompendiumMongoWatch(): void {
-  if (started || !isMongoConfigured()) return;
+  if (started || !isMongoConfigured() || isMongoCircuitOpen()) return;
   started = true;
 
   void (async () => {

@@ -1,5 +1,5 @@
 import type { OwlbearRawGlobalDoc } from '@grimoire/shared';
-import { getCollection, withMongoTimeout } from '../lib/mongo';
+import { getCollection, isMongoCircuitOpen, withMongoTimeout } from '../lib/mongo';
 import { isoTimestamp } from './compendiumGlobal';
 import {
   policyFromRaw,
@@ -29,6 +29,16 @@ function policyCacheRev(policy: CompendiumVisibilityPolicy): string {
 /** Read only visibility policy fields — avoids loading the full multi-MB global doc. */
 export async function readVisibilityPolicyFast(): Promise<CompendiumVisibilityPolicy> {
   if (policyCache) return policyCache.policy;
+  if (isMongoCircuitOpen()) {
+    const { readRawGlobalDoc } = await import('./compendiumOwlbearPersist');
+    const raw = await readRawGlobalDoc({ includeImageData: false });
+    const policy = policyFromRaw(raw);
+    policyCache = {
+      rev: `${isoTimestamp(raw.lastUpdated)}:${policyCacheRev(policy)}:circuit`,
+      policy,
+    };
+    return policy;
+  }
 
   try {
     const col = await getCollection<OwlbearRawGlobalDoc>('data');

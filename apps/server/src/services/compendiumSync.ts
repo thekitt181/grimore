@@ -11,7 +11,7 @@ import type {
 } from '@grimoire/shared';
 import { isHomebrewEntry, normalizeOwlbearGlobalDoc, splitCompendiumSources } from '@grimoire/shared';
 import { isLikelyValidItem, parseCr, slugify } from '@grimoire/monster-dex';
-import { getCollection, withMongoTimeout, resetMongoClient } from '../lib/mongo';
+import { getCollection, isMongoCircuitOpen, withMongoTimeout, resetMongoClient } from '../lib/mongo';
 import { resolveCompendiumEntryImageUrl, resolveEntryImageUrl } from './compendiumImages';
 import {
   isLocalCatalogAvailable,
@@ -407,6 +407,38 @@ async function buildCatalogCache(): Promise<CatalogCache> {
         spells,
       };
       return catalogCache;
+    } catch (err) {
+      console.warn(
+        '[Compendium] Catalog build failed, using local fallback:',
+        err instanceof Error ? err.message : err,
+      );
+      const fallback = loadGlobalFallback(true);
+      const global: CompendiumGlobalDoc = fallback ?? {
+        _id: 'global',
+        monsters: [],
+        items: [],
+        spells: [],
+        deleted: [],
+        images: {},
+        imagesData: {},
+        entryImages: {},
+        lastUpdated: new Date(0).toISOString(),
+      };
+      const policy = await readVisibilityPolicyFast();
+      const deleted = global.deleted ?? [];
+      const [monsters, items, spells] = await Promise.all([
+        mergeMonsters(await loadBaseMonsters(), [], [], deleted, global, true),
+        mergeItems(await loadBaseItems(), [], [], deleted, global, true),
+        mergeSpells(await loadBaseSpells(), [], [], deleted, global, true),
+      ]);
+      catalogCache = {
+        rev: `${isoTimestamp(global.lastUpdated)}:${policyCacheRev(policy)}:fallback`,
+        policy,
+        monsters,
+        items,
+        spells,
+      };
+      return catalogCache;
     } finally {
       catalogBuildPromise = null;
     }
@@ -626,7 +658,7 @@ export async function getSyncStatus(): Promise<CompendiumSyncStatus> {
   if (fileRev) stamps.push(fileRev);
 
   const col = await getCollection<CompendiumGlobalDoc>('data');
-  const mongoConnected = Boolean(col && mongoVersion);
+  const mongoConnected = Boolean(col && mongoVersion && !isMongoCircuitOpen());
   const hasLocal = isLocalCatalogAvailable() || Boolean(file);
   const hasExtension = Boolean(extVersion);
 

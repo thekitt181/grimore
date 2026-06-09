@@ -6,6 +6,7 @@ import {
   clearGlobalFallbackCache,
 } from './compendiumGlobalFallback';
 import { readMongoGlobalVersion, newestIso } from './compendiumGlobal';
+import { isMongoCircuitOpen } from '../lib/mongo';
 import { notifyCompendiumChanged } from './compendiumChangeNotify';
 
 const POLL_MS = 8_000;
@@ -21,6 +22,7 @@ export function startCompendiumExternalWatch(): void {
 
   const tick = async () => {
     try {
+      if (isMongoCircuitOpen()) return;
       const mongoVersion = await readMongoGlobalVersion();
       const extVersion = await fetchExtensionVersion();
 

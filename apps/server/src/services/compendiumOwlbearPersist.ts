@@ -7,7 +7,7 @@ import type {
   OwlbearSpell,
 } from '@grimoire/shared';
 import { normalizeOwlbearGlobalDoc } from '@grimoire/shared';
-import { getCollection, withMongoTimeout } from '../lib/mongo';
+import { getCollection, isMongoCircuitOpen, withMongoTimeout } from '../lib/mongo';
 import {
   clearGlobalFallbackCache,
   loadGlobalFallback,
@@ -255,11 +255,11 @@ function hideBuiltInOriginal(raw: OwlbearRawGlobalDoc, kind: CompendiumKind, ori
 
 /** Dedupe overrides and strip stale custom copies in Mongo/data.json. */
 export async function reconcileRawGlobalStorage(): Promise<void> {
-  if (process.env['COMPENDIUM_MONGO_ONLY'] === '1') return;
+  if (process.env['COMPENDIUM_MONGO_ONLY'] === '1' || isMongoCircuitOpen()) return;
   try {
     const col = await getCollection<OwlbearRawGlobalDoc>('data');
     if (!col) return;
-    const doc = await withMongoTimeout(col.findOne({ _id: 'global' }), 30_000);
+    const doc = await withMongoTimeout(col.findOne({ _id: 'global' }), 12_000);
     if (!doc) return;
 
     const cleaned = normalizeRawDoc(doc);
@@ -345,12 +345,19 @@ export async function persistRawGlobalDoc(raw: OwlbearRawGlobalDoc): Promise<Com
   const payload = normalizeRawDoc({ ...raw, lastUpdated });
 
   const col = await getCollection<OwlbearRawGlobalDoc>('data');
-  if (col) {
+  if (col && !isMongoCircuitOpen()) {
     markCompendiumWritePending();
-    await withMongoTimeout(
-      col.updateOne({ _id: 'global' }, { $set: payload }, { upsert: true }),
-      30_000,
-    );
+    try {
+      await withMongoTimeout(
+        col.updateOne({ _id: 'global' }, { $set: payload }, { upsert: true }),
+        12_000,
+      );
+    } catch (err) {
+      console.warn(
+        '[Compendium] Mongo write failed, saving locally:',
+        err instanceof Error ? err.message : err,
+      );
+    }
   }
 
   const normalized = normalizeOwlbearGlobalDoc(payload);

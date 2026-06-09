@@ -6,6 +6,7 @@ import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
 import { prisma } from './lib/prisma';
 import { connectRedisOptional, isRedisOperational, redis } from './lib/redis';
+import { getMongoCircuitStatus, isMongoConfigured } from './lib/mongo';
 import { initSocket } from './socket';
 import campaignRoutes from './routes/campaigns';
 import userRoutes from './routes/users';
@@ -58,9 +59,13 @@ app.use('/api/compendium', compendiumRoutes);
 app.use('/api/ddb', ddbRoutes);
 
 app.get('/health', (_req, res) => {
+  const mongo = getMongoCircuitStatus();
   res.json({
     status: 'ok',
     redis: isRedisOperational() ? 'connected' : 'degraded',
+    mongo: isMongoConfigured()
+      ? (mongo.open ? 'circuit-open' : 'configured')
+      : 'disabled',
     timestamp: new Date().toISOString(),
   });
 });
