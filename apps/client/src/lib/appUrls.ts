@@ -3,13 +3,31 @@
  * - Same domain: leave VITE_SERVER_URL empty → /api + sockets on window.location.origin
  * - Split domains: VITE_SERVER_URL=https://api.yourdomain.com
  */
+
+function isLocalhostUrl(url: string): boolean {
+  return /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?/i.test(url);
+}
+
+/** Resolve VITE_SERVER_URL, ignoring localhost when the page is on a real host. */
 function configuredServerOrigin(): string | undefined {
   const raw = import.meta.env['VITE_SERVER_URL'] as string | undefined;
   if (!raw?.trim()) return undefined;
-  return raw.trim().replace(/\/$/, '');
+
+  const url = raw.trim().replace(/\/$/, '');
+
+  if (typeof window !== 'undefined' && isLocalhostUrl(url) && !isLocalhostUrl(window.location.origin)) {
+    console.warn(
+      '[Grimoire] VITE_SERVER_URL points at localhost but the app is on',
+      window.location.origin,
+      '— using same-origin instead.',
+    );
+    return undefined;
+  }
+
+  return url;
 }
 
-/** Origin for Socket.io — same origin in dev (Vite proxies /socket.io → :3001). */
+/** Origin for Socket.io. Dev: Vite proxies /socket.io. Prod: same host as the page unless split API domain. */
 export function getServerOrigin(): string {
   const configured = configuredServerOrigin();
   if (configured) return configured;
@@ -28,6 +46,12 @@ export function getApiBaseUrl(): string {
 /** Public app URL for invite links (optional override). */
 export function getPublicAppUrl(): string {
   const override = import.meta.env['VITE_APP_URL'] as string | undefined;
-  if (override?.trim()) return override.trim().replace(/\/$/, '');
-  return window.location.origin;
+  if (override?.trim()) {
+    const url = override.trim().replace(/\/$/, '');
+    if (typeof window !== 'undefined' && isLocalhostUrl(url) && !isLocalhostUrl(window.location.origin)) {
+      return window.location.origin;
+    }
+    return url;
+  }
+  return typeof window !== 'undefined' ? window.location.origin : '';
 }

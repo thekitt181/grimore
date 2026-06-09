@@ -5,6 +5,7 @@ apps/server/client-dist
 .env.*
 !.env.example
 !.env.production.example
+!.env.production
 .env.local
 *.log
 .DS_Store
