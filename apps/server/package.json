@@ -10,6 +10,7 @@
     "lint": "eslint src --ext .ts",
     "type-check": "tsc --noEmit",
     "db:migrate": "prisma migrate dev",
+    "db:deploy": "node scripts/deploy-db.mjs",
     "db:generate": "prisma generate",
     "db:studio": "prisma studio",
     "db:seed": "tsx src/seed.ts",
