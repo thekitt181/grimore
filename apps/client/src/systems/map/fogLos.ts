@@ -261,6 +261,64 @@ export function losVisibleCellKeys(
   return cells;
 }
 
+/** Grid cells a token overlaps on a map (map-local coordinates). */
+export function tokenOccupiedCellKeys(
+  token: TokenItem,
+  map: MapItem,
+  gridSize: number,
+): Set<string> {
+  const { x: cx, y: cy } = tokenMapOrigin(token, map);
+  const minX = cx - token.width / 2;
+  const maxX = cx + token.width / 2;
+  const minY = cy - token.height / 2;
+  const maxY = cy + token.height / 2;
+  const cols = Math.ceil(map.width / gridSize);
+  const rows = Math.ceil(map.height / gridSize);
+  const x0 = Math.max(0, Math.floor(minX / gridSize));
+  const y0 = Math.max(0, Math.floor(minY / gridSize));
+  const x1 = Math.min(cols - 1, Math.floor(maxX / gridSize));
+  const y1 = Math.min(rows - 1, Math.floor(maxY / gridSize));
+  const keys = new Set<string>();
+  for (let x = x0; x <= x1; x++) {
+    for (let y = y0; y <= y1; y++) {
+      keys.add(cellKey(x, y));
+    }
+  }
+  return keys;
+}
+
+/** Cells a player can see — matches fog overlay (LOS + GM reveal, or reveal-only with no vision token). */
+export function playerSeenCellKeys(
+  revealedCells: Set<string>,
+  map: MapItem,
+  items: Record<string, Item>,
+  userId: string | null,
+  selectedIds: string[],
+  gridSize: number,
+): Set<string> {
+  const visionTokens = getVisionTokens(items, selectedIds, false, userId, map);
+  if (visionTokens.length === 0) {
+    return new Set(revealedCells);
+  }
+  return playerVisibleCells(revealedCells, map, items, userId, selectedIds, gridSize);
+}
+
+/** Whether a player may render this token while fog is active. */
+export function isTokenVisibleToPlayer(
+  token: TokenItem,
+  map: MapItem,
+  seenCells: Set<string>,
+  userId: string | null,
+): boolean {
+  const uid = userId?.trim() ?? '';
+  if (uid && token.ownerId?.trim() === uid) return true;
+  if (!tokenOnMap(token, map)) return false;
+  for (const key of tokenOccupiedCellKeys(token, map, map.gridSize)) {
+    if (seenCells.has(key)) return true;
+  }
+  return false;
+}
+
 /** Cells a player can see: token LOS clipped to GM-revealed area. */
 export function playerVisibleCells(
   revealedCells: Set<string>,

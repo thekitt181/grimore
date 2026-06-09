@@ -1,8 +1,11 @@
 import { useEffect } from 'react';
 import { Graphics } from 'pixi.js';
 import { useMapStore } from '@/systems/map/store/mapStore';
-import { useItemStore } from '../store/itemStore';
+import { isFogOverlayVisible } from '@/systems/scene/fogActiveSync';
+import { isTokenVisibleToPlayer, playerSeenCellKeys } from '@/systems/map/fogLos';
+import { useItemStore, getActiveMap } from '../store/itemStore';
 import { useSessionStore } from '@/store/sessionStore';
+import { itemsWithLiveTransforms } from '../store/liveTransformStore';
 import { sceneRefs, clientToWorld } from '../sceneRefs';
 import { hitTest, hitTestMap, itemIntersectsRect, isInteriorClick } from '../hitTest';
 import { snapPoint } from '../snap';
@@ -56,7 +59,25 @@ export function useSelectionTool(appReady: boolean) {
     function selectableItems(): Item[] {
       const all = Object.values(useItemStore.getState().items) as Item[];
       if (gm) return all;
-      return all.filter((i) => i.visible && i.type === 'token');
+      let tokens = all.filter((i) => i.visible && i.type === 'token');
+      if (!isFogOverlayVisible()) return tokens;
+      const map = getActiveMap();
+      if (!map) return tokens;
+      const itemsForVision = itemsWithLiveTransforms(
+        useItemStore.getState().items,
+        useLiveTransformStore.getState().byId,
+      );
+      const seen = playerSeenCellKeys(
+        useMapStore.getState().revealedCells,
+        map,
+        itemsForVision,
+        useSessionStore.getState().myUserId,
+        useItemStore.getState().selectedIds,
+        map.gridSize,
+      );
+      return tokens.filter((i) =>
+        isTokenVisibleToPlayer(i as TokenItem, map, seen, useSessionStore.getState().myUserId),
+      );
     }
 
     function canManipulate(item: Item): boolean {

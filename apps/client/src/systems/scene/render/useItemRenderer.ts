@@ -1,10 +1,17 @@
 import { useEffect, useRef } from 'react';
 import { Container } from 'pixi.js';
-import { useItemStore } from '../store/itemStore';
+import { useItemStore, getActiveMap } from '../store/itemStore';
 import { useSessionStore } from '@/store/sessionStore';
 import { useInitiativeStore } from '@/systems/map/store/initiativeStore';
+import { useMapStore } from '@/systems/map/store/mapStore';
+import { isFogOverlayVisible } from '@/systems/scene/fogActiveSync';
+import { isTokenVisibleToPlayer, playerSeenCellKeys } from '@/systems/map/fogLos';
+import {
+  itemsWithLiveTransforms,
+  useLiveTransformStore,
+} from '../store/liveTransformStore';
 import { renderItem, itemVisualSignature, renderMapWalls, wallVisualSignature, type RenderContext } from './renderers';
-import type { Item, MapItem } from '../types';
+import type { Item, MapItem, TokenItem } from '../types';
 import { itemDisplayZIndex, wallDisplayZIndex } from '../zOrder';
 
 /**
@@ -21,7 +28,15 @@ export function useItemRenderer(
   appReady: boolean,
 ) {
   const items   = useItemStore((s) => s.items);
+  const selectedIds = useItemStore((s) => s.selectedIds);
   const myRole  = useSessionStore((s) => s.myRole);
+  const myUserId = useSessionStore((s) => s.myUserId);
+  const revealedCells = useMapStore((s) => s.revealedCells);
+  const revealedCount = useMapStore((s) => s.revealedCells.size);
+  const fogEnabled = useMapStore((s) => s.fogEnabled);
+  const sessionFogActive = useMapStore((s) => s.sessionFogActive);
+  const liveById = useLiveTransformStore((s) => s.byId);
+  const liveTick = useLiveTransformStore((s) => s.tick);
   const activeTurnItemId = useInitiativeStore((s) =>
     s.isActive && s.combatants[s.currentIndex] ? s.combatants[s.currentIndex]!.tokenId : undefined
   );
@@ -48,6 +63,19 @@ export function useItemRenderer(
     layer.sortableChildren = true;
     const gm: boolean = myRole === 'GM';
     const ctx: RenderContext = { gm, ...(activeTurnItemId ? { activeTurnItemId } : {}) };
+    const itemsForVision = itemsWithLiveTransforms(items, liveById);
+    const activeMap = getActiveMap();
+    const fogFiltersTokens = !gm && isFogOverlayVisible();
+    const seenCells = fogFiltersTokens && activeMap
+      ? playerSeenCellKeys(
+        revealedCells,
+        activeMap,
+        itemsForVision,
+        myUserId,
+        selectedIds,
+        activeMap.gridSize,
+      )
+      : null;
 
     const liveIds = new Set(Object.keys(items));
     const liveMapIds = new Set(
@@ -95,15 +123,18 @@ export function useItemRenderer(
       c.zIndex = itemDisplayZIndex(item);
 
       // Visibility / ghosting
-      if (item.visible) {
-        c.visible = true;
-        c.alpha = 1;
-      } else if (gm) {
-        c.visible = true;
-        c.alpha = 0.35;
-      } else {
-        c.visible = false;
+      let show = item.visible || gm;
+      let alpha = item.visible || !gm ? 1 : 0.35;
+
+      if (show && item.type === 'token' && seenCells && activeMap) {
+        const visionToken = (itemsForVision[item.id] ?? item) as TokenItem;
+        if (!isTokenVisibleToPlayer(visionToken, activeMap, seenCells, myUserId)) {
+          show = false;
+        }
       }
+
+      c.visible = show;
+      c.alpha = show ? alpha : 1;
 
       // Wall overlay — always above map background/grid, below tokens
       if (item.type === 'map') {
@@ -137,7 +168,20 @@ export function useItemRenderer(
         }
       }
     }
-  }, [items, myRole, activeTurnItemId, appReady]);
+  }, [
+    items,
+    selectedIds,
+    myRole,
+    myUserId,
+    revealedCells,
+    revealedCount,
+    fogEnabled,
+    sessionFogActive,
+    liveById,
+    liveTick,
+    activeTurnItemId,
+    appReady,
+  ]);
 
   // Cleanup on unmount
   useEffect(() => {
