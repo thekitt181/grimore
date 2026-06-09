@@ -1,2 +1,14 @@
 export * from './types';
-export * from './owlbear';
+export {
+  compendiumImageKey,
+  compendiumStaticImagePath,
+  owlbearStaticImagePath,
+  toOwlbearMongoImageRef,
+  slugify,
+  parseCr,
+  parseSizeFromType,
+  monsterSizeToCells,
+  monsterToTokenDefaults,
+  isLikelyValidItem,
+  type CompendiumImageKind,
+} from './owlbear';

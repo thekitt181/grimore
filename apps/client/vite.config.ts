@@ -9,6 +9,7 @@ export default defineConfig({
     alias: {
       '@': path.resolve(__dirname, './src'),
       '@grimoire/shared': path.resolve(__dirname, '../../packages/shared/src'),
+      '@grimoire/monster-dex': path.resolve(__dirname, '../../packages/monster-dex/src'),
       '@grimoire/dice-engine': path.resolve(__dirname, '../../packages/dice-engine/src'),
       '@grimoire/fog-engine': path.resolve(__dirname, '../../packages/fog-engine/src'),
     },
