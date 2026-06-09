@@ -112,7 +112,8 @@ function paintFogGraphics(
     ? losPolygons(map, visionTokens, gridSize, { directional: true })
     : [];
 
-  fog.rect(0, 0, width, height);
+  // Pixi cut() only punches holes into the previous fill — fill the map first, then cut.
+  fog.rect(0, 0, width, height).fill({ color: FOG_COLOR, alpha: 1 });
 
   if (polys.length > 0) {
     for (const poly of polys) {
@@ -143,8 +144,6 @@ function paintFogGraphics(
       }
     }
   }
-
-  fog.fill({ color: FOG_COLOR, alpha: 1 });
 
   // Re-fog unrevealed LOS cells inside the cone while keeping smooth outer edges.
   if (!opts.isGM && opts.revealedCells.size > 0 && polys.length > 0) {

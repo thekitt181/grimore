@@ -2,7 +2,11 @@ import { useEffect } from 'react';
 import { Graphics } from 'pixi.js';
 import { useMapStore } from '@/systems/map/store/mapStore';
 import { isFogOverlayVisible } from '@/systems/scene/fogActiveSync';
-import { isTokenVisibleToPlayer, playerSeenCellKeys } from '@/systems/map/fogLos';
+import {
+  isTokenVisibleToPlayer,
+  playerHasVisionSource,
+  playerSeenCellKeys,
+} from '@/systems/map/fogLos';
 import { useItemStore, getActiveMap } from '../store/itemStore';
 import { useSessionStore } from '@/store/sessionStore';
 import { itemsWithLiveTransforms } from '../store/liveTransformStore';
@@ -62,21 +66,26 @@ export function useSelectionTool(appReady: boolean) {
       let tokens = all.filter((i) => i.visible && i.type === 'token');
       if (!isFogOverlayVisible()) return tokens;
       const map = getActiveMap();
-      if (!map) return tokens;
+      if (!map) return [];
       const itemsForVision = itemsWithLiveTransforms(
         useItemStore.getState().items,
         useLiveTransformStore.getState().byId,
       );
+      const userId = useSessionStore.getState().myUserId;
+      const selectedIds = useItemStore.getState().selectedIds;
+      if (!playerHasVisionSource(itemsForVision, userId, selectedIds, map)) {
+        return [];
+      }
       const seen = playerSeenCellKeys(
         useMapStore.getState().revealedCells,
         map,
         itemsForVision,
-        useSessionStore.getState().myUserId,
-        useItemStore.getState().selectedIds,
+        userId,
+        selectedIds,
         map.gridSize,
       );
       return tokens.filter((i) =>
-        isTokenVisibleToPlayer(i as TokenItem, map, seen, useSessionStore.getState().myUserId),
+        isTokenVisibleToPlayer(i as TokenItem, map, seen),
       );
     }
 

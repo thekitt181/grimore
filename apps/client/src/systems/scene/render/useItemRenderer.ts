@@ -5,7 +5,11 @@ import { useSessionStore } from '@/store/sessionStore';
 import { useInitiativeStore } from '@/systems/map/store/initiativeStore';
 import { useMapStore } from '@/systems/map/store/mapStore';
 import { isFogOverlayVisible } from '@/systems/scene/fogActiveSync';
-import { isTokenVisibleToPlayer, playerSeenCellKeys } from '@/systems/map/fogLos';
+import {
+  isTokenVisibleToPlayer,
+  playerHasVisionSource,
+  playerSeenCellKeys,
+} from '@/systems/map/fogLos';
 import {
   itemsWithLiveTransforms,
   useLiveTransformStore,
@@ -66,7 +70,12 @@ export function useItemRenderer(
     const itemsForVision = itemsWithLiveTransforms(items, liveById);
     const activeMap = getActiveMap();
     const fogFiltersTokens = !gm && isFogOverlayVisible();
-    const seenCells = fogFiltersTokens && activeMap
+    const hasVision = Boolean(
+      fogFiltersTokens
+      && activeMap
+      && playerHasVisionSource(itemsForVision, myUserId, selectedIds, activeMap),
+    );
+    const seenCells = hasVision && activeMap
       ? playerSeenCellKeys(
         revealedCells,
         activeMap,
@@ -126,9 +135,9 @@ export function useItemRenderer(
       let show = item.visible || gm;
       let alpha = item.visible || !gm ? 1 : 0.35;
 
-      if (show && item.type === 'token' && seenCells && activeMap) {
+      if (show && item.type === 'token' && fogFiltersTokens) {
         const visionToken = (itemsForVision[item.id] ?? item) as TokenItem;
-        if (!isTokenVisibleToPlayer(visionToken, activeMap, seenCells, myUserId)) {
+        if (!activeMap || !seenCells || !isTokenVisibleToPlayer(visionToken, activeMap, seenCells)) {
           show = false;
         }
       }

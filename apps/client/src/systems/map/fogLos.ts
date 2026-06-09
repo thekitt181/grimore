@@ -287,7 +287,17 @@ export function tokenOccupiedCellKeys(
   return keys;
 }
 
-/** Cells a player can see — matches fog overlay (LOS + GM reveal, or reveal-only with no vision token). */
+/** True when this player has an assigned or selected token driving vision. */
+export function playerHasVisionSource(
+  items: Record<string, Item>,
+  userId: string | null,
+  selectedIds: string[],
+  map: MapItem,
+): boolean {
+  return getVisionTokens(items, selectedIds, false, userId, map).length > 0;
+}
+
+/** Cells a player can see — only when they have a vision source (assigned or selected token). */
 export function playerSeenCellKeys(
   revealedCells: Set<string>,
   map: MapItem,
@@ -296,9 +306,8 @@ export function playerSeenCellKeys(
   selectedIds: string[],
   gridSize: number,
 ): Set<string> {
-  const visionTokens = getVisionTokens(items, selectedIds, false, userId, map);
-  if (visionTokens.length === 0) {
-    return new Set(revealedCells);
+  if (!playerHasVisionSource(items, userId, selectedIds, map)) {
+    return new Set();
   }
   return playerVisibleCells(revealedCells, map, items, userId, selectedIds, gridSize);
 }
@@ -308,11 +317,8 @@ export function isTokenVisibleToPlayer(
   token: TokenItem,
   map: MapItem,
   seenCells: Set<string>,
-  userId: string | null,
 ): boolean {
-  const uid = userId?.trim() ?? '';
-  if (uid && token.ownerId?.trim() === uid) return true;
-  if (!tokenOnMap(token, map)) return false;
+  if (seenCells.size === 0 || !tokenOnMap(token, map)) return false;
   for (const key of tokenOccupiedCellKeys(token, map, map.gridSize)) {
     if (seenCells.has(key)) return true;
   }
