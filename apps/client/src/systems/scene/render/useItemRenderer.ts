@@ -14,7 +14,7 @@ import {
   itemsWithLiveTransforms,
   useLiveTransformStore,
 } from '../store/liveTransformStore';
-import { renderItem, itemVisualSignature, renderMapWalls, wallVisualSignature, type RenderContext } from './renderers';
+import { renderItem, itemVisualSignature, tokenOverlayVisualSignature, updateTokenOverlay, renderMapWalls, wallVisualSignature, type RenderContext } from './renderers';
 import type { Item, MapItem, TokenItem } from '../types';
 import { itemDisplayZIndex, wallDisplayZIndex } from '../zOrder';
 
@@ -48,6 +48,7 @@ export function useItemRenderer(
   const containers = useRef<Map<string, Container>>(new Map());
   const wallContainers = useRef<Map<string, Container>>(new Map());
   const signatures = useRef<Map<string, string>>(new Map());
+  const overlaySignatures = useRef<Map<string, string>>(new Map());
   const wallSignatures = useRef<Map<string, string>>(new Map());
 
   useEffect(() => {
@@ -57,6 +58,7 @@ export function useItemRenderer(
       containers.current.clear();
       wallContainers.current.clear();
       signatures.current.clear();
+      overlaySignatures.current.clear();
       wallSignatures.current.clear();
       return;
     }
@@ -97,6 +99,7 @@ export function useItemRenderer(
         c.destroy({ children: true });
         containers.current.delete(id);
         signatures.current.delete(id);
+        overlaySignatures.current.delete(id);
       }
     }
     for (const [mapId, wc] of wallContainers.current) {
@@ -117,11 +120,21 @@ export function useItemRenderer(
         containers.current.set(item.id, c);
       }
 
-      // Rebuild children only when visual data changed
+      // Rebuild children only when visual data changed; tokens patch overlay separately.
       const sig = itemVisualSignature(item, ctx);
-      if (signatures.current.get(item.id) !== sig) {
+      const prevSig = signatures.current.get(item.id);
+      if (prevSig !== sig) {
         renderItem(c, item, ctx);
         signatures.current.set(item.id, sig);
+        if (item.type === 'token') {
+          overlaySignatures.current.set(item.id, tokenOverlayVisualSignature(item, ctx));
+        }
+      } else if (item.type === 'token') {
+        const overlaySig = tokenOverlayVisualSignature(item, ctx);
+        if (overlaySignatures.current.get(item.id) !== overlaySig) {
+          updateTokenOverlay(c, item, ctx);
+          overlaySignatures.current.set(item.id, overlaySig);
+        }
       }
 
       // Transform — merge live drag offsets so tokens stay aligned with fog vision.
@@ -202,6 +215,7 @@ export function useItemRenderer(
       containers.current.clear();
       wallContainers.current.clear();
       signatures.current.clear();
+      overlaySignatures.current.clear();
       wallSignatures.current.clear();
     };
   }, []);

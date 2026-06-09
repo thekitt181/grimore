@@ -11,6 +11,9 @@ import { useDdbStore } from './ddbStore';
 import { bindDdbRollSocket } from './bindDdbRollSocket';
 import { fetchDdbRollPoll } from './ddbApi';
 
+const POLL_MS = 2500;
+const POLL_MS_CONNECTED = 12_000;
+
 export function useDdbSocket(): void {
   const { isLoaded, isSignedIn, getToken } = useAuth();
   const sessionId = useSessionStore((s) => s.sessionId);
@@ -49,8 +52,9 @@ export function useDdbSocket(): void {
       }
     };
     void runPoll();
-    const pollTimer = setInterval(() => void runPoll(), 2500);
-    console.info('[DDB] roll poll active (session', sessionId + ') — roll on dndbeyond.com; logs appear here in Grimoire, not on DDB.');
+    const pollMs = isConnected ? POLL_MS_CONNECTED : POLL_MS;
+    const pollTimer = setInterval(() => void runPoll(), pollMs);
+    console.info(`[DDB] roll poll active (${pollMs}ms, session ${sessionId}) — roll on dndbeyond.com; logs appear here in Grimoire, not on DDB.`);
 
     const onSync = (payload: DdbCharacterSyncPayload) => {
       if (payload.sessionId !== sessionId) return;

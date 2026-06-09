@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { v4 as uuidv4 } from 'uuid';
 import { DraggablePanel } from '@/components/DraggablePanel';
 import { ddbPanelPosition, ddbPanelWidth } from '@/systems/ddb/ddbTokenUtils';
@@ -31,7 +32,16 @@ export function InitiativeTracker({ onClose }: { onClose: () => void }) {
     addCombatant, removeCombatant, updateCombatant,
     setInitiative, reorderCombatants, startCombat, endCombat, nextTurn, prevTurn,
   } = useInitiativeStore();
-  const tokens = useItemStore((s) => Object.values(s.items).filter((i): i is TokenItem => i.type === 'token'));
+  const tokenPickerOptions = useItemStore(
+    useShallow((s) =>
+      Object.values(s.items)
+        .filter((i): i is TokenItem => i.type === 'token')
+        .map((t) => ({ id: t.id, name: t.name })),
+    ),
+  );
+  const tokenCount = useItemStore(
+    (s) => Object.values(s.items).filter((i) => i.type === 'token').length,
+  );
   const { myRole } = useSessionStore();
   const isGM = myRole === 'GM';
 
@@ -44,7 +54,11 @@ export function InitiativeTracker({ onClose }: { onClose: () => void }) {
 
   function handleAdd() {
     if (!newName.trim()) return;
-    const linked = linkTokenId ? tokens.find((t) => t.id === linkTokenId) : undefined;
+    const linked = linkTokenId
+      ? Object.values(useItemStore.getState().items).find(
+        (i): i is TokenItem => i.type === 'token' && i.id === linkTokenId,
+      )
+      : undefined;
     const c: Combatant = {
       id:         uuidv4(),
       name:       newName.trim(),
@@ -136,9 +150,9 @@ export function InitiativeTracker({ onClose }: { onClose: () => void }) {
             type="button"
             onClick={() => { rollInitiativeFromTokens(); }}
             className="btn-ghost text-xs py-1 w-full"
-            disabled={tokens.length === 0}
+            disabled={tokenCount === 0}
           >
-            🎲 Roll Initiative ({tokens.length} token{tokens.length === 1 ? '' : 's'})
+            🎲 Roll Initiative ({tokenCount} token{tokenCount === 1 ? '' : 's'})
           </button>
         </div>
       )}
@@ -347,13 +361,15 @@ export function InitiativeTracker({ onClose }: { onClose: () => void }) {
             </div>
           </div>
           {/* Link to token */}
-          {tokens.length > 0 && (
+          {tokenPickerOptions.length > 0 && (
             <select
               value={linkTokenId}
               onChange={(e) => {
                 setLinkTokenId(e.target.value);
                 if (e.target.value) {
-                  const t = tokens.find((t) => t.id === e.target.value);
+                  const t = Object.values(useItemStore.getState().items).find(
+                    (i): i is TokenItem => i.type === 'token' && i.id === e.target.value,
+                  );
                   if (t) {
                     if (!newName) setNewName(t.name);
                     setNewHp(t.hp);
@@ -363,7 +379,7 @@ export function InitiativeTracker({ onClose }: { onClose: () => void }) {
               className="input-dark text-xs py-0.5 w-full"
             >
               <option value="">— Link to token (optional) —</option>
-              {tokens.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+              {tokenPickerOptions.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
             </select>
           )}
           <div className="flex items-center gap-2">

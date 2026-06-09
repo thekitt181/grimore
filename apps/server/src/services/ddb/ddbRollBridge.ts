@@ -16,6 +16,7 @@ const WS_BASE = 'wss://game-log-api-live.dndbeyond.com/v1';
 const REST_BASE = 'https://game-log-rest-live.dndbeyond.com/v1';
 const RECONNECT_MS = 5000;
 const POLL_MS = 2500;
+const POLL_MS_CONNECTED = 12_000;
 const PING_MS = 5000;
 const MAX_SEEN_IDS = 500;
 
@@ -234,6 +235,17 @@ async function handleGameLogMessage(io: Server, bridge: ActiveBridge, data: unkn
   emitRoll(io, bridge.sessionId, parsed, msgId ?? undefined);
 }
 
+function bridgePollMs(bridge: ActiveBridge): number {
+  return bridge.ws.readyState === WebSocket.OPEN ? POLL_MS_CONNECTED : POLL_MS;
+}
+
+function scheduleBridgePoll(io: Server, bridge: ActiveBridge): void {
+  if (bridge.pollTimer) clearInterval(bridge.pollTimer);
+  bridge.pollTimer = setInterval(() => {
+    void pollGameLog(io, bridge);
+  }, bridgePollMs(bridge));
+}
+
 async function pollGameLog(io: Server, bridge: ActiveBridge): Promise<void> {
   try {
     const rolls = await fetchNewDdbRollsForSession(bridge.sessionId);
@@ -327,6 +339,7 @@ async function connectBridge(
 
   ws.on('open', () => {
     console.log(`[DDB] roll bridge connected (session=${sessionId}, campaign=${ddbCampaignId})`);
+    scheduleBridgePoll(io, bridge);
   });
 
   ws.on('message', (raw) => {
@@ -341,6 +354,7 @@ async function connectBridge(
     console.warn(`[DDB] roll bridge WS closed (${code}) session=${sessionId}`);
     const current = bridges.get(sessionId);
     if (!current || current.ws !== ws) return;
+    scheduleBridgePoll(io, current);
     // Keep REST poll running; WS will reconnect.
     current.reconnectTimer = setTimeout(() => {
       void reconnectWs(io, sessionId);
@@ -355,9 +369,7 @@ async function connectBridge(
     if (bridge.ws.readyState === WebSocket.OPEN) bridge.ws.ping();
   }, PING_MS);
 
-  bridge.pollTimer = setInterval(() => {
-    void pollGameLog(io, bridge);
-  }, POLL_MS);
+  scheduleBridgePoll(io, bridge);
 
   // Seed + first poll immediately.
   void pollGameLog(io, bridge);
@@ -384,6 +396,7 @@ async function reconnectWs(io: Server, sessionId: string): Promise<void> {
 
     ws.on('open', () => {
       console.log(`[DDB] roll bridge WS reconnected (session=${sessionId})`);
+      scheduleBridgePoll(io, bridge);
     });
     ws.on('message', (raw) => {
       try {
@@ -393,6 +406,7 @@ async function reconnectWs(io: Server, sessionId: string): Promise<void> {
     ws.on('close', (code) => {
       console.warn(`[DDB] roll bridge WS closed (${code}) session=${sessionId}`);
       if (bridges.get(sessionId)?.ws === ws) {
+        scheduleBridgePoll(io, bridge);
         bridge.reconnectTimer = setTimeout(() => {
           void reconnectWs(io, sessionId);
         }, RECONNECT_MS);
@@ -496,27 +510,52 @@ export async function resolveRollBridgeUserId(campaignId: string): Promise<strin
 
 const SEEN_TTL = 60 * 60 * 24;
 
-/** Poll DDB game log for new rolls (Redis-backed dedup). Used by bridge + HTTP API. */
-export async function fetchNewDdbRollsForSession(sessionId: string): Promise<DdbRollBridgePayload[]> {
+type SessionRollContext = {
+  at: number;
+  ddbCampaignId: number;
+  cobalt: string;
+};
+
+const sessionRollContextCache = new Map<string, SessionRollContext>();
+const SESSION_CTX_TTL_MS = 60_000;
+
+async function loadSessionRollContext(sessionId: string): Promise<SessionRollContext | null> {
+  const hit = sessionRollContextCache.get(sessionId);
+  if (hit && Date.now() - hit.at < SESSION_CTX_TTL_MS) return hit;
+
   const gameSession = await prisma.gameSession.findUnique({
     where: { id: sessionId },
     include: { campaign: { include: { ddbCampaignLink: true } } },
   });
-  if (!gameSession?.campaign.ddbCampaignLink) return [];
+  if (!gameSession?.campaign.ddbCampaignLink) return null;
 
   const bridgeUserId = await resolveRollBridgeUserId(gameSession.campaignId);
-  if (!bridgeUserId) return [];
+  if (!bridgeUserId) return null;
 
   const conn = await prisma.ddbConnection.findUnique({ where: { userId: bridgeUserId } });
-  if (!conn?.rollBridgeEnabled) return [];
+  if (!conn?.rollBridgeEnabled) return null;
 
   const cobalt = await getCobaltForUser(bridgeUserId);
-  if (!cobalt) return [];
+  if (!cobalt) return null;
 
-  const auth = await getGameLogAuth(normalizeCobaltToken(cobalt));
+  const ctx: SessionRollContext = {
+    at: Date.now(),
+    ddbCampaignId: gameSession.campaign.ddbCampaignLink.ddbCampaignId,
+    cobalt,
+  };
+  sessionRollContextCache.set(sessionId, ctx);
+  return ctx;
+}
+
+/** Poll DDB game log for new rolls (Redis-backed dedup). Used by bridge + HTTP API. */
+export async function fetchNewDdbRollsForSession(sessionId: string): Promise<DdbRollBridgePayload[]> {
+  const rollCtx = await loadSessionRollContext(sessionId);
+  if (!rollCtx) return [];
+
+  const auth = await getGameLogAuth(normalizeCobaltToken(rollCtx.cobalt));
   if (!auth) return [];
 
-  const ddbCampaignId = gameSession.campaign.ddbCampaignLink.ddbCampaignId;
+  const ddbCampaignId = rollCtx.ddbCampaignId;
   const url = `${REST_BASE}/getmessages?gameId=${ddbCampaignId}&userId=${auth.ddbUserId}`;
   const res = await fetch(url, {
     headers: {

@@ -21,6 +21,16 @@ const CONDITION_COLORS: Record<string, number> = {
 
 function cssHex(hex: string): number { return parseInt(hex.replace('#', ''), 16); }
 
+/** Base token visuals (image, aura, name) — stable during combat HP changes. */
+export function tokenBaseVisualSignature(item: TokenItem): string {
+  return `${item.name}|${item.imageUrl ?? ''}|${item.sizeCells}|${item.auraRadius ?? 0}|${item.auraColor ?? ''}`;
+}
+
+/** HP, conditions, and turn ring — cheap to patch without rebuilding the whole token. */
+export function tokenOverlayVisualSignature(item: TokenItem, ctx: RenderContext): string {
+  return `${item.hp}|${item.maxHp}|${item.tempHp ?? 0}|${item.conditions.join(',')}|${ctx.activeTurnItemId === item.id}|${ctx.gm}`;
+}
+
 /** A signature of the visual-relevant fields so we can skip needless rebuilds. */
 export function itemVisualSignature(item: Item, ctx: RenderContext): string {
   const base = `${item.type}|${item.width}|${item.height}`;
@@ -28,7 +38,7 @@ export function itemVisualSignature(item: Item, ctx: RenderContext): string {
     case 'map':
       return `${base}|${item.backgroundUrl}|${item.gridSize}|${item.gridType}|${item.gridColor}|${item.gridOpacity}|${item.gridOffsetX}|${item.gridOffsetY}|${item.showGrid}`;
     case 'token':
-      return `${base}|${item.name}|${item.imageUrl}|${item.sizeCells}|${item.hp}|${item.maxHp}|${item.tempHp ?? 0}|${item.conditions.join(',')}|${item.auraRadius}|${item.auraColor}|${ctx.activeTurnItemId === item.id}`;
+      return `${base}|${tokenBaseVisualSignature(item)}`;
     case 'drawing':
       return `${base}|${item.shape}|${item.color}|${item.stroke}|${item.points.length}`;
     case 'text':
@@ -114,13 +124,25 @@ export function renderMapWalls(c: Container, walls: WallSegment[]) {
 const HP_BAR_HEIGHT = 6;
 
 function renderToken(c: Container, item: TokenItem, ctx: RenderContext) {
-  const size = item.width;            // square
+  c.removeChildren();
+  renderTokenBase(c, item);
+  renderTokenOverlay(c, item, ctx);
+}
+
+/** Patch HP bar, conditions, and turn ring without rebuilding image/aura. */
+export function updateTokenOverlay(c: Container, item: TokenItem, ctx: RenderContext) {
+  const existing = c.getChildByLabel('token-overlay');
+  if (existing) existing.destroy();
+  renderTokenOverlay(c, item, ctx);
+}
+
+function renderTokenBase(c: Container, item: TokenItem) {
+  const size = item.width;
   const cellPx = item.width / item.sizeCells;
   const cx = size / 2;
   const cy = size / 2;
   const radius = size / 2 - 4;
 
-  // Aura (drawn first, below everything)
   if (item.auraRadius && item.auraRadius > 0) {
     const aura = new Graphics();
     aura.label = 'aura';
@@ -134,16 +156,6 @@ function renderToken(c: Container, item: TokenItem, ctx: RenderContext) {
     c.addChild(aura);
   }
 
-  // Active-turn ring
-  if (ctx.activeTurnItemId === item.id) {
-    const turn = new Graphics();
-    turn.circle(cx, cy, radius + 6);
-    turn.setStrokeStyle({ width: 3, color: 0xffd700, alpha: 1 });
-    turn.stroke();
-    c.addChild(turn);
-  }
-
-  // Base circle
   const circle = new Graphics();
   circle.label = 'circle';
   circle.circle(cx, cy, radius);
@@ -152,7 +164,6 @@ function renderToken(c: Container, item: TokenItem, ctx: RenderContext) {
   circle.stroke();
   c.addChild(circle);
 
-  // Image (masked)
   if (item.imageUrl) {
     void loadTexture(item.imageUrl).then((tex) => {
       if (c.destroyed) return;
@@ -171,46 +182,67 @@ function renderToken(c: Container, item: TokenItem, ctx: RenderContext) {
     }).catch(() => {});
   }
 
-  // Name label
   const nameText = new Text({
     text: item.name,
     style: new TextStyle({ fontFamily: 'Inter', fontSize: 10, fill: 0xe8e0d0, stroke: { color: 0x000000, width: 3 } }),
   });
+  nameText.label = 'name';
   nameText.anchor.set(0.5, 0);
   nameText.x = cx;
   nameText.y = cy + radius + 2;
   c.addChild(nameText);
+}
 
-  // HP bar — GM always sees it; players only when allowed on the token
+function renderTokenOverlay(c: Container, item: TokenItem, ctx: RenderContext) {
+  const overlay = new Container();
+  overlay.label = 'token-overlay';
+
+  const size = item.width;
+  const cellPx = item.width / item.sizeCells;
+  const cx = size / 2;
+  const cy = size / 2;
+  const radius = size / 2 - 4;
+
+  if (ctx.activeTurnItemId === item.id) {
+    const turn = new Graphics();
+    turn.label = 'turn-ring';
+    turn.circle(cx, cy, radius + 6);
+    turn.setStrokeStyle({ width: 3, color: 0xffd700, alpha: 1 });
+    turn.stroke();
+    overlay.addChild(turn);
+  }
+
   const showHpBar = ctx.gm || tokenShowsHpBarToPlayer(item);
   if (showHpBar) {
-  const maxHp = Math.max(1, item.maxHp);
-  const hpRatio = Math.max(0, item.hp / maxHp);
-  const tempRatio = Math.max(0, (item.tempHp ?? 0) / maxHp);
-  const barW = size - 8;
-  const barX = cx - radius;
-  const barY = cy + radius + 14;
-  const hpBg = new Graphics();
-  hpBg.rect(barX, barY, barW, HP_BAR_HEIGHT);
-  hpBg.fill({ color: 0x8b1a1a });
-  c.addChild(hpBg);
-  if (hpRatio > 0) {
-    const color = hpRatio > 0.5 ? 0x4ade80 : hpRatio > 0.25 ? 0xfacc15 : 0xef4444;
-    const hpFill = new Graphics();
-    hpFill.rect(barX, barY, barW * hpRatio, HP_BAR_HEIGHT);
-    hpFill.fill({ color });
-    c.addChild(hpFill);
-  }
-  if (tempRatio > 0) {
-    const tempFill = new Graphics();
-    const tempW = Math.min(barW * tempRatio, barW - barW * hpRatio);
-    tempFill.rect(barX + barW * hpRatio, barY, tempW, HP_BAR_HEIGHT);
-    tempFill.fill({ color: 0x60a5fa });
-    c.addChild(tempFill);
-  }
+    const maxHp = Math.max(1, item.maxHp);
+    const hpRatio = Math.max(0, item.hp / maxHp);
+    const tempRatio = Math.max(0, (item.tempHp ?? 0) / maxHp);
+    const barW = size - 8;
+    const barX = cx - radius;
+    const barY = cy + radius + 14;
+    const hpBg = new Graphics();
+    hpBg.label = 'hp-bg';
+    hpBg.rect(barX, barY, barW, HP_BAR_HEIGHT);
+    hpBg.fill({ color: 0x8b1a1a });
+    overlay.addChild(hpBg);
+    if (hpRatio > 0) {
+      const color = hpRatio > 0.5 ? 0x4ade80 : hpRatio > 0.25 ? 0xfacc15 : 0xef4444;
+      const hpFill = new Graphics();
+      hpFill.label = 'hp-fill';
+      hpFill.rect(barX, barY, barW * hpRatio, HP_BAR_HEIGHT);
+      hpFill.fill({ color });
+      overlay.addChild(hpFill);
+    }
+    if (tempRatio > 0) {
+      const tempFill = new Graphics();
+      tempFill.label = 'temp-fill';
+      const tempW = Math.min(barW * tempRatio, barW - barW * hpRatio);
+      tempFill.rect(barX + barW * hpRatio, barY, tempW, HP_BAR_HEIGHT);
+      tempFill.fill({ color: 0x60a5fa });
+      overlay.addChild(tempFill);
+    }
   }
 
-  // Condition dots
   if (item.conditions.length) {
     const dotR = Math.max(3, cellPx / 12);
     const count = item.conditions.length;
@@ -220,13 +252,16 @@ function renderToken(c: Container, item: TokenItem, ctx: RenderContext) {
       const dx = cx + (radius + dotR + 2) * Math.cos(angle);
       const dy = cy + (radius + dotR + 2) * Math.sin(angle);
       const dot = new Graphics();
+      dot.label = `cond-${i}`;
       dot.circle(dx, dy, dotR);
       dot.fill({ color: CONDITION_COLORS[cond] ?? 0xffffff });
       dot.setStrokeStyle({ width: 1, color: 0x000000, alpha: 0.5 });
       dot.stroke();
-      c.addChild(dot);
+      overlay.addChild(dot);
     });
   }
+
+  c.addChild(overlay);
 }
 
 // ─── Handout (item card) ────────────────────────────────────────────────────

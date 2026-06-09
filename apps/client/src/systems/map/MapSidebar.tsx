@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { v4 as uuidv4 } from 'uuid';
 import { useItemStore, getActiveMap } from '@/systems/scene/store/itemStore';
 import { emitItemAdd, emitItemUpdate, emitItemRemove } from '@/systems/scene/sceneSync';
@@ -77,12 +78,23 @@ export function MapSidebar() {
 // ─── GM panel ─────────────────────────────────────────────────────────────────
 
 function GMSidebarContent() {
-  const items = useItemStore((s) => s.items);
+  const maps = useItemStore(
+    useShallow((s) => Object.values(s.items).filter((i): i is MapItem => i.type === 'map')),
+  );
+  const tokenIds = useItemStore(
+    useShallow((s) =>
+      Object.values(s.items)
+        .filter((i): i is TokenItem => i.type === 'token')
+        .map((t) => t.id),
+    ),
+  );
   const activeMapId = useItemStore((s) => s.activeMapId);
-
-  const maps = Object.values(items).filter((i): i is MapItem => i.type === 'map');
-  const tokens = Object.values(items).filter((i): i is TokenItem => i.type === 'token');
-  const activeMap = getActiveMap();
+  const activeMap = useItemStore((s) => {
+    const id = s.activeMapId;
+    if (!id) return null;
+    const item = s.items[id];
+    return item?.type === 'map' ? item : null;
+  });
 
   const [mapUrl, setMapUrl] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -275,12 +287,12 @@ function GMSidebarContent() {
       <DdbSidebarSection />
 
       {/* Token list */}
-      {tokens.length > 0 && (
+      {tokenIds.length > 0 && (
         <div className="panel space-y-1.5">
           <h3 className="font-display text-xs font-semibold tracking-wider uppercase mb-2" style={{ color: 'var(--color-accent-gold)' }}>
-            Tokens ({tokens.length})
+            Tokens ({tokenIds.length})
           </h3>
-          {tokens.map((t) => <TokenRow key={t.id} tokenId={t.id} />)}
+          {tokenIds.map((id) => <TokenRow key={id} tokenId={id} />)}
         </div>
       )}
     </>
