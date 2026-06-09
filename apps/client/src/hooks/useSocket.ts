@@ -1,6 +1,12 @@
 import { useEffect, useRef } from 'react';
 import { useAuth } from '@clerk/clerk-react';
-import { getSocket, connectSocket, isMobileClient } from '@/lib/socket';
+import {
+  configureSocketSession,
+  connectSocket,
+  getSocket,
+  isMobileClient,
+  reconnectSocketWithFreshAuth,
+} from '@/lib/socket';
 import { useSessionStore } from '@/store/sessionStore';
 import { useChatStore } from '@/store/chatStore';
 import { applySessionFogActive, bindFogActiveSocket, syncFogActiveToSession } from '@/systems/scene/fogActiveSync';
@@ -26,6 +32,7 @@ type SocketHandlers = {
 
 const JOIN_RETRY_MAX = 8;
 const JOIN_ACK_MS = isMobileClient() ? 22_000 : 15_000;
+const TOKEN_REFRESH_MS = 8 * 60_000;
 
 /**
  * Establishes and manages the Socket.io connection for a session.
@@ -36,7 +43,7 @@ export function useSocket(
   campaignId: string | null,
   retryNonce = 0,
 ) {
-  const { isLoaded, isSignedIn, getToken } = useAuth();
+  const { isLoaded, getToken } = useAuth();
   const getTokenRef = useRef(getToken);
   getTokenRef.current = getToken;
 
@@ -58,12 +65,6 @@ export function useSocket(
       clearConnectionError,
     } = useSessionStore.getState();
     const { addMessage } = useChatStore.getState();
-
-    if (!isSignedIn) {
-      setConnectionError('Sign in to join the live session');
-      setConnected(false);
-      return;
-    }
 
     let alive = true;
     const socket = getSocket();
@@ -89,9 +90,9 @@ export function useSocket(
         joinAckTimerRef.current = null;
         if (!alive || joinedRef.current) return;
         console.warn('[Socket] session:join ack timed out');
-        setConnectionError('Session join timed out — retrying…');
+        setConnectionError('Reconnecting to session…');
         setConnected(false);
-        scheduleJoinRetry();
+        scheduleJoinRetry(true);
       }, JOIN_ACK_MS);
     }
 
@@ -102,21 +103,44 @@ export function useSocket(
       startJoinAckTimer();
     };
 
-    function scheduleJoinRetry() {
-      if (!alive || !socket.connected) return;
+    function afterTransportUp() {
+      clearConnectionError();
+      joinRoom();
+      bindFogActiveSocket();
+      bindDdbRollSocket(true);
+      syncFogActiveToSession();
+    }
+
+    async function scheduleJoinRetry(forceFreshAuth = false) {
+      if (!alive) return;
       if (joinRetryRef.current >= JOIN_RETRY_MAX) {
-        setConnectionError('Could not join session — tap Retry or refresh');
+        setConnectionError('Could not stay connected — tap Retry');
         return;
       }
       joinedRef.current = false;
       const attempt = joinRetryRef.current;
       joinRetryRef.current += 1;
-      const wait = isMobileClient() ? 2000 * (attempt + 1) : 1200 * (attempt + 1);
+      const wait = isMobileClient() ? 1500 * (attempt + 1) : 900 * (attempt + 1);
       joinRetryTimerRef.current = setTimeout(() => {
         joinRetryTimerRef.current = null;
-        if (!alive || !socket.connected) return;
-        clearConnectionError();
-        joinRoom();
+        if (!alive) return;
+        void (async () => {
+          try {
+            clearConnectionError();
+            if (forceFreshAuth || !socket.connected) {
+              await reconnectSocketWithFreshAuth();
+            } else if (socket.connected) {
+              joinRoom();
+            }
+          } catch (err) {
+            console.warn('[Socket] Rejoin failed:', err);
+            if (alive && attempt < JOIN_RETRY_MAX - 1) {
+              scheduleJoinRetry(true);
+            } else {
+              setConnectionError('Lost connection — tap Retry');
+            }
+          }
+        })();
       }, wait);
     }
 
@@ -156,6 +180,10 @@ export function useSocket(
         onError: ({ message }) => {
           console.error('[Socket] Error:', message);
           clearJoinAckTimer();
+          if (message.includes('Authentication failed') || message.includes('auth')) {
+            void scheduleJoinRetry(true);
+            return;
+          }
           setConnectionError(message);
           setConnected(false);
           joinedRef.current = false;
@@ -168,19 +196,16 @@ export function useSocket(
         },
         onDisconnect: (reason) => {
           clearJoinAckTimer();
-          clearJoinRetry();
           joinedRef.current = false;
           setConnected(false);
+          clearConnectionError();
+          console.warn('[Socket] disconnected:', reason);
           if (reason === 'io server disconnect') {
-            void socket.connect();
+            void reconnectSocketWithFreshAuth().catch(() => scheduleJoinRetry(true));
           }
         },
         onConnect: () => {
-          clearConnectionError();
-          joinRoom();
-          bindFogActiveSocket();
-          bindDdbRollSocket(true);
-          syncFogActiveToSession();
+          afterTransportUp();
         },
         onConnectError: (err) => {
           console.warn('[Socket] connect_error:', err.message);
@@ -207,10 +232,17 @@ export function useSocket(
       bindDdbRollSocket(true);
     }
 
+    configureSocketSession({
+      getAuthToken: () => getTokenRef.current({ skipCache: true }),
+      onReconnected: () => {
+        if (!alive) return;
+        afterTransportUp();
+      },
+    });
+
     async function connect(attempt = 0): Promise<void> {
       const maxAttempts = isMobileClient() ? 8 : 5;
       try {
-        clearConnectionError();
         const token = await getTokenRef.current({ skipCache: attempt > 0 });
         if (!alive) return;
 
@@ -219,7 +251,7 @@ export function useSocket(
             await delay(isMobileClient() ? 2000 * (attempt + 1) : 1200 * (attempt + 1));
             return connect(attempt + 1);
           }
-          setConnectionError('Sign-in expired — refresh and try again');
+          setConnectionError('Sign in to join the live session');
           setConnected(false);
           return;
         }
@@ -230,8 +262,7 @@ export function useSocket(
         if (!alive) return;
 
         if (socket.connected) {
-          joinRoom();
-          syncFogActiveToSession();
+          afterTransportUp();
         }
         window.dispatchEvent(new CustomEvent('grimoire:socket-connected'));
       } catch (err) {
@@ -254,28 +285,55 @@ export function useSocket(
     clearJoinAckTimer();
     void connect();
 
+    const tokenRefreshInterval = window.setInterval(() => {
+      if (!alive || !socket.connected) return;
+      void getTokenRef.current({ skipCache: true }).then((token) => {
+        if (token) socket.auth = { token };
+      });
+    }, TOKEN_REFRESH_MS);
+
     const onVisible = () => {
       if (document.visibilityState !== 'visible' || !alive) return;
       if (!socket.connected) {
-        void connect();
+        void reconnectSocketWithFreshAuth()
+          .then(() => afterTransportUp())
+          .catch(() => void connect());
       } else if (!joinedRef.current) {
-        clearConnectionError();
-        joinRoom();
+        afterTransportUp();
       }
     };
     document.addEventListener('visibilitychange', onVisible);
 
+    const onOnline = () => {
+      if (!alive) return;
+      if (!socket.connected || !joinedRef.current) {
+        void reconnectSocketWithFreshAuth()
+          .then(() => afterTransportUp())
+          .catch(() => scheduleJoinRetry(true));
+      }
+    };
+    window.addEventListener('online', onOnline);
+
     return () => {
       alive = false;
+      configureSocketSession(null);
       clearJoinRetry();
       clearJoinAckTimer();
+      window.clearInterval(tokenRefreshInterval);
       document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('online', onOnline);
       if (joinedRef.current) {
         socket.emit('session:leave', { sessionId });
       }
       joinedRef.current = false;
       detachHandlers();
-      setConnected(false);
+      // Avoid flashing "Connecting" when Clerk/React re-runs the same session effect.
+      const stillSameSession =
+        useSessionStore.getState().sessionId === sessionId
+        && useSessionStore.getState().campaignId === campaignId;
+      if (!stillSameSession) {
+        setConnected(false);
+      }
     };
-  }, [sessionId, campaignId, retryNonce, isLoaded, isSignedIn]);
+  }, [sessionId, campaignId, retryNonce, isLoaded]);
 }

@@ -23,16 +23,58 @@ function socketOptions() {
     upgrade: !(mobile || dev),
     timeout: mobile ? 90_000 : 45_000,
     reconnection: true,
-    reconnectionAttempts: 20,
-    reconnectionDelay: 1500,
-    reconnectionDelayMax: 10_000,
+    reconnectionAttempts: Infinity,
+    reconnectionDelay: 1000,
+    reconnectionDelayMax: 8_000,
     withCredentials: true,
   };
+}
+
+type AuthProvider = () => Promise<string | null>;
+
+let authProvider: AuthProvider | null = null;
+let onReconnected: (() => void) | null = null;
+let reconnectHooksInstalled = false;
+
+/** Clerk token + re-join hook — survives React effect churn. */
+export function configureSocketSession(opts: {
+  getAuthToken: AuthProvider;
+  onReconnected: () => void;
+} | null): void {
+  authProvider = opts?.getAuthToken ?? null;
+  onReconnected = opts?.onReconnected ?? null;
+}
+
+async function refreshSocketAuth(s: Socket, skipCache = true): Promise<boolean> {
+  if (!authProvider) return false;
+  try {
+    const token = await authProvider();
+    if (!token) return false;
+    s.auth = { token };
+    return true;
+  } catch (err) {
+    console.warn('[Socket] Auth refresh failed:', err);
+    return false;
+  }
+}
+
+function installReconnectHooks(s: Socket): void {
+  if (reconnectHooksInstalled) return;
+  reconnectHooksInstalled = true;
+
+  s.io.on('reconnect_attempt', () => {
+    void refreshSocketAuth(s, true);
+  });
+
+  s.io.on('reconnect', () => {
+    onReconnected?.();
+  });
 }
 
 export function getSocket(): Socket<ServerToClientEvents, ClientToServerEvents> {
   if (!socket) {
     socket = io(getServerOrigin(), socketOptions());
+    installReconnectHooks(socket);
   }
   return socket;
 }
@@ -40,9 +82,12 @@ export function getSocket(): Socket<ServerToClientEvents, ClientToServerEvents> 
 /** Full teardown (logout / leave app). Preserves listeners during connect retries. */
 export function resetSocket(): void {
   if (!socket) return;
+  configureSocketSession(null);
   socket.removeAllListeners();
+  socket.io.removeAllListeners();
   socket.disconnect();
   socket = null;
+  reconnectHooksInstalled = false;
 }
 
 function softDisconnect(): void {
@@ -72,6 +117,32 @@ export async function connectSocket(
   }
 
   throw lastError instanceof Error ? lastError : new Error('Socket connection failed');
+}
+
+/** Reconnect with a fresh Clerk token (fixes stale auth after idle drops). */
+export async function reconnectSocketWithFreshAuth(): Promise<void> {
+  const s = getSocket();
+  const ok = await refreshSocketAuth(s, true);
+  if (!ok) throw new Error('Sign-in expired — refresh and try again');
+  if (s.connected) {
+    s.disconnect();
+    await delay(250);
+  }
+  await new Promise<void>((resolve, reject) => {
+    const timeoutMs = isMobileClient() ? 90_000 : 45_000;
+    const timer = setTimeout(() => {
+      cleanup();
+      reject(new Error('Reconnection timed out'));
+    }, timeoutMs);
+    const onConnect = () => {
+      clearTimeout(timer);
+      cleanup();
+      resolve();
+    };
+    const cleanup = () => s.off('connect', onConnect);
+    s.once('connect', onConnect);
+    s.connect();
+  });
 }
 
 async function connectSocketOnce(token: string): Promise<void> {
