@@ -145,9 +145,12 @@ export function SessionPage() {
   useHandoutRevealSocket(socketReady ? (sessionId ?? null) : null);
 
   const combatActive = useInitiativeStore((s) => s.isActive);
+  const hasCombatants = useInitiativeStore((s) => s.combatants.length > 0);
   useEffect(() => {
-    if (combatActive) setShowInitiative(true);
-  }, [combatActive]);
+    if (combatActive || (isMobileClient() && hasCombatants)) {
+      setShowInitiative(true);
+    }
+  }, [combatActive, hasCombatants]);
 
   useEffect(() => {
     if (!isGM) setPanelOpen(false);
@@ -303,6 +306,10 @@ export function SessionPage() {
           <DiceTrayOverlay />
           <ItemHandoutViewer />
 
+          {showDice && <DiceRoller onClose={() => setShowDice(false)} />}
+          {showInitiative && <InitiativeTracker onClose={() => setShowInitiative(false)} />}
+          {isGM && panelOpen && <MonsterDexPanel onClose={() => setPanelOpen(false)} />}
+
           {/* Bottom dock — inspector (center) + tool panels (right), no overlap */}
           <div className="absolute bottom-0 inset-x-0 z-30 flex items-end gap-3 px-4 pb-4 pointer-events-none">
             <div className="flex-1 min-w-0 flex justify-center pointer-events-none">
@@ -311,10 +318,6 @@ export function SessionPage() {
               </div>
             </div>
             <div className="shrink-0 flex flex-col items-end gap-2 pointer-events-auto">
-              {showDice && <DiceRoller onClose={() => setShowDice(false)} />}
-              {showInitiative && <InitiativeTracker onClose={() => setShowInitiative(false)} />}
-              {isGM && panelOpen && <MonsterDexPanel onClose={() => setPanelOpen(false)} />}
-
               <RollModeBar />
 
               <div className="flex gap-2">

@@ -62,8 +62,16 @@ export async function fetchDdbCharacter(id: number): Promise<GrimoireCharacter> 
 }
 
 export async function syncDdbCharacter(id: number): Promise<GrimoireCharacter> {
-  const { data } = await api.post<{ character: GrimoireCharacter }>(`/ddb/characters/${id}/sync`);
-  return coerceGrimoireCharacter(data.character);
+  try {
+    const { data } = await api.post<{ character: GrimoireCharacter }>(`/ddb/characters/${id}/sync`);
+    return coerceGrimoireCharacter(data.character);
+  } catch (err) {
+    if (axios.isAxiosError(err)) {
+      const msg = (err.response?.data as { error?: string } | undefined)?.error;
+      throw new Error(msg ?? 'Failed to sync D&D Beyond character');
+    }
+    throw err;
+  }
 }
 
 export async function importDdbCharacterToken(id: number): Promise<{

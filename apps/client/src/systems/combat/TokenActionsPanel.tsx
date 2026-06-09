@@ -6,8 +6,10 @@ import { getMonster, searchSpells } from '@/systems/compendium/compendiumApi';
 import {
   buildSpellLookup,
   getMonsterAbilities,
+  inferMonsterAttackToHit,
   parseMonsterActions,
   parseSavingThrows,
+  proficiencyBonusFromCr,
   type ParsedAction,
 } from '@/systems/compendium/statBlockParser';
 import { RollButton } from '@/systems/dice/RollButton';
@@ -50,10 +52,14 @@ export function TokenActionsPanel({ token, onClose }: { token: TokenItem; onClos
     [monster?.description],
   );
 
-  const actions = useMemo(
-    () => (monster?.description ? parseMonsterActions(monster.description, lookup) : []),
-    [monster?.description, lookup],
-  );
+  const actions = useMemo(() => {
+    if (!monster?.description) return [];
+    const prof = proficiencyBonusFromCr(monster.cr);
+    return parseMonsterActions(monster.description, lookup).map((action) => {
+      const toHit = inferMonsterAttackToHit(action, abilities, prof);
+      return toHit !== undefined && action.toHit === undefined ? { ...action, toHit } : action;
+    });
+  }, [monster?.description, monster?.cr, lookup, abilities]);
 
   const grouped = useMemo(() => {
     const g = {

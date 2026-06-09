@@ -43,8 +43,7 @@ function parseSourceIds(query: Record<string, unknown>): number[] | undefined {
   const single = parseInt(String(query['sourceId'] ?? ''), 10);
   return Number.isFinite(single) && single > 0 ? [single] : undefined;
 }
-import { getRollBridgeDebug, fetchNewDdbRollsForSession, broadcastDdbRolls } from '../services/ddb/ddbRollBridge';
-import { getSocketServer } from '../services/compendiumBroadcast';
+import { getRollBridgeDebug, fetchNewDdbRollsForSession } from '../services/ddb/ddbRollBridge';
 const router = Router();
 
 const linkSchema = z.object({ cobalt: z.string().min(10) });
@@ -153,7 +152,8 @@ router.get('/characters/:id', requireAuth, async (req: AuthenticatedRequest, res
       res.status(400).json({ error: 'Invalid character id' });
       return;
     }
-    const character = await getOrSyncCharacter(req.userId!, id);
+    const sessionId = req.header('x-session-id') ?? undefined;
+    const character = await getOrSyncCharacter(req.userId!, id, false, sessionId);
     res.json({ character });
   } catch (err) {
     res.status(400).json({ error: err instanceof Error ? err.message : 'Failed to load character' });
@@ -167,7 +167,8 @@ router.post('/characters/:id/sync', requireAuth, async (req: AuthenticatedReques
       res.status(400).json({ error: 'Invalid character id' });
       return;
     }
-    const character = await getOrSyncCharacter(req.userId!, id, true);
+    const sessionId = req.header('x-session-id') ?? undefined;
+    const character = await getOrSyncCharacter(req.userId!, id, true, sessionId);
     res.json({ character });
   } catch (err) {
     res.status(400).json({ error: err instanceof Error ? err.message : 'Sync failed' });
@@ -390,11 +391,8 @@ router.get('/sessions/:sessionId/rolls/poll', requireAuth, requireSessionMember,
     return;
   }
   try {
+    // Bridge WS + poll emit to connected clients; HTTP response is for offline fallback only.
     const rolls = await fetchNewDdbRollsForSession(sessionId);
-    const io = getSocketServer();
-    if (io && rolls.length > 0) {
-      broadcastDdbRolls(io, sessionId, rolls);
-    }
     res.json({ rolls });
   } catch (err) {
     console.error('[DDB] roll poll failed:', err);

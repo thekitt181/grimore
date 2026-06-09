@@ -1,6 +1,8 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
 import { formatDiceNotation, parseSimpleDiceNotation } from '@grimoire/dice-engine';
 import { DraggablePanel } from '@/components/DraggablePanel';
+import { ddbPanelPosition, ddbPanelWidth } from '@/systems/ddb/ddbTokenUtils';
+import { isMobileClient } from '@/lib/socket';
 import { useSessionStore } from '@/store/sessionStore';
 import { useDiceStore } from './diceStore';
 import type { RollMode } from '@grimoire/dice-engine';
@@ -142,10 +144,14 @@ export function DiceRoller({ onClose }: { onClose: () => void }) {
     <DraggablePanel
       title="🎲 Dice Roller"
       onClose={onClose}
-      defaultPosition={{ x: Math.max(16, window.innerWidth - 300), y: Math.max(16, window.innerHeight - 640) }}
-      width={280}
-      maxHeight="600px"
-      zIndex={130}
+      defaultPosition={
+        isMobileClient()
+          ? ddbPanelPosition(10, 56)
+          : { x: Math.max(16, window.innerWidth - 300), y: Math.max(16, window.innerHeight - 640) }
+      }
+      width={ddbPanelWidth(280)}
+      maxHeight={isMobileClient() ? 'calc(100vh - 9rem)' : '600px'}
+      zIndex={150}
     >
       <div className="select-none">
       <div className="flex gap-2 px-2 py-2 shrink-0" style={{ borderBottom: `1px solid ${BD}` }}>

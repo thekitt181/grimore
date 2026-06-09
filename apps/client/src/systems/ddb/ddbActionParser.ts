@@ -1,6 +1,13 @@
 import { normalizeDiceNotation, type GrimoireAttack, type GrimoireCharacter, type GrimoireSpell } from '@grimoire/shared';
 import { stripHtmlText } from '@/systems/compendium/actionDetail';
-import type { ActionDamage, ActionRange, ParsedAction } from '@/systems/compendium/statBlockParser';
+import {
+  parseActionDamages,
+  parseActionRange,
+  parseActionToHit,
+  type ActionDamage,
+  type ActionRange,
+  type ParsedAction,
+} from '@/systems/compendium/statBlockParser';
 
 function defaultRange(): ActionRange {
   return { kind: 'melee', reachFt: 5 };
@@ -162,10 +169,22 @@ function spellSave(spell: GrimoireSpell, character: GrimoireCharacter): ParsedAc
   return { dc, stat: saveStat };
 }
 
+function resolveSpellToHit(spell: GrimoireSpell, character: GrimoireCharacter): number | undefined {
+  if (!spell.attack) return undefined;
+  if (character.spellAttackMod !== undefined) return character.spellAttackMod;
+  if (character.spellSaveDc !== undefined) return character.spellSaveDc - 8;
+  const prof = character.proficiencyBonus ?? 2;
+  const castingMods = character.abilities
+    .filter((a) => a.name === 'INT' || a.name === 'WIS' || a.name === 'CHA')
+    .map((a) => a.mod);
+  if (castingMods.length > 0) return Math.max(...castingMods) + prof;
+  return undefined;
+}
+
 export function spellToParsedAction(spell: GrimoireSpell, character: GrimoireCharacter): ParsedAction {
   const damages = spell.damage ? [{ dice: normalizeDiceNotation(spell.damage), type: spell.damageType ?? 'damage' }] : [];
   const save = spellSave(spell, character);
-  const toHit = spell.attack && character.spellAttackMod !== undefined ? character.spellAttackMod : undefined;
+  const toHit = resolveSpellToHit(spell, character);
 
   return {
     name: spell.name,
@@ -221,14 +240,43 @@ export function parsePcActions(character: GrimoireCharacter): {
   const spells = character.spells
     .filter((s) => s.prepared || s.level === 0)
     .map((s) => spellToParsedAction(s, character));
-  const features = character.features.map((f) => ({
-    name: f.name,
-    originalText: stripHtmlText(f.description ?? f.name),
-    section: 'traits' as const,
-    isTrait: true,
-    damages: [] as ActionDamage[],
-    spells: [] as ParsedAction['spells'],
-    isSpellcastingBlock: false,
-  }));
-  return { attacks, spells, features };
+  const featureActions: ParsedAction[] = [];
+  const features: ParsedAction[] = [];
+
+  for (const f of character.features) {
+    const originalText = stripHtmlText(f.description ?? f.name);
+    const range = parseActionRange(originalText);
+    const damages = parseActionDamages(originalText, range, f.name);
+    const parsedToHit = parseActionToHit(originalText);
+
+    if (damages.length > 0 || parsedToHit !== undefined) {
+      const pseudoAttack: GrimoireAttack = {
+        id: f.id,
+        name: f.name,
+        toHit: parsedToHit ?? 0,
+        damageDice: damages[0]?.dice ?? '—',
+        damageType: damages[0]?.type ?? 'damage',
+      };
+      const rollable = attackToParsedAction(pseudoAttack, character);
+      rollable.originalText = originalText;
+      rollable.damages = damages.length > 0 ? damages : rollable.damages;
+      rollable.range = range;
+      rollable.isTrait = false;
+      rollable.section = 'actions';
+      featureActions.push(rollable);
+      continue;
+    }
+
+    features.push({
+      name: f.name,
+      originalText,
+      section: 'traits',
+      isTrait: true,
+      damages: [] as ActionDamage[],
+      spells: [] as ParsedAction['spells'],
+      isSpellcastingBlock: false,
+    });
+  }
+
+  return { attacks: [...attacks, ...featureActions], spells, features };
 }

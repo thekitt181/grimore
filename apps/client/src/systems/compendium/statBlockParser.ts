@@ -183,10 +183,12 @@ export function parseSavingThrows(text: string): SavingThrow[] {
   return saves;
 }
 
-/** Parse attack bonus from action text (5e / Owlbear / 2024 stat block variants). */
+/** Parse attack bonus from action text (5e / Owlbear / 2024 / D&D Beyond stat block variants). */
 export function parseActionToHit(fullText: string): number | undefined {
   const patterns = [
     /(?:Melee(?:\/Ranged)?(?:\s+or\s+Ranged)?\s+Weapon\s+Attack|Ranged\s+Weapon\s+Attack|Weapon\s+Attack|Spell\s+Attack|Melee\s+Attack\s+Roll|Ranged\s+Attack\s+Roll|Melee\s+Attack|Ranged\s+Attack)[\s.:,]*\+?\s*([+-]?\d+)\s*to\s*hit/i,
+    /(?:Melee|Ranged)\s+Attack\s+Roll[\s.:,]*\+?\s*([+-]?\d+)/i,
+    /Attack\s+Roll[\s.:,]*\+?\s*([+-]?\d+)/i,
     /([+-]\d+)\s*to\s*hit(?:\s*,|\s*\.|\s*;|\s+reach|\s+range|\s+one)/i,
     /([+-]\d+)\s*to\s*hit/i,
   ];
@@ -350,7 +352,7 @@ function finalizeDamageTypes(
   }));
 }
 
-function parseActionDamages(fullText: string, actionRange?: ActionRange, actionName?: string): ActionDamage[] {
+export function parseActionDamages(fullText: string, actionRange?: ActionRange, actionName?: string): ActionDamage[] {
   const normalized = fullText.replace(/\r\n/g, ' ');
   const damages: ActionDamage[] = [];
   const seen = new Set<string>();
@@ -594,6 +596,45 @@ function pickPreferredAction(a: ParsedAction, b: ParsedAction): ParsedAction {
 }
 
 /** Drop duplicate weapon actions (e.g. two Greataxe entries) — keeps one, discards the other. */
+/** Monster proficiency bonus by challenge rating (MM). */
+export function proficiencyBonusFromCr(cr: number | string | undefined): number {
+  const raw = typeof cr === 'string' ? parseFloat(cr.replace(/[^\d.]/g, '')) : cr;
+  const n = Number.isFinite(raw) ? raw! : 0;
+  if (n < 5) return 2;
+  if (n < 9) return 3;
+  if (n < 13) return 4;
+  if (n < 17) return 5;
+  if (n < 21) return 6;
+  if (n < 25) return 7;
+  if (n < 29) return 8;
+  return 9;
+}
+
+/** When stat-block text omits "+X to hit", infer from ability scores + CR. */
+export function inferMonsterAttackToHit(
+  action: ParsedAction,
+  abilities: AbilityScore[],
+  proficiencyBonus: number,
+): number | undefined {
+  if (action.toHit !== undefined || action.damages.length === 0 || action.save) return action.toHit;
+
+  const text = `${action.name} ${action.originalText}`.toLowerCase();
+  const looksLikeAttack =
+    action.range?.kind === 'melee'
+    || action.range?.kind === 'ranged'
+    || action.range?.kind === 'both'
+    || /touch|ray|strike|slam|bite|claw|weapon attack|attack roll/i.test(text);
+  if (!looksLikeAttack) return undefined;
+
+  const str = abilities.find((a) => a.name === 'STR')?.mod ?? 0;
+  const dex = abilities.find((a) => a.name === 'DEX')?.mod ?? 0;
+  const isRanged =
+    action.range?.kind === 'ranged'
+    || (action.range?.rangeNormalFt != null && action.range.kind !== 'melee')
+    || /\branged\b|\bray\b|range \d/i.test(text);
+  return (isRanged ? dex : str) + proficiencyBonus;
+}
+
 export function deduplicateActions(actions: ParsedAction[]): ParsedAction[] {
   const byKey = new Map<string, ParsedAction>();
   const order: string[] = [];

@@ -96,38 +96,86 @@ export async function getDdbStatus(userId: string): Promise<DdbLinkStatus> {
   };
 }
 
+async function loadCachedCharacter(
+  cacheUserIds: string[],
+  ddbCharacterId: number,
+): Promise<GrimoireCharacter | null> {
+  for (const cacheUserId of cacheUserIds) {
+    const cached = await prisma.ddbCharacterCache.findUnique({
+      where: { userId_ddbCharacterId: { userId: cacheUserId, ddbCharacterId } },
+    });
+    if (!cached) continue;
+
+    const snap = cached.snapshot as Record<string, unknown>;
+    const version =
+      (snap.ddbNormalizerVersion as number | undefined)
+      ?? (snap.hpNormalizerVersion as number | undefined);
+    if (version !== DDB_NORMALIZER_VERSION) continue;
+
+    return coerceGrimoireCharacter({
+      ...(snap as Partial<GrimoireCharacter>),
+      ddbCharacterId,
+    });
+  }
+  return null;
+}
+
+/** Players without DDB linked use the campaign GM's connection + cache when in a live session. */
+async function resolveDdbProviderUserId(
+  userId: string,
+  sessionId?: string,
+): Promise<string> {
+  if (await getCobaltForUser(userId)) return userId;
+
+  if (!sessionId) {
+    throw new Error('D&D Beyond account not linked');
+  }
+
+  const session = await prisma.gameSession.findUnique({
+    where: { id: sessionId },
+    select: {
+      campaignId: true,
+      campaign: { select: { gmId: true } },
+    },
+  });
+  if (!session) throw new Error('Session not found');
+
+  const member = await prisma.campaignMember.findFirst({
+    where: { campaignId: session.campaignId, userId },
+  });
+  if (!member) throw new Error('Session access required');
+
+  const gmId = session.campaign.gmId;
+  if (!(await getCobaltForUser(gmId))) {
+    throw new Error('GM has not linked D&D Beyond — ask your GM to connect in Account settings');
+  }
+
+  return gmId;
+}
+
 export async function getOrSyncCharacter(
   userId: string,
   ddbCharacterId: number,
   force = false,
+  sessionId?: string,
 ): Promise<GrimoireCharacter> {
-  const cobalt = await getCobaltForUser(userId);
-  if (!cobalt) throw new Error('D&D Beyond account not linked');
+  const providerId = await resolveDdbProviderUserId(userId, sessionId);
+  const cacheUserIds = providerId === userId ? [userId] : [providerId, userId];
 
   if (!force) {
-    const cached = await prisma.ddbCharacterCache.findUnique({
-      where: { userId_ddbCharacterId: { userId, ddbCharacterId } },
-    });
-    if (cached) {
-      const snap = cached.snapshot as Record<string, unknown>;
-      const version =
-        (snap.ddbNormalizerVersion as number | undefined)
-        ?? (snap.hpNormalizerVersion as number | undefined);
-      if (version === DDB_NORMALIZER_VERSION) {
-        return coerceGrimoireCharacter({
-          ...(snap as Partial<GrimoireCharacter>),
-          ddbCharacterId,
-        });
-      }
-    }
+    const cached = await loadCachedCharacter(cacheUserIds, ddbCharacterId);
+    if (cached) return cached;
   }
+
+  const cobalt = await getCobaltForUser(providerId);
+  if (!cobalt) throw new Error('D&D Beyond account not linked');
 
   const character = await extractCharacter(cobalt, ddbCharacterId);
   const snapshot = { ...character, ddbNormalizerVersion: DDB_NORMALIZER_VERSION };
   await prisma.ddbCharacterCache.upsert({
-    where: { userId_ddbCharacterId: { userId, ddbCharacterId } },
+    where: { userId_ddbCharacterId: { userId: providerId, ddbCharacterId } },
     create: {
-      userId,
+      userId: providerId,
       ddbCharacterId,
       name: character.name,
       campaignId: character.campaignId ?? null,

@@ -20,7 +20,7 @@ export function PcActionsPanel({ token, onClose }: { token: TokenItem; onClose: 
   const ddbId = token.ddbCharacterId!;
   const [detailFeature, setDetailFeature] = useState<{ name: string; text: string } | null>(null);
 
-  const { data: character, isLoading, isError } = useQuery({
+  const { data: character, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['ddb', 'character', ddbId],
     queryFn: async () => {
       const ch = await syncDdbCharacter(ddbId);
@@ -64,7 +64,16 @@ export function PcActionsPanel({ token, onClose }: { token: TokenItem; onClose: 
 
         <div className="p-2 space-y-3">
           {isLoading && <p className="font-ui text-xs p-2">Loading…</p>}
-          {isError && <p className="font-ui text-xs p-2" style={{ color: 'var(--color-accent-red-hot)' }}>Failed to load</p>}
+          {isError && (
+            <div className="space-y-2 p-2">
+              <p className="font-ui text-xs" style={{ color: 'var(--color-accent-red-hot)' }}>
+                {error instanceof Error ? error.message : 'Failed to load character'}
+              </p>
+              <button type="button" className="btn-ghost text-[10px]" onClick={() => void refetch()}>
+                Retry
+              </button>
+            </div>
+          )}
 
           {parsed.attacks.length > 0 && (
             <ActionSection title="Attacks">

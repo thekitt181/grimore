@@ -147,13 +147,17 @@ function emitRollPayload(io: Server, payload: DdbRollBridgePayload): void {
   );
 }
 
-async function markRollSeenInRedis(sessionId: string, messageId: string): Promise<void> {
+/** Atomically claim a game-log message id before emitting (shared by WS + REST poll). */
+async function claimDdbRollMessage(sessionId: string, messageId: string | null): Promise<boolean> {
+  if (!messageId) return true;
   const seenKey = `ddb:roll-seen:${sessionId}`;
-  await redis.sadd(seenKey, messageId);
+  const isNew = await redis.sadd(seenKey, messageId);
+  if (isNew === 0) return false;
   await redis.expire(seenKey, SEEN_TTL);
+  return true;
 }
 
-/** Broadcast DDB rolls to every client in the session (HTTP poll + bridge). */
+/** Broadcast DDB rolls to every client in the session. */
 export function broadcastDdbRolls(io: Server, sessionId: string, rolls: DdbRollBridgePayload[]): void {
   for (const payload of rolls) {
     emitRollPayload(io, payload);
@@ -164,18 +168,11 @@ function emitRoll(io: Server, sessionId: string, parsed: ParsedDdbRoll, messageI
   emitRollPayload(io, toPayload(sessionId, parsed, messageId));
 }
 
-function handleGameLogMessage(io: Server, bridge: ActiveBridge, data: unknown): void {
+async function handleGameLogMessage(io: Server, bridge: ActiveBridge, data: unknown): Promise<void> {
   const msg = data as Record<string, unknown> | undefined;
   const msgId = typeof msg?.id === 'string' ? msg.id : null;
 
-  if (msgId) {
-    if (bridge.seenIds.has(msgId)) return;
-    bridge.seenIds.add(msgId);
-    if (bridge.seenIds.size > MAX_SEEN_IDS) {
-      const drop = bridge.seenIds.values().next().value;
-      if (drop) bridge.seenIds.delete(drop);
-    }
-  }
+  if (msgId && bridge.seenIds.has(msgId)) return;
 
   const parsed = parseRollMessage(data);
   if (!parsed) {
@@ -189,8 +186,16 @@ function handleGameLogMessage(io: Server, bridge: ActiveBridge, data: unknown): 
     return;
   }
 
+  if (!(await claimDdbRollMessage(bridge.sessionId, msgId))) return;
+
   debugMessageCount = 0;
-  if (msgId) void markRollSeenInRedis(bridge.sessionId, msgId);
+  if (msgId) {
+    bridge.seenIds.add(msgId);
+    if (bridge.seenIds.size > MAX_SEEN_IDS) {
+      const drop = bridge.seenIds.values().next().value;
+      if (drop) bridge.seenIds.delete(drop);
+    }
+  }
   emitRoll(io, bridge.sessionId, parsed, msgId ?? undefined);
 }
 
@@ -291,7 +296,7 @@ async function connectBridge(
 
   ws.on('message', (raw) => {
     try {
-      handleGameLogMessage(io, bridge, JSON.parse(raw.toString()) as unknown);
+      void handleGameLogMessage(io, bridge, JSON.parse(raw.toString()) as unknown);
     } catch {
       // ignore malformed frames
     }
@@ -347,7 +352,7 @@ async function reconnectWs(io: Server, sessionId: string): Promise<void> {
     });
     ws.on('message', (raw) => {
       try {
-        handleGameLogMessage(io, bridge, JSON.parse(raw.toString()) as unknown);
+        void handleGameLogMessage(io, bridge, JSON.parse(raw.toString()) as unknown);
       } catch { /* ignore */ }
     });
     ws.on('close', (code) => {

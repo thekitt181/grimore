@@ -70,6 +70,7 @@ function rollerNameFor(userId: string | null): string {
 let socketHandler: ((payload: DiceRollPayload) => void) | null = null;
 
 const seenDdbRollIds = new Set<string>();
+const seenDdbRollFingerprints = new Set<string>();
 const MAX_SEEN_DDB_ROLLS = 300;
 
 function rememberDdbRollId(messageId: string): boolean {
@@ -78,6 +79,27 @@ function rememberDdbRollId(messageId: string): boolean {
   if (seenDdbRollIds.size > MAX_SEEN_DDB_ROLLS) {
     const drop = seenDdbRollIds.values().next().value;
     if (drop) seenDdbRollIds.delete(drop);
+  }
+  return true;
+}
+
+function ddbRollFingerprint(payload: DdbRollBridgePayload): string {
+  return [
+    payload.characterName,
+    payload.label,
+    payload.total,
+    payload.notation ?? '',
+    (payload.diceResults ?? []).join(','),
+  ].join('|');
+}
+
+function rememberDdbRollFingerprint(payload: DdbRollBridgePayload): boolean {
+  const fp = ddbRollFingerprint(payload);
+  if (seenDdbRollFingerprints.has(fp)) return false;
+  seenDdbRollFingerprints.add(fp);
+  if (seenDdbRollFingerprints.size > MAX_SEEN_DDB_ROLLS) {
+    const drop = seenDdbRollFingerprints.values().next().value;
+    if (drop) seenDdbRollFingerprints.delete(drop);
   }
   return true;
 }
@@ -129,6 +151,7 @@ export const useDiceStore = create<DiceState>((set, get) => ({
 
   addDdbRollEntry: (payload) => {
     if (payload.messageId && !rememberDdbRollId(payload.messageId)) return;
+    if (!rememberDdbRollFingerprint(payload)) return;
 
     const now = Date.now();
     const recent = get().history[0];
@@ -136,8 +159,8 @@ export const useDiceStore = create<DiceState>((set, get) => ({
       recent
       && recent.rollerName === payload.characterName
       && recent.total === payload.total
-      && recent.label.includes(payload.label)
-      && now - recent.timestamp < 2500
+      && (recent.label.includes(payload.label) || payload.label.includes(recent.label.replace(/^DDB: [^—]+ — /, '')))
+      && now - recent.timestamp < 5000
     ) {
       return;
     }

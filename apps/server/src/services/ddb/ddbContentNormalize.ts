@@ -175,28 +175,184 @@ function formatItemProperties(def: Record<string, unknown>): string {
   return lines.join('\n');
 }
 
-function formatAttackDetails(o: Record<string, unknown>): string {
+function proficiencyBonusFromMonsterCr(cr: string): number {
+  const cleaned = cr.trim();
+  let n = 0;
+  if (cleaned.includes('/')) {
+    const [a, b] = cleaned.split('/');
+    const num = parseInt(a ?? '', 10);
+    const den = parseInt(b ?? '', 10);
+    n = Number.isFinite(num) && Number.isFinite(den) && den > 0 ? num / den : 0;
+  } else {
+    n = parseFloat(cleaned.replace(/[^\d.]/g, ''));
+  }
+  if (!Number.isFinite(n)) n = 0;
+  if (n < 5) return 2;
+  if (n < 9) return 3;
+  if (n < 13) return 4;
+  if (n < 17) return 5;
+  if (n < 21) return 6;
+  if (n < 25) return 7;
+  if (n < 29) return 8;
+  return 9;
+}
+
+function abilityModsFromMonster(raw: Record<string, unknown>): Record<string, number> {
+  const stats = abilityStatsFromRaw(raw);
+  const mods: Record<string, number> = {};
+  for (const [key, score] of Object.entries(stats)) {
+    mods[key.toUpperCase()] = Math.floor((score - 10) / 2);
+  }
+  return mods;
+}
+
+function parseToHitFromActionText(text: string): number | undefined {
+  if (!text) return undefined;
+  const patterns = [
+    /(?:Melee|Ranged)\s+Attack\s+Roll[\s.:,]*\+?\s*([+-]?\d+)/i,
+    /Attack\s+Roll[\s.:,]*\+?\s*([+-]?\d+)/i,
+    /(?:Melee|Ranged|Spell|Weapon)\s+Attack[\s.:,]*\+?\s*([+-]?\d+)\s*to\s*hit/i,
+    /([+-]\d+)\s*to\s*hit/i,
+  ];
+  for (const re of patterns) {
+    const m = text.match(re);
+    if (m?.[1]) {
+      const n = parseInt(m[1], 10);
+      if (Number.isFinite(n)) return n;
+    }
+  }
+  return undefined;
+}
+
+function textHasAttackBonus(text: string): boolean {
+  return /\+\s*\d+\s*to\s*hit|to\s*hit[,.]?\s*\+?\s*\d+|attack\s+roll[:\s]+\+?\s*\d+/i.test(text);
+}
+
+function collectMonsterActionBlocks(raw: Record<string, unknown>): unknown[] {
+  const out: unknown[] = [];
+  const buckets = [
+    raw.actions,
+    raw.monsterActions,
+    raw.standardActions,
+    (raw.actionSections as Record<string, unknown> | undefined)?.actions,
+  ];
+  for (const bucket of buckets) {
+    if (!Array.isArray(bucket)) continue;
+    out.push(...bucket);
+  }
+  return out;
+}
+
+function extractMonsterActionToHit(
+  o: Record<string, unknown>,
+  raw: Record<string, unknown>,
+  catalog: DdbCatalog | undefined,
+  descText: string,
+): number | undefined {
+  const attack = (o.attack && typeof o.attack === 'object' ? o.attack : {}) as Record<string, unknown>;
+  const def = (o.definition && typeof o.definition === 'object' ? o.definition : {}) as Record<string, unknown>;
+
+  const direct = pickNumber(
+    o.attackBonus,
+    o.toHit,
+    o.attackModifier,
+    o.attackStatValue,
+    o.fixedToHit,
+    o.attackMod,
+    attack.attackBonus,
+    attack.attackModifier,
+    attack.toHit,
+    attack.fixedToHit,
+    def.attackBonus,
+    def.attackModifier,
+    def.toHit,
+  );
+  if (direct != null) return direct;
+
+  const abilityMod = pickNumber(
+    o.abilityModifier,
+    o.statModifier,
+    o.attackStatModifier,
+    attack.abilityModifier,
+    attack.statModifier,
+  );
+  const cr = catalog
+    ? resolveMonsterCr(raw, catalog.challengeRatingById)
+    : resolveMonsterCr(raw, new Map());
+  const prof = pickNumber(o.proficiencyBonus, raw.proficiencyBonus) ?? proficiencyBonusFromMonsterCr(cr);
+
+  if (abilityMod != null) return abilityMod + prof;
+
+  const fromText = parseToHitFromActionText(descText);
+  if (fromText != null) return fromText;
+
+  const name = String(o.name ?? o.title ?? '').toLowerCase();
+  const combined = `${name} ${descText}`.toLowerCase();
+  const damage = o.dice
+    ?? o.damageDice
+    ?? (typeof o.damage === 'object' ? (o.damage as Record<string, unknown>).dice : o.damage)
+    ?? o.fixedDamage
+    ?? attack.damage
+    ?? def.damage;
+  const looksLikeAttack =
+    Boolean(damage)
+    || /touch|ray|strike|slam|bite|claw|weapon attack|attack roll/i.test(combined);
+  if (!looksLikeAttack) return undefined;
+
+  const mods = abilityModsFromMonster(raw);
+  const str = mods.STR ?? 0;
+  const dex = mods.DEX ?? 0;
+  const ranged = /\branged\b|\bray\b|range\s+\d/i.test(combined);
+  return (ranged ? dex : str) + prof;
+}
+
+function formatAttackDetails(
+  o: Record<string, unknown>,
+  raw?: Record<string, unknown>,
+  catalog?: DdbCatalog,
+  descText?: string,
+): string {
   const parts: string[] = [];
-  const toHit = pickNumber(o.attackBonus, o.toHit, o.attackModifier, o.attackStatValue);
+  const description = descText ?? pickRichText(o, [
+    'description',
+    'text',
+    'snippet',
+    'attackNotes',
+    'actionDescription',
+    'details',
+  ]);
+  const toHit = raw
+    ? extractMonsterActionToHit(o, raw, catalog, description)
+    : pickNumber(o.attackBonus, o.toHit, o.attackModifier, o.attackStatValue);
   if (toHit != null) parts.push(`${toHit >= 0 ? '+' : ''}${toHit} to hit`);
 
-  const reach = o.reach ?? o.range ?? o.attackRange ?? o.rangeDescription;
+  const attack = (o.attack && typeof o.attack === 'object' ? o.attack : {}) as Record<string, unknown>;
+  const def = (o.definition && typeof o.definition === 'object' ? o.definition : {}) as Record<string, unknown>;
+  const reach = o.reach ?? o.range ?? o.attackRange ?? o.rangeDescription ?? attack.range ?? def.range;
   if (reach) parts.push(String(reach).trim());
 
   const damage = o.dice
     ?? o.damageDice
     ?? (typeof o.damage === 'object' ? (o.damage as Record<string, unknown>).dice : o.damage)
-    ?? o.fixedDamage;
+    ?? o.fixedDamage
+    ?? attack.damage
+    ?? attack.dice
+    ?? def.damage
+    ?? def.dice;
   if (damage) parts.push(`${stripDdbHtml(damage)} damage`);
 
-  const saveDc = pickNumber(o.saveDc, o.dc, o.spellSaveDc);
-  const saveStat = String(o.saveStatName ?? o.saveStat ?? o.saveAbilityName ?? '').trim();
+  const saveDc = pickNumber(o.saveDc, o.dc, o.spellSaveDc, attack.saveDc, def.saveDc);
+  const saveStat = String(o.saveStatName ?? o.saveStat ?? o.saveAbilityName ?? attack.saveStat ?? '').trim();
   if (saveDc != null) parts.push(`DC ${saveDc}${saveStat ? ` ${saveStat}` : ''} save`);
 
   return parts.join(', ');
 }
 
-function formatActionEntry(block: unknown): string {
+function formatActionEntry(
+  block: unknown,
+  raw?: Record<string, unknown>,
+  catalog?: DdbCatalog,
+): string {
   if (!block || typeof block !== 'object') return stripDdbHtml(block);
   const o = block as Record<string, unknown>;
   const name = String(o.name ?? o.title ?? '').trim();
@@ -208,17 +364,48 @@ function formatActionEntry(block: unknown): string {
     'actionDescription',
     'details',
   ]);
-  const attack = formatAttackDetails(o);
+  const attack = formatAttackDetails(o, raw, catalog, desc);
   const chunks = [desc, attack].filter(Boolean);
   if (name && chunks.length) return `${name}. ${chunks.join(' ')}`;
   return name || chunks.join(' ');
 }
 
-function formatNamedBlocks(title: string, blocks: unknown): string {
+function formatNamedBlocks(
+  title: string,
+  blocks: unknown,
+  raw?: Record<string, unknown>,
+  catalog?: DdbCatalog,
+): string {
   if (!Array.isArray(blocks) || blocks.length === 0) return '';
-  const lines = blocks.map((block) => formatActionEntry(block)).filter(Boolean);
+  const lines = blocks.map((block) => formatActionEntry(block, raw, catalog)).filter(Boolean);
   if (!lines.length) return '';
   return `${title}\n${lines.join('\n')}`;
+}
+
+function appendMonsterActionSection(
+  parts: string[],
+  title: string,
+  blocks: unknown,
+  descriptionHtml: unknown,
+  raw: Record<string, unknown>,
+  catalog?: DdbCatalog,
+): void {
+  const structured = formatNamedBlocks(title, blocks, raw, catalog);
+  const html = stripDdbHtml(descriptionHtml);
+
+  if (structured && html && textHasAttackBonus(html) && !textHasAttackBonus(structured)) {
+    appendSection(parts, title);
+    parts.push(html);
+    return;
+  }
+  if (structured) {
+    appendSection(parts, structured);
+    return;
+  }
+  if (html) {
+    appendSection(parts, title);
+    parts.push(html);
+  }
 }
 
 function buildSpellDescription(def: Record<string, unknown>): string {
@@ -514,50 +701,50 @@ function buildMonsterDescription(raw: Record<string, unknown>, catalog?: DdbCata
   const spellcasting = formatNamedBlocks('', raw.spellcasting ?? raw.spells);
   if (spellcasting) appendSection(parts, spellcasting);
 
-  const actions = stripDdbHtml(raw.actionsDescription);
-  if (actions) {
-    appendSection(parts, 'ACTIONS');
-    parts.push(actions);
-  } else {
-    const actionBlocks = formatNamedBlocks('ACTIONS', raw.actions);
-    if (actionBlocks) appendSection(parts, actionBlocks);
-  }
+  appendMonsterActionSection(
+    parts,
+    'ACTIONS',
+    collectMonsterActionBlocks(raw),
+    raw.actionsDescription,
+    raw,
+    catalog,
+  );
 
-  const bonusActions = stripDdbHtml(raw.bonusActionsDescription);
-  if (bonusActions) {
-    appendSection(parts, 'Bonus Actions');
-    parts.push(bonusActions);
-  } else {
-    const bonusBlocks = formatNamedBlocks('Bonus Actions', raw.bonusActions);
-    if (bonusBlocks) appendSection(parts, bonusBlocks);
-  }
+  appendMonsterActionSection(
+    parts,
+    'Bonus Actions',
+    raw.bonusActions,
+    raw.bonusActionsDescription,
+    raw,
+    catalog,
+  );
 
-  const reactions = stripDdbHtml(raw.reactionsDescription);
-  if (reactions) {
-    appendSection(parts, 'REACTIONS');
-    parts.push(reactions);
-  } else {
-    const reactionBlocks = formatNamedBlocks('REACTIONS', raw.reactions);
-    if (reactionBlocks) appendSection(parts, reactionBlocks);
-  }
+  appendMonsterActionSection(
+    parts,
+    'REACTIONS',
+    raw.reactions,
+    raw.reactionsDescription,
+    raw,
+    catalog,
+  );
 
-  const legendary = stripDdbHtml(raw.legendaryActionsDescription);
-  if (legendary) {
-    appendSection(parts, 'LEGENDARY ACTIONS');
-    parts.push(legendary);
-  } else {
-    const legendaryBlocks = formatNamedBlocks('LEGENDARY ACTIONS', raw.legendaryActions);
-    if (legendaryBlocks) appendSection(parts, legendaryBlocks);
-  }
+  appendMonsterActionSection(
+    parts,
+    'LEGENDARY ACTIONS',
+    raw.legendaryActions,
+    raw.legendaryActionsDescription,
+    raw,
+    catalog,
+  );
 
-  const mythic = stripDdbHtml(raw.mythicActionsDescription);
-  if (mythic) {
-    appendSection(parts, 'MYTHIC ACTIONS');
-    parts.push(mythic);
-  } else {
-    const mythicBlocks = formatNamedBlocks('MYTHIC ACTIONS', raw.mythicActions);
-    if (mythicBlocks) appendSection(parts, mythicBlocks);
-  }
+  appendMonsterActionSection(
+    parts,
+    'MYTHIC ACTIONS',
+    raw.mythicActions,
+    raw.mythicActionsDescription,
+    raw,
+    catalog,
+  );
 
   const lair = stripDdbHtml(raw.lairDescription);
   if (lair) appendSection(parts, `Lair Actions\n${lair}`);

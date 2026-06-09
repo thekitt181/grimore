@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { isMobileClient } from '@/lib/socket';
 import { useDiceStore } from './diceStore';
 import { formatRollBreakdown } from './diceAnimation';
 
@@ -16,11 +17,15 @@ export function RollToast() {
   if (!lastToast) return null;
 
   const GOLD = 'var(--color-accent-gold)';
+  const mobile = isMobileClient();
+  const toastClass = mobile
+    ? 'fixed bottom-40 left-1/2 -translate-x-1/2 z-[100] rounded-lg px-4 py-2 shadow-2xl pointer-events-none max-w-[min(100vw-2rem,24rem)]'
+    : 'fixed bottom-20 left-1/2 -translate-x-1/2 z-[100] rounded-lg px-4 py-2 shadow-2xl pointer-events-none';
 
   if (lastToast.secretHidden) {
     return (
       <div
-        className="fixed bottom-20 left-1/2 -translate-x-1/2 z-50 rounded-lg px-4 py-2 shadow-2xl pointer-events-none"
+        className={toastClass}
         style={{
           background: 'var(--color-bg-secondary)',
           border: '1px solid var(--color-border)',
@@ -35,7 +40,7 @@ export function RollToast() {
 
   return (
     <div
-      className="fixed bottom-20 left-1/2 -translate-x-1/2 z-50 rounded-lg px-4 py-2 shadow-2xl pointer-events-none"
+      className={toastClass}
       style={{
         background: 'var(--color-bg-secondary)',
         border: `1px solid ${lastToast.isCrit ? GOLD : lastToast.isCritFail ? '#ef4444' : 'var(--color-border)'}`,

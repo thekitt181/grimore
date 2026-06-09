@@ -2,6 +2,7 @@ import { Suspense, useEffect, useMemo, useRef } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { Html } from '@react-three/drei';
 import * as THREE from 'three';
+import { isMobileClient } from '@/lib/socket';
 import { useDiceStore, type DiceAnimationSpec } from './diceStore';
 import { createDieGeometry, dieColor, normalizeDieSides } from './dieGeometry';
 
@@ -171,7 +172,9 @@ export function DiceTrayOverlay() {
   const trayHeight = Math.min(360, 140 + Math.ceil(spec.faces.length / 4) * 44);
 
   return (
-    <div className="fixed inset-0 z-[90] pointer-events-none flex items-end justify-center pb-24">
+    <div
+      className={`fixed inset-0 z-[90] pointer-events-none flex items-end justify-center ${isMobileClient() ? 'pb-40' : 'pb-24'}`}
+    >
       <div
         className="rounded-xl overflow-hidden shadow-2xl"
         style={{

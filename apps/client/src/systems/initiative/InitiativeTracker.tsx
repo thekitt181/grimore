@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { DraggablePanel } from '@/components/DraggablePanel';
+import { ddbPanelPosition, ddbPanelWidth } from '@/systems/ddb/ddbTokenUtils';
+import { isMobileClient } from '@/lib/socket';
 import { useInitiativeStore, type Combatant } from '../map/store/initiativeStore';
 import { useItemStore } from '@/systems/scene/store/itemStore';
 import type { TokenItem } from '@/systems/scene/types';
@@ -108,10 +110,10 @@ export function InitiativeTracker({ onClose }: { onClose: () => void }) {
       title="⚔ Initiative"
       subtitle={isActive ? `Round ${round}` : undefined}
       onClose={onClose}
-      defaultPosition={{ x: Math.max(16, window.innerWidth - 300), y: 80 }}
-      width={280}
-      maxHeight="580px"
-      zIndex={130}
+      defaultPosition={ddbPanelPosition(Math.max(16, window.innerWidth - 300), 56)}
+      width={ddbPanelWidth(280)}
+      maxHeight={isMobileClient() ? 'calc(100vh - 9rem)' : '580px'}
+      zIndex={150}
     >
       <div className="select-none">
       {/* Combat controls */}
