@@ -12,12 +12,10 @@
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
     "sourceMap": true,
+    "rootDir": "./src",
     "outDir": "./dist",
-    "baseUrl": ".",
-    "paths": {
-      "@grimoire/shared": ["../../packages/shared/src"]
-    }
+    "baseUrl": "."
   },
-  "include": ["src", "../../packages/shared/src"],
+  "include": ["src"],
   "exclude": ["node_modules", "dist"]
 }
