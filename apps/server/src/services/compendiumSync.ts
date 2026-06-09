@@ -12,7 +12,7 @@ import type {
 import { isHomebrewEntry, normalizeOwlbearGlobalDoc, splitCompendiumSources } from '@grimoire/shared';
 import { isLikelyValidItem, parseCr, slugify } from '@grimoire/monster-dex';
 import { getCollection, withMongoTimeout, resetMongoClient } from '../lib/mongo';
-import { resolveCompendiumEntryImageUrl } from './compendiumImages';
+import { resolveCompendiumEntryImageUrl, resolveEntryImageUrl } from './compendiumImages';
 import {
   isLocalCatalogAvailable,
   loadLocalItems,

@@ -29,7 +29,9 @@ router.get('/:id', requireAuth, async (req: AuthenticatedRequest, res) => {
       return;
     }
 
-    const isMember = session.campaign.members.some((m) => m.userId === userId);
+    const isMember = session.campaign.members.some(
+      (m: (typeof session.campaign.members)[number]) => m.userId === userId,
+    );
     if (!isMember) {
       res.status(403).json({ error: 'Access denied' });
       return;

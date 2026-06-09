@@ -35,7 +35,7 @@ router.get('/', requireAuth, async (req: AuthenticatedRequest, res) => {
       orderBy: { joinedAt: 'desc' },
     });
 
-    const campaigns = memberships.map((m) => ({
+    const campaigns = memberships.map((m: (typeof memberships)[number]) => ({
       ...m.campaign,
       myRole: m.role,
     }));
@@ -109,7 +109,7 @@ router.get('/:id', requireAuth, async (req: AuthenticatedRequest, res) => {
       return;
     }
 
-    const isMember = campaign.members.some((m) => m.userId === userId);
+    const isMember = campaign.members.some((m: (typeof campaign.members)[number]) => m.userId === userId);
     if (!isMember) {
       res.status(403).json({ error: 'Access denied' });
       return;

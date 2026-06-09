@@ -2,6 +2,7 @@ import type { Server as HttpServer } from 'http';
 import { Server } from 'socket.io';
 import { createClerkClient, verifyToken } from '@clerk/backend';
 import { prisma } from '../lib/prisma';
+import type { Prisma } from '@prisma/client';
 import {
   setRoomUsers,
   getRoomUsers,
@@ -288,7 +289,7 @@ export function initSocket(httpServer: HttpServer): Server {
             userId: payload.rollerId || undefined,
             type: 'DICE_ROLL',
             // Prisma Json field requires casting through unknown
-            data: payload as unknown as Parameters<typeof prisma.sessionLog.create>[0]['data']['data'],
+            data: payload as unknown as Prisma.InputJsonValue,
           },
         });
       } catch {
@@ -377,7 +378,7 @@ export function initSocket(httpServer: HttpServer): Server {
             senderId: payload.senderId,
             type: payload.type,
             content: payload.content,
-            rollData: payload.roll ? (payload.roll as unknown as Parameters<typeof prisma.chatMessage.create>[0]['data']['rollData']) : undefined,
+            rollData: payload.roll ? (payload.roll as unknown as Prisma.InputJsonValue) : undefined,
             whisperToId: payload.whisperToId ?? null,
             timestamp: new Date(payload.timestamp),
           },

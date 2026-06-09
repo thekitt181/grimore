@@ -41,6 +41,7 @@ export type CompendiumKind = 'monster' | 'item' | 'spell';
 
 type OwlbearEntry = (OwlbearMonster | OwlbearItem | OwlbearSpell) & {
   originBookName?: string;
+  image?: string;
 };
 
 const KIND_FIELDS = {
@@ -491,7 +492,7 @@ export async function deleteOwlbearEntry(
 }
 
 /** Patch image fields on the raw doc without flattening override/custom structure. */
-export type OwlbearImageFieldsPatch = Pick<CompendiumGlobalDoc, 'images' | 'imagesData' | 'entryImages'> & {
+export type OwlbearImageFieldsPatch = Partial<Pick<CompendiumGlobalDoc, 'images' | 'imagesData' | 'entryImages'>> & {
   /** Keys to remove from `images` after merge. */
   removeImageKeys?: string[];
   /** Keys to remove from `imagesData` after merge. */

@@ -337,7 +337,7 @@ export async function saveEntryImage(
   const global = globalFromEntrySlice(key, name, {
     imageRef: imageUrl ? imageRef : null,
     entryHistory: patch.entryImages?.[name] ?? [],
-    lastUpdated: saved.lastUpdated,
+    lastUpdated: saved.lastUpdated ? isoTimestamp(saved.lastUpdated) : null,
   });
 
   return buildEntryImageStateResponse(global, kind, name, storedEntryImage);

@@ -287,6 +287,12 @@ export interface ServerToClientEvents {
   'session:roomState':    (payload: { users: SessionUser[] }) => void;
   'compendium:updated':   (payload: CompendiumUpdatedPayload) => void;
   'ddb:roll':             (payload: DdbRollBridgePayload) => void;
+  'ddb:rollBridge:status': (payload: {
+    sessionId: string;
+    connected: boolean;
+    ddbCampaignId?: number;
+    error?: string;
+  }) => void;
   'ddb:characterSync':    (payload: DdbCharacterSyncPayload) => void;
   'character:hpUpdate':   (payload: DdbHpUpdatePayload) => void;
   error: (payload: { message: string }) => void;

@@ -1,4 +1,5 @@
 import { prisma } from '../../lib/prisma';
+import type { Prisma } from '@prisma/client';
 import { decryptToken, encryptToken } from './encryption';
 import { normalizeCobaltToken, validateCobalt } from './cobaltAuth';
 import { extractCharacter } from './characterExtract';
@@ -130,14 +131,14 @@ export async function getOrSyncCharacter(
       ddbCharacterId,
       name: character.name,
       campaignId: character.campaignId ?? null,
-      snapshot: snapshot as unknown as Parameters<typeof prisma.ddbCharacterCache.create>[0]['data']['snapshot'],
+      snapshot: snapshot as unknown as Prisma.InputJsonValue,
       updateId: character.updateId ?? 0,
       lastSyncedAt: new Date(),
     },
     update: {
       name: character.name,
       campaignId: character.campaignId ?? null,
-      snapshot: snapshot as unknown as Parameters<typeof prisma.ddbCharacterCache.update>[0]['data']['snapshot'],
+      snapshot: snapshot as unknown as Prisma.InputJsonValue,
       updateId: character.updateId ?? 0,
       lastSyncedAt: new Date(),
     },
@@ -173,7 +174,7 @@ export async function patchCharacterHp(
         snapshot: {
           ...next,
           ddbNormalizerVersion: DDB_NORMALIZER_VERSION,
-        } as unknown as Parameters<typeof prisma.ddbCharacterCache.update>[0]['data']['snapshot'],
+        } as unknown as Prisma.InputJsonValue,
       },
     });
     return { pushedToDdb, character: next };
@@ -232,7 +233,7 @@ export async function patchCharacterDeathSaves(
         snapshot: {
           ...next,
           ddbNormalizerVersion: DDB_NORMALIZER_VERSION,
-        } as unknown as Parameters<typeof prisma.ddbCharacterCache.update>[0]['data']['snapshot'],
+        } as unknown as Prisma.InputJsonValue,
       },
     });
     return { pushedToDdb, character: next };

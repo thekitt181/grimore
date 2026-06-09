@@ -11,7 +11,7 @@
     "dev": "pnpm --filter @grimoire/shared build && node scripts/dev-supervisor.mjs",
     "dev:raw": "pnpm --filter @grimoire/shared build && concurrently -k -n server,client -c blue,green \"pnpm --filter @grimoire/server dev\" \"pnpm --filter @grimoire/client dev\"",
     "dev:kill-ports": "powershell -NoProfile -Command \"Get-NetTCPConnection -LocalPort 3001,5173 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }\"",
-    "build": "pnpm --filter @grimoire/shared build && pnpm --filter @grimoire/server build && pnpm --filter @grimoire/client build",
+    "build": "pnpm --filter @grimoire/shared build && pnpm --filter @grimoire/server db:generate && pnpm --filter @grimoire/server build && pnpm --filter @grimoire/client build",
     "lint": "pnpm -r lint",
     "format": "prettier --write \"**/*.{ts,tsx,json,md}\"",
     "type-check": "pnpm -r type-check",
