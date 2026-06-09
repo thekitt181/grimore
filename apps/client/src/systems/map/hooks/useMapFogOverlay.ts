@@ -95,18 +95,15 @@ export function useMapFogOverlay(
       }
 
       if (isActive) {
-        const renderer = sceneRefs.app.current?.renderer;
-        if (renderer) {
-          drawFogLayers(fogLayers, map, {
-            revealedCells,
-            gridSize: map.gridSize,
-            isGM,
-            items: itemsForFog,
-            selectedIds,
-            myUserId,
-            visible: showThis,
-          }, renderer);
-        }
+        drawFogLayers(fogLayers, map, {
+          revealedCells,
+          gridSize: map.gridSize,
+          isGM,
+          items: itemsForFog,
+          selectedIds,
+          myUserId,
+          visible: showThis,
+        }, sceneRefs.app.current?.renderer ?? null);
       } else {
         clearFogLayers(fogLayers);
       }

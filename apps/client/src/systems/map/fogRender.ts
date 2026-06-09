@@ -5,6 +5,7 @@ import {
   Sprite,
   type Renderer,
 } from 'pixi.js';
+import { isMobileClient } from '@/lib/socket';
 import type { Item, MapItem } from '@/systems/scene/types';
 import { cellKey } from './store/mapStore';
 import {
@@ -31,7 +32,6 @@ export interface FogLayers {
   compose: Container;
   base: Graphics;
   erase: Graphics;
-  /** Re-fog smooth cone, then clip revealed cells off it. */
   refog: Graphics;
   refogClip: Graphics;
 }
@@ -39,6 +39,11 @@ export interface FogLayers {
 const FOG_COLOR = 0x000000;
 
 const layerCache = new WeakMap<Container, FogLayers>();
+
+/** Mobile GPUs often fail erase-blend when rendering into a RenderTexture. */
+function fogUsesDirectCompose(): boolean {
+  return isMobileClient();
+}
 
 function parseCellKey(key: string): { x: number; y: number } | null {
   const [sx, sy] = key.split(',');
@@ -101,11 +106,6 @@ function eraseCell(g: Graphics, cx: number, cy: number, gridSize: number): void 
   g.rect(cx * gridSize, cy * gridSize, gridSize, gridSize).fill({ color: 0xffffff, alpha: 1 });
 }
 
-function fillFogPolygon(g: Graphics, poly: { x: number; y: number }[]): void {
-  if (poly.length < 3) return;
-  g.poly(poly.flatMap((p) => [p.x, p.y])).fill({ color: FOG_COLOR, alpha: 1 });
-}
-
 /** True when all 4 orthogonal neighbors are also visible — safe to grid-fill without squaring the cone edge. */
 function isInteriorVisibleCell(cx: number, cy: number, visible: Set<string>): boolean {
   return (
@@ -118,17 +118,16 @@ function isInteriorVisibleCell(cx: number, cy: number, visible: Set<string>): bo
 }
 
 /**
- * Compose fog into a RenderTexture.
+ * Build fog graphics (smooth cone erase + optional refog).
  * Smooth cone from polygon erase; grid cells only patch interior ray gaps.
  */
-function composeFogTexture(
+function paintFogGraphics(
   layers: FogLayers,
   map: MapItem,
   opts: FogDrawOptions,
-  renderer: Renderer,
 ): void {
   const { width, height, gridSize } = map;
-  const { base, erase, refog, refogClip } = layers;
+  const { base, erase, refog } = layers;
 
   base.clear();
   base.rect(0, 0, width, height).fill({ color: FOG_COLOR, alpha: 1 });
@@ -182,7 +181,7 @@ function composeFogTexture(
   }
 
   refog.clear();
-  refogClip.clear();
+  layers.refogClip.clear();
 
   // GM-revealed fog: cover unrevealed LOS cells with grid fog while keeping the smooth cone edge
   // from the polygon erase above (do not refog the whole cone then punch square holes).
@@ -197,12 +196,30 @@ function composeFogTexture(
         .fill({ color: FOG_COLOR, alpha: 1 });
     }
   }
+}
 
-  renderer.render({
-    container: layers.compose,
-    target: layers.rt!,
-    clear: true,
-  });
+function mountFogOutput(fc: Container, layers: FogLayers, map: MapItem, opts: FogDrawOptions): void {
+  const alpha = opts.isGM ? 0.5 : 1;
+  const { width, height } = map;
+
+  if (fogUsesDirectCompose()) {
+    layers.sprite.visible = false;
+    if (layers.compose.parent !== fc) {
+      fc.addChild(layers.compose);
+    }
+    layers.compose.visible = true;
+    layers.compose.alpha = alpha;
+    return;
+  }
+
+  layers.compose.visible = false;
+  if (layers.compose.parent === fc) {
+    fc.removeChild(layers.compose);
+  }
+  layers.sprite.visible = true;
+  layers.sprite.alpha = alpha;
+  layers.sprite.width = width;
+  layers.sprite.height = height;
 }
 
 /** Draw fog-of-war (map-local coordinates). */
@@ -210,22 +227,37 @@ export function drawFogLayers(
   layers: FogLayers,
   map: MapItem,
   opts: FogDrawOptions,
-  renderer: Renderer,
+  renderer: Renderer | null,
 ): void {
   clearFogLayers(layers);
 
-  if (!opts.visible) return;
+  const fc = layers.sprite.parent as Container | null;
+
+  if (!opts.visible) {
+    layers.sprite.visible = false;
+    layers.compose.visible = false;
+    return;
+  }
 
   const { width, height } = map;
   const gridSize = opts.gridSize;
   if (width <= 0 || height <= 0 || gridSize <= 0) return;
 
-  ensureRenderTarget(layers, width, height);
-  composeFogTexture(layers, map, opts, renderer);
+  paintFogGraphics(layers, map, opts);
 
-  layers.sprite.alpha = opts.isGM ? 0.5 : 1;
-  layers.sprite.width = width;
-  layers.sprite.height = height;
+  if (!fc) return;
+
+  mountFogOutput(fc, layers, map, opts);
+
+  if (!fogUsesDirectCompose()) {
+    if (!renderer) return;
+    ensureRenderTarget(layers, width, height);
+    renderer.render({
+      container: layers.compose,
+      target: layers.rt!,
+      clear: true,
+    });
+  }
 }
 
 /** @deprecated Use drawFogLayers. */

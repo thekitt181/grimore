@@ -29,9 +29,11 @@ export function setFogVisibleForSession(visible: boolean): void {
 
 export function applySessionFogActive(active: boolean): void {
   const role = useSessionStore.getState().myRole;
-  if (role === 'GM') return;
   useMapStore.getState().setSessionFogActive(active);
-  useMapStore.getState().setFogEnabled(active);
+  // Players mirror GM fog on/off; GMs keep local fogEnabled for prep tools.
+  if (role !== 'GM') {
+    useMapStore.getState().setFogEnabled(active);
+  }
 }
 
 export function bindFogActiveSocket(): void {
