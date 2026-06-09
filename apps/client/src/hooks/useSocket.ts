@@ -4,6 +4,7 @@ import { getSocket, connectSocket } from '@/lib/socket';
 import { useSessionStore } from '@/store/sessionStore';
 import { useChatStore } from '@/store/chatStore';
 import { bindFogActiveSocket, emitFogActive } from '@/systems/scene/fogActiveSync';
+import { bindDdbRollSocket } from '@/systems/ddb/bindDdbRollSocket';
 import { useMapStore } from '@/systems/map/store/mapStore';
 
 function delay(ms: number): Promise<void> {
@@ -76,6 +77,7 @@ export function useSocket(
     });
 
     bindFogActiveSocket();
+    bindDdbRollSocket(true);
 
     if (useSessionStore.getState().myRole === 'GM') {
       emitFogActive(useMapStore.getState().fogEnabled);

@@ -140,13 +140,40 @@ export function MapToolbar() {
                 setFogEnabled(next);
                 useMapStore.getState().setSessionFogActive(next);
                 emitFogActive(next);
+                if (!next) {
+                  useMapStore.getState().setTool('select');
+                }
               }}
               className={clsx(BTN, fogEnabled && ACTIVE_BTN)}
             >
               🌫
             </button>
-            <button title="Reveal entire map" onClick={() => { setFogEnabled(true); revealAll(); emitFogUpdate(); }} className={BTN}>☀</button>
-            <button title="Hide entire map" onClick={() => { setFogEnabled(true); hideAll(); emitFogUpdate(); }} className={BTN}>⬛</button>
+            <button
+              title="Reveal entire map"
+              onClick={() => {
+                setFogEnabled(true);
+                useMapStore.getState().setSessionFogActive(true);
+                emitFogActive(true);
+                revealAll();
+                emitFogUpdate();
+              }}
+              className={BTN}
+            >
+              ☀
+            </button>
+            <button
+              title="Hide entire map"
+              onClick={() => {
+                setFogEnabled(true);
+                useMapStore.getState().setSessionFogActive(true);
+                emitFogActive(true);
+                hideAll();
+                emitFogUpdate();
+              }}
+              className={BTN}
+            >
+              ⬛
+            </button>
           </>
         )}
       </div>

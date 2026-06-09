@@ -43,7 +43,8 @@ function parseSourceIds(query: Record<string, unknown>): number[] | undefined {
   const single = parseInt(String(query['sourceId'] ?? ''), 10);
   return Number.isFinite(single) && single > 0 ? [single] : undefined;
 }
-import { getRollBridgeDebug, fetchNewDdbRollsForSession } from '../services/ddb/ddbRollBridge';
+import { getRollBridgeDebug, fetchNewDdbRollsForSession, broadcastDdbRolls } from '../services/ddb/ddbRollBridge';
+import { getSocketServer } from '../services/compendiumBroadcast';
 const router = Router();
 
 const linkSchema = z.object({ cobalt: z.string().min(10) });
@@ -390,6 +391,10 @@ router.get('/sessions/:sessionId/rolls/poll', requireAuth, requireSessionMember,
   }
   try {
     const rolls = await fetchNewDdbRollsForSession(sessionId);
+    const io = getSocketServer();
+    if (io && rolls.length > 0) {
+      broadcastDdbRolls(io, sessionId, rolls);
+    }
     res.json({ rolls });
   } catch (err) {
     console.error('[DDB] roll poll failed:', err);

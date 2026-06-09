@@ -8,13 +8,17 @@ export function emitFogActive(active: boolean): void {
   getSocket().emit('fog:active', { sessionId, active });
 }
 
+export function applySessionFogActive(active: boolean): void {
+  useMapStore.getState().setSessionFogActive(active);
+  if (useSessionStore.getState().myRole === 'GM') {
+    useMapStore.getState().setFogEnabled(active);
+  }
+}
+
 export function bindFogActiveSocket(): void {
   const socket = getSocket();
   socket.off('fog:active');
   socket.on('fog:active', ({ active }) => {
-    useMapStore.getState().setSessionFogActive(active);
-    if (useSessionStore.getState().myRole === 'GM') {
-      useMapStore.getState().setFogEnabled(active);
-    }
+    applySessionFogActive(active);
   });
 }

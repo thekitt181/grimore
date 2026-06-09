@@ -149,6 +149,13 @@ function emitRollPayload(io: Server, payload: DdbRollBridgePayload): void {
   );
 }
 
+/** Broadcast DDB rolls to every client in the session (HTTP poll + bridge). */
+export function broadcastDdbRolls(io: Server, sessionId: string, rolls: DdbRollBridgePayload[]): void {
+  for (const payload of rolls) {
+    emitRollPayload(io, payload);
+  }
+}
+
 function emitRoll(io: Server, sessionId: string, parsed: ParsedDdbRoll): void {
   emitRollPayload(io, toPayload(sessionId, parsed));
 }

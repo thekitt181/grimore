@@ -25,7 +25,9 @@ export function useDdbSocket(): void {
     const socket = getSocket();
 
     const startTimer = setTimeout(() => {
-      void requestDdbRollBridgeStart();
+      if (useSessionStore.getState().myRole === 'GM') {
+        void requestDdbRollBridgeStart();
+      }
     }, 1200);
 
     // HTTP poll — reliable path; does not depend on socket room or server bridge process.

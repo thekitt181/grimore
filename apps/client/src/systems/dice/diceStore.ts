@@ -115,6 +115,18 @@ export const useDiceStore = create<DiceState>((set, get) => ({
   },
 
   addDdbRollEntry: (payload) => {
+    const now = Date.now();
+    const recent = get().history[0];
+    if (
+      recent
+      && recent.rollerName === payload.characterName
+      && recent.total === payload.total
+      && recent.label.includes(payload.label)
+      && now - recent.timestamp < 2500
+    ) {
+      return;
+    }
+
     const results = payload.diceResults ?? [];
     const displayLabel = `DDB: ${payload.characterName} — ${payload.label}`;
     const displayNotation = payload.notation

@@ -164,7 +164,7 @@ export function initSocket(httpServer: HttpServer): Server {
 
         // Scene items and fog are stored per-user in the browser — live sync only.
         socket.emit('fog:sync', { sessionId, fogData: '[]' });
-        socket.emit('fog:active', { sessionId, active: sessionFogActive.get(sessionId) ?? true });
+        socket.emit('fog:active', { sessionId, active: sessionFogActive.get(sessionId) ?? false });
         socket.emit('items:sync', { sessionId, items: [] });
 
         const ddbLink = await prisma.ddbCampaignLink.findUnique({ where: { campaignId } });

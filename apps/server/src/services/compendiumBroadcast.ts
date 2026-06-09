@@ -9,6 +9,10 @@ export function setCompendiumSocketServer(
   io = server;
 }
 
+export function getSocketServer(): Server<ClientToServerEvents, ServerToClientEvents> | null {
+  return io;
+}
+
 export function broadcastCompendiumUpdated(lastUpdated: string): void {
   io?.emit('compendium:updated', { lastUpdated });
 }

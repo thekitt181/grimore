@@ -111,7 +111,7 @@ export const useMapStore = create<SceneState>((set) => ({
   revealedCells: new Set<string>(),
   fogBrushSize: 2,
   fogEnabled: false,
-  sessionFogActive: true,
+  sessionFogActive: false,
   drawColor:    '#c9a84c',
   drawStroke:   3,
 
@@ -180,6 +180,6 @@ export const useMapStore = create<SceneState>((set) => ({
       viewport: { x: 0, y: 0, scale: 1 },
       revealedCells: new Set<string>(),
       fogEnabled: false,
-      sessionFogActive: true,
+      sessionFogActive: false,
     }),
 }));

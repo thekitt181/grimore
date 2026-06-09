@@ -12,6 +12,7 @@ import {
   gmVisibleCells,
   losPolygons,
   losVisibleCellKeys,
+  playerVisibleCells,
 } from './fogLos';
 
 export interface FogDrawOptions {
@@ -100,6 +101,11 @@ function eraseCell(g: Graphics, cx: number, cy: number, gridSize: number): void 
   g.rect(cx * gridSize, cy * gridSize, gridSize, gridSize).fill({ color: 0xffffff, alpha: 1 });
 }
 
+function fillFogPolygon(g: Graphics, poly: { x: number; y: number }[]): void {
+  if (poly.length < 3) return;
+  g.poly(poly.flatMap((p) => [p.x, p.y])).fill({ color: FOG_COLOR, alpha: 1 });
+}
+
 /** True when all 4 orthogonal neighbors are also visible — safe to grid-fill without squaring the cone edge. */
 function isInteriorVisibleCell(cx: number, cy: number, visible: Set<string>): boolean {
   return (
@@ -143,19 +149,14 @@ function composeFogTexture(
       erasePolygon(erase, poly);
     }
 
-    if (opts.isGM) {
-      const visibleCells = gmVisibleCells(
-        opts.revealedCells,
-        map,
-        opts.items,
-        opts.selectedIds,
-        gridSize,
-      );
-      for (const key of visibleCells) {
-        const cell = parseCellKey(key);
-        if (!cell || !isInteriorVisibleCell(cell.x, cell.y, visibleCells)) continue;
-        eraseCell(erase, cell.x, cell.y, gridSize);
-      }
+    const visibleCells = opts.isGM
+      ? gmVisibleCells(opts.revealedCells, map, opts.items, opts.selectedIds, gridSize)
+      : playerVisibleCells(opts.revealedCells, map, opts.items, opts.myUserId, gridSize);
+
+    for (const key of visibleCells) {
+      const cell = parseCellKey(key);
+      if (!cell || !isInteriorVisibleCell(cell.x, cell.y, visibleCells)) continue;
+      eraseCell(erase, cell.x, cell.y, gridSize);
     }
   } else if (opts.isGM) {
     const cols = Math.ceil(width / gridSize);
@@ -173,13 +174,14 @@ function composeFogTexture(
   refogClip.blendMode = 'erase';
 
   if (!opts.isGM && opts.revealedCells.size > 0 && polys.length > 0) {
+    for (const poly of polys) {
+      fillFogPolygon(refog, poly);
+    }
     const coneCells = losVisibleCellKeys(map, visionTokens, gridSize, { directional: true });
-    for (const key of coneCells) {
-      if (opts.revealedCells.has(key)) continue;
+    for (const key of opts.revealedCells) {
+      if (!coneCells.has(key)) continue;
       const cell = parseCellKey(key);
-      if (cell) {
-        refog.rect(cell.x * gridSize, cell.y * gridSize, gridSize, gridSize).fill({ color: FOG_COLOR, alpha: 1 });
-      }
+      if (cell) eraseCell(refogClip, cell.x, cell.y, gridSize);
     }
   }
 

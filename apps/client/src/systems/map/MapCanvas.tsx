@@ -19,6 +19,7 @@ import { sceneRefs } from '@/systems/scene/sceneRefs';
 import { DEFAULT_MAP_GRID_SIZE, defaultMapGrid, gridSizeForMap } from '@/systems/scene/types';
 import { emitItemAdd, emitItemUpdate, emitItemsSync } from '@/systems/scene/sceneSync';
 import { applyFogData, emitFogSync, flushFogScene, hydrateFogFromServer, parseFogCells, restoreFogFromLocal } from '@/systems/scene/fogSync';
+import { bindFogActiveSocket, emitFogActive } from '@/systems/scene/fogActiveSync';
 import { useParams } from 'react-router-dom';
 import { loadItemsLocal, persistItemsLocal } from '@/systems/scene/sessionPersistence';
 import { mergeSceneItems, sanitizePersistedItems } from '@/systems/scene/mergeSceneItems';
@@ -197,19 +198,30 @@ export function MapCanvas() {
     };
     const onFog = ({ fogData }: { fogData: string }) => {
       const incoming = parseFogCells(fogData);
+      const isGM = useSessionStore.getState().myRole === 'GM';
       const current = useMapStore.getState().revealedCells;
-      if (incoming.size === 0 && current.size > 0) return;
+      if (isGM && incoming.size === 0 && current.size > 0) return;
+      if (!isGM) {
+        const merged = new Set([...current, ...incoming]);
+        useMapStore.getState().setRevealedCells(merged, { persist: false });
+        return;
+      }
       applyFogData(fogData);
     };
     const onFogSync = ({ fogData }: { fogData: string }) => {
       fogSyncedRef.current = true;
-      hydrateFogFromServer(fogData, sessionId);
+      if (useSessionStore.getState().myRole === 'GM') {
+        hydrateFogFromServer(fogData, sessionId);
+      } else {
+        applyFogData(fogData);
+      }
     };
     // When a player joins, the GM pushes the current scene + fog snapshot to them.
     const onUserJoined = () => {
       if (useSessionStore.getState().myRole === 'GM') {
         emitItemsSync(Object.values(useItemStore.getState().items) as Item[]);
         emitFogSync();
+        emitFogActive(useMapStore.getState().fogEnabled);
       }
     };
 
@@ -220,6 +232,7 @@ export function MapCanvas() {
     socket.on('map:fogUpdate', onFog as any);
     socket.on('fog:sync', onFogSync as any);
     socket.on('session:userJoined', onUserJoined as any);
+    bindFogActiveSocket();
     return () => {
       socket.off('item:add', onAdd as any);
       socket.off('item:update', onUpdate as any);

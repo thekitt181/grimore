@@ -84,10 +84,9 @@ export function visionBounds(
 }
 
 function playerControlsToken(token: TokenItem, userId: string | null): boolean {
+  void userId;
   if (token.visible === false) return false;
-  const owner = token.ownerId?.trim();
-  if (!owner || !userId) return false;
-  return owner === userId;
+  return token.type === 'token';
 }
 
 /** Tokens on this map that contribute line-of-sight. */
