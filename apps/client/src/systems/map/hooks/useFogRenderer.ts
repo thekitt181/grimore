@@ -2,8 +2,6 @@ import { useEffect } from 'react';
 import { useMapStore, cellKey } from '../store/mapStore';
 import { getActiveMap } from '@/systems/scene/store/itemStore';
 import { useSessionStore } from '@/store/sessionStore';
-import { getPersistSessionId } from '@/systems/scene/sessionPersistence';
-import { emitFogUpdate } from '@/systems/scene/fogSync';
 import { setFogVisibleForSession } from '@/systems/scene/fogActiveSync';
 import { sceneRefs, clientToWorld } from '@/systems/scene/sceneRefs';
 
@@ -29,9 +27,8 @@ export function useFogRenderer(appReady = false) {
   const activeTool = useMapStore((s) => s.activeTool);
   const fogBrushSize = useMapStore((s) => s.fogBrushSize);
   const fogEnabled = useMapStore((s) => s.fogEnabled);
-  const { revealCell, hideCell } = useMapStore();
+  const applyFogCells = useMapStore((s) => s.applyFogCells);
   const { myRole } = useSessionStore();
-  const persistSessionId = getPersistSessionId();
 
   const isGM = myRole === 'GM';
   const isFogTool = activeTool === 'fog-reveal' || activeTool === 'fog-hide';
@@ -57,14 +54,13 @@ export function useFogRenderer(appReady = false) {
       const { x: localX, y: localY } = worldToMapLocal(wx, wy);
       const cx = Math.floor(localX / cellSize);
       const cy = Math.floor(localY / cellSize);
+      const keys: string[] = [];
       for (let dx = -(fogBrushSize - 1); dx < fogBrushSize; dx++) {
         for (let dy = -(fogBrushSize - 1); dy < fogBrushSize; dy++) {
-          const key = cellKey(cx + dx, cy + dy);
-          if (activeTool === 'fog-reveal') revealCell(key);
-          else hideCell(key);
+          keys.push(cellKey(cx + dx, cy + dy));
         }
       }
-      if (persistSessionId) emitFogUpdate();
+      applyFogCells(keys, activeTool === 'fog-reveal' ? 'reveal' : 'hide');
     }
 
     function onDown(e: PointerEvent) {
@@ -93,5 +89,5 @@ export function useFogRenderer(appReady = false) {
       canvas.removeEventListener('pointerup', onUp);
       canvas.removeEventListener('pointercancel', onUp);
     };
-  }, [appReady, activeTool, fogBrushSize, isGM, isFogTool, fogEnabled, persistSessionId, revealCell, hideCell]);
+  }, [appReady, activeTool, fogBrushSize, isGM, isFogTool, fogEnabled, applyFogCells]);
 }

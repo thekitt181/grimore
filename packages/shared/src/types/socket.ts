@@ -12,7 +12,12 @@ export interface TokenMovePayload {
 
 export interface FogUpdatePayload {
   sessionId: string;
-  fogData: string;
+  /** Full snapshot — used on join / GM flush. */
+  fogData?: string;
+  /** Incremental reveal (smaller than full snapshot during play). */
+  added?: string[];
+  /** Incremental hide. */
+  removed?: string[];
 }
 
 /** Full fog state pushed to joining clients or on GM sync. */

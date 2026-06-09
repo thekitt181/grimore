@@ -18,7 +18,9 @@ import { useTransformControls } from '@/systems/scene/interaction/useTransformCo
 import { sceneRefs } from '@/systems/scene/sceneRefs';
 import { DEFAULT_MAP_GRID_SIZE, defaultMapGrid, gridSizeForMap } from '@/systems/scene/types';
 import { emitItemAdd, emitItemUpdate, emitItemsSync } from '@/systems/scene/sceneSync';
-import { applyFogData, emitFogSync, flushFogScene, hydrateFogFromServer, parseFogCells, restoreFogFromLocal } from '@/systems/scene/fogSync';
+import { applyFogData, emitFogSync, flushFogScene, hydrateFogFromServer, parseFogCells, resetFogPushBaseline, restoreFogFromLocal } from '@/systems/scene/fogSync';
+import { mergeFogIntoCells } from '@/systems/scene/fogMerge';
+import type { FogUpdatePayload } from '@grimoire/shared';
 import { bindFogActiveSocket, syncFogActiveToSession } from '@/systems/scene/fogActiveSync';
 import { useParams } from 'react-router-dom';
 import {
@@ -217,17 +219,29 @@ export function MapCanvas() {
         emitItemsSync([map]);
       }
     };
-    const onFog = ({ fogData }: { fogData: string }) => {
-      const incoming = parseFogCells(fogData);
+    const onFog = (payload: FogUpdatePayload) => {
       const isGM = useSessionStore.getState().myRole === 'GM';
       const current = useMapStore.getState().revealedCells;
-      if (isGM && incoming.size === 0 && current.size > 0) return;
-      if (!isGM) {
-        const merged = new Set([...current, ...incoming]);
-        useMapStore.getState().setRevealedCells(merged, { persist: false });
+
+      if (payload.fogData != null) {
+        const incoming = parseFogCells(payload.fogData);
+        if (isGM && incoming.size === 0 && current.size > 0) return;
+        if (!isGM) {
+          const merged = mergeFogIntoCells(current, payload);
+          useMapStore.getState().setRevealedCells(merged, { persist: false });
+          resetFogPushBaseline(merged);
+          return;
+        }
+        applyFogData(payload.fogData);
+        resetFogPushBaseline();
         return;
       }
-      applyFogData(fogData);
+
+      if (payload.added?.length || payload.removed?.length) {
+        const merged = mergeFogIntoCells(current, payload);
+        useMapStore.getState().setRevealedCells(merged, { persist: false });
+        resetFogPushBaseline(merged);
+      }
     };
     const onFogSync = ({ fogData }: { fogData: string }) => {
       fogSyncedRef.current = true;

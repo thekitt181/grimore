@@ -6,6 +6,7 @@ import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
 import { prisma } from './lib/prisma';
 import { connectRedisOptional, isRedisOperational, redis } from './lib/redis';
+import { attachRedisSocketAdapter } from './lib/socketRedisAdapter';
 import { getMongoCircuitStatus, isMongoConfigured } from './lib/mongo';
 import { initSocket } from './socket';
 import campaignRoutes from './routes/campaigns';
@@ -63,6 +64,7 @@ app.get('/health', (_req, res) => {
   res.json({
     status: 'ok',
     redis: isRedisOperational() ? 'connected' : 'degraded',
+    socketAdapter: process.env['SOCKET_REDIS_ADAPTER'] === '0' ? 'disabled' : 'redis-when-available',
     mongo: isMongoConfigured()
       ? (mongo.open ? 'circuit-open' : 'configured')
       : 'disabled',
@@ -73,7 +75,7 @@ app.get('/health', (_req, res) => {
 mountClientSpa(app);
 
 // ─── Socket.io ────────────────────────────────────────────────────────────────
-initSocket(httpServer);
+const io = initSocket(httpServer);
 
 async function startCompendiumBackground(): Promise<void> {
   try {
@@ -100,6 +102,8 @@ async function start() {
     const redisOk = await connectRedisOptional();
     if (!redisOk) {
       console.warn('[Redis] Running without Redis — session caches and DDB dedup are degraded');
+    } else {
+      await attachRedisSocketAdapter(io);
     }
 
     httpServer.on('error', (err: NodeJS.ErrnoException) => {

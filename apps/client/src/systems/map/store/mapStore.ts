@@ -71,6 +71,7 @@ interface SceneState extends ActiveGrid {
   setActiveGrid: (grid: Partial<ActiveGrid>) => void;
 
   revealCell: (key: string) => void;
+  applyFogCells: (keys: string[], mode: 'reveal' | 'hide') => void;
   hideCell: (key: string) => void;
   revealAll: () => void;
   hideAll: () => void;
@@ -138,6 +139,19 @@ export const useMapStore = create<SceneState>((set) => ({
     set((s) => {
       const n = new Set(s.revealedCells);
       n.add(key);
+      return { revealedCells: n };
+    });
+    persistFogScene();
+  },
+
+  applyFogCells: (keys, mode) => {
+    if (keys.length === 0) return;
+    set((s) => {
+      const n = new Set(s.revealedCells);
+      for (const key of keys) {
+        if (mode === 'reveal') n.add(key);
+        else n.delete(key);
+      }
       return { revealedCells: n };
     });
     persistFogScene();

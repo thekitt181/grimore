@@ -10,7 +10,6 @@ import {
   getRoomUsers,
   getSessionFog,
   getSessionItems,
-  setSessionFog,
   setSessionItems,
 } from '../lib/redis';
 import {
@@ -48,6 +47,7 @@ import {
 } from '@grimoire/shared';
 import { setCompendiumSocketServer } from '../services/compendiumBroadcast';
 import { startRollBridge, stopRollBridge, isRollBridgeActive, resolveRollBridgeUserId } from '../services/ddb/ddbRollBridge';
+import { persistSessionFogCache } from '../lib/fogSessionCache';
 import { isClientOriginAllowed } from '../lib/clientOrigins';
 
 /** Per-session fog active flag (GM toggles off during prep). */
@@ -83,8 +83,11 @@ async function hydrateSessionFromCache(socket: Socket, sessionId: string): Promi
   socket.emit('items:sync', { sessionId, items: [] });
 }
 
-function cacheSessionFog(sessionId: string, fogData: string): void {
-  void setSessionFog(sessionId, fogData);
+function cacheSessionFog(
+  sessionId: string,
+  payload: { fogData?: string; added?: string[]; removed?: string[] },
+): void {
+  void persistSessionFogCache(sessionId, payload);
 }
 
 function cacheSessionItems(sessionId: string, items: unknown[]): void {
@@ -298,7 +301,7 @@ export function initSocket(httpServer: HttpServer): Server {
     socket.on('map:fogUpdate', (payload: FogUpdatePayload) => {
       if (!isJoinedSession(socket, payload.sessionId)) return;
       if (isSessionGM(socket)) {
-        cacheSessionFog(payload.sessionId, payload.fogData);
+        cacheSessionFog(payload.sessionId, payload);
       }
       socket.to(payload.sessionId).emit('map:fogUpdate', payload);
     });
@@ -306,7 +309,7 @@ export function initSocket(httpServer: HttpServer): Server {
     socket.on('fog:sync', (payload: FogSyncPayload) => {
       if (!isJoinedSession(socket, payload.sessionId)) return;
       if (isSessionGM(socket)) {
-        cacheSessionFog(payload.sessionId, payload.fogData);
+        cacheSessionFog(payload.sessionId, { fogData: payload.fogData });
       }
       socket.to(payload.sessionId).emit('fog:sync', payload);
     });

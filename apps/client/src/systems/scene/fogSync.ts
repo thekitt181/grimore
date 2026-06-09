@@ -6,31 +6,59 @@ import {
   loadFogCells,
   persistFogLocal,
 } from './sessionPersistence';
+import {
+  fogDeltaFromPrevious,
+  mergeFogIntoCells,
+  parseFogCellSet,
+  shouldSendFogDelta,
+} from './fogMerge';
+import type { FogUpdatePayload } from '@grimoire/shared';
 
 let pendingFogServerSync: ReturnType<typeof setTimeout> | null = null;
+let lastPushedCells: Set<string> | null = null;
 
 export function fogDataJson(): string {
   return JSON.stringify([...useMapStore.getState().revealedCells]);
 }
 
 export function parseFogCells(fogData: string): Set<string> {
-  try {
-    return new Set(JSON.parse(fogData) as string[]);
-  } catch {
-    return new Set();
-  }
+  return parseFogCellSet(fogData);
+}
+
+export function applyFogPayload(
+  payload: Pick<FogUpdatePayload, 'fogData' | 'added' | 'removed'>,
+  options?: { persist?: boolean },
+) {
+  const merged = mergeFogIntoCells(useMapStore.getState().revealedCells, payload);
+  useMapStore.getState().setRevealedCells(merged, options);
 }
 
 export function applyFogData(fogData: string, options?: { persist?: boolean }) {
-  useMapStore.getState().setRevealedCells(parseFogCells(fogData), options);
+  applyFogPayload({ fogData }, options);
 }
 
-/** Save fog locally immediately; debounce a live socket push to other clients. */
+function pushFogToServer(sessionId: string, cells: Set<string>) {
+  const fullJson = JSON.stringify([...cells]);
+  persistFogLocal(sessionId, fullJson);
+
+  const previous = lastPushedCells ?? new Set<string>();
+  const { added, removed } = fogDeltaFromPrevious(cells, previous);
+
+  if (shouldSendFogDelta(added, removed, fullJson)) {
+    getSocket().emit('map:fogUpdate', { sessionId, added, removed });
+  } else {
+    getSocket().emit('map:fogUpdate', { sessionId, fogData: fullJson });
+  }
+  lastPushedCells = new Set(cells);
+}
+
+/** Save fog locally immediately; debounce socket push (delta when possible). */
 export function persistFogScene(options?: { pushServer?: boolean; sessionId?: string | null }) {
   const sessionId = options?.sessionId ?? getPersistSessionId();
   if (!sessionId) return;
 
-  const fogData = fogDataJson();
+  const cells = useMapStore.getState().revealedCells;
+  const fogData = JSON.stringify([...cells]);
   persistFogLocal(sessionId, fogData);
 
   if (options?.pushServer === false) return;
@@ -40,9 +68,7 @@ export function persistFogScene(options?: { pushServer?: boolean; sessionId?: st
     pendingFogServerSync = null;
     const sid = getPersistSessionId();
     if (!sid) return;
-    const data = fogDataJson();
-    persistFogLocal(sid, data);
-    getSocket().emit('map:fogUpdate', { sessionId: sid, fogData: data });
+    pushFogToServer(sid, useMapStore.getState().revealedCells);
   }, 400);
 }
 
@@ -56,8 +82,10 @@ export function flushFogScene(sessionId?: string | null) {
     pendingFogServerSync = null;
   }
 
-  const fogData = fogDataJson();
+  const cells = useMapStore.getState().revealedCells;
+  const fogData = JSON.stringify([...cells]);
   persistFogLocal(sid, fogData);
+  lastPushedCells = new Set(cells);
 
   if (useSessionStore.getState().myRole === 'GM') {
     getSocket().emit('fog:sync', { sessionId: sid, fogData });
@@ -72,6 +100,7 @@ export function flushFogScene(sessionId?: string | null) {
 export function restoreFogFromLocal(sessionId: string): void {
   const local = loadFogCells(sessionId);
   useMapStore.getState().setRevealedCells(local, { persist: false });
+  lastPushedCells = new Set(local);
 }
 
 /** Merge server snapshot on join; local wins when it has more reveals. */
@@ -93,6 +122,7 @@ export function hydrateFogFromServer(fogData: string, sessionId?: string | null)
   const json = JSON.stringify([...merged]);
   useMapStore.getState().setRevealedCells(merged, { persist: false });
   if (sid) persistFogLocal(sid, json);
+  lastPushedCells = new Set(merged);
 
   if (sid && merged.size > server.size && useSessionStore.getState().myRole === 'GM') {
     getSocket().emit('fog:sync', { sessionId: sid, fogData: json });
@@ -107,4 +137,9 @@ export function emitFogUpdate() {
 /** GM pushes full fog snapshot when a player joins. */
 export function emitFogSync() {
   flushFogScene();
+}
+
+/** Reset delta baseline after loading a full snapshot from server. */
+export function resetFogPushBaseline(cells?: Set<string>) {
+  lastPushedCells = cells ? new Set(cells) : new Set(useMapStore.getState().revealedCells);
 }

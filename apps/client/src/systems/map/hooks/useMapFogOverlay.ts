@@ -31,6 +31,7 @@ export function useMapFogOverlay(
   const { myRole, myUserId } = useSessionStore();
 
   const fogContainers = useRef<Map<string, Container>>(new Map());
+  const rafRef = useRef<number | null>(null);
 
   const isGM = myRole === 'GM';
   const showFogOverlay = fogEnabled || sessionFogActive;
@@ -42,72 +43,81 @@ export function useMapFogOverlay(
       return;
     }
 
-    const layer = layerRef.current;
-    if (!layer) return;
+    if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
+    rafRef.current = requestAnimationFrame(() => {
+      rafRef.current = null;
 
-    const activeMap = getActiveMap();
-    const itemsForFog = itemsWithLiveTransforms(items, liveById);
-    const liveMapIds = new Set(
-      Object.values(items)
-        .filter((i): i is MapItem => i.type === 'map')
-        .map((m) => m.id),
-    );
+      const layer = layerRef.current;
+      if (!layer) return;
 
-    for (const [mapId, fc] of fogContainers.current) {
-      if (!liveMapIds.has(mapId)) {
-        fc.destroy({ children: true });
-        fogContainers.current.delete(mapId);
-      }
-    }
+      const activeMap = getActiveMap();
+      const itemsForFog = itemsWithLiveTransforms(items, liveById);
+      const liveMapIds = new Set(
+        Object.values(items)
+          .filter((i): i is MapItem => i.type === 'map')
+          .map((m) => m.id),
+      );
 
-    for (const item of Object.values(items)) {
-      if (item.type !== 'map') continue;
-      const map = item as MapItem;
-
-      let fc = fogContainers.current.get(map.id);
-      if (!fc || fc.parent !== layer) {
-        fc = new Container();
-        fc.label = `fog_${map.id}`;
-        fc.eventMode = 'none';
-        layer.addChild(fc);
-        fogContainers.current.set(map.id, fc);
+      for (const [mapId, fc] of fogContainers.current) {
+        if (!liveMapIds.has(mapId)) {
+          fc.destroy({ children: true });
+          fogContainers.current.delete(mapId);
+        }
       }
 
-      const fogLayers = ensureFogLayers(fc);
+      for (const item of Object.values(items)) {
+        if (item.type !== 'map') continue;
+        const map = item as MapItem;
 
-      fc.scale.set(1, 1);
-      fc.pivot.set(map.width / 2, map.height / 2);
-      fc.position.set(map.x + map.width / 2, map.y + map.height / 2);
-      fc.rotation = (map.rotation * Math.PI) / 180;
-      fc.zIndex = fogDisplayZIndex(map.zIndex);
+        let fc = fogContainers.current.get(map.id);
+        if (!fc || fc.parent !== layer) {
+          fc = new Container();
+          fc.label = `fog_${map.id}`;
+          fc.eventMode = 'none';
+          layer.addChild(fc);
+          fogContainers.current.set(map.id, fc);
+        }
 
-      const isActive = activeMap?.id === map.id;
-      const showThis = isActive && showFogOverlay;
+        const fogLayers = ensureFogLayers(fc);
 
-      if (map.visible) {
-        fc.visible = showThis;
-        fc.alpha = 1;
-      } else if (isGM) {
-        fc.visible = showThis;
-        fc.alpha = 0.35;
-      } else {
-        fc.visible = false;
+        fc.scale.set(1, 1);
+        fc.pivot.set(map.width / 2, map.height / 2);
+        fc.position.set(map.x + map.width / 2, map.y + map.height / 2);
+        fc.rotation = (map.rotation * Math.PI) / 180;
+        fc.zIndex = fogDisplayZIndex(map.zIndex);
+
+        const isActive = activeMap?.id === map.id;
+        const showThis = isActive && showFogOverlay;
+
+        if (map.visible) {
+          fc.visible = showThis;
+          fc.alpha = 1;
+        } else if (isGM) {
+          fc.visible = showThis;
+          fc.alpha = 0.35;
+        } else {
+          fc.visible = false;
+        }
+
+        if (isActive) {
+          drawFogLayers(fogLayers, map, {
+            revealedCells,
+            gridSize: map.gridSize,
+            isGM,
+            items: itemsForFog,
+            selectedIds,
+            myUserId,
+            visible: showThis,
+          }, sceneRefs.app.current?.renderer ?? null);
+        } else {
+          clearFogLayers(fogLayers);
+        }
       }
+    });
 
-      if (isActive) {
-        drawFogLayers(fogLayers, map, {
-          revealedCells,
-          gridSize: map.gridSize,
-          isGM,
-          items: itemsForFog,
-          selectedIds,
-          myUserId,
-          visible: showThis,
-        }, sceneRefs.app.current?.renderer ?? null);
-      } else {
-        clearFogLayers(fogLayers);
-      }
-    }
+    return () => {
+      if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
+    };
   }, [
     appReady,
     items,

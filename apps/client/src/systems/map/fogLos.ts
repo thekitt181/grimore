@@ -214,7 +214,7 @@ function cellSamplePoints(cx: number, cy: number, gridSize: number): Point[] {
 }
 
 /** Rasterize vision to grid cells (wall-aware ray checks, multi-sample per cell). */
-export function losVisibleCellKeys(
+function computeLosVisibleCellKeys(
   map: MapItem,
   tokens: TokenItem[],
   gridSize: number,
@@ -259,6 +259,56 @@ export function losVisibleCellKeys(
     }
   }
   return cells;
+}
+
+const losCellCache = new Map<string, Set<string>>();
+const LOS_CACHE_MAX = 64;
+
+function wallsSignature(map: MapItem): string {
+  const walls = map.walls ?? [];
+  let h = walls.length;
+  for (let i = 0; i < Math.min(walls.length, 32); i++) {
+    const w = walls[i]!;
+    h = (h * 31 + Math.round(w.a.x) + Math.round(w.a.y) + Math.round(w.b.x) + Math.round(w.b.y)) | 0;
+  }
+  return `${map.width}x${map.height}:${h}`;
+}
+
+function tokensSignature(map: MapItem, tokens: TokenItem[]): string {
+  return tokens.map((t) => {
+    const o = tokenMapOrigin(t, map);
+    return `${t.id}:${Math.round(o.x)}:${Math.round(o.y)}:${Math.round(t.rotation)}:${t.visionRadius ?? DEFAULT_VISION_CELLS}:${t.visionArc ?? DEFAULT_VISION_ARC_DEG}`;
+  }).join(';');
+}
+
+function trimLosCache(): void {
+  while (losCellCache.size > LOS_CACHE_MAX) {
+    const first = losCellCache.keys().next().value;
+    if (first == null) break;
+    losCellCache.delete(first);
+  }
+}
+
+/** Cached LOS raster — keyed by map geometry + token positions (safe across drag frames). */
+export function losVisibleCellKeys(
+  map: MapItem,
+  tokens: TokenItem[],
+  gridSize: number,
+  options: LosOptions = {},
+): Set<string> {
+  const directional = options.directional ?? false;
+  const key = `${map.id}|${gridSize}|${directional ? 1 : 0}|${wallsSignature(map)}|${tokensSignature(map, tokens)}`;
+  const hit = losCellCache.get(key);
+  if (hit) return hit;
+
+  const cells = computeLosVisibleCellKeys(map, tokens, gridSize, options);
+  losCellCache.set(key, cells);
+  trimLosCache();
+  return cells;
+}
+
+export function clearLosCellCache(): void {
+  losCellCache.clear();
 }
 
 /** Grid cells a token overlaps on a map (map-local coordinates). */
