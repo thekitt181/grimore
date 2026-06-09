@@ -124,11 +124,15 @@ export function useItemRenderer(
         signatures.current.set(item.id, sig);
       }
 
-      // Transform (scale normalised — interaction hooks may set it live during drags)
+      // Transform — merge live drag offsets so tokens stay aligned with fog vision.
+      const live = liveById[item.id];
+      const drawX = live?.x ?? item.x;
+      const drawY = live?.y ?? item.y;
+      const drawRot = live?.rotation ?? item.rotation;
       c.scale.set(1, 1);
       c.pivot.set(item.width / 2, item.height / 2);
-      c.position.set(item.x + item.width / 2, item.y + item.height / 2);
-      c.rotation = (item.rotation * Math.PI) / 180;
+      c.position.set(drawX + item.width / 2, drawY + item.height / 2);
+      c.rotation = (drawRot * Math.PI) / 180;
       c.zIndex = itemDisplayZIndex(item);
 
       // Visibility / ghosting

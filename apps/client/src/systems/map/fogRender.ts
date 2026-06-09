@@ -10,7 +10,6 @@ import {
   gmVisibleCells,
   losPolygons,
   losVisibleCellKeys,
-  playerVisibleCells,
 } from './fogLos';
 
 export interface FogDrawOptions {
@@ -75,7 +74,17 @@ function cutCell(g: Graphics, cx: number, cy: number, gridSize: number): void {
   g.rect(cx * gridSize, cy * gridSize, gridSize, gridSize).cut();
 }
 
-/** True when all 4 orthogonal neighbors are also visible — safe to grid-fill without squaring the cone edge. */
+function isInteriorCell(cx: number, cy: number, cells: Set<string>): boolean {
+  return (
+    cells.has(cellKey(cx, cy))
+    && cells.has(cellKey(cx + 1, cy))
+    && cells.has(cellKey(cx - 1, cy))
+    && cells.has(cellKey(cx, cy + 1))
+    && cells.has(cellKey(cx, cy - 1))
+  );
+}
+
+/** Grid holes only deep inside visible area — keeps the cone edge smooth. */
 function isInteriorVisibleCell(cx: number, cy: number, visible: Set<string>): boolean {
   return (
     visible.has(cellKey(cx, cy))
@@ -87,7 +96,8 @@ function isInteriorVisibleCell(cx: number, cy: number, visible: Set<string>): bo
 }
 
 /**
- * Build fog using shape cutouts (no erase blend — works on mobile + desktop WebGL).
+ * Full-map fog with smooth cone cutouts (fill first, then Pixi cut holes).
+ * Players: polygon holes only. GM: polygon + interior grid patches.
  */
 function paintFogGraphics(
   layers: FogLayers,
@@ -112,7 +122,7 @@ function paintFogGraphics(
     ? losPolygons(map, visionTokens, gridSize, { directional: true })
     : [];
 
-  // Pixi cut() only punches holes into the previous fill — fill the map first, then cut.
+  // Must fill before cut() — Pixi punches holes into the previous fill instruction.
   fog.rect(0, 0, width, height).fill({ color: FOG_COLOR, alpha: 1 });
 
   if (polys.length > 0) {
@@ -120,21 +130,19 @@ function paintFogGraphics(
       cutPolygon(fog, poly);
     }
 
-    const visibleCells = opts.isGM
-      ? gmVisibleCells(opts.revealedCells, map, opts.items, opts.selectedIds, gridSize)
-      : playerVisibleCells(
+    if (opts.isGM) {
+      const visibleCells = gmVisibleCells(
         opts.revealedCells,
         map,
         opts.items,
-        opts.myUserId,
         opts.selectedIds,
         gridSize,
       );
-
-    for (const key of visibleCells) {
-      const cell = parseCellKey(key);
-      if (!cell || !isInteriorVisibleCell(cell.x, cell.y, visibleCells)) continue;
-      cutCell(fog, cell.x, cell.y, gridSize);
+      for (const key of visibleCells) {
+        const cell = parseCellKey(key);
+        if (!cell || !isInteriorVisibleCell(cell.x, cell.y, visibleCells)) continue;
+        cutCell(fog, cell.x, cell.y, gridSize);
+      }
     }
   } else {
     for (let cx = 0; cx < Math.ceil(width / gridSize); cx++) {
@@ -145,13 +153,13 @@ function paintFogGraphics(
     }
   }
 
-  // Re-fog unrevealed LOS cells inside the cone while keeping smooth outer edges.
+  // Grid refog only on unrevealed interior cone cells (smooth outer edge stays on fog cuts).
   if (!opts.isGM && opts.revealedCells.size > 0 && polys.length > 0) {
     const coneCells = losVisibleCellKeys(map, visionTokens, gridSize, { directional: true });
     for (const key of coneCells) {
       if (opts.revealedCells.has(key)) continue;
       const cell = parseCellKey(key);
-      if (!cell) continue;
+      if (!cell || !isInteriorCell(cell.x, cell.y, coneCells)) continue;
       refog
         .rect(cell.x * gridSize, cell.y * gridSize, gridSize, gridSize)
         .fill({ color: FOG_COLOR, alpha: 1 });
