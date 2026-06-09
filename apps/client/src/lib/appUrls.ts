@@ -9,12 +9,13 @@ function configuredServerOrigin(): string | undefined {
   return raw.trim().replace(/\/$/, '');
 }
 
-/** Origin for Socket.io (must reach the API host directly). */
+/** Origin for Socket.io — same origin in dev (Vite proxies /socket.io → :3001). */
 export function getServerOrigin(): string {
   const configured = configuredServerOrigin();
   if (configured) return configured;
-  if (import.meta.env.DEV) return 'http://localhost:3001';
-  return window.location.origin;
+  if (typeof window !== 'undefined') return window.location.origin;
+  if (import.meta.env.DEV) return 'http://localhost:5173';
+  return '';
 }
 
 /** REST API base path. Dev uses Vite proxy (/api → localhost:3001). */

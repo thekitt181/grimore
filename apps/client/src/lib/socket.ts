@@ -15,11 +15,12 @@ function delay(ms: number): Promise<void> {
 
 function socketOptions() {
   const mobile = isMobileClient();
+  const dev = import.meta.env.DEV;
   return {
     autoConnect: false,
-    // Mobile: polling-only. Desktop: try websocket first, fall back to polling.
-    transports: mobile ? ['polling'] : ['websocket', 'polling'],
-    upgrade: !mobile,
+    // Polling first in dev/mobile — websocket upgrade is optional after connect.
+    transports: mobile || dev ? ['polling', 'websocket'] : ['websocket', 'polling'],
+    upgrade: !(mobile || dev),
     timeout: mobile ? 60_000 : 30_000,
     reconnection: true,
     reconnectionAttempts: 15,
@@ -77,36 +78,37 @@ async function connectSocketOnce(token: string): Promise<void> {
   const s = getSocket();
   s.auth = { token };
 
-  // Re-handshake when reconnecting so Clerk token is always fresh.
   if (s.connected) {
-    s.disconnect();
-    await delay(150);
-  } else if (s.active) {
+    return;
+  }
+
+  if (s.active) {
     s.disconnect();
     await delay(100);
   }
 
-  s.connect();
-
   const timeoutMs = isMobileClient() ? 60_000 : 30_000;
+
   await new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('Connection timed out — server may be waking up')), timeoutMs);
+    const timer = setTimeout(() => {
+      cleanup();
+      reject(new Error('Connection timed out — server may be waking up'));
+    }, timeoutMs);
+
     const onConnect = () => {
       clearTimeout(timer);
       cleanup();
       resolve();
     };
-    const onError = (err: Error) => {
-      clearTimeout(timer);
-      cleanup();
-      reject(err);
-    };
+
     const cleanup = () => {
       s.off('connect', onConnect);
-      s.off('connect_error', onError);
     };
+
+    // Do NOT reject on connect_error — Socket.io emits that per transport
+    // (e.g. websocket fails) before trying polling. Wait for connect or timeout.
     s.once('connect', onConnect);
-    s.once('connect_error', onError);
+    s.connect();
   });
 
   const { bindDdbRollSocket } = await import('@/systems/ddb/bindDdbRollSocket');

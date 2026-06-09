@@ -67,14 +67,23 @@ export function attachApiProxySupervisor(proxy: HttpProxy): void {
   });
 }
 
+function apiProxyTarget(): ProxyOptions {
+  return {
+    target: 'http://localhost:3001',
+    changeOrigin: true,
+    configure(proxy) {
+      attachApiProxySupervisor(proxy);
+    },
+  };
+}
+
 export function apiProxyConfig(): Record<string, ProxyOptions> {
   return {
-    '/api': {
-      target: 'http://localhost:3001',
-      changeOrigin: true,
-      configure(proxy) {
-        attachApiProxySupervisor(proxy);
-      },
+    '/api': apiProxyTarget(),
+    // Same-origin Socket.io in dev (avoids cross-port WebSocket failures on localhost).
+    '/socket.io': {
+      ...apiProxyTarget(),
+      ws: true,
     },
   };
 }
