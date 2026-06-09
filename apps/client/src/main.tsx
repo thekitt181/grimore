@@ -5,6 +5,7 @@ import { ClerkProvider } from '@clerk/clerk-react';
 import { QueryClientProvider } from '@tanstack/react-query';
 import App from './App';
 import { QueryDevtoolsGate } from './components/QueryDevtoolsGate';
+import { grimoireClerkAppearance } from './lib/clerkAppearance';
 import { queryClient } from './lib/queryClient';
 import './styles/globals.css';
 
@@ -16,7 +17,7 @@ if (!PUBLISHABLE_KEY) {
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <ClerkProvider publishableKey={PUBLISHABLE_KEY}>
+    <ClerkProvider publishableKey={PUBLISHABLE_KEY} appearance={grimoireClerkAppearance}>
       <QueryClientProvider client={queryClient}>
         <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
           <App />

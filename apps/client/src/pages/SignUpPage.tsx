@@ -1,4 +1,5 @@
 import { SignUp } from '@clerk/clerk-react';
+import { grimoireClerkAppearance } from '@/lib/clerkAppearance';
 
 export function SignUpPage() {
   return (
@@ -24,19 +25,7 @@ export function SignUpPage() {
           routing="path"
           path="/sign-up"
           afterSignUpUrl="/"
-          appearance={{
-            variables: {
-              colorBackground: '#12121a',
-              colorInputBackground: '#0a0a0f',
-              colorInputText: '#e8e0d0',
-              colorText: '#e8e0d0',
-              colorTextSecondary: '#8a8075',
-              colorPrimary: '#c9a84c',
-              colorDanger: '#d42b2b',
-              borderRadius: '6px',
-              fontFamily: 'Inter, sans-serif',
-            },
-          }}
+          appearance={grimoireClerkAppearance}
         />
       </div>
     </div>

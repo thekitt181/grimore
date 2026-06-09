@@ -243,3 +243,46 @@ body {
   animation: shimmer 1.5s infinite;
   border-radius: 4px;
 }
+
+/* ─── Clerk auth contrast (sign-in / sign-up) ─────────────────────────────── */
+.cl-socialButtonsBlockButton {
+  border: 1px solid var(--color-border) !important;
+  background: var(--color-bg-tertiary) !important;
+  color: var(--color-text-primary) !important;
+}
+
+.cl-socialButtonsBlockButton:hover {
+  background: var(--color-border) !important;
+}
+
+.cl-socialButtonsBlockButtonText {
+  color: var(--color-text-primary) !important;
+  font-weight: 500;
+}
+
+.cl-dividerText {
+  color: var(--color-text-secondary) !important;
+}
+
+.cl-dividerLine {
+  background: var(--color-border) !important;
+}
+
+.cl-formFieldLabel {
+  color: var(--color-text-primary) !important;
+}
+
+.cl-formFieldInput {
+  color: var(--color-text-primary) !important;
+  background: var(--color-bg-tertiary) !important;
+  border-color: var(--color-border) !important;
+}
+
+.cl-formFieldInput::placeholder {
+  color: var(--color-text-secondary) !important;
+  opacity: 1;
+}
+
+.cl-footerActionText {
+  color: var(--color-text-secondary) !important;
+}

@@ -34,6 +34,7 @@ import { useDdbSocket } from '@/systems/ddb/useDdbSocket';
 import { useCombatStore } from '@/systems/combat/combatStore';
 import { useDiceSocket } from '@/systems/dice/useDiceSocket';
 import { InitiativeTracker } from '@/systems/initiative/InitiativeTracker';
+import { MobileSessionDock } from '@/components/MobileSessionDock';
 import { MonsterDexPanel } from '@/systems/compendium/MonsterDexPanel';
 import { ItemHandoutViewer } from '@/systems/compendium/ItemHandoutViewer';
 import { useHandoutRevealSocket } from '@/systems/compendium/useHandoutRevealSocket';
@@ -310,8 +311,15 @@ export function SessionPage() {
           {showInitiative && <InitiativeTracker onClose={() => setShowInitiative(false)} />}
           {isGM && panelOpen && <MonsterDexPanel onClose={() => setPanelOpen(false)} />}
 
-          {/* Bottom dock — inspector (center) + tool panels (right), no overlap */}
-          <div className="absolute bottom-0 inset-x-0 z-30 flex items-end gap-3 px-4 pb-4 pointer-events-none">
+          <MobileSessionDock
+            showInitiative={showInitiative}
+            showDice={showDice}
+            onToggleInitiative={() => setShowInitiative((v) => !v)}
+            onToggleDice={() => setShowDice((v) => !v)}
+          />
+
+          {/* Bottom dock — inspector (center) + tool panels (right); hidden on mobile (use MobileSessionDock). */}
+          <div className="absolute bottom-0 inset-x-0 z-30 hidden md:flex items-end gap-3 px-4 pb-4 pointer-events-none">
             <div className="flex-1 min-w-0 flex justify-center pointer-events-none">
               <div className="pointer-events-auto max-w-full">
                 <ItemInspector />

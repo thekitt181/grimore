@@ -24,7 +24,7 @@ export function MobileDdbTokenBar() {
   return (
     <div
       className="absolute left-1/2 -translate-x-1/2 z-40 flex gap-2 px-2 pointer-events-auto"
-      style={{ bottom: '5.5rem' }}
+      style={{ bottom: 'max(5.5rem, calc(env(safe-area-inset-bottom, 0px) + 4.5rem))' }}
     >
       <button
         type="button"

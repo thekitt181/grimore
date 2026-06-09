@@ -51,7 +51,8 @@ function parseRollMessage(data: unknown): ParsedDdbRoll | null {
   if (!data || typeof data !== 'object') return null;
   const msg = data as Record<string, unknown>;
   const eventType = String(msg.eventType ?? msg.type ?? '');
-  if (!eventType.includes('dice/roll') && !eventType.includes('roll/fulfilled')) {
+  // DDB emits dice/roll then roll/fulfilled for the same roll — only ingest the final event.
+  if (!eventType.includes('roll/fulfilled')) {
     return null;
   }
 
@@ -157,6 +158,32 @@ async function claimDdbRollMessage(sessionId: string, messageId: string | null):
   return true;
 }
 
+const ROLL_FP_TTL_SEC = 15;
+
+/** Block duplicate emits when DDB uses different message ids for the same roll. */
+async function claimDdbRollFingerprint(sessionId: string, parsed: ParsedDdbRoll): Promise<boolean> {
+  const fp = [
+    parsed.characterName,
+    parsed.label,
+    parsed.total,
+    parsed.notation,
+    parsed.diceResults.join(','),
+  ].join('|');
+  const key = `ddb:roll-fp:${sessionId}:${fp}`;
+  const ok = await redis.set(key, '1', 'EX', ROLL_FP_TTL_SEC, 'NX');
+  return ok === 'OK';
+}
+
+async function claimDdbRollEmit(
+  sessionId: string,
+  parsed: ParsedDdbRoll,
+  messageId: string | null,
+): Promise<boolean> {
+  if (!(await claimDdbRollMessage(sessionId, messageId))) return false;
+  if (!(await claimDdbRollFingerprint(sessionId, parsed))) return false;
+  return true;
+}
+
 /** Broadcast DDB rolls to every client in the session. */
 export function broadcastDdbRolls(io: Server, sessionId: string, rolls: DdbRollBridgePayload[]): void {
   for (const payload of rolls) {
@@ -186,7 +213,7 @@ async function handleGameLogMessage(io: Server, bridge: ActiveBridge, data: unkn
     return;
   }
 
-  if (!(await claimDdbRollMessage(bridge.sessionId, msgId))) return;
+  if (!(await claimDdbRollEmit(bridge.sessionId, parsed, msgId))) return;
 
   debugMessageCount = 0;
   if (msgId) {
@@ -515,11 +542,10 @@ export async function fetchNewDdbRollsForSession(sessionId: string): Promise<Ddb
   for (const msg of msgs) {
     const id = (msg as Record<string, unknown>).id;
     if (typeof id !== 'string') continue;
-    const isNew = await redis.sadd(seenKey, id);
-    if (isNew === 0) continue;
 
     const parsed = parseRollMessage(msg);
     if (!parsed) continue;
+    if (!(await claimDdbRollEmit(sessionId, parsed, id))) continue;
 
     console.log(
       `[DDB] roll poll: ${parsed.characterName} ${parsed.label} → ${parsed.total} (session=${sessionId})`,
