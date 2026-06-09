@@ -136,9 +136,13 @@ function composeFogTexture(
   erase.clear();
   erase.blendMode = 'erase';
 
-  const visionTokens = opts.isGM
-    ? getVisionTokens(opts.items, opts.selectedIds, true, null, map)
-    : getVisionTokens(opts.items, [], false, opts.myUserId, map);
+  const visionTokens = getVisionTokens(
+    opts.items,
+    opts.selectedIds,
+    opts.isGM,
+    opts.isGM ? null : opts.myUserId,
+    map,
+  );
 
   const polys = visionTokens.length > 0
     ? losPolygons(map, visionTokens, gridSize, { directional: true })
@@ -151,7 +155,14 @@ function composeFogTexture(
 
     const visibleCells = opts.isGM
       ? gmVisibleCells(opts.revealedCells, map, opts.items, opts.selectedIds, gridSize)
-      : playerVisibleCells(opts.revealedCells, map, opts.items, opts.myUserId, gridSize);
+      : playerVisibleCells(
+        opts.revealedCells,
+        map,
+        opts.items,
+        opts.myUserId,
+        opts.selectedIds,
+        gridSize,
+      );
 
     for (const key of visibleCells) {
       const cell = parseCellKey(key);
@@ -172,17 +183,18 @@ function composeFogTexture(
 
   refog.clear();
   refogClip.clear();
-  refogClip.blendMode = 'erase';
 
+  // GM-revealed fog: cover unrevealed LOS cells with grid fog while keeping the smooth cone edge
+  // from the polygon erase above (do not refog the whole cone then punch square holes).
   if (!opts.isGM && opts.revealedCells.size > 0 && polys.length > 0) {
-    for (const poly of polys) {
-      fillFogPolygon(refog, poly);
-    }
     const coneCells = losVisibleCellKeys(map, visionTokens, gridSize, { directional: true });
-    for (const key of opts.revealedCells) {
-      if (!coneCells.has(key)) continue;
+    for (const key of coneCells) {
+      if (opts.revealedCells.has(key)) continue;
       const cell = parseCellKey(key);
-      if (cell) eraseCell(refogClip, cell.x, cell.y, gridSize);
+      if (!cell) continue;
+      refog
+        .rect(cell.x * gridSize, cell.y * gridSize, gridSize, gridSize)
+        .fill({ color: FOG_COLOR, alpha: 1 });
     }
   }
 

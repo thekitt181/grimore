@@ -83,12 +83,6 @@ export function visionBounds(
   };
 }
 
-function playerControlsToken(token: TokenItem, userId: string | null): boolean {
-  void userId;
-  if (token.visible === false) return false;
-  return token.type === 'token';
-}
-
 /** Tokens on this map that contribute line-of-sight. */
 export function getVisionTokens(
   items: Record<string, Item>,
@@ -97,18 +91,28 @@ export function getVisionTokens(
   userId: string | null,
   map: MapItem,
 ): TokenItem[] {
-  const onMap = (t: TokenItem) => t.type === 'token' && tokenOnMap(t, map);
+  const visibleOnMap = (t: TokenItem) =>
+    t.type === 'token' && t.visible !== false && tokenOnMap(t, map);
 
   if (isGM) {
     if (selectedIds.length === 0) return [];
     return selectedIds
       .map((id) => items[id])
-      .filter((i): i is TokenItem => i?.type === 'token' && onMap(i));
+      .filter((i): i is TokenItem => i?.type === 'token' && visibleOnMap(i));
   }
 
-  return Object.values(items).filter(
-    (i): i is TokenItem => i.type === 'token' && onMap(i) && playerControlsToken(i, userId),
-  );
+  const uid = userId?.trim() ?? '';
+  if (uid) {
+    const owned = Object.values(items).filter(
+      (i): i is TokenItem => i.type === 'token' && visibleOnMap(i) && i.ownerId?.trim() === uid,
+    );
+    if (owned.length > 0) return owned;
+  }
+
+  if (selectedIds.length === 0) return [];
+  return selectedIds
+    .map((id) => items[id])
+    .filter((i): i is TokenItem => i?.type === 'token' && visibleOnMap(i));
 }
 
 function pointInPolygon(x: number, y: number, poly: Point[]): boolean {
@@ -263,9 +267,10 @@ export function playerVisibleCells(
   map: MapItem,
   items: Record<string, Item>,
   userId: string | null,
+  selectedIds: string[],
   gridSize: number,
 ): Set<string> {
-  const tokens = getVisionTokens(items, [], false, userId, map);
+  const tokens = getVisionTokens(items, selectedIds, false, userId, map);
   const los = losVisibleCellKeys(map, tokens, gridSize, { directional: true });
   const visible = new Set<string>();
 

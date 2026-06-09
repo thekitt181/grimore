@@ -7,10 +7,11 @@ import {
   setRoomUsers,
   getRoomUsers,
 } from '../lib/redis';
-import type {
-  ServerToClientEvents,
-  ClientToServerEvents,
-  SessionUser,
+import {
+  dedupeSessionUsers,
+  type ServerToClientEvents,
+  type ClientToServerEvents,
+  type SessionUser,
   TokenMovePayload,
   FogUpdatePayload,
   FogSyncPayload,
@@ -49,6 +50,22 @@ const clerk = createClerkClient({
 
 /** Per-session fog active flag (GM toggles off during prep). */
 const sessionFogActive = new Map<string, boolean>();
+
+function userHasOtherSocketInRoom(
+  io: Server,
+  sessionId: string,
+  userId: string,
+  exceptSocketId: string,
+): boolean {
+  const room = io.sockets.adapter.rooms.get(sessionId);
+  if (!room) return false;
+  for (const socketId of room) {
+    if (socketId === exceptSocketId) continue;
+    const peer = io.sockets.sockets.get(socketId);
+    if (peer?.data['userId'] === userId) return true;
+  }
+  return false;
+}
 
 export function initSocket(httpServer: HttpServer): Server {
   const io = new Server<ClientToServerEvents, ServerToClientEvents>(httpServer, {
@@ -143,7 +160,9 @@ export function initSocket(httpServer: HttpServer): Server {
         const currentUsers = await getRoomUsers(sessionId);
         await setRoomUsers(sessionId, [...new Set([...currentUsers, userId])]);
 
-        socket.to(sessionId).emit('session:userJoined', { sessionId, user: sessionUser });
+        if (!userHasOtherSocketInRoom(io, sessionId, userId, socket.id)) {
+          socket.to(sessionId).emit('session:userJoined', { sessionId, user: sessionUser });
+        }
 
         // Build and send room state to the newly joined user
         const allSocketIds = io.sockets.adapter.rooms.get(sessionId);
@@ -170,7 +189,7 @@ export function initSocket(httpServer: HttpServer): Server {
         }
 
         const fogActive = sessionFogActive.get(sessionId) ?? false;
-        socket.emit('session:roomState', { users: connectedUsers, fogActive });
+        socket.emit('session:roomState', { users: dedupeSessionUsers(connectedUsers), fogActive });
 
         // Scene items and fog are stored per-user in the browser — live sync only.
         socket.emit('fog:sync', { sessionId, fogData: '[]' });
@@ -428,7 +447,9 @@ export function initSocket(httpServer: HttpServer): Server {
     socket.on('disconnect', () => {
       const sessionId = socket.data['sessionId'] as string | undefined;
       if (sessionId) {
-        socket.to(sessionId).emit('session:userLeft', { sessionId, userId });
+        if (!userHasOtherSocketInRoom(io, sessionId, userId, socket.id)) {
+          socket.to(sessionId).emit('session:userLeft', { sessionId, userId });
+        }
         // Keep roll bridge alive while anyone is still in the session.
         setTimeout(() => {
           const room = io.sockets.adapter.rooms.get(sessionId);

@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { SessionUser } from '@grimoire/shared';
+import { dedupeSessionUsers, type SessionUser } from '@grimoire/shared';
 
 interface SessionState {
   sessionId: string | null;
@@ -36,7 +36,7 @@ export const useSessionStore = create<SessionState>((set) => ({
   setConnected: (isConnected) => set({ isConnected }),
   setConnectionError: (connectionError) => set({ connectionError }),
   clearConnectionError: () => set({ connectionError: null }),
-  setConnectedUsers: (connectedUsers) => set({ connectedUsers }),
+  setConnectedUsers: (connectedUsers) => set({ connectedUsers: dedupeSessionUsers(connectedUsers) }),
 
   addUser: (user) =>
     set((state) => ({
