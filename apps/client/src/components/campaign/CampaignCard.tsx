@@ -9,6 +9,7 @@ interface CampaignCardProps {
 export function CampaignCard({ campaign }: CampaignCardProps) {
   const navigate = useNavigate();
   const isGM = campaign.myRole === 'GM';
+  const liveSession = campaign.activeSession;
 
   return (
     <div
@@ -40,11 +41,32 @@ export function CampaignCard({ campaign }: CampaignCardProps) {
         <div className="absolute inset-0 bg-gradient-to-t from-bg-secondary/90 to-transparent" />
 
         {/* Role badge */}
-        <div className="absolute top-3 right-3">
+        <div className="absolute top-3 right-3 flex flex-col items-end gap-2">
+          {liveSession && (
+            <span
+              className="font-ui text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded"
+              style={{ background: 'rgba(34, 197, 94, 0.9)', color: '#0a0a0a' }}
+            >
+              ● Live
+            </span>
+          )}
           <span className={isGM ? 'badge-role-gm' : 'badge-role-player'}>
             {isGM ? 'GM' : 'Player'}
           </span>
         </div>
+
+        {liveSession && (
+          <button
+            type="button"
+            className="absolute bottom-3 right-3 btn-primary text-xs py-1.5 px-3"
+            onClick={(e) => {
+              e.stopPropagation();
+              navigate(`/session/${liveSession.id}`);
+            }}
+          >
+            Join Game
+          </button>
+        )}
       </div>
 
       {/* Content */}

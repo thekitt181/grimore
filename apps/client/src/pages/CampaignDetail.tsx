@@ -1,5 +1,5 @@
 import { useParams, useNavigate } from 'react-router-dom';
-import { useQuery, useMutation } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/axios';
 import { AppShell } from '@/components/layout/AppShell';
 import { InvitePanel } from '@/components/campaign/InvitePanel';
@@ -18,6 +18,7 @@ interface CampaignDetailResponse {
 export function CampaignDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const qc = useQueryClient();
 
   const { data, isLoading } = useQuery({
     queryKey: ['campaign', id],
@@ -26,6 +27,7 @@ export function CampaignDetail() {
       return res.data;
     },
     enabled: !!id,
+    refetchInterval: 5000,
   });
 
   const startSessionMutation = useMutation({
@@ -34,9 +36,15 @@ export function CampaignDetail() {
       return res.data.session;
     },
     onSuccess: (session) => {
+      void qc.invalidateQueries({ queryKey: ['campaign', id] });
+      void qc.invalidateQueries({ queryKey: ['campaigns'] });
       navigate(`/session/${session.id}`);
     },
   });
+
+  const joinLiveSession = (sessionId: string) => {
+    navigate(`/session/${sessionId}`);
+  };
 
   if (isLoading) {
     return (
@@ -62,10 +70,42 @@ export function CampaignDetail() {
 
   const { campaign, myRole } = data;
   const isGM = myRole === 'GM';
+  const liveSession = campaign.activeSession;
 
   return (
     <AppShell>
       <div className="flex-1 p-6 md:p-10 max-w-5xl mx-auto w-full">
+        {liveSession && (
+          <div
+            className="mb-6 rounded-lg p-4 md:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+            style={{
+              background: 'linear-gradient(135deg, rgba(34, 197, 94, 0.12), rgba(212, 175, 55, 0.08))',
+              border: '1px solid rgba(34, 197, 94, 0.35)',
+            }}
+          >
+            <div>
+              <div className="flex items-center gap-2 mb-1">
+                <span
+                  className="inline-block w-2 h-2 rounded-full animate-pulse"
+                  style={{ background: 'var(--color-accent-green, #22c55e)' }}
+                />
+                <span className="font-ui text-xs font-semibold uppercase tracking-widest" style={{ color: '#22c55e' }}>
+                  Live session
+                </span>
+              </div>
+              <p className="font-display text-lg font-semibold" style={{ color: 'var(--color-text-primary)' }}>
+                The table is open — jump into the map and play.
+              </p>
+              <p className="font-ui text-sm mt-1" style={{ color: 'var(--color-text-secondary)' }}>
+                Started {new Date(liveSession.startedAt).toLocaleString()}
+              </p>
+            </div>
+            <button className="btn-primary shrink-0" onClick={() => joinLiveSession(liveSession.id)}>
+              ▶ Join Live Game
+            </button>
+          </div>
+        )}
+
         {/* Header */}
         <div className="flex flex-col md:flex-row gap-6 mb-8">
           {/* Cover art */}
@@ -105,13 +145,24 @@ export function CampaignDetail() {
               </div>
 
               {isGM && (
-                <button
-                  className="btn-primary"
-                  onClick={() => startSessionMutation.mutate()}
-                  disabled={startSessionMutation.isPending}
-                >
-                  {startSessionMutation.isPending ? 'Starting...' : '▶ Start Session'}
-                </button>
+                <div className="flex flex-col sm:flex-row gap-2 shrink-0">
+                  {liveSession && (
+                    <button className="btn-primary" onClick={() => joinLiveSession(liveSession.id)}>
+                      ▶ Join Session
+                    </button>
+                  )}
+                  <button
+                    className={liveSession ? 'btn-ghost' : 'btn-primary'}
+                    onClick={() => startSessionMutation.mutate()}
+                    disabled={startSessionMutation.isPending}
+                  >
+                    {startSessionMutation.isPending
+                      ? 'Starting...'
+                      : liveSession
+                        ? 'Start New Session'
+                        : '▶ Start Session'}
+                  </button>
+                </div>
               )}
             </div>
           </div>

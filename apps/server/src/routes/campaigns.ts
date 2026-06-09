@@ -8,6 +8,19 @@ import { getPrimaryClientUrl } from '../lib/clientOrigins';
 
 const router = Router();
 
+const activeSessionSelect = {
+  where: { isActive: true as const },
+  take: 1,
+  select: { id: true, startedAt: true, isActive: true },
+};
+
+function pickActiveSession<T extends { sessions: { id: string; startedAt: Date; isActive: boolean }[] }>(
+  campaign: T,
+): Omit<T, 'sessions'> & { activeSession: { id: string; startedAt: Date; isActive: boolean } | null } {
+  const { sessions, ...rest } = campaign;
+  return { ...rest, activeSession: sessions[0] ?? null };
+}
+
 // ─── Validation schemas ───────────────────────────────────────────────────────
 
 const createCampaignSchema = z.object({
@@ -29,6 +42,7 @@ router.get('/', requireAuth, async (req: AuthenticatedRequest, res) => {
         campaign: {
           include: {
             _count: { select: { members: true, scenes: true } },
+            sessions: activeSessionSelect,
           },
         },
       },
@@ -36,7 +50,7 @@ router.get('/', requireAuth, async (req: AuthenticatedRequest, res) => {
     });
 
     const campaigns = memberships.map((m: (typeof memberships)[number]) => ({
-      ...m.campaign,
+      ...pickActiveSession(m.campaign),
       myRole: m.role,
     }));
 
@@ -100,6 +114,7 @@ router.get('/:id', requireAuth, async (req: AuthenticatedRequest, res) => {
           include: { user: { select: { id: true, username: true, avatarUrl: true } } },
         },
         scenes: { orderBy: { sortOrder: 'asc' } },
+        sessions: activeSessionSelect,
         _count: { select: { members: true, scenes: true } },
       },
     });
@@ -116,7 +131,7 @@ router.get('/:id', requireAuth, async (req: AuthenticatedRequest, res) => {
     }
 
     const myRole = campaign.gmId === userId ? 'GM' : 'PLAYER';
-    res.json({ campaign, myRole });
+    res.json({ campaign: pickActiveSession(campaign), myRole });
   } catch (err) {
     console.error('[Campaigns] get error:', err);
     res.status(500).json({ error: 'Failed to fetch campaign' });
@@ -132,6 +147,7 @@ router.post('/join', requireAuth, async (req: AuthenticatedRequest, res) => {
 
     const campaign = await prisma.campaign.findUnique({
       where: { inviteCode: inviteCode.toUpperCase() },
+      include: { sessions: activeSessionSelect },
     });
 
     if (!campaign) {
@@ -139,12 +155,18 @@ router.post('/join', requireAuth, async (req: AuthenticatedRequest, res) => {
       return;
     }
 
+    const activeSession = campaign.sessions[0] ?? null;
+
     const existing = await prisma.campaignMember.findUnique({
       where: { campaignId_userId: { campaignId: campaign.id, userId } },
     });
 
     if (existing) {
-      res.status(409).json({ error: 'Already a member', campaign });
+      res.status(409).json({
+        error: 'Already a member',
+        campaign: pickActiveSession(campaign),
+        activeSession,
+      });
       return;
     }
 
@@ -152,7 +174,7 @@ router.post('/join', requireAuth, async (req: AuthenticatedRequest, res) => {
       data: { campaignId: campaign.id, userId, role: 'PLAYER' },
     });
 
-    res.status(201).json({ campaign });
+    res.status(201).json({ campaign: pickActiveSession(campaign), activeSession });
   } catch (err) {
     console.error('[Campaigns] join error:', err);
     res.status(500).json({ error: 'Failed to join campaign' });
@@ -180,6 +202,7 @@ router.post('/:id/sessions', requireAuth, async (req: AuthenticatedRequest, res)
 
     const session = await prisma.gameSession.create({
       data: { campaignId },
+      select: { id: true, startedAt: true, isActive: true, campaignId: true },
     });
 
     res.status(201).json({ session });

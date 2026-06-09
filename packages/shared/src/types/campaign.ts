@@ -25,10 +25,18 @@ export interface CreateCampaignPayload {
   system?: string;
 }
 
+/** Minimal live-session info for campaign list/detail and join redirects. */
+export interface ActiveSessionSummary {
+  id: string;
+  startedAt: Date;
+  isActive: boolean;
+}
+
 export interface CampaignWithMembers extends Campaign {
   members: CampaignMember[];
   _count: {
     members: number;
     scenes: number;
   };
+  activeSession?: ActiveSessionSummary | null;
 }

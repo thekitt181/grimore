@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
+import { isAxiosError } from 'axios';
 import { api } from '@/lib/axios';
-import type { Campaign } from '@grimoire/shared';
+import type { ActiveSessionSummary, CampaignWithMembers } from '@grimoire/shared';
 
 interface JoinCampaignModalProps {
   onClose: () => void;
@@ -16,14 +17,36 @@ export function JoinCampaignModal({ onClose, prefillCode = '' }: JoinCampaignMod
 
   const joinMutation = useMutation({
     mutationFn: async () => {
-      const res = await api.post<{ campaign: Campaign }>('/campaigns/join', {
-        inviteCode: code.trim().toUpperCase(),
-      });
-      return res.data.campaign;
+      try {
+        const res = await api.post<{
+          campaign: CampaignWithMembers;
+          activeSession: ActiveSessionSummary | null;
+        }>('/campaigns/join', {
+          inviteCode: code.trim().toUpperCase(),
+        });
+        return res.data;
+      } catch (err) {
+        if (
+          isAxiosError(err) &&
+          err.response?.status === 409 &&
+          err.response.data?.campaign
+        ) {
+          return {
+            campaign: err.response.data.campaign as CampaignWithMembers,
+            activeSession: (err.response.data.activeSession as ActiveSessionSummary | null) ?? null,
+            alreadyMember: true,
+          };
+        }
+        throw err;
+      }
     },
-    onSuccess: (campaign) => {
+    onSuccess: ({ campaign, activeSession }) => {
       void qc.invalidateQueries({ queryKey: ['campaigns'] });
-      navigate(`/campaigns/${campaign.id}`);
+      if (activeSession?.isActive) {
+        navigate(`/session/${activeSession.id}`);
+      } else {
+        navigate(`/campaigns/${campaign.id}`);
+      }
       onClose();
     },
   });

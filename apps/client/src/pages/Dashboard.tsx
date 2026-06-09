@@ -21,6 +21,8 @@ export function Dashboard() {
       );
       return res.data.campaigns;
     },
+    refetchInterval: (query) =>
+      query.state.data?.some((c) => c.activeSession?.isActive) ? 5000 : false,
   });
 
   const campaigns = data ?? [];
