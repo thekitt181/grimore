@@ -7,6 +7,7 @@ import { mapLayerRefs } from './MapCanvas';
 import { emitItemUpdate, emitItemRemove } from '@/systems/scene/sceneSync';
 import { emitFogUpdate } from '@/systems/scene/fogSync';
 import { clsx } from 'clsx';
+import { emitFogActive } from '@/systems/scene/fogActiveSync';
 
 type ToolDef = { id: MapTool; label: string; icon: string; title: string };
 
@@ -134,7 +135,12 @@ export function MapToolbar() {
             <div className="gold-divider my-1" />
             <button
               title={fogEnabled ? 'Fog overlay: ON (click to hide)' : 'Fog overlay: OFF (click to show)'}
-              onClick={() => setFogEnabled(!fogEnabled)}
+              onClick={() => {
+                const next = !fogEnabled;
+                setFogEnabled(next);
+                useMapStore.getState().setSessionFogActive(next);
+                emitFogActive(next);
+              }}
               className={clsx(BTN, fogEnabled && ACTIVE_BTN)}
             >
               🌫

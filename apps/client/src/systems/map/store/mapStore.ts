@@ -52,6 +52,8 @@ interface SceneState extends ActiveGrid {
   fogBrushSize: number;
   /** GM prep mode — when false the fog overlay is hidden (map fully visible). */
   fogEnabled: boolean;
+  /** Session-wide fog active (synced from GM). Players hide fog when false. */
+  sessionFogActive: boolean;
 
   // Drawing tool settings
   drawColor: string;
@@ -62,6 +64,7 @@ interface SceneState extends ActiveGrid {
   setViewport: (vp: MapViewport) => void;
   setFogBrushSize: (size: number) => void;
   setFogEnabled: (enabled: boolean) => void;
+  setSessionFogActive: (active: boolean) => void;
   setDrawColor: (color: string) => void;
   setDrawStroke: (stroke: number) => void;
 
@@ -108,6 +111,7 @@ export const useMapStore = create<SceneState>((set) => ({
   revealedCells: new Set<string>(),
   fogBrushSize: 2,
   fogEnabled: false,
+  sessionFogActive: true,
   drawColor:    '#c9a84c',
   drawStroke:   3,
 
@@ -120,6 +124,7 @@ export const useMapStore = create<SceneState>((set) => ({
   setViewport:    (viewport) => set({ viewport }),
   setFogBrushSize:(fogBrushSize) => set({ fogBrushSize }),
   setFogEnabled:  (fogEnabled) => set({ fogEnabled }),
+  setSessionFogActive: (sessionFogActive) => set({ sessionFogActive }),
   setDrawColor:   (drawColor) => set({ drawColor }),
   setDrawStroke:  (drawStroke) => set({ drawStroke }),
 
@@ -175,5 +180,6 @@ export const useMapStore = create<SceneState>((set) => ({
       viewport: { x: 0, y: 0, scale: 1 },
       revealedCells: new Set<string>(),
       fogEnabled: false,
+      sessionFogActive: true,
     }),
 }));

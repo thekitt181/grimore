@@ -55,7 +55,17 @@ export function SessionPage() {
   const { sessionId } = useParams<{ sessionId: string }>();
   const navigate = useNavigate();
   const { getToken } = useAuth();
-  const { isConnected, myRole, setMyRole, setMyUserId, setSession, clearSession } = useSessionStore();
+  const {
+    isConnected,
+    connectionError,
+    myRole,
+    setMyRole,
+    setMyUserId,
+    setSession,
+    clearSession,
+    clearConnectionError,
+  } = useSessionStore();
+  const [retrySocket, setRetrySocket] = useState(0);
   const [socketReady, setSocketReady] = useState(false);
   const [showDice, setShowDice] = useState(false);
   const [showInitiative, setShowInitiative] = useState(false);
@@ -129,7 +139,11 @@ export function SessionPage() {
   }, [socketReady, sessionId]);
 
   // ── Socket room management ─────────────────────────────────────────────────
-  useSocket(socketReady ? (sessionId ?? null) : null, sessionInfo?.campaignId ?? null);
+  useSocket(
+    socketReady ? (sessionId ?? null) : null,
+    socketReady ? (sessionInfo?.campaignId ?? null) : null,
+    retrySocket,
+  );
   useHandoutRevealSocket(socketReady ? (sessionId ?? null) : null);
 
   const combatActive = useInitiativeStore((s) => s.isActive);
@@ -185,14 +199,28 @@ export function SessionPage() {
         </div>
 
         <div className="flex items-center gap-3">
-          <div className="flex items-center gap-1.5">
-            <div
-              className="w-1.5 h-1.5 rounded-full"
-              style={{ background: isConnected ? '#4ade80' : '#f87171' }}
-            />
-            <span className="font-ui text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-              {isConnected ? 'Live' : 'Connecting...'}
-            </span>
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5">
+              <div
+                className="w-1.5 h-1.5 rounded-full"
+                style={{ background: isConnected ? '#4ade80' : '#f87171' }}
+              />
+              <span className="font-ui text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                {isConnected ? 'Live' : connectionError ? 'Offline' : 'Connecting...'}
+              </span>
+            </div>
+            {connectionError && !isConnected && (
+              <button
+                type="button"
+                className="btn-ghost text-[10px] py-0.5 px-2"
+                onClick={() => {
+                  clearConnectionError();
+                  setRetrySocket((n) => n + 1);
+                }}
+              >
+                Retry
+              </button>
+            )}
           </div>
           {myRole && (
             <span className={myRole === 'GM' ? 'badge-role-gm' : 'badge-role-player'}>

@@ -6,6 +6,7 @@ import { clientToWorld } from './sceneRefs';
 import { hitTest, isMapGroundHit, isCanvasContextEvent } from './hitTest';
 import { emitItemAdd, emitItemUpdate, emitItemRemove } from './sceneSync';
 import { syncGridToMap } from './syncGridToMap';
+import type { SessionUser } from '@grimoire/shared';
 import type { Item, MapItem, TokenItem, HandoutItem } from './types';
 import { isHpHiddenFromPlayers } from './types';
 import { visionFeet, visionRadiusFromFeet } from '@/systems/map/fogLos';
@@ -49,10 +50,8 @@ const MENU_WIDTH = 210;
 const MAP_MENU_WIDTH = 220;
 const VIEWPORT_PAD = 8;
 
-function isPlayerPcToken(token: TokenItem, myUserId: string | null): boolean {
-  if (!myUserId) return false;
-  if (!token.isPc && !token.ddbCharacterId) return false;
-  return token.ownerId === myUserId;
+function isDdbPcToken(token: TokenItem): boolean {
+  return Boolean(token.isPc || token.ddbCharacterId);
 }
 
 function clampMenuPosition(
@@ -82,7 +81,7 @@ export function ItemContextMenu() {
   const selectedIds = useItemStore((s) => s.selectedIds);
   const items = useItemStore((s) => s.items);
   const myRole = useSessionStore((s) => s.myRole);
-  const myUserId = useSessionStore((s) => s.myUserId);
+  const connectedUsers = useSessionStore((s) => s.connectedUsers);
   const isGM = myRole === 'GM';
 
   const selected = selectedIds.map((id) => items[id]).filter(Boolean) as Item[];
@@ -110,7 +109,6 @@ export function ItemContextMenu() {
 
       if (!hit) return;
       if (!isGM) {
-        const uid = useSessionStore.getState().myUserId;
         if (hit.type === 'handout') {
           e.preventDefault();
           if (!useItemStore.getState().selectedIds.includes(hit.id)) {
@@ -119,7 +117,7 @@ export function ItemContextMenu() {
           setMenu({ x: e.clientX, y: e.clientY, kind: 'item' });
           return;
         }
-        if (hit.type === 'token' && isPlayerPcToken(hit as TokenItem, uid)) {
+        if (hit.type === 'token' && isDdbPcToken(hit as TokenItem)) {
           e.preventDefault();
           if (!useItemStore.getState().selectedIds.includes(hit.id)) {
             useItemStore.getState().select([hit.id], 'set');
@@ -282,7 +280,7 @@ export function ItemContextMenu() {
     );
 
     const pcToken =
-      single?.type === 'token' && isPlayerPcToken(single as TokenItem, myUserId)
+      single?.type === 'token' && isDdbPcToken(single as TokenItem)
         ? (single as TokenItem)
         : null;
 
@@ -426,6 +424,14 @@ export function ItemContextMenu() {
 
       {single?.type === 'token' && isGM && <TokenExtras token={single as TokenItem} />}
 
+      {single?.type === 'token' && isGM && (
+        <TokenOwnerAssign
+          token={single as TokenItem}
+          players={connectedUsers}
+          onDone={close}
+        />
+      )}
+
       {single?.type === 'token' && (single as TokenItem).monsterId && isGM && (
         <>
           <div className="gold-divider my-1" />
@@ -441,7 +447,7 @@ export function ItemContextMenu() {
         </>
       )}
 
-      {single?.type === 'token' && ((single as TokenItem).isPc || (single as TokenItem).ddbCharacterId) && isGM && (
+      {single?.type === 'token' && isDdbPcToken(single as TokenItem) && isGM && (
         <>
           <div className="gold-divider my-1" />
           <Btn label="⚔ Character actions" onClick={() => {
@@ -502,6 +508,69 @@ export function ItemContextMenu() {
 }
 
 // ─── Token-specific section ─────────────────────────────────────────────────
+
+function TokenOwnerAssign({
+  token,
+  players,
+  onDone,
+}: {
+  token: TokenItem;
+  players: SessionUser[];
+  onDone: () => void;
+}) {
+  const Btn = ({ label, onClick }: { label: string; onClick: () => void }) => (
+    <button
+      type="button"
+      onClick={onClick}
+      className="w-full text-left px-3 py-1.5 text-xs font-ui rounded transition-colors"
+      style={{
+        color: token.ownerId && label.includes(players.find((p) => p.id === token.ownerId)?.username ?? '')
+          ? 'var(--color-accent-gold)'
+          : 'var(--color-text-primary)',
+      }}
+      onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.background = 'var(--color-bg-tertiary)')}
+      onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.background = 'transparent')}
+    >
+      {label}
+    </button>
+  );
+
+  function assign(ownerId: string | null) {
+    const patch: Partial<TokenItem> = ownerId
+      ? { ownerId, isPc: true }
+      : { ownerId: '' };
+    useItemStore.getState().updateItem(token.id, patch);
+    emitItemUpdate([{ id: token.id, patch }]);
+    onDone();
+  }
+
+  const sessionPlayers = players.filter((p) => p.role === 'PLAYER');
+
+  return (
+    <>
+      <div className="gold-divider my-1" />
+      <div className="px-3 py-1 font-ui text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+        Assign to player
+      </div>
+      <Btn
+        label={token.ownerId?.trim() ? '○ Unassigned' : '● Unassigned'}
+        onClick={() => assign(null)}
+      />
+      {sessionPlayers.map((p) => (
+        <Btn
+          key={p.id}
+          label={token.ownerId?.trim() === p.id ? `● ${p.username}` : `○ ${p.username}`}
+          onClick={() => assign(p.id)}
+        />
+      ))}
+      {sessionPlayers.length === 0 && (
+        <p className="px-3 py-1 font-ui text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
+          No players online
+        </p>
+      )}
+    </>
+  );
+}
 
 function TokenExtras({ token }: { token: TokenItem }) {
   const [hoveredCondition, setHoveredCondition] = useState<string | null>(null);

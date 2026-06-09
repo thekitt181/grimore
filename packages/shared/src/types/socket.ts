@@ -21,6 +21,12 @@ export interface FogSyncPayload {
   fogData: string;
 }
 
+/** GM toggles whether fog-of-war is active for the whole session. */
+export interface FogActivePayload {
+  sessionId: string;
+  active: boolean;
+}
+
 export interface GridUpdatePayload {
   sessionId: string;
   gridSize: number;
@@ -262,6 +268,7 @@ export interface ServerToClientEvents {
   'map:tokenMove':        (payload: TokenMovePayload)         => void;
   'map:fogUpdate':        (payload: FogUpdatePayload)         => void;
   'fog:sync':             (payload: FogSyncPayload)          => void;
+  'fog:active':           (payload: FogActivePayload)         => void;
   'map:gridUpdate':       (payload: GridUpdatePayload)        => void;
   'map:mapMove':          (payload: MapMovePayload)           => void;
   'map:mapResize':        (payload: MapResizePayload)         => void;
@@ -308,6 +315,7 @@ export interface ClientToServerEvents {
   'map:tokenMove':        (payload: TokenMovePayload)         => void;
   'map:fogUpdate':        (payload: FogUpdatePayload)         => void;
   'fog:sync':             (payload: FogSyncPayload)          => void;
+  'fog:active':           (payload: FogActivePayload)         => void;
   'map:gridUpdate':       (payload: GridUpdatePayload)        => void;
   'map:mapMove':          (payload: MapMovePayload)           => void;
   'map:mapResize':        (payload: MapResizePayload)         => void;

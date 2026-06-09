@@ -88,7 +88,11 @@ export function useTransformControls(appReady: boolean) {
 
     const gm = myRole === 'GM';
     const sel = selectedIds.map((id) => items[id]).filter(Boolean) as Item[];
-    const manipulable = gm ? sel.filter((it) => !it.locked) : [];
+    const manipulable = sel.filter((it) => {
+      if (it.locked) return false;
+      if (gm) return true;
+      return it.type === 'token';
+    });
 
     function clearControls() {
       registry.mode = 'none';

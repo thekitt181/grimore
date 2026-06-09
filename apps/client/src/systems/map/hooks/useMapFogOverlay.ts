@@ -23,6 +23,7 @@ export function useMapFogOverlay(
   const revealedCells = useMapStore((s) => s.revealedCells);
   const revealedCount = useMapStore((s) => s.revealedCells.size);
   const fogEnabled = useMapStore((s) => s.fogEnabled);
+  const sessionFogActive = useMapStore((s) => s.sessionFogActive);
   const items = useItemStore((s) => s.items);
   const liveById = useLiveTransformStore((s) => s.byId);
   const liveTick = useLiveTransformStore((s) => s.tick);
@@ -32,7 +33,7 @@ export function useMapFogOverlay(
   const fogContainers = useRef<Map<string, Container>>(new Map());
 
   const isGM = myRole === 'GM';
-  const showFogOverlay = isGM ? fogEnabled : true;
+  const showFogOverlay = isGM ? fogEnabled : sessionFogActive;
 
   useEffect(() => {
     if (!appReady) {
@@ -118,6 +119,7 @@ export function useMapFogOverlay(
     revealedCells,
     revealedCount,
     fogEnabled,
+    sessionFogActive,
     showFogOverlay,
     myRole,
     isGM,

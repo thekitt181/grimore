@@ -14,6 +14,7 @@ import type {
   TokenMovePayload,
   FogUpdatePayload,
   FogSyncPayload,
+  FogActivePayload,
   MapMovePayload,
   MapResizePayload,
   MapLockPayload,
@@ -46,6 +47,9 @@ const clerk = createClerkClient({
   secretKey: process.env['CLERK_SECRET_KEY'] ?? '',
 });
 
+/** Per-session fog active flag (GM toggles off during prep). */
+const sessionFogActive = new Map<string, boolean>();
+
 export function initSocket(httpServer: HttpServer): Server {
   const allowedOrigins = getClientOrigins();
   const io = new Server<ClientToServerEvents, ServerToClientEvents>(httpServer, {
@@ -68,12 +72,26 @@ export function initSocket(httpServer: HttpServer): Server {
       const clerkUserId = payload.sub;
       if (!clerkUserId) return next(new Error('Invalid token'));
 
-      const user = await prisma.user.findUnique({
+      let user = await prisma.user.findUnique({
         where: { clerkId: clerkUserId },
         select: { id: true, username: true, avatarUrl: true },
       });
 
-      if (!user) return next(new Error('User not found'));
+      if (!user) {
+        const clerkUser = await clerk.users.getUser(clerkUserId);
+        user = await prisma.user.create({
+          data: {
+            clerkId: clerkUserId,
+            username:
+              clerkUser.username ??
+              clerkUser.firstName ??
+              clerkUser.emailAddresses[0]?.emailAddress.split('@')[0] ??
+              'Adventurer',
+            avatarUrl: clerkUser.imageUrl ?? null,
+          },
+          select: { id: true, username: true, avatarUrl: true },
+        });
+      }
 
       socket.data['userId'] = user.id;
       socket.data['username'] = user.username;
@@ -146,6 +164,7 @@ export function initSocket(httpServer: HttpServer): Server {
 
         // Scene items and fog are stored per-user in the browser — live sync only.
         socket.emit('fog:sync', { sessionId, fogData: '[]' });
+        socket.emit('fog:active', { sessionId, active: sessionFogActive.get(sessionId) ?? true });
         socket.emit('items:sync', { sessionId, items: [] });
 
         const ddbLink = await prisma.ddbCampaignLink.findUnique({ where: { campaignId } });
@@ -195,6 +214,13 @@ export function initSocket(httpServer: HttpServer): Server {
 
     socket.on('fog:sync', (payload: FogSyncPayload) => {
       socket.to(payload.sessionId).emit('fog:sync', payload);
+    });
+
+    socket.on('fog:active', (payload: FogActivePayload) => {
+      if (socket.data['role'] !== 'GM') return;
+      sessionFogActive.set(payload.sessionId, payload.active);
+      socket.to(payload.sessionId).emit('fog:active', payload);
+      socket.emit('fog:active', payload);
     });
 
     socket.on('map:gridUpdate', (payload) => {

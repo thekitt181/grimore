@@ -8,10 +8,13 @@ interface SessionState {
   connectedUsers: SessionUser[];
   myRole: 'GM' | 'PLAYER' | null;
   isConnected: boolean;
+  connectionError: string | null;
   setSession: (sessionId: string, campaignId: string) => void;
   setMyRole: (role: 'GM' | 'PLAYER') => void;
   setMyUserId: (id: string) => void;
   setConnected: (connected: boolean) => void;
+  setConnectionError: (message: string | null) => void;
+  clearConnectionError: () => void;
   setConnectedUsers: (users: SessionUser[]) => void;
   addUser: (user: SessionUser) => void;
   removeUser: (userId: string) => void;
@@ -25,11 +28,14 @@ export const useSessionStore = create<SessionState>((set) => ({
   connectedUsers: [],
   myRole: null,
   isConnected: false,
+  connectionError: null,
 
   setSession: (sessionId, campaignId) => set({ sessionId, campaignId }),
   setMyRole: (myRole) => set({ myRole }),
   setMyUserId: (myUserId) => set({ myUserId }),
   setConnected: (isConnected) => set({ isConnected }),
+  setConnectionError: (connectionError) => set({ connectionError }),
+  clearConnectionError: () => set({ connectionError: null }),
   setConnectedUsers: (connectedUsers) => set({ connectedUsers }),
 
   addUser: (user) =>
@@ -52,5 +58,6 @@ export const useSessionStore = create<SessionState>((set) => ({
       connectedUsers: [],
       myRole: null,
       isConnected: false,
+      connectionError: null,
     }),
 }));
