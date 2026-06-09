@@ -122,7 +122,11 @@ function buildWsUrl(gameId: number, ddbUserId: number, bearer: string): string {
   return `${WS_BASE}?gameId=${gameId}&userId=${ddbUserId}&stt=${bearer}`;
 }
 
-function toPayload(sessionId: string, parsed: ParsedDdbRoll): DdbRollBridgePayload {
+function toPayload(
+  sessionId: string,
+  parsed: ParsedDdbRoll,
+  messageId?: string,
+): DdbRollBridgePayload {
   return {
     sessionId,
     characterName: parsed.characterName,
@@ -132,21 +136,21 @@ function toPayload(sessionId: string, parsed: ParsedDdbRoll): DdbRollBridgePaylo
     total: parsed.total,
     isDamage: parsed.isDamage,
     diceResults: parsed.diceResults,
+    ...(messageId ? { messageId } : {}),
   };
 }
 
 function emitRollPayload(io: Server, payload: DdbRollBridgePayload): void {
-  let delivered = 0;
-  for (const socket of io.sockets.sockets.values()) {
-    if (socket.data['sessionId'] === payload.sessionId) {
-      socket.emit('ddb:roll', payload);
-      delivered += 1;
-    }
-  }
   io.to(payload.sessionId).emit('ddb:roll', payload);
   console.log(
-    `[DDB] roll bridge: ${payload.characterName} ${payload.label} → ${payload.total} (session=${payload.sessionId}, sockets=${delivered})`,
+    `[DDB] roll bridge: ${payload.characterName} ${payload.label} → ${payload.total} (session=${payload.sessionId})`,
   );
+}
+
+async function markRollSeenInRedis(sessionId: string, messageId: string): Promise<void> {
+  const seenKey = `ddb:roll-seen:${sessionId}`;
+  await redis.sadd(seenKey, messageId);
+  await redis.expire(seenKey, SEEN_TTL);
 }
 
 /** Broadcast DDB rolls to every client in the session (HTTP poll + bridge). */
@@ -156,8 +160,8 @@ export function broadcastDdbRolls(io: Server, sessionId: string, rolls: DdbRollB
   }
 }
 
-function emitRoll(io: Server, sessionId: string, parsed: ParsedDdbRoll): void {
-  emitRollPayload(io, toPayload(sessionId, parsed));
+function emitRoll(io: Server, sessionId: string, parsed: ParsedDdbRoll, messageId?: string): void {
+  emitRollPayload(io, toPayload(sessionId, parsed, messageId));
 }
 
 function handleGameLogMessage(io: Server, bridge: ActiveBridge, data: unknown): void {
@@ -186,7 +190,8 @@ function handleGameLogMessage(io: Server, bridge: ActiveBridge, data: unknown): 
   }
 
   debugMessageCount = 0;
-  emitRoll(io, bridge.sessionId, parsed);
+  if (msgId) void markRollSeenInRedis(bridge.sessionId, msgId);
+  emitRoll(io, bridge.sessionId, parsed, msgId ?? undefined);
 }
 
 async function pollGameLog(io: Server, bridge: ActiveBridge): Promise<void> {
@@ -514,7 +519,7 @@ export async function fetchNewDdbRollsForSession(sessionId: string): Promise<Ddb
     console.log(
       `[DDB] roll poll: ${parsed.characterName} ${parsed.label} → ${parsed.total} (session=${sessionId})`,
     );
-    out.push(toPayload(sessionId, parsed));
+    out.push(toPayload(sessionId, parsed, id));
   }
 
   return out;

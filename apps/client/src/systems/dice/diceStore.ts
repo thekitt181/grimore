@@ -69,6 +69,19 @@ function rollerNameFor(userId: string | null): string {
 
 let socketHandler: ((payload: DiceRollPayload) => void) | null = null;
 
+const seenDdbRollIds = new Set<string>();
+const MAX_SEEN_DDB_ROLLS = 300;
+
+function rememberDdbRollId(messageId: string): boolean {
+  if (seenDdbRollIds.has(messageId)) return false;
+  seenDdbRollIds.add(messageId);
+  if (seenDdbRollIds.size > MAX_SEEN_DDB_ROLLS) {
+    const drop = seenDdbRollIds.values().next().value;
+    if (drop) seenDdbRollIds.delete(drop);
+  }
+  return true;
+}
+
 export const useDiceStore = create<DiceState>((set, get) => ({
   history: [],
   isSecret: false,
@@ -115,6 +128,8 @@ export const useDiceStore = create<DiceState>((set, get) => ({
   },
 
   addDdbRollEntry: (payload) => {
+    if (payload.messageId && !rememberDdbRollId(payload.messageId)) return;
+
     const now = Date.now();
     const recent = get().history[0];
     if (
@@ -133,7 +148,7 @@ export const useDiceStore = create<DiceState>((set, get) => ({
       ? `${displayLabel} (${payload.notation})`
       : displayLabel;
     const entry: DiceHistoryEntry = {
-      id: `ddb-${Date.now()}`,
+      id: payload.messageId ? `ddb-${payload.messageId}` : `ddb-${Date.now()}`,
       rollerName: payload.characterName,
       label: displayLabel,
       notation: displayNotation,

@@ -200,6 +200,8 @@ export interface DdbRollBridgePayload {
   /** Individual die results from DDB (when available). */
   diceResults?: number[];
   damageApplied?: number;
+  /** D&D Beyond game-log message id — used to dedupe WS + HTTP poll delivery. */
+  messageId?: string;
 }
 
 export interface DdbCharacterSyncPayload {

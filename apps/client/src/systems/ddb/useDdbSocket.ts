@@ -37,9 +37,11 @@ export function useDdbSocket(): void {
         const token = await getToken();
         if (!token) return;
         const rolls = await fetchDdbRollPoll(sessionId);
+        // When the socket is live, rolls arrive via ddb:roll — poll only wakes the server fetch.
+        if (pollCancelled || useSessionStore.getState().isConnected) return;
         for (const roll of rolls) {
           if (pollCancelled) return;
-          console.info('[DDB] roll received:', roll.characterName, roll.label, roll.total);
+          console.info('[DDB] roll received (poll):', roll.characterName, roll.label, roll.total);
           useDiceStore.getState().addDdbRollEntry(roll);
         }
       } catch {
