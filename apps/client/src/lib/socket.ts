@@ -21,9 +21,9 @@ function socketOptions() {
     // Polling first in dev/mobile — websocket upgrade is optional after connect.
     transports: mobile || dev ? ['polling', 'websocket'] : ['websocket', 'polling'],
     upgrade: !(mobile || dev),
-    timeout: mobile ? 60_000 : 30_000,
+    timeout: mobile ? 90_000 : 45_000,
     reconnection: true,
-    reconnectionAttempts: 15,
+    reconnectionAttempts: 20,
     reconnectionDelay: 1500,
     reconnectionDelayMax: 10_000,
     withCredentials: true,
@@ -87,7 +87,7 @@ async function connectSocketOnce(token: string): Promise<void> {
     await delay(100);
   }
 
-  const timeoutMs = isMobileClient() ? 60_000 : 30_000;
+  const timeoutMs = isMobileClient() ? 90_000 : 45_000;
 
   await new Promise<void>((resolve, reject) => {
     const timer = setTimeout(() => {

@@ -20,9 +20,12 @@ type SocketHandlers = {
   onError: (payload: { message: string }) => void;
   onDisconnect: (reason: string) => void;
   onConnect: () => void;
+  onConnectError: (err: Error) => void;
+  onReconnectFailed: () => void;
 };
 
-const JOIN_RETRY_MAX = 6;
+const JOIN_RETRY_MAX = 8;
+const JOIN_ACK_MS = isMobileClient() ? 22_000 : 15_000;
 
 /**
  * Establishes and manages the Socket.io connection for a session.
@@ -41,6 +44,7 @@ export function useSocket(
   const joinedRef = useRef(false);
   const joinRetryRef = useRef(0);
   const joinRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const joinAckTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (!sessionId || !campaignId || !isLoaded) return;
@@ -64,6 +68,13 @@ export function useSocket(
     let alive = true;
     const socket = getSocket();
 
+    function clearJoinAckTimer() {
+      if (joinAckTimerRef.current) {
+        clearTimeout(joinAckTimerRef.current);
+        joinAckTimerRef.current = null;
+      }
+    }
+
     function clearJoinRetry() {
       if (joinRetryTimerRef.current) {
         clearTimeout(joinRetryTimerRef.current);
@@ -72,14 +83,31 @@ export function useSocket(
       joinRetryRef.current = 0;
     }
 
+    function startJoinAckTimer() {
+      clearJoinAckTimer();
+      joinAckTimerRef.current = setTimeout(() => {
+        joinAckTimerRef.current = null;
+        if (!alive || joinedRef.current) return;
+        console.warn('[Socket] session:join ack timed out');
+        setConnectionError('Session join timed out — retrying…');
+        setConnected(false);
+        scheduleJoinRetry();
+      }, JOIN_ACK_MS);
+    }
+
     const joinRoom = () => {
+      if (!socket.connected) return;
+      joinedRef.current = false;
       socket.emit('session:join', { sessionId, campaignId });
-      joinedRef.current = true;
+      startJoinAckTimer();
     };
 
     function scheduleJoinRetry() {
       if (!alive || !socket.connected) return;
-      if (joinRetryRef.current >= JOIN_RETRY_MAX) return;
+      if (joinRetryRef.current >= JOIN_RETRY_MAX) {
+        setConnectionError('Could not join session — tap Retry or refresh');
+        return;
+      }
       joinedRef.current = false;
       const attempt = joinRetryRef.current;
       joinRetryRef.current += 1;
@@ -87,6 +115,7 @@ export function useSocket(
       joinRetryTimerRef.current = setTimeout(() => {
         joinRetryTimerRef.current = null;
         if (!alive || !socket.connected) return;
+        clearConnectionError();
         joinRoom();
       }, wait);
     }
@@ -101,6 +130,8 @@ export function useSocket(
       socket.off('error', h.onError);
       socket.off('disconnect', h.onDisconnect);
       socket.off('connect', h.onConnect);
+      socket.off('connect_error', h.onConnectError);
+      socket.io.off('reconnect_failed', h.onReconnectFailed);
       handlersRef.current = null;
     }
 
@@ -109,6 +140,7 @@ export function useSocket(
 
       const h: SocketHandlers = {
         onRoomState: ({ users, fogActive }) => {
+          clearJoinAckTimer();
           clearJoinRetry();
           joinedRef.current = true;
           setConnectedUsers(users);
@@ -123,6 +155,7 @@ export function useSocket(
         onChat: (payload) => addMessage(payload),
         onError: ({ message }) => {
           console.error('[Socket] Error:', message);
+          clearJoinAckTimer();
           setConnectionError(message);
           setConnected(false);
           joinedRef.current = false;
@@ -134,6 +167,7 @@ export function useSocket(
           }
         },
         onDisconnect: (reason) => {
+          clearJoinAckTimer();
           clearJoinRetry();
           joinedRef.current = false;
           setConnected(false);
@@ -148,6 +182,14 @@ export function useSocket(
           bindDdbRollSocket(true);
           syncFogActiveToSession();
         },
+        onConnectError: (err) => {
+          console.warn('[Socket] connect_error:', err.message);
+        },
+        onReconnectFailed: () => {
+          setConnectionError('Lost connection to server — tap Retry');
+          setConnected(false);
+          joinedRef.current = false;
+        },
       };
 
       handlersRef.current = h;
@@ -158,6 +200,8 @@ export function useSocket(
       socket.on('error', h.onError);
       socket.on('disconnect', h.onDisconnect);
       socket.on('connect', h.onConnect);
+      socket.on('connect_error', h.onConnectError);
+      socket.io.on('reconnect_failed', h.onReconnectFailed);
 
       bindFogActiveSocket();
       bindDdbRollSocket(true);
@@ -185,8 +229,10 @@ export function useSocket(
         await connectSocket(token, { retries: isMobileClient() ? 6 : 3 });
         if (!alive) return;
 
-        joinRoom();
-        syncFogActiveToSession();
+        if (socket.connected) {
+          joinRoom();
+          syncFogActiveToSession();
+        }
         window.dispatchEvent(new CustomEvent('grimoire:socket-connected'));
       } catch (err) {
         console.error('[Socket] Setup failed:', err);
@@ -205,6 +251,7 @@ export function useSocket(
 
     joinedRef.current = false;
     clearJoinRetry();
+    clearJoinAckTimer();
     void connect();
 
     const onVisible = () => {
@@ -212,7 +259,7 @@ export function useSocket(
       if (!socket.connected) {
         void connect();
       } else if (!joinedRef.current) {
-        attachHandlers();
+        clearConnectionError();
         joinRoom();
       }
     };
@@ -221,6 +268,7 @@ export function useSocket(
     return () => {
       alive = false;
       clearJoinRetry();
+      clearJoinAckTimer();
       document.removeEventListener('visibilitychange', onVisible);
       if (joinedRef.current) {
         socket.emit('session:leave', { sessionId });

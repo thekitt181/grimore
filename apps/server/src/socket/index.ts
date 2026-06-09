@@ -153,77 +153,90 @@ export function initSocket(httpServer: HttpServer): Server {
         const avatarUrl = socket.data['avatarUrl'] as string | undefined;
         const sessionUser: SessionUser = { id: userId, username, avatarUrl, role };
 
-        try {
-          const currentUsers = await getRoomUsers(sessionId);
-          await setRoomUsers(sessionId, [...new Set([...currentUsers, userId])]);
-        } catch (redisErr) {
-          console.warn('[Socket] Redis room tracking skipped:', redisErr);
-        }
-
         socket.join(sessionId);
         socket.data['sessionId'] = sessionId;
         socket.data['role'] = role;
+
+        const fogActive = sessionFogActive.get(sessionId) ?? false;
+
+        // Fast ack — client shows Live before slower roster / DDB work.
+        socket.emit('session:roomState', { users: [sessionUser], fogActive });
+        socket.emit('fog:sync', { sessionId, fogData: '[]' });
+        socket.emit('fog:active', { sessionId, active: fogActive });
+        socket.emit('items:sync', { sessionId, items: [] });
+
+        void getRoomUsers(sessionId)
+          .then((currentUsers) => setRoomUsers(sessionId, [...new Set([...currentUsers, userId])]))
+          .catch((redisErr) => console.warn('[Socket] Redis room tracking skipped:', redisErr));
 
         if (!userHasOtherSocketInRoom(io, sessionId, userId, socket.id)) {
           socket.to(sessionId).emit('session:userJoined', { sessionId, user: sessionUser });
         }
 
-        // Build and send room state to the newly joined user
-        const allSocketIds = io.sockets.adapter.rooms.get(sessionId);
-        const connectedUsers: SessionUser[] = [];
+        // Refresh full online roster (non-blocking for join ack).
+        try {
+          const allSocketIds = io.sockets.adapter.rooms.get(sessionId);
+          const connectedUsers: SessionUser[] = [];
 
-        if (allSocketIds) {
-          const uidBySocket = new Map<string, string>();
-          const uniqueUserIds = new Set<string>();
-          for (const socketId of allSocketIds) {
-            const s = io.sockets.sockets.get(socketId);
-            const uid = s?.data['userId'] as string | undefined;
-            if (!uid) continue;
-            uidBySocket.set(socketId, uid);
-            uniqueUserIds.add(uid);
-          }
+          if (allSocketIds) {
+            const uidBySocket = new Map<string, string>();
+            const uniqueUserIds = new Set<string>();
+            for (const socketId of allSocketIds) {
+              const s = io.sockets.sockets.get(socketId);
+              const uid = s?.data['userId'] as string | undefined;
+              if (!uid) continue;
+              uidBySocket.set(socketId, uid);
+              uniqueUserIds.add(uid);
+            }
 
-          const memberRecords = await prisma.campaignMember.findMany({
-            where: { campaignId, userId: { in: [...uniqueUserIds] } },
-            include: { campaign: { select: { gmId: true } } },
-          });
-          const memberByUserId = new Map(memberRecords.map((m) => [m.userId, m]));
-
-          for (const socketId of allSocketIds) {
-            const s = io.sockets.sockets.get(socketId);
-            const uid = uidBySocket.get(socketId);
-            if (!s || !uid) continue;
-            const memberRecord = memberByUserId.get(uid);
-            if (memberRecord) {
-              connectedUsers.push({
-                id: uid,
-                username: s.data['username'] as string,
-                avatarUrl: s.data['avatarUrl'] as string | undefined,
-                role: memberRecord.campaign.gmId === uid ? 'GM' : 'PLAYER',
+            if (uniqueUserIds.size > 0) {
+              const memberRecords = await prisma.campaignMember.findMany({
+                where: { campaignId, userId: { in: [...uniqueUserIds] } },
+                include: { campaign: { select: { gmId: true } } },
               });
+              const memberByUserId = new Map(memberRecords.map((m) => [m.userId, m]));
+
+              for (const socketId of allSocketIds) {
+                const s = io.sockets.sockets.get(socketId);
+                const uid = uidBySocket.get(socketId);
+                if (!s || !uid) continue;
+                const memberRecord = memberByUserId.get(uid);
+                if (memberRecord) {
+                  connectedUsers.push({
+                    id: uid,
+                    username: s.data['username'] as string,
+                    avatarUrl: s.data['avatarUrl'] as string | undefined,
+                    role: memberRecord.campaign.gmId === uid ? 'GM' : 'PLAYER',
+                  });
+                }
+              }
             }
           }
+
+          const roster = dedupeSessionUsers(
+            connectedUsers.length > 0 ? connectedUsers : [sessionUser],
+          );
+          socket.emit('session:roomState', { users: roster, fogActive });
+        } catch (rosterErr) {
+          console.warn('[Socket] room roster refresh failed:', rosterErr);
         }
 
-        const fogActive = sessionFogActive.get(sessionId) ?? false;
-        socket.emit('session:roomState', { users: dedupeSessionUsers(connectedUsers), fogActive });
-
-        // Scene items and fog are stored per-user in the browser — live sync only.
-        socket.emit('fog:sync', { sessionId, fogData: '[]' });
-        socket.emit('fog:active', { sessionId, active: fogActive });
-        socket.emit('items:sync', { sessionId, items: [] });
-
-        const ddbLink = await prisma.ddbCampaignLink.findUnique({ where: { campaignId } });
-        if (ddbLink) {
-          const bridgeUserId = await resolveRollBridgeUserId(campaignId);
-          if (bridgeUserId) {
-            void startRollBridge(io, sessionId, bridgeUserId, ddbLink.ddbCampaignId);
-          } else {
-            console.warn(
-              '[DDB] roll bridge: campaign linked to DDB but GM has no linked account or roll bridge is off',
-            );
+        void (async () => {
+          try {
+            const ddbLink = await prisma.ddbCampaignLink.findUnique({ where: { campaignId } });
+            if (!ddbLink) return;
+            const bridgeUserId = await resolveRollBridgeUserId(campaignId);
+            if (bridgeUserId) {
+              void startRollBridge(io, sessionId, bridgeUserId, ddbLink.ddbCampaignId);
+            } else {
+              console.warn(
+                '[DDB] roll bridge: campaign linked to DDB but GM has no linked account or roll bridge is off',
+              );
+            }
+          } catch (ddbErr) {
+            console.warn('[Socket] DDB bridge setup failed:', ddbErr);
           }
-        }
+        })();
       } catch (err) {
         console.error('[Socket] session:join error:', err);
         socket.emit('error', { message: 'Failed to join session' });

@@ -211,7 +211,7 @@ export function SessionPage() {
                 {isConnected ? 'Live' : connectionError ? 'Offline' : 'Connecting...'}
               </span>
             </div>
-            {connectionError && !isConnected && (
+            {!isConnected && (
               <button
                 type="button"
                 className="btn-ghost text-[10px] py-0.5 px-2"
