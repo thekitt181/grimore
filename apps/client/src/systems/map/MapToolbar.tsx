@@ -95,19 +95,14 @@ export function MapToolbar() {
           </button>
         ))}
 
-        {isGM && (
-          <>
-            <div className="gold-divider my-1" />
-            {/* Draw group toggle */}
-            <button
-              title="Drawing tools"
-              onClick={() => setShowDrawPanel((p) => !p)}
-              className={clsx(BTN, (showDrawPanel || isDrawTool) && ACTIVE_BTN)}
-            >
-              ✏
-            </button>
-          </>
-        )}
+        <div className="gold-divider my-1" />
+        <button
+          title="Drawing tools"
+          onClick={() => setShowDrawPanel((p) => !p)}
+          className={clsx(BTN, (showDrawPanel || isDrawTool) && ACTIVE_BTN)}
+        >
+          ✏
+        </button>
 
         <div className="gold-divider my-1" />
 
@@ -151,7 +146,7 @@ export function MapToolbar() {
       </div>
 
       {/* Draw sub-panel */}
-      {showDrawPanel && isGM && (
+      {showDrawPanel && (
         <div
           className="flex flex-col gap-1 p-2 rounded-lg shadow-panel"
           style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)', width: 52 }}
@@ -194,15 +189,18 @@ export function MapToolbar() {
             />
           </div>
 
-          <div className="gold-divider my-1" />
-
-          <button
-            title="Clear all drawings"
-            onClick={handleClearDrawings}
-            className={clsx(BTN, 'text-[#ef4444] hover:bg-[#7f1d1d33]')}
-          >
-            🗑
-          </button>
+          {isGM && (
+            <>
+              <div className="gold-divider my-1" />
+              <button
+                title="Clear all drawings"
+                onClick={handleClearDrawings}
+                className={clsx(BTN, 'text-[#ef4444] hover:bg-[#7f1d1d33]')}
+              >
+                🗑
+              </button>
+            </>
+          )}
         </div>
       )}
     </div>

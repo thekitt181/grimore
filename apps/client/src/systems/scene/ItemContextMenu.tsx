@@ -49,6 +49,12 @@ const MENU_WIDTH = 210;
 const MAP_MENU_WIDTH = 220;
 const VIEWPORT_PAD = 8;
 
+function isPlayerPcToken(token: TokenItem, myUserId: string | null): boolean {
+  if (!myUserId) return false;
+  if (!token.isPc && !token.ddbCharacterId) return false;
+  return token.ownerId === myUserId;
+}
+
 function clampMenuPosition(
   anchorX: number,
   anchorY: number,
@@ -76,6 +82,7 @@ export function ItemContextMenu() {
   const selectedIds = useItemStore((s) => s.selectedIds);
   const items = useItemStore((s) => s.items);
   const myRole = useSessionStore((s) => s.myRole);
+  const myUserId = useSessionStore((s) => s.myUserId);
   const isGM = myRole === 'GM';
 
   const selected = selectedIds.map((id) => items[id]).filter(Boolean) as Item[];
@@ -102,11 +109,28 @@ export function ItemContextMenu() {
       }
 
       if (!hit) return;
-      e.preventDefault();
-      if (!isGM && hit.type === 'token' && (hit as TokenItem).monsterId) {
+      if (!isGM) {
+        const uid = useSessionStore.getState().myUserId;
+        if (hit.type === 'handout') {
+          e.preventDefault();
+          if (!useItemStore.getState().selectedIds.includes(hit.id)) {
+            useItemStore.getState().select([hit.id], 'set');
+          }
+          setMenu({ x: e.clientX, y: e.clientY, kind: 'item' });
+          return;
+        }
+        if (hit.type === 'token' && isPlayerPcToken(hit as TokenItem, uid)) {
+          e.preventDefault();
+          if (!useItemStore.getState().selectedIds.includes(hit.id)) {
+            useItemStore.getState().select([hit.id], 'set');
+          }
+          setMenu({ x: e.clientX, y: e.clientY, kind: 'item' });
+          return;
+        }
         setMenu(null);
         return;
       }
+      e.preventDefault();
       if (!useItemStore.getState().selectedIds.includes(hit.id)) {
         useItemStore.getState().select([hit.id], 'set');
       }
@@ -244,6 +268,64 @@ export function ItemContextMenu() {
 
   if (selected.length === 0) return null;
 
+  if (!isGM) {
+    const Btn = ({ label, onClick }: { label: string; onClick: () => void }) => (
+      <button
+        onClick={onClick}
+        className="w-full text-left px-3 py-1.5 text-xs font-ui rounded transition-colors"
+        style={{ color: 'var(--color-text-primary)' }}
+        onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.background = 'var(--color-bg-tertiary)')}
+        onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.background = 'transparent')}
+      >
+        {label}
+      </button>
+    );
+
+    const pcToken =
+      single?.type === 'token' && isPlayerPcToken(single as TokenItem, myUserId)
+        ? (single as TokenItem)
+        : null;
+
+    return (
+      <div
+        ref={ref}
+        className="fixed z-50 rounded-lg shadow-panel py-1 overflow-y-auto"
+        style={{
+          left: position?.left ?? menu.x,
+          top: position?.top ?? menu.y,
+          width: MENU_WIDTH,
+          maxHeight: `calc(100vh - ${VIEWPORT_PAD * 2}px)`,
+          visibility: position ? 'visible' : 'hidden',
+          background: 'var(--color-bg-secondary)',
+          border: '1px solid var(--color-border)',
+        }}
+      >
+        <div className="px-3 py-1 font-display text-xs tracking-wider uppercase" style={{ color: 'var(--color-accent-gold)' }}>
+          {pcToken ? pcToken.name : single?.type ?? 'item'}
+        </div>
+        <div className="gold-divider my-1" />
+        {pcToken && (
+          <>
+            <Btn label="⚔ Character actions" onClick={() => {
+              openPcActions(pcToken);
+              close();
+            }} />
+            <Btn label="📜 Character sheet" onClick={() => {
+              openSheet(pcToken);
+              close();
+            }} />
+          </>
+        )}
+        {single?.type === 'handout' && (
+          <Btn label="📖 View item" onClick={() => {
+            useHandoutViewerStore.getState().openHandout(single as HandoutItem);
+            close();
+          }} />
+        )}
+      </div>
+    );
+  }
+
   const ids = selected.map((i) => i.id);
   const allLocked = selected.every((i) => i.locked);
   const allHidden = selected.every((i) => !i.visible);
@@ -359,7 +441,7 @@ export function ItemContextMenu() {
         </>
       )}
 
-      {single?.type === 'token' && ((single as TokenItem).isPc || (single as TokenItem).ddbCharacterId) && (
+      {single?.type === 'token' && ((single as TokenItem).isPc || (single as TokenItem).ddbCharacterId) && isGM && (
         <>
           <div className="gold-divider my-1" />
           <Btn label="⚔ Character actions" onClick={() => {

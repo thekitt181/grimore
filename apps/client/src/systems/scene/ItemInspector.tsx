@@ -21,7 +21,7 @@ export function ItemInspector() {
   const isGM = myRole === 'GM';
 
   const selected = selectedIds.map((id) => items[id]).filter(Boolean) as Item[];
-  if (selected.length === 0) return null;
+  if (!isGM || selected.length === 0) return null;
 
   function update(id: string, patch: Partial<Item>) {
     useItemStore.getState().updateItem(id, patch);

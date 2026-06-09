@@ -18,11 +18,13 @@ import { useDdbStore } from '@/systems/ddb/ddbStore';
 
 /**
  * Right-hand sidebar shown during a session.
- * GM: map upload, grid settings, maps list, add token. Player: token list.
+ * GM-only: map upload, grid settings, maps list, compendium, add token.
  */
 export function MapSidebar() {
   const { myRole, connectedUsers } = useSessionStore();
   const isGM = myRole === 'GM';
+
+  if (!isGM) return null;
 
   return (
     <aside
@@ -40,7 +42,7 @@ export function MapSidebar() {
           style={{ borderRight: '1px solid var(--color-border)' }}
         >
           <div className="flex-1 min-h-0 overflow-y-auto p-3 flex flex-col gap-3">
-            {isGM ? <GMSidebarContent /> : <PlayerSidebarContent />}
+            <GMSidebarContent />
           </div>
         </div>
 
@@ -421,20 +423,3 @@ function TokenRow({ tokenId }: { tokenId: string }) {
   );
 }
 
-// ─── Player panel ─────────────────────────────────────────────────────────────
-
-function PlayerSidebarContent() {
-  const items = useItemStore((s) => s.items);
-  const tokens = Object.values(items).filter((i): i is TokenItem => i.type === 'token' && i.visible);
-
-  return (
-    <div className="panel space-y-1.5">
-      <h3 className="font-display text-xs font-semibold tracking-wider uppercase mb-2" style={{ color: 'var(--color-accent-gold)' }}>Tokens</h3>
-      {tokens.length === 0 ? (
-        <p className="font-ui text-xs" style={{ color: 'var(--color-text-secondary)' }}>No tokens on the map.</p>
-      ) : (
-        tokens.map((t) => <TokenRow key={t.id} tokenId={t.id} />)
-      )}
-    </div>
-  );
-}

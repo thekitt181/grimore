@@ -137,6 +137,10 @@ export function SessionPage() {
     if (combatActive) setShowInitiative(true);
   }, [combatActive]);
 
+  useEffect(() => {
+    if (!isGM) setPanelOpen(false);
+  }, [isGM, setPanelOpen]);
+
   // ── Loading / error states ─────────────────────────────────────────────────
   if (isLoading) {
     return (
@@ -261,23 +265,25 @@ export function SessionPage() {
             <div className="shrink-0 flex flex-col items-end gap-2 pointer-events-auto">
               {showDice && <DiceRoller onClose={() => setShowDice(false)} />}
               {showInitiative && <InitiativeTracker onClose={() => setShowInitiative(false)} />}
-              {panelOpen && <MonsterDexPanel onClose={() => setPanelOpen(false)} />}
+              {isGM && panelOpen && <MonsterDexPanel onClose={() => setPanelOpen(false)} />}
 
               <RollModeBar />
 
               <div className="flex gap-2">
-                <button
-                  onClick={() => setPanelOpen(!panelOpen)}
-                  className="w-10 h-10 rounded-lg flex items-center justify-center text-lg shadow-panel transition-all"
-                  style={{
-                    background: panelOpen ? 'rgba(201,168,76,0.2)' : 'var(--color-bg-secondary)',
-                    border: `1px solid ${panelOpen ? 'var(--color-accent-gold)' : 'var(--color-border)'}`,
-                    color: panelOpen ? 'var(--color-accent-gold)' : 'var(--color-text-secondary)',
-                  }}
-                  title="Compendium reference"
-                >
-                  🐉
-                </button>
+                {isGM && (
+                  <button
+                    onClick={() => setPanelOpen(!panelOpen)}
+                    className="w-10 h-10 rounded-lg flex items-center justify-center text-lg shadow-panel transition-all"
+                    style={{
+                      background: panelOpen ? 'rgba(201,168,76,0.2)' : 'var(--color-bg-secondary)',
+                      border: `1px solid ${panelOpen ? 'var(--color-accent-gold)' : 'var(--color-border)'}`,
+                      color: panelOpen ? 'var(--color-accent-gold)' : 'var(--color-text-secondary)',
+                    }}
+                    title="Compendium reference"
+                  >
+                    🐉
+                  </button>
+                )}
                 <button
                   onClick={() => setShowInitiative((v) => !v)}
                   className="w-10 h-10 rounded-lg flex items-center justify-center text-lg shadow-panel transition-all"

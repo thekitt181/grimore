@@ -44,7 +44,6 @@ export function useSelectionTool(appReady: boolean) {
 
     const canvas = app.canvas;
     const gm = myRole === 'GM';
-    const myUserId = useSessionStore.getState().myUserId;
 
     let move: MoveState | null = null;
     let marquee: MarqueeState | null = null;
@@ -53,19 +52,13 @@ export function useSelectionTool(appReady: boolean) {
     function selectableItems(): Item[] {
       const all = Object.values(useItemStore.getState().items) as Item[];
       if (gm) return all;
-      return all.filter((i) => {
-        if (!i.visible) return false;
-        if (i.type === 'token' && (i as import('../types').TokenItem).monsterId) return false;
-        return true;
-      });
+      return all.filter((i) => i.visible && i.type === 'token');
     }
 
     function canManipulate(item: Item): boolean {
       if (item.locked) return false;
       if (gm) return true;
-      // Players may move only tokens they own (or unowned tokens)
-      if (item.type !== 'token') return false;
-      return item.ownerId === undefined || item.ownerId === myUserId;
+      return item.type === 'token';
     }
 
     function onDown(e: PointerEvent) {
