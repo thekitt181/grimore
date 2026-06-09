@@ -19,7 +19,7 @@ import {
   loadLocalMonsters,
   loadLocalSpells,
 } from './compendiumLocal';
-import { loadGlobalFallback, globalFallbackFileRevision } from './compendiumGlobalFallback';
+import { loadGlobalFallback, globalFallbackFileRevision, loadRawGlobalFallback } from './compendiumGlobalFallback';
 import { fetchExtensionGlobalDoc, invalidateExtensionGlobalCache, fetchExtensionVersion } from './compendiumExtensionBridge';
 import {
   globalDoc,
@@ -345,6 +345,10 @@ type CatalogCache = {
 let catalogCache: CatalogCache | null = null;
 let catalogBuildPromise: Promise<CatalogCache> | null = null;
 
+function catalogEntryCount(cache: CatalogCache): number {
+  return cache.monsters.length + cache.items.length + cache.spells.length;
+}
+
 function invalidateCatalogCache(): void {
   catalogCache = null;
   catalogBuildPromise = null;
@@ -378,6 +382,7 @@ async function buildCatalogCache(): Promise<CatalogCache> {
   if (catalogBuildPromise) return catalogBuildPromise;
 
   catalogBuildPromise = (async () => {
+    const previousCache = catalogCache;
     try {
       const raw = await readRawGlobalDoc({ includeImageData: false });
       const global = normalizeOwlbearGlobalDoc({
@@ -399,19 +404,65 @@ async function buildCatalogCache(): Promise<CatalogCache> {
       monsters.sort((a, b) => a.name.localeCompare(b.name));
       items.sort((a, b) => a.name.localeCompare(b.name));
       spells.sort((a, b) => a.name.localeCompare(b.name));
-      catalogCache = {
+      const built: CatalogCache = {
         rev: `${effectiveRev}:${policyCacheRev(policy)}`,
         policy,
         monsters,
         items,
         spells,
       };
+      if (
+        catalogEntryCount(built) === 0
+        && previousCache
+        && catalogEntryCount(previousCache) > 0
+      ) {
+        console.warn('[Compendium] Rebuild produced empty catalog — keeping previous cache');
+        return previousCache;
+      }
+      catalogCache = built;
       return catalogCache;
     } catch (err) {
       console.warn(
         '[Compendium] Catalog build failed, using local fallback:',
         err instanceof Error ? err.message : err,
       );
+      const rawFallback = loadRawGlobalFallback();
+      if (rawFallback) {
+        const policy = policyFromRaw(rawFallback);
+        const deleted = rawFallback.deleted ?? [];
+        const global = normalizeOwlbearGlobalDoc({
+          ...rawFallback,
+          images: {},
+          imagesData: {},
+          entryImages: {},
+        });
+        const [monsters, items, spells] = await Promise.all([
+          mergeMonsters(await loadBaseMonsters(), rawFallback.overrideMonsters ?? [], rawFallback.monsters ?? [], deleted, global, true),
+          mergeItems(await loadBaseItems(), rawFallback.overrideItems ?? [], rawFallback.items ?? [], deleted, global, true),
+          mergeSpells(await loadBaseSpells(), rawFallback.overrideSpells ?? [], rawFallback.spells ?? [], deleted, global, true),
+        ]);
+        monsters.sort((a, b) => a.name.localeCompare(b.name));
+        items.sort((a, b) => a.name.localeCompare(b.name));
+        spells.sort((a, b) => a.name.localeCompare(b.name));
+        const built: CatalogCache = {
+          rev: `${isoTimestamp(global.lastUpdated)}:${policyCacheRev(policy)}:raw-fallback`,
+          policy,
+          monsters,
+          items,
+          spells,
+        };
+        if (
+          catalogEntryCount(built) === 0
+          && previousCache
+          && catalogEntryCount(previousCache) > 0
+        ) {
+          console.warn('[Compendium] Raw fallback rebuild empty — keeping previous cache');
+          return previousCache;
+        }
+        catalogCache = built;
+        return catalogCache;
+      }
+
       const fallback = loadGlobalFallback(true);
       const global: CompendiumGlobalDoc = fallback ?? {
         _id: 'global',
@@ -431,13 +482,25 @@ async function buildCatalogCache(): Promise<CatalogCache> {
         mergeItems(await loadBaseItems(), [], [], deleted, global, true),
         mergeSpells(await loadBaseSpells(), [], [], deleted, global, true),
       ]);
-      catalogCache = {
+      monsters.sort((a, b) => a.name.localeCompare(b.name));
+      items.sort((a, b) => a.name.localeCompare(b.name));
+      spells.sort((a, b) => a.name.localeCompare(b.name));
+      const built: CatalogCache = {
         rev: `${isoTimestamp(global.lastUpdated)}:${policyCacheRev(policy)}:fallback`,
         policy,
         monsters,
         items,
         spells,
       };
+      if (
+        catalogEntryCount(built) === 0
+        && previousCache
+        && catalogEntryCount(previousCache) > 0
+      ) {
+        console.warn('[Compendium] Fallback rebuild empty — keeping previous cache');
+        return previousCache;
+      }
+      catalogCache = built;
       return catalogCache;
     } finally {
       catalogBuildPromise = null;

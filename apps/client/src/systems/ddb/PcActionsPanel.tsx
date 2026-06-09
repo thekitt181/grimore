@@ -11,6 +11,8 @@ import { RollModeBar } from '@/systems/dice/RollModeBar';
 import { PanelAttackResult, PanelTargetPicker } from '@/systems/combat/TokenPanelCombatFlow';
 import { TokenActionCard } from '@/systems/combat/TokenActionCard';
 import { hasMeaningfulActionDetail, stripHtmlText } from '@/systems/compendium/actionDetail';
+import { buildSpellLookup } from '@/systems/compendium/statBlockParser';
+import { searchSpells } from '@/systems/compendium/compendiumApi';
 import { ddbPanelPosition, ddbPanelWidth } from './ddbTokenUtils';
 
 const GOLD = 'var(--color-accent-gold)';
@@ -32,10 +34,24 @@ export function PcActionsPanel({ token, onClose }: { token: TokenItem; onClose: 
     refetchOnMount: 'always',
   });
 
-  const parsed = useMemo(
-    () => (character ? parsePcActions(character) : { attacks: [], spells: [], features: [] }),
-    [character],
+  const { data: spellData } = useQuery({
+    queryKey: ['compendium', 'spells', 'lookup'],
+    queryFn: () => searchSpells({ limit: 5000 }),
+    staleTime: 5 * 60_000,
+  });
+
+  const lookup = useMemo(
+    () => buildSpellLookup(spellData?.items ?? []),
+    [spellData?.items],
   );
+
+  const parsed = useMemo(
+    () => (character ? parsePcActions(character, lookup) : { attacks: [], spells: [], features: [] }),
+    [character, lookup],
+  );
+
+  const activePickName =
+    targetPick?.attackerTokenId === token.id ? targetPick.actionName : null;
 
   function openFeatureDetail(name: string, rawText: string) {
     const text = stripHtmlText(rawText);
@@ -62,6 +78,9 @@ export function PcActionsPanel({ token, onClose }: { token: TokenItem; onClose: 
           <RollModeBar />
         </div>
 
+        <PanelTargetPicker token={token} />
+        <PanelAttackResult token={token} />
+
         <div className="p-2 space-y-3">
           {isLoading && <p className="font-ui text-xs p-2">Loading…</p>}
           {isError && (
@@ -82,7 +101,7 @@ export function PcActionsPanel({ token, onClose }: { token: TokenItem; onClose: 
                   key={action.name}
                   action={action}
                   token={token}
-                  isActivePick={targetPick?.attackerTokenId === token.id}
+                  isActivePick={activePickName === action.name}
                   compact
                 />
               ))}
@@ -96,7 +115,7 @@ export function PcActionsPanel({ token, onClose }: { token: TokenItem; onClose: 
                   key={action.name}
                   action={action}
                   token={token}
-                  isActivePick={targetPick?.attackerTokenId === token.id}
+                  isActivePick={activePickName === action.name}
                   compact
                 />
               ))}
@@ -118,9 +137,6 @@ export function PcActionsPanel({ token, onClose }: { token: TokenItem; onClose: 
             </ActionSection>
           )}
         </div>
-
-        <PanelTargetPicker token={token} />
-        <PanelAttackResult token={token} />
       </DraggablePanel>
 
       {detailFeature && (

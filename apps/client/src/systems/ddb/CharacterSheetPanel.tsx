@@ -19,6 +19,11 @@ import { pullDdbHpToToken } from './useDdbHpSync';
 import { emitItemUpdate } from '@/systems/scene/sceneSync';
 import { useDdbStore } from './ddbStore';
 import { ddbPanelPosition, ddbPanelWidth } from './ddbTokenUtils';
+import { buildSpellLookup } from '@/systems/compendium/statBlockParser';
+import { searchSpells } from '@/systems/compendium/compendiumApi';
+import { useCombatStore } from '@/systems/combat/combatStore';
+import { PanelAttackResult, PanelTargetPicker } from '@/systems/combat/TokenPanelCombatFlow';
+import { TokenActionCard } from '@/systems/combat/TokenActionCard';
 
 const GOLD = 'var(--color-accent-gold)';
 const BD = 'var(--color-border)';
@@ -109,6 +114,14 @@ export function CharacterSheetPanel({ token, onClose }: { token: TokenItem; onCl
     }
   }
 
+  const { data: spellData } = useQuery({
+    queryKey: ['compendium', 'spells', 'lookup'],
+    queryFn: () => searchSpells({ limit: 5000 }),
+    staleTime: 5 * 60_000,
+  });
+
+  const lookup = buildSpellLookup(spellData?.items ?? []);
+
   if (!ddbId) {
     return (
       <SheetShell title={liveToken.name} onClose={onClose}>
@@ -134,6 +147,7 @@ export function CharacterSheetPanel({ token, onClose }: { token: TokenItem; onCl
         <SheetBody
           character={character}
           liveToken={liveToken}
+          lookup={lookup}
           syncPending={syncMutation.isPending}
           deathSavePending={deathSaveMutation.isPending}
           onSync={() => syncMutation.mutate()}
@@ -151,6 +165,7 @@ export function CharacterSheetPanel({ token, onClose }: { token: TokenItem; onCl
 function SheetBody({
   character,
   liveToken,
+  lookup,
   syncPending,
   deathSavePending,
   onSync,
@@ -160,6 +175,7 @@ function SheetBody({
 }: {
   character: GrimoireCharacter;
   liveToken: TokenItem;
+  lookup: ReturnType<typeof buildSpellLookup>;
   syncPending: boolean;
   deathSavePending: boolean;
   onSync: () => void;
@@ -168,7 +184,8 @@ function SheetBody({
   onOpenActions: () => void;
 }) {
   const roller = liveToken.name;
-  const parsedCombat = parsePcActions(character);
+  const targetPick = useCombatStore((s) => s.targetPick);
+  const parsedCombat = parsePcActions(character, lookup);
   const spells = character.spells ?? [];
   const spellSlots = character.spellSlots ?? [];
   const inventory = character.inventory ?? [];
@@ -188,8 +205,14 @@ function SheetBody({
     vulnerabilities.length > 0 ||
     conditionImmunities.length > 0;
 
+  const activePickName =
+    targetPick?.attackerTokenId === liveToken.id ? targetPick.actionName : null;
+
   return (
     <>
+      <PanelTargetPicker token={liveToken} />
+      <PanelAttackResult token={liveToken} />
+
       <div className="flex flex-wrap gap-2 items-center">
         <button type="button" className="btn-primary text-[10px]" disabled={syncPending} onClick={onSync}>
           {syncPending ? 'Syncing…' : 'Sync from DDB'}
@@ -389,15 +412,24 @@ function SheetBody({
         </Section>
       )}
 
-      {spells.length > 0 && (
+      {parsedCombat.spells.length > 0 && (
         <Section title="Spells">
-          {spells.filter((s) => s.prepared || s.level === 0).slice(0, 24).map((s) => (
-            <div key={s.id} className="py-0.5 truncate">
-              {s.level === 0 ? '○' : `L${s.level}`} {s.name}
-              {s.concentration ? ' (C)' : ''}
-            </div>
-          ))}
-          {spells.length > 24 && <div className="opacity-60">+{spells.length - 24} more</div>}
+          <div className="space-y-1">
+            {parsedCombat.spells.map((action) => (
+              <TokenActionCard
+                key={action.name}
+                action={action}
+                token={liveToken}
+                isActivePick={activePickName === action.name}
+                compact
+              />
+            ))}
+          </div>
+          {spells.length > parsedCombat.spells.length && (
+            <p className="font-ui text-[10px] mt-1 opacity-60">
+              +{spells.length - parsedCombat.spells.length} unprepared spells hidden
+            </p>
+          )}
         </Section>
       )}
 

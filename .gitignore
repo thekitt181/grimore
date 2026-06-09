@@ -7,6 +7,7 @@ apps/server/client-dist
 !.env.production.example
 !.env.production
 .env.local
+apps/server/data/global.json
 *.log
 .DS_Store
 .turbo

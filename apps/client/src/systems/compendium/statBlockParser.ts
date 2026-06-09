@@ -36,7 +36,58 @@ export function formatAoeLabel(aoe: { size: number; type: string }): string {
 }
 
 export function isSaveAreaAction(action: ParsedAction): boolean {
-  return Boolean(action.save && action.damages.length > 0 && action.toHit === undefined);
+  return Boolean(
+    action.save
+    && action.damages.length > 0
+    && action.toHit === undefined
+    && hasAoeTemplate(action.aoe),
+  );
+}
+
+/** Default range for single-target spell attacks (120 ft). */
+export const RANGED_SPELL_RANGE: ActionRange = { kind: 'ranged', reachFt: 5, rangeNormalFt: 120 };
+
+function spellDamagesFromData(
+  damage?: string,
+  type?: string,
+  secondary?: { damage: string; type: string },
+): ActionDamage[] {
+  const out: ActionDamage[] = [];
+  if (damage) out.push({ dice: damage.replace(/\s+/g, ''), type: type ?? 'damage' });
+  if (secondary) out.push({ dice: secondary.damage.replace(/\s+/g, ''), type: secondary.type });
+  return out;
+}
+
+/** Build a combat ParsedAction from compendium spell data. */
+export function compendiumSpellToParsedAction(
+  spell: {
+    name: string;
+    damage?: string;
+    type?: string;
+    save?: string;
+    attack?: boolean;
+    aoe?: { size: number; type: string };
+    secondary?: { damage: string; type: string };
+  },
+  opts?: { toHit?: number; saveDc?: number },
+): ParsedAction {
+  const damages = spellDamagesFromData(spell.damage, spell.type, spell.secondary);
+  const isSaveArea = Boolean(spell.save && damages.length > 0 && hasAoeTemplate(spell.aoe) && !spell.attack);
+  const toHit = spell.attack && !isSaveArea && opts?.toHit !== undefined ? opts.toHit : undefined;
+
+  return {
+    name: spell.name,
+    originalText: spell.name,
+    section: 'actions',
+    isTrait: false,
+    ...(toHit !== undefined ? { toHit } : {}),
+    ...(spell.save ? { save: { dc: opts?.saveDc ?? 13, stat: spell.save } } : {}),
+    ...(spell.aoe ? { aoe: spell.aoe } : {}),
+    ...(!spell.aoe && toHit !== undefined ? { range: RANGED_SPELL_RANGE } : {}),
+    damages,
+    spells: [],
+    isSpellcastingBlock: false,
+  };
 }
 
 /** Save-for-half spell with area template (fireball, lightning bolt, etc.). */

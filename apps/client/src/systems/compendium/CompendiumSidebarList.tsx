@@ -344,9 +344,24 @@ export function CompendiumSidebarList() {
 
         {/* Source book picker */}
         {!loading && !unavailable && showSourcePicker && filteredSources.length === 0 && (
-          <p className="font-ui text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-            No source books match.
-          </p>
+          <div className="space-y-1.5">
+            <p className="font-ui text-xs leading-snug" style={{ color: 'var(--color-text-secondary)' }}>
+              {query.trim()
+                ? 'No source books match your search.'
+                : (sourcesQ.data?.length ?? 0) === 0
+                  ? 'No source books yet. Import from D&D Beyond (Library import), then check All — or use bundled content on All.'
+                  : 'All source books are hidden (locked). Unlock them in admin mode or browse All.'}
+            </p>
+            {!query.trim() && (
+              <button
+                type="button"
+                className="btn-ghost w-full text-xs py-0.5"
+                onClick={() => setBrowseMode('all')}
+              >
+                Browse all {tab}
+              </button>
+            )}
+          </div>
         )}
         {!loading && showSourcePicker && filteredSources.map((source) => (
           <SourceRow
@@ -365,11 +380,24 @@ export function CompendiumSidebarList() {
         {!loading && !unavailable && showEntryList && (
           (tab === 'monsters' ? monsterEntries.length : tab === 'items' ? itemEntries.length : spellEntries.length) === 0
         ) && (
-          <p className="font-ui text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-            {browseMode === 'homebrew'
-              ? `No homebrew ${tab} yet.`
-              : `No ${tab} match.`}
-          </p>
+          <div className="space-y-1.5">
+            <p className="font-ui text-xs leading-snug" style={{ color: 'var(--color-text-secondary)' }}>
+              {browseMode === 'homebrew'
+                ? `No homebrew ${tab} yet.`
+                : debouncedQuery.trim()
+                  ? `No ${tab} match your search.`
+                  : `No ${tab} in the catalog. If this persists, the server cannot reach MongoDB and bundled compendium data may be missing.`}
+            </p>
+            {browseMode === 'sources' && selectedSource && (
+              <button
+                type="button"
+                className="btn-ghost w-full text-xs py-0.5"
+                onClick={() => { setSelectedSource(null); setBrowseMode('all'); }}
+              >
+                Browse all {tab}
+              </button>
+            )}
+          </div>
         )}
         {showEntryList && tab === 'monsters' && monsterEntries.map((monster) => (
           <EntryRow

@@ -6,12 +6,20 @@ import { normalizeOwlbearGlobalDoc } from '@grimoire/shared';
 let cached: CompendiumGlobalDoc | null | undefined;
 let cachedMtime = 0;
 
+/** Bundled server mirror — survives Mongo outages on Render. */
+function bundledGlobalJsonPath(): string {
+  return path.resolve(__dirname, '../../data/global.json');
+}
+
 function globalJsonPath(): string | null {
   const candidates = [
     process.env['OWLBear_GLOBAL_PATH'],
     process.env['OWLBear_DATA_DIR']
       ? path.join(path.dirname(process.env['OWLBear_DATA_DIR']), 'server', 'data.json')
       : null,
+    path.resolve(process.cwd(), 'apps/server/data/global.json'),
+    path.resolve(process.cwd(), 'data/global.json'),
+    bundledGlobalJsonPath(),
     path.resolve(process.cwd(), '../../../owlbear_dnd_extension/server/data.json'),
     path.resolve(process.cwd(), '../../owlbear_dnd_extension/server/data.json'),
   ].filter(Boolean) as string[];
@@ -20,6 +28,11 @@ function globalJsonPath(): string | null {
     if (fs.existsSync(p)) return p;
   }
   return null;
+}
+
+/** Path used for writes when Mongo is down — creates bundled mirror if needed. */
+function writableGlobalJsonPath(): string {
+  return globalJsonPath() ?? bundledGlobalJsonPath();
 }
 
 function fileMtimeMs(filePath: string): number {
@@ -87,8 +100,7 @@ export function patchRawGlobalFallbackPolicy(
   policy: { lockedSources: string[]; publishedEntryKeys: string[] },
   lastUpdated: string,
 ): void {
-  const filePath = globalJsonPath();
-  if (!filePath) return;
+  const filePath = globalJsonPath() ?? bundledGlobalJsonPath();
 
   try {
     let raw: Record<string, unknown> = {};
@@ -113,10 +125,9 @@ export function saveGlobalFallback(
   next: CompendiumGlobalDoc,
   rawMongo?: OwlbearRawGlobalDoc | Record<string, unknown>,
 ): CompendiumGlobalDoc | null {
-  const filePath = globalJsonPath();
-  if (!filePath) return null;
-
+  const filePath = writableGlobalJsonPath();
   try {
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
     let raw: Record<string, unknown> = {};
     try {
       raw = JSON.parse(fs.readFileSync(filePath, 'utf8')) as Record<string, unknown>;

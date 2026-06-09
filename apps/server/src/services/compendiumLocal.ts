@@ -3,6 +3,9 @@ import path from 'path';
 import type { OwlbearItem, OwlbearMonster, OwlbearSpell } from '@grimoire/shared';
 import { isLikelyValidItem, slugify } from '@grimoire/monster-dex';
 
+/** Resolved from compiled dist/services → apps/server/data/compendium */
+const bundledDataDir = path.resolve(__dirname, '../../data/compendium');
+
 type StoredMonster = OwlbearMonster & { _id: string; isCustom?: boolean };
 type StoredItem = OwlbearItem & { _id: string; isCustom?: boolean };
 type StoredSpell = OwlbearSpell & { _id: string; isCustom?: boolean };
@@ -16,6 +19,9 @@ function owlbearSrcDir(): string | null {
   if (cachedDir !== undefined) return cachedDir;
   const candidates = [
     process.env['OWLBear_DATA_DIR'],
+    bundledDataDir,
+    path.resolve(process.cwd(), 'apps/server/data/compendium'),
+    path.resolve(process.cwd(), 'data/compendium'),
     path.resolve(process.cwd(), '../../../owlbear_dnd_extension/src'),
     path.resolve(process.cwd(), '../../owlbear_dnd_extension/src'),
   ].filter(Boolean) as string[];

@@ -20,6 +20,7 @@ import {
   sourceIdsMatch,
 } from '@/systems/compendium/compendiumLockCache';
 import { useCompendiumEditor } from '@/systems/compendium/useCompendiumEditor';
+import { useCompendiumUiStore } from '@/systems/compendium/compendiumStore';
 
 const GOLD = 'var(--color-accent-gold)';
 const BD = 'var(--color-border)';
@@ -183,18 +184,22 @@ export function DdbLibraryPanel({ onClose }: { onClose: () => void }) {
         ...(selectedSourceIds.size === 1 ? { sourceId: [...selectedSourceIds][0] } : {}),
         ...(ddbCampaignId ? { campaignId: ddbCampaignId } : {}),
       }),
-    onSuccess: (result) => {
+    onSuccess: async (result) => {
       const ok = result.imported.length;
       const fail = result.errors.length;
       setMessage(
         ok
-          ? `Imported ${ok} ${tab}${fail ? ` (${fail} failed)` : ''}. Book entries replace existing compendium matches.`
+          ? `Imported ${ok} ${tab}${fail ? ` (${fail} failed)` : ''}. Open Compendium → All to browse; Books tab lists imported sources.`
           : fail
             ? result.errors.map((e) => e.message).join('; ')
             : 'Nothing imported.',
       );
       setSelected(new Set());
-      void qc.invalidateQueries({ queryKey: ['compendium'] });
+      await qc.invalidateQueries({ queryKey: ['compendium'] });
+      if (ok > 0) {
+        useCompendiumUiStore.getState().setBrowseMode('all');
+        useCompendiumUiStore.getState().setPanelOpen(true);
+      }
     },
     onError: (err: Error) => setMessage(err.message),
   });
@@ -207,7 +212,7 @@ export function DdbLibraryPanel({ onClose }: { onClose: () => void }) {
         ...(ddbCampaignId != null && ddbCampaignId > 0 ? { campaignId: ddbCampaignId } : {}),
       });
     },
-    onSuccess: (result) => {
+    onSuccess: async (result) => {
       const ok = result.imported.length;
       const fail = result.errors.length;
       const bookCount = selectedSourceIds.size;
@@ -224,13 +229,17 @@ export function DdbLibraryPanel({ onClose }: { onClose: () => void }) {
         .join(', ');
       setMessage(
         ok
-          ? `Imported ${ok} entries (${breakdown}) from ${bookCount} book${bookCount === 1 ? '' : 's'}${fail ? ` — ${fail} failed` : ''}.`
+          ? `Imported ${ok} entries (${breakdown}) from ${bookCount} book${bookCount === 1 ? '' : 's'}${fail ? ` — ${fail} failed` : ''}. Open Compendium → All to browse.`
           : fail
             ? result.errors.map((e) => e.message).join('; ')
             : 'Nothing to import from the selected books.',
       );
       setSelected(new Set());
-      void qc.invalidateQueries({ queryKey: ['compendium'] });
+      await qc.invalidateQueries({ queryKey: ['compendium'] });
+      if (ok > 0) {
+        useCompendiumUiStore.getState().setBrowseMode('all');
+        useCompendiumUiStore.getState().setPanelOpen(true);
+      }
     },
     onError: (err: Error) => setMessage(err.message),
   });

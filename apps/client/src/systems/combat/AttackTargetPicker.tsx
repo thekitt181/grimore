@@ -5,11 +5,14 @@ import type { TokenItem } from '@/systems/scene/types';
 import { previewAttackRange, useCombatStore } from './combatStore';
 import { isTokenPanelCombatOwner } from './TokenPanelCombatFlow';
 import { formatActionRangeLabel } from './attackRange';
+import { useDdbStore } from '@/systems/ddb/ddbStore';
 
 const GOLD = 'var(--color-accent-gold)';
 
 export function AttackTargetPicker() {
   const targetPick = useCombatStore((s) => s.targetPick);
+  const pcActionsToken = useDdbStore((s) => s.pcActionsToken);
+  const sheetToken = useDdbStore((s) => s.sheetToken);
   const attackBlocked = useCombatStore((s) => s.attackBlocked);
   const cancel = useCombatStore((s) => s.cancelTargetPick);
   const clearBlocked = useCombatStore((s) => s.clearAttackBlocked);
@@ -36,6 +39,8 @@ export function AttackTargetPicker() {
 
   if (!targetPick) return null;
   if (isTokenPanelCombatOwner(targetPick.attackerTokenId)) return null;
+  if (pcActionsToken && targetPick.attackerTokenId === pcActionsToken.id) return null;
+  if (sheetToken && targetPick.attackerTokenId === sheetToken.id) return null;
 
   const targets = tokens.filter((t) => t.id !== targetPick.attackerTokenId);
   const rangeLabel = formatActionRangeLabel(targetPick.range);

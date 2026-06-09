@@ -4,13 +4,21 @@ import {
   parseActionDamages,
   parseActionRange,
   parseActionToHit,
+  RANGED_SPELL_RANGE,
   type ActionDamage,
   type ActionRange,
   type ParsedAction,
+  type SpellLookup,
 } from '@/systems/compendium/statBlockParser';
 
 function defaultRange(): ActionRange {
   return { kind: 'melee', reachFt: 5 };
+}
+
+function spellRange(hasAttack: boolean, aoe?: { size: number; type: string }): ActionRange | undefined {
+  if (aoe) return undefined;
+  if (hasAttack) return RANGED_SPELL_RANGE;
+  return undefined;
 }
 
 function parseRangeNumbers(range?: string): { normal?: number; long?: number } {
@@ -169,8 +177,8 @@ function spellSave(spell: GrimoireSpell, character: GrimoireCharacter): ParsedAc
   return { dc, stat: saveStat };
 }
 
-function resolveSpellToHit(spell: GrimoireSpell, character: GrimoireCharacter): number | undefined {
-  if (!spell.attack) return undefined;
+function resolveSpellToHit(spell: GrimoireSpell, character: GrimoireCharacter, isAttack = spell.attack): number | undefined {
+  if (!isAttack) return undefined;
   if (character.spellAttackMod !== undefined) return character.spellAttackMod;
   if (character.spellSaveDc !== undefined) return character.spellSaveDc - 8;
   const prof = character.proficiencyBonus ?? 2;
@@ -181,10 +189,29 @@ function resolveSpellToHit(spell: GrimoireSpell, character: GrimoireCharacter): 
   return undefined;
 }
 
-export function spellToParsedAction(spell: GrimoireSpell, character: GrimoireCharacter): ParsedAction {
-  const damages = spell.damage ? [{ dice: normalizeDiceNotation(spell.damage), type: spell.damageType ?? 'damage' }] : [];
-  const save = spellSave(spell, character);
-  const toHit = resolveSpellToHit(spell, character);
+export function spellToParsedAction(
+  spell: GrimoireSpell,
+  character: GrimoireCharacter,
+  lookup?: SpellLookup,
+): ParsedAction {
+  const data = lookup?.(spell.name);
+  const damage = spell.damage ?? data?.damage;
+  const damageType = spell.damageType ?? data?.type ?? 'damage';
+  const damages: ActionDamage[] = [];
+  if (damage) {
+    damages.push({ dice: normalizeDiceNotation(damage), type: damageType });
+  }
+  if (data?.secondary) {
+    damages.push({ dice: normalizeDiceNotation(data.secondary.damage), type: data.secondary.type });
+  }
+
+  const saveStat = spell.save ?? data?.save;
+  const save = saveStat ? spellSave({ ...spell, save: saveStat }, character) : undefined;
+  const isAttackSpell = Boolean(spell.attack || data?.attack);
+  const aoe = spell.aoe ?? data?.aoe;
+  const isSaveArea = Boolean(saveStat && damages.length > 0 && aoe && !isAttackSpell);
+  const toHit = isAttackSpell && !isSaveArea ? resolveSpellToHit(spell, character, isAttackSpell) : undefined;
+  const range = spellRange(Boolean(toHit !== undefined), aoe);
 
   return {
     name: spell.name,
@@ -192,15 +219,15 @@ export function spellToParsedAction(spell: GrimoireSpell, character: GrimoireCha
     section: 'actions',
     isTrait: false,
     ...(toHit !== undefined ? { toHit } : {}),
-    ...(!spell.aoe ? { range: defaultRange() } : {}),
+    ...(range ? { range } : {}),
     ...(save ? { save } : {}),
-    ...(spell.aoe ? { aoe: spell.aoe } : {}),
+    ...(aoe ? { aoe } : {}),
     damages,
-    spells: spell.damage
+    spells: damage
       ? [{
           name: spell.name,
-          dice: normalizeDiceNotation(spell.damage),
-          ...(spell.aoe ? { aoe: spell.aoe } : {}),
+          dice: normalizeDiceNotation(damage),
+          ...(aoe ? { aoe } : {}),
         }]
       : [],
     isSpellcastingBlock: false,
@@ -223,7 +250,10 @@ function attacksFromEquippedInventory(character: GrimoireCharacter): GrimoireAtt
   }));
 }
 
-export function parsePcActions(character: GrimoireCharacter): {
+export function parsePcActions(
+  character: GrimoireCharacter,
+  lookup?: SpellLookup,
+): {
   attacks: ParsedAction[];
   spells: ParsedAction[];
   features: ParsedAction[];
@@ -239,7 +269,7 @@ export function parsePcActions(character: GrimoireCharacter): {
 
   const spells = character.spells
     .filter((s) => s.prepared || s.level === 0)
-    .map((s) => spellToParsedAction(s, character));
+    .map((s) => spellToParsedAction(s, character, lookup));
   const featureActions: ParsedAction[] = [];
   const features: ParsedAction[] = [];
 

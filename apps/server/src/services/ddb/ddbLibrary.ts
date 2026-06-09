@@ -20,6 +20,7 @@ import {
   normalizeDdbSpellToCompendium,
 } from './ddbContentNormalize';
 import { saveItemsBulk, saveMonstersBulk, saveSpellsBulk } from '../compendiumSync';
+import { unlockCompendiumSource } from '../compendiumSourcePolicy';
 import { redis } from '../../lib/redis';
 import {
   fetchDdbCatalog,
@@ -371,6 +372,22 @@ function resolveImportSaveOpts(entry: { source?: string }) {
     : { saveAs: 'homebrew' as const };
 }
 
+async function unlockImportedBookSources(catalog: DdbCatalog, sourceIds: number[]): Promise<void> {
+  for (const sourceId of sourceIds) {
+    const label = catalog.sourceNames.get(sourceId);
+    if (!label || label === 'D&D Beyond') continue;
+    try {
+      await unlockCompendiumSource(label);
+    } catch (err) {
+      console.warn(
+        '[DDB Import] Could not unlock compendium source:',
+        label,
+        err instanceof Error ? err.message : err,
+      );
+    }
+  }
+}
+
 async function importMonsterIds(
   ctx: DdbAuthContext,
   ids: number[],
@@ -408,7 +425,10 @@ async function importMonsterIds(
           errors.push({ id, message: 'Could not parse monster' });
           continue;
         }
-        pending.push({ entry: withSource, ddbId: id });
+        pending.push({
+          entry: applyBookSource(withSource, raw, catalog, sourceId),
+          ddbId: id,
+        });
       } catch (err) {
         errors.push({ id, message: err instanceof Error ? err.message : 'Import failed' });
       }
@@ -657,5 +677,10 @@ export async function importAllDdbLibraryFromSources(
       );
     }
   }
-  return mergeImportResults(...results);
+  const merged = mergeImportResults(...results);
+  if (merged.imported.length > 0) {
+    const catalog = await loadDdbCatalog(ctx);
+    await unlockImportedBookSources(catalog, unique);
+  }
+  return merged;
 }

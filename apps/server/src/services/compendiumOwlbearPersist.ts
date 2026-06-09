@@ -293,6 +293,12 @@ export function clearRawGlobalDocInflight(): void {
 
 async function readRawGlobalDocInner(opts: RawGlobalDocReadOptions = {}): Promise<OwlbearRawGlobalDoc> {
   const includeImageData = opts.includeImageData !== false;
+
+  if (isMongoCircuitOpen()) {
+    const fallbackRaw = loadRawGlobalFallback();
+    if (fallbackRaw) return normalizeRawDoc(fallbackRaw);
+  }
+
   try {
     const col = await getCollection<OwlbearRawGlobalDoc>('data');
     if (col) {
@@ -362,8 +368,8 @@ export async function persistRawGlobalDoc(raw: OwlbearRawGlobalDoc): Promise<Com
 
   const normalized = normalizeOwlbearGlobalDoc(payload);
   const saved = saveGlobalFallback(normalized, payload);
-  if (!col && !saved) {
-    throw new Error('MongoDB unavailable and no local data.json to write');
+  if (!col && !saved && isMongoCircuitOpen()) {
+    throw new Error('MongoDB unavailable and failed to write local compendium mirror');
   }
   notifyCompendiumChanged(lastUpdated);
   if (process.env['COMPENDIUM_MONGO_ONLY'] !== '1') {

@@ -1,36 +1,41 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import type { CompendiumSpell } from '@grimoire/shared';
-import type { ActionDamage } from './statBlockParser';
-import { RollButton } from '@/systems/dice/RollButton';
 import { RollableText } from '@/systems/dice/RollableText';
-import { AoeTemplateBlock } from '@/systems/combat/AoeTemplateBlock';
 import { CasterTokenHint } from '@/systems/combat/CasterTokenHint';
-import { SaveAreaEffectBlock } from '@/systems/combat/SaveAreaEffectBlock';
-import { TargetedAttackButton } from '@/systems/combat/TargetedAttackButton';
+import { TokenActionCard } from '@/systems/combat/TokenActionCard';
 import { useCasterToken } from '@/systems/combat/useCasterToken';
-import { hasAoeTemplate } from './statBlockParser';
-
-const RANGED_SPELL = { kind: 'ranged' as const, reachFt: 5, rangeNormalFt: 120 };
-
-function spellDamages(spell: CompendiumSpell): ActionDamage[] {
-  const out: ActionDamage[] = [];
-  if (spell.damage) out.push({ dice: spell.damage, type: spell.type ?? 'damage' });
-  if (spell.secondary) out.push({ dice: spell.secondary.damage, type: spell.secondary.type });
-  return out;
-}
-
-function isSaveAreaCompendiumSpell(spell: CompendiumSpell, damages: ActionDamage[]): boolean {
-  return Boolean(spell.save && damages.length > 0 && hasAoeTemplate(spell.aoe) && !spell.attack);
-}
+import { useCombatStore } from '@/systems/combat/combatStore';
+import { compendiumSpellToParsedAction } from './statBlockParser';
+import { syncDdbCharacter } from '@/systems/ddb/ddbApi';
 
 export function SpellRollPanel({ spell }: { spell: CompendiumSpell }) {
   const caster = useCasterToken();
-  const [attackMod, setAttackMod] = useState(0);
-  const damages = spellDamages(spell);
-  const aoe = spell.aoe;
-  const hasAoe = hasAoeTemplate(aoe);
-  const isSaveArea = isSaveAreaCompendiumSpell(spell, damages);
-  const canTargetCast = Boolean(caster && spell.attack && damages.length > 0 && !hasAoe);
+  const targetPick = useCombatStore((s) => s.targetPick);
+  const [manualAttackMod, setManualAttackMod] = useState<number | null>(null);
+
+  const { data: casterCharacter } = useQuery({
+    queryKey: ['ddb', 'character', caster?.ddbCharacterId],
+    queryFn: () => syncDdbCharacter(caster!.ddbCharacterId!),
+    enabled: Boolean(caster?.ddbCharacterId),
+    staleTime: 60_000,
+  });
+
+  const spellAttackMod = casterCharacter?.spellAttackMod;
+  const spellSaveDc = casterCharacter?.spellSaveDc;
+  const attackMod = manualAttackMod ?? spellAttackMod ?? 0;
+
+  const action = useMemo(
+    () => compendiumSpellToParsedAction(spell, {
+      ...(spell.attack ? { toHit: attackMod } : {}),
+      ...(spell.save && spellSaveDc != null ? { saveDc: spellSaveDc } : {}),
+    }),
+    [spell, attackMod, spellSaveDc],
+  );
+
+  const isActivePick = Boolean(
+    caster && targetPick?.attackerTokenId === caster.id && targetPick.actionName === spell.name,
+  );
 
   return (
     <div className="space-y-2">
@@ -38,89 +43,27 @@ export function SpellRollPanel({ spell }: { spell: CompendiumSpell }) {
         Cast spell
       </p>
 
-      {hasAoe && aoe && (
-        caster ? (
-          isSaveArea ? (
-            <SaveAreaEffectBlock
-              effectName={spell.name}
-              token={caster}
-              damages={damages}
-              aoe={aoe}
-              {...(spell.save ? { save: { stat: spell.save } } : {})}
-            />
-          ) : (
-            <AoeTemplateBlock
-              effectName={spell.name}
-              token={caster}
-              aoe={aoe}
-              damages={damages}
-              {...(spell.save ? { saveStat: spell.save } : {})}
-              rollVariant="damage"
-            />
-          )
-        ) : (
-          <CasterTokenHint />
-        )
-      )}
-
-      {canTargetCast && caster && (
-        <div className="space-y-1">
-          <label className="font-ui text-[10px] flex gap-2 items-center" style={{ color: 'var(--color-text-secondary)' }}>
-            Spell attack
-            <input
-              type="number"
-              className="input-stat w-12"
-              value={attackMod}
-              onChange={(e) => setAttackMod(Number(e.target.value))}
-            />
-          </label>
-          <TargetedAttackButton
-            attackerTokenId={caster.id}
-            attackerName={caster.name}
-            actionName={spell.name}
-            toHit={attackMod}
-            damages={damages}
-            range={RANGED_SPELL}
-            className="w-full text-center py-1"
+      {caster ? (
+        <>
+          {spell.attack && casterCharacter?.spellAttackMod == null && manualAttackMod == null && (
+            <label className="font-ui text-[10px] flex gap-2 items-center" style={{ color: 'var(--color-text-secondary)' }}>
+              Spell attack
+              <input
+                type="number"
+                className="input-stat w-12"
+                value={attackMod}
+                onChange={(e) => setManualAttackMod(Number(e.target.value))}
+              />
+            </label>
+          )}
+          <TokenActionCard
+            action={action}
+            token={caster}
+            isActivePick={isActivePick}
           />
-        </div>
-      )}
-
-      {!hasAoe && !canTargetCast && (
-        <div className="flex flex-wrap gap-1">
-          {damages.map((dmg, i) => (
-            <RollButton
-              key={`${dmg.dice}-${i}`}
-              notation={dmg.dice.replace(/\s+/g, '')}
-              label={`${dmg.dice} ${dmg.type}`}
-              variant="damage"
-            />
-          ))}
-          {spell.attack && !caster && <CasterTokenHint />}
-          {spell.attack && caster && damages.length === 0 && (
-            <RollButton notation="1d20" label="Spell Attack (d20)" variant="attack" />
-          )}
-          {spell.save && (
-            <span
-              className="font-ui text-xs px-1.5 py-0.5 rounded"
-              style={{ border: '1px solid #ef4444', color: '#fca5a5' }}
-            >
-              {spell.save} save
-            </span>
-          )}
-        </div>
-      )}
-
-      {hasAoe && spell.attack && caster && (
-        <TargetedAttackButton
-          attackerTokenId={caster.id}
-          attackerName={caster.name}
-          actionName={spell.name}
-          toHit={attackMod}
-          damages={damages}
-          range={RANGED_SPELL}
-          className="w-full text-center py-1"
-        />
+        </>
+      ) : (
+        <CasterTokenHint />
       )}
 
       {spell.description && (
