@@ -291,7 +291,7 @@ export interface ServerToClientEvents {
   'chat:message':         (payload: ChatMessagePayload)       => void;
   'session:userJoined':   (payload: UserJoinedPayload)        => void;
   'session:userLeft':     (payload: UserLeftPayload)          => void;
-  'session:roomState':    (payload: { users: SessionUser[] }) => void;
+  'session:roomState':    (payload: { users: SessionUser[]; fogActive?: boolean }) => void;
   'compendium:updated':   (payload: CompendiumUpdatedPayload) => void;
   'ddb:roll':             (payload: DdbRollBridgePayload) => void;
   'ddb:rollBridge:status': (payload: {

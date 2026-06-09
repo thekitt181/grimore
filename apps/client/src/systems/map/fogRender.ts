@@ -158,7 +158,8 @@ function composeFogTexture(
       if (!cell || !isInteriorVisibleCell(cell.x, cell.y, visibleCells)) continue;
       eraseCell(erase, cell.x, cell.y, gridSize);
     }
-  } else if (opts.isGM) {
+  } else {
+    // No vision cones — punch out GM-revealed cells for GM and players alike.
     const cols = Math.ceil(width / gridSize);
     const rows = Math.ceil(height / gridSize);
     for (let cx = 0; cx < cols; cx++) {

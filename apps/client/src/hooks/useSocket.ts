@@ -3,7 +3,7 @@ import { useAuth } from '@clerk/clerk-react';
 import { getSocket, connectSocket, isMobileClient } from '@/lib/socket';
 import { useSessionStore } from '@/store/sessionStore';
 import { useChatStore } from '@/store/chatStore';
-import { bindFogActiveSocket, syncFogActiveToSession } from '@/systems/scene/fogActiveSync';
+import { applySessionFogActive, bindFogActiveSocket, syncFogActiveToSession } from '@/systems/scene/fogActiveSync';
 import { bindDdbRollSocket } from '@/systems/ddb/bindDdbRollSocket';
 
 function delay(ms: number): Promise<void> {
@@ -20,6 +20,9 @@ export function useSocket(
   retryNonce = 0,
 ) {
   const { isLoaded, isSignedIn, getToken } = useAuth();
+  const getTokenRef = useRef(getToken);
+  getTokenRef.current = getToken;
+
   const {
     setConnected,
     addUser,
@@ -49,12 +52,13 @@ export function useSocket(
       joinedRef.current = true;
     };
 
-    joinRoom();
-
-    socket.on('session:roomState', ({ users }) => {
+    socket.on('session:roomState', ({ users, fogActive }) => {
       setConnectedUsers(users);
       setConnected(true);
       clearConnectionError();
+      if (typeof fogActive === 'boolean') {
+        applySessionFogActive(fogActive);
+      }
     });
 
     socket.on('session:userJoined', ({ user }) => {
@@ -72,13 +76,13 @@ export function useSocket(
     socket.on('error', ({ message }) => {
       console.error('[Socket] Error:', message);
       setConnectionError(message);
+      setConnected(false);
     });
 
     socket.on('disconnect', (reason) => {
       joinedRef.current = false;
       setConnected(false);
       if (reason === 'io server disconnect') {
-        // Server kicked — reconnect manually
         void socket.connect();
       }
     });
@@ -92,8 +96,10 @@ export function useSocket(
       syncFogActiveToSession();
     });
 
+    // Register handlers before join so we never miss the initial room snapshot.
     bindFogActiveSocket();
     bindDdbRollSocket(true);
+    joinRoom();
     syncFogActiveToSession();
   }, [campaignId, addUser, removeUser, setConnectedUsers, addMessage, setConnected, setConnectionError, clearConnectionError]);
 
@@ -110,10 +116,10 @@ export function useSocket(
     joinedRef.current = false;
 
     async function setup(attempt = 0): Promise<void> {
-      const maxAttempts = isMobileClient() ? 8 : 5;
+      const maxAttempts = isMobileClient() ? 10 : 5;
       try {
         clearConnectionError();
-        const token = await getToken({ skipCache: attempt > 0 });
+        const token = await getTokenRef.current({ skipCache: attempt > 0 });
         if (!token) {
           if (attempt < maxAttempts - 1 && !cancelled && gen === setupGen.current) {
             await delay(isMobileClient() ? 2000 * (attempt + 1) : 1200 * (attempt + 1));
@@ -127,7 +133,7 @@ export function useSocket(
 
         if (cancelled || gen !== setupGen.current) return;
 
-        await connectSocket(token, { retries: isMobileClient() ? 6 : 3 });
+        await connectSocket(token, { retries: isMobileClient() ? 8 : 3 });
         if (cancelled || gen !== setupGen.current) return;
 
         setConnected(true);
@@ -179,5 +185,5 @@ export function useSocket(
       socket.off('connect');
       setConnected(false);
     };
-  }, [sessionId, campaignId, retryNonce, isLoaded, isSignedIn, getToken, setConnected, attachListeners, setConnectionError, clearConnectionError]);
+  }, [sessionId, campaignId, retryNonce, isLoaded, isSignedIn, setConnected, attachListeners, setConnectionError, clearConnectionError]);
 }

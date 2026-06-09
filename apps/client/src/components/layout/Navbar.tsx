@@ -1,9 +1,12 @@
-import { Link, useNavigate } from 'react-router-dom';
-import { UserButton, useUser } from '@clerk/clerk-react';
+import { Link } from 'react-router-dom';
+import { useUser, useClerk } from '@clerk/clerk-react';
 
 export function Navbar() {
   const { user } = useUser();
-  const navigate = useNavigate();
+  const { signOut } = useClerk();
+
+  const displayName = user?.username ?? user?.firstName ?? 'Adventurer';
+  const initial = displayName.charAt(0).toUpperCase();
 
   return (
     <header
@@ -48,20 +51,32 @@ export function Navbar() {
       </nav>
 
       {/* User controls */}
-      <div className="flex items-center gap-4">
+      <div className="flex items-center gap-3">
         {user && (
           <span className="font-ui text-sm hidden md:block" style={{ color: 'var(--color-text-secondary)' }}>
-            {user.username ?? user.firstName}
+            {displayName}
           </span>
         )}
-        <UserButton
-          afterSignOutUrl="/sign-in"
-          appearance={{
-            elements: {
-              avatarBox: 'w-8 h-8 ring-1 ring-[var(--color-accent-gold)] ring-opacity-50',
-            },
-          }}
-        />
+        <button
+          type="button"
+          onClick={() => void signOut({ redirectUrl: '/sign-in' })}
+          className="flex items-center gap-2 rounded-md px-2 py-1 transition-colors hover:opacity-90"
+          title="Sign out"
+        >
+          <span
+            className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-ui font-semibold shrink-0"
+            style={{
+              background: 'var(--color-bg-primary)',
+              color: 'var(--color-accent-gold)',
+              border: '1px solid var(--color-border)',
+            }}
+          >
+            {initial}
+          </span>
+          <span className="font-ui text-xs hidden sm:block" style={{ color: 'var(--color-text-secondary)' }}>
+            Sign out
+          </span>
+        </button>
       </div>
     </header>
   );

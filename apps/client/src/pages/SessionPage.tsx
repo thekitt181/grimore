@@ -38,8 +38,9 @@ import { ItemHandoutViewer } from '@/systems/compendium/ItemHandoutViewer';
 import { useHandoutRevealSocket } from '@/systems/compendium/useHandoutRevealSocket';
 import { useCompendiumSyncPoll } from '@/systems/compendium/useCompendiumSync';
 import { useCompendiumUiStore } from '@/systems/compendium/compendiumStore';
-import { getSocket } from '@/lib/socket';
+import { getSocket, isMobileClient } from '@/lib/socket';
 import { loadInitiativeLocal, persistInitiativeLocal } from '@/systems/scene/sessionPersistence';
+import { useItemStore } from '@/systems/scene/store/itemStore';
 
 interface SessionInfo {
   id: string;
@@ -72,6 +73,9 @@ export function SessionPage() {
   const tokenActionsToken = useCombatStore((s) => s.tokenActionsToken);
   const closeTokenActions = useCombatStore((s) => s.closeTokenActions);
   const isGM = myRole === 'GM';
+  const hasMapItems = useItemStore((s) =>
+    Object.values(s.items).some((i) => i.type === 'map'),
+  );
 
   useCompendiumSyncPoll(socketReady);
   useDiceSocket();
@@ -233,6 +237,27 @@ export function SessionPage() {
         {/* Map canvas + overlay panels */}
         <div className="flex-1 relative overflow-hidden">
           <MapCanvas />
+
+          {!isGM && !hasMapItems && !isConnected && (
+            <div
+              className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 px-6 text-center pointer-events-none"
+              style={{ background: 'rgba(10, 10, 15, 0.85)' }}
+            >
+              <p className="font-display text-lg animate-torch" style={{ color: 'var(--color-accent-gold)' }}>
+                Connecting to the table…
+              </p>
+              <p className="font-ui text-sm max-w-sm" style={{ color: 'var(--color-text-secondary)' }}>
+                {isMobileClient()
+                  ? 'Mobile connections can take up to a minute while the server wakes up. The map will appear once you are live.'
+                  : 'Waiting for the live session link. The GM map will sync when you connect.'}
+              </p>
+              {connectionError && (
+                <p className="font-ui text-xs" style={{ color: 'var(--color-accent-red-hot)' }}>
+                  {connectionError}
+                </p>
+              )}
+            </div>
+          )}
 
           {/* Right-click context menu */}
           <ItemContextMenu />

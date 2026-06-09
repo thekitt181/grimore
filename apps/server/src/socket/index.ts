@@ -57,10 +57,11 @@ export function initSocket(httpServer: HttpServer): Server {
       origin: allowedOrigins.length === 1 ? allowedOrigins[0] : allowedOrigins,
       credentials: true,
     },
+    path: '/socket.io/',
     transports: ['websocket', 'polling'],
     pingTimeout: 60_000,
     pingInterval: 25_000,
-    connectTimeout: 45_000,
+    connectTimeout: 60_000,
   });
 
   // ─── Auth middleware ─────────────────────────────────────────────────────────
@@ -163,11 +164,12 @@ export function initSocket(httpServer: HttpServer): Server {
           }
         }
 
-        socket.emit('session:roomState', { users: connectedUsers });
+        const fogActive = sessionFogActive.get(sessionId) ?? false;
+        socket.emit('session:roomState', { users: connectedUsers, fogActive });
 
         // Scene items and fog are stored per-user in the browser — live sync only.
         socket.emit('fog:sync', { sessionId, fogData: '[]' });
-        socket.emit('fog:active', { sessionId, active: sessionFogActive.get(sessionId) ?? false });
+        socket.emit('fog:active', { sessionId, active: fogActive });
         socket.emit('items:sync', { sessionId, items: [] });
 
         const ddbLink = await prisma.ddbCampaignLink.findUnique({ where: { campaignId } });

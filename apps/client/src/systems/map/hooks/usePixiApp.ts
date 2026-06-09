@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { Application } from 'pixi.js';
+import { isMobileClient } from '@/lib/socket';
 
 export interface PixiAppRef {
   app: Application;
@@ -27,13 +28,16 @@ export function usePixiApp(
     async function init() {
       const app = new Application();
 
+      const mobile = isMobileClient();
       await app.init({
         background: '#0a0a0f',
         resizeTo: container,
-        antialias: true,
-        resolution: window.devicePixelRatio || 1,
+        antialias: !mobile,
+        resolution: mobile
+          ? Math.min(window.devicePixelRatio || 1, 1.5)
+          : Math.min(window.devicePixelRatio || 1, 2),
         autoDensity: true,
-        powerPreference: 'high-performance',
+        ...(mobile ? {} : { powerPreference: 'high-performance' as const }),
       });
 
       if (destroyed) {

@@ -17,12 +17,13 @@ function socketOptions() {
   const mobile = isMobileClient();
   return {
     autoConnect: false,
+    path: '/socket.io/',
     // Mobile networks + Render cold starts: polling-only is far more reliable.
     transports: mobile ? ['polling'] : ['websocket', 'polling'],
     upgrade: !mobile,
-    timeout: mobile ? 45_000 : 25_000,
+    timeout: mobile ? 60_000 : 25_000,
     reconnection: true,
-    reconnectionAttempts: 12,
+    reconnectionAttempts: 15,
     reconnectionDelay: 1500,
     reconnectionDelayMax: 10_000,
     withCredentials: true,
@@ -90,7 +91,7 @@ async function connectSocketOnce(token: string): Promise<void> {
 
   s.connect();
 
-  const timeoutMs = isMobileClient() ? 45_000 : 25_000;
+  const timeoutMs = isMobileClient() ? 60_000 : 25_000;
   await new Promise<void>((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error('Connection timed out — server may be waking up')), timeoutMs);
     const onConnect = () => {
