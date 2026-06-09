@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { DraggablePanel } from '@/components/DraggablePanel';
 import { useSessionStore } from '@/store/sessionStore';
 import {
@@ -16,9 +16,11 @@ import { fetchSources, lockCompendiumSource, unlockCompendiumSource } from '@/sy
 import {
   applyCompendiumLockPolicy,
   patchCompendiumSourceLock,
+  refetchCompendiumAfterImport,
   refetchCompendiumAfterLock,
   sourceIdsMatch,
 } from '@/systems/compendium/compendiumLockCache';
+import type { DdbLibraryImportResult } from '@grimoire/shared';
 import { useCompendiumEditor } from '@/systems/compendium/useCompendiumEditor';
 import { useCompendiumUiStore } from '@/systems/compendium/compendiumStore';
 
@@ -47,6 +49,27 @@ function tabToKind(tab: LibraryTab): 'monster' | 'item' | 'spell' {
   if (tab === 'monsters') return 'monster';
   if (tab === 'spells') return 'spell';
   return 'item';
+}
+
+function formatImportResultMessage(result: DdbLibraryImportResult, base: string): string {
+  let msg = base;
+  if (result.mongoPersisted === false) {
+    msg += ' Warning: save may be temporary until MongoDB reconnects.';
+  }
+  return msg;
+}
+
+async function afterCompendiumImport(
+  qc: QueryClient,
+  result: DdbLibraryImportResult,
+): Promise<void> {
+  if (result.imported.length === 0) return;
+  useCompendiumUiStore.getState().setBrowseMode('all');
+  useCompendiumUiStore.getState().setPanelOpen(true);
+  await refetchCompendiumAfterImport(
+    qc,
+    result.catalogRev ? { catalogRev: result.catalogRev } : undefined,
+  );
 }
 
 export function DdbLibraryPanel({ onClose }: { onClose: () => void }) {
@@ -189,17 +212,16 @@ export function DdbLibraryPanel({ onClose }: { onClose: () => void }) {
       const fail = result.errors.length;
       setMessage(
         ok
-          ? `Imported ${ok} ${tab}${fail ? ` (${fail} failed)` : ''}. Open Compendium → All to browse; Books tab lists imported sources.`
+          ? formatImportResultMessage(
+              result,
+              `Imported ${ok} ${tab}${fail ? ` (${fail} failed)` : ''}. Open Compendium → All to browse.`,
+            )
           : fail
             ? result.errors.map((e) => e.message).join('; ')
             : 'Nothing imported.',
       );
       setSelected(new Set());
-      await qc.invalidateQueries({ queryKey: ['compendium'] });
-      if (ok > 0) {
-        useCompendiumUiStore.getState().setBrowseMode('all');
-        useCompendiumUiStore.getState().setPanelOpen(true);
-      }
+      await afterCompendiumImport(qc, result);
     },
     onError: (err: Error) => setMessage(err.message),
   });
@@ -229,17 +251,16 @@ export function DdbLibraryPanel({ onClose }: { onClose: () => void }) {
         .join(', ');
       setMessage(
         ok
-          ? `Imported ${ok} entries (${breakdown}) from ${bookCount} book${bookCount === 1 ? '' : 's'}${fail ? ` — ${fail} failed` : ''}. Open Compendium → All to browse.`
+          ? formatImportResultMessage(
+              result,
+              `Imported ${ok} entries (${breakdown}) from ${bookCount} book${bookCount === 1 ? '' : 's'}${fail ? ` — ${fail} failed` : ''}. Open Compendium → All to browse.`,
+            )
           : fail
             ? result.errors.map((e) => e.message).join('; ')
             : 'Nothing to import from the selected books.',
       );
       setSelected(new Set());
-      await qc.invalidateQueries({ queryKey: ['compendium'] });
-      if (ok > 0) {
-        useCompendiumUiStore.getState().setBrowseMode('all');
-        useCompendiumUiStore.getState().setPanelOpen(true);
-      }
+      await afterCompendiumImport(qc, result);
     },
     onError: (err: Error) => setMessage(err.message),
   });

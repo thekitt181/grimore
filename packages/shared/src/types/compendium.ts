@@ -123,6 +123,9 @@ export interface CompendiumSyncStatus {
   lastUpdated: string;
   storage: 'mongodb' | 'local' | 'unavailable';
   mongoConnected?: boolean;
+  /** In-memory catalog revision after last rebuild. */
+  catalogRev?: string;
+  entryCounts?: { monsters: number; items: number; spells: number };
 }
 
 export type CompendiumImageKind = 'monster' | 'item' | 'spell';

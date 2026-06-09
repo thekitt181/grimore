@@ -27,7 +27,14 @@ import {
   newestIso,
   isoTimestamp,
 } from './compendiumGlobal';
-import { saveOwlbearEntry, deleteOwlbearEntry, readRawGlobalDoc, saveOwlbearEntriesBulk, type CompendiumKind } from './compendiumOwlbearPersist';
+import {
+  saveOwlbearEntry,
+  deleteOwlbearEntry,
+  readRawGlobalDoc,
+  saveOwlbearEntriesBulk,
+  type CompendiumKind,
+  type PersistRawGlobalDocResult,
+} from './compendiumOwlbearPersist';
 import {
   dedupeByEntryName,
   entryNameKey,
@@ -39,6 +46,7 @@ import {
   registerCompendiumCacheInvalidator,
   setCachedGlobalLite,
 } from './compendiumCache';
+import { registerCatalogRebuild } from './compendiumChangeNotify';
 import {
   isEntryDraft,
   policyFromRaw,
@@ -354,6 +362,148 @@ function invalidateCatalogCache(): void {
   catalogBuildPromise = null;
 }
 
+async function executeCatalogBuild(previousCache: CatalogCache | null): Promise<CatalogCache> {
+  try {
+    const raw = await readRawGlobalDoc({ includeImageData: false });
+    const global = normalizeOwlbearGlobalDoc({
+      ...raw,
+      images: {},
+      imagesData: {},
+      entryImages: {},
+    });
+    setCachedGlobalLite(global);
+    const effectiveRev = isoTimestamp(global.lastUpdated);
+    const deleted = raw.deleted ?? [];
+
+    const policy = policyFromRaw(raw);
+    const [monsters, items, spells] = await Promise.all([
+      mergeMonsters(await loadBaseMonsters(), raw.overrideMonsters ?? [], raw.monsters ?? [], deleted, global, true),
+      mergeItems(await loadBaseItems(), raw.overrideItems ?? [], raw.items ?? [], deleted, global, true),
+      mergeSpells(await loadBaseSpells(), raw.overrideSpells ?? [], raw.spells ?? [], deleted, global, true),
+    ]);
+    monsters.sort((a, b) => a.name.localeCompare(b.name));
+    items.sort((a, b) => a.name.localeCompare(b.name));
+    spells.sort((a, b) => a.name.localeCompare(b.name));
+    const built: CatalogCache = {
+      rev: `${effectiveRev}:${policyCacheRev(policy)}`,
+      policy,
+      monsters,
+      items,
+      spells,
+    };
+    if (
+      catalogEntryCount(built) === 0
+      && previousCache
+      && catalogEntryCount(previousCache) > 0
+    ) {
+      console.warn('[Compendium] Rebuild produced empty catalog — keeping previous cache');
+      return previousCache;
+    }
+    return built;
+  } catch (err) {
+    console.warn(
+      '[Compendium] Catalog build failed, using local fallback:',
+      err instanceof Error ? err.message : err,
+    );
+    const rawFallback = loadRawGlobalFallback();
+    if (rawFallback) {
+      const policy = policyFromRaw(rawFallback);
+      const deleted = rawFallback.deleted ?? [];
+      const global = normalizeOwlbearGlobalDoc({
+        ...rawFallback,
+        images: {},
+        imagesData: {},
+        entryImages: {},
+      });
+      const [monsters, items, spells] = await Promise.all([
+        mergeMonsters(await loadBaseMonsters(), rawFallback.overrideMonsters ?? [], rawFallback.monsters ?? [], deleted, global, true),
+        mergeItems(await loadBaseItems(), rawFallback.overrideItems ?? [], rawFallback.items ?? [], deleted, global, true),
+        mergeSpells(await loadBaseSpells(), rawFallback.overrideSpells ?? [], rawFallback.spells ?? [], deleted, global, true),
+      ]);
+      monsters.sort((a, b) => a.name.localeCompare(b.name));
+      items.sort((a, b) => a.name.localeCompare(b.name));
+      spells.sort((a, b) => a.name.localeCompare(b.name));
+      const built: CatalogCache = {
+        rev: `${isoTimestamp(global.lastUpdated)}:${policyCacheRev(policy)}:raw-fallback`,
+        policy,
+        monsters,
+        items,
+        spells,
+      };
+      if (
+        catalogEntryCount(built) === 0
+        && previousCache
+        && catalogEntryCount(previousCache) > 0
+      ) {
+        console.warn('[Compendium] Raw fallback rebuild empty — keeping previous cache');
+        return previousCache;
+      }
+      return built;
+    }
+
+    const fallback = loadGlobalFallback(true);
+    const global: CompendiumGlobalDoc = fallback ?? {
+      _id: 'global',
+      monsters: [],
+      items: [],
+      spells: [],
+      deleted: [],
+      images: {},
+      imagesData: {},
+      entryImages: {},
+      lastUpdated: new Date(0).toISOString(),
+    };
+    const policy = await readVisibilityPolicyFast();
+    const deleted = global.deleted ?? [];
+    const [monsters, items, spells] = await Promise.all([
+      mergeMonsters(await loadBaseMonsters(), [], [], deleted, global, true),
+      mergeItems(await loadBaseItems(), [], [], deleted, global, true),
+      mergeSpells(await loadBaseSpells(), [], [], deleted, global, true),
+    ]);
+    monsters.sort((a, b) => a.name.localeCompare(b.name));
+    items.sort((a, b) => a.name.localeCompare(b.name));
+    spells.sort((a, b) => a.name.localeCompare(b.name));
+    const built: CatalogCache = {
+      rev: `${isoTimestamp(global.lastUpdated)}:${policyCacheRev(policy)}:fallback`,
+      policy,
+      monsters,
+      items,
+      spells,
+    };
+    if (
+      catalogEntryCount(built) === 0
+      && previousCache
+      && catalogEntryCount(previousCache) > 0
+    ) {
+      console.warn('[Compendium] Fallback rebuild empty — keeping previous cache');
+      return previousCache;
+    }
+    return built;
+  }
+}
+
+/** Rebuild catalog after a write while keeping the previous cache if rebuild fails. */
+export async function rebuildCatalogCacheAtomic(): Promise<CatalogCache> {
+  const previousCache = catalogCache;
+  catalogBuildPromise = null;
+  const built = await executeCatalogBuild(previousCache);
+  catalogCache = built;
+  return built;
+}
+
+export function getCatalogRevision(): string | null {
+  return catalogCache?.rev ?? null;
+}
+
+export function getCatalogEntryCounts(): { monsters: number; items: number; spells: number } | null {
+  if (!catalogCache) return null;
+  return {
+    monsters: catalogCache.monsters.length,
+    items: catalogCache.items.length,
+    spells: catalogCache.spells.length,
+  };
+}
+
 function policyCacheRev(policy: CompendiumVisibilityPolicy): string {
   return `${policy.lockedSources.join('\0')}::${policy.publishedEntryKeys.join('\0')}`;
 }
@@ -384,122 +534,7 @@ async function buildCatalogCache(): Promise<CatalogCache> {
   catalogBuildPromise = (async () => {
     const previousCache = catalogCache;
     try {
-      const raw = await readRawGlobalDoc({ includeImageData: false });
-      const global = normalizeOwlbearGlobalDoc({
-        ...raw,
-        images: {},
-        imagesData: {},
-        entryImages: {},
-      });
-      setCachedGlobalLite(global);
-      const effectiveRev = isoTimestamp(global.lastUpdated);
-      const deleted = raw.deleted ?? [];
-
-      const policy = policyFromRaw(raw);
-      const [monsters, items, spells] = await Promise.all([
-        mergeMonsters(await loadBaseMonsters(), raw.overrideMonsters ?? [], raw.monsters ?? [], deleted, global, true),
-        mergeItems(await loadBaseItems(), raw.overrideItems ?? [], raw.items ?? [], deleted, global, true),
-        mergeSpells(await loadBaseSpells(), raw.overrideSpells ?? [], raw.spells ?? [], deleted, global, true),
-      ]);
-      monsters.sort((a, b) => a.name.localeCompare(b.name));
-      items.sort((a, b) => a.name.localeCompare(b.name));
-      spells.sort((a, b) => a.name.localeCompare(b.name));
-      const built: CatalogCache = {
-        rev: `${effectiveRev}:${policyCacheRev(policy)}`,
-        policy,
-        monsters,
-        items,
-        spells,
-      };
-      if (
-        catalogEntryCount(built) === 0
-        && previousCache
-        && catalogEntryCount(previousCache) > 0
-      ) {
-        console.warn('[Compendium] Rebuild produced empty catalog — keeping previous cache');
-        return previousCache;
-      }
-      catalogCache = built;
-      return catalogCache;
-    } catch (err) {
-      console.warn(
-        '[Compendium] Catalog build failed, using local fallback:',
-        err instanceof Error ? err.message : err,
-      );
-      const rawFallback = loadRawGlobalFallback();
-      if (rawFallback) {
-        const policy = policyFromRaw(rawFallback);
-        const deleted = rawFallback.deleted ?? [];
-        const global = normalizeOwlbearGlobalDoc({
-          ...rawFallback,
-          images: {},
-          imagesData: {},
-          entryImages: {},
-        });
-        const [monsters, items, spells] = await Promise.all([
-          mergeMonsters(await loadBaseMonsters(), rawFallback.overrideMonsters ?? [], rawFallback.monsters ?? [], deleted, global, true),
-          mergeItems(await loadBaseItems(), rawFallback.overrideItems ?? [], rawFallback.items ?? [], deleted, global, true),
-          mergeSpells(await loadBaseSpells(), rawFallback.overrideSpells ?? [], rawFallback.spells ?? [], deleted, global, true),
-        ]);
-        monsters.sort((a, b) => a.name.localeCompare(b.name));
-        items.sort((a, b) => a.name.localeCompare(b.name));
-        spells.sort((a, b) => a.name.localeCompare(b.name));
-        const built: CatalogCache = {
-          rev: `${isoTimestamp(global.lastUpdated)}:${policyCacheRev(policy)}:raw-fallback`,
-          policy,
-          monsters,
-          items,
-          spells,
-        };
-        if (
-          catalogEntryCount(built) === 0
-          && previousCache
-          && catalogEntryCount(previousCache) > 0
-        ) {
-          console.warn('[Compendium] Raw fallback rebuild empty — keeping previous cache');
-          return previousCache;
-        }
-        catalogCache = built;
-        return catalogCache;
-      }
-
-      const fallback = loadGlobalFallback(true);
-      const global: CompendiumGlobalDoc = fallback ?? {
-        _id: 'global',
-        monsters: [],
-        items: [],
-        spells: [],
-        deleted: [],
-        images: {},
-        imagesData: {},
-        entryImages: {},
-        lastUpdated: new Date(0).toISOString(),
-      };
-      const policy = await readVisibilityPolicyFast();
-      const deleted = global.deleted ?? [];
-      const [monsters, items, spells] = await Promise.all([
-        mergeMonsters(await loadBaseMonsters(), [], [], deleted, global, true),
-        mergeItems(await loadBaseItems(), [], [], deleted, global, true),
-        mergeSpells(await loadBaseSpells(), [], [], deleted, global, true),
-      ]);
-      monsters.sort((a, b) => a.name.localeCompare(b.name));
-      items.sort((a, b) => a.name.localeCompare(b.name));
-      spells.sort((a, b) => a.name.localeCompare(b.name));
-      const built: CatalogCache = {
-        rev: `${isoTimestamp(global.lastUpdated)}:${policyCacheRev(policy)}:fallback`,
-        policy,
-        monsters,
-        items,
-        spells,
-      };
-      if (
-        catalogEntryCount(built) === 0
-        && previousCache
-        && catalogEntryCount(previousCache) > 0
-      ) {
-        console.warn('[Compendium] Fallback rebuild empty — keeping previous cache');
-        return previousCache;
-      }
+      const built = await executeCatalogBuild(previousCache);
       catalogCache = built;
       return catalogCache;
     } finally {
@@ -566,6 +601,9 @@ export async function warmCompendiumCatalog(): Promise<void> {
 }
 
 registerCompendiumCacheInvalidator(invalidateCatalogCache);
+registerCatalogRebuild(async () => {
+  await rebuildCatalogCacheAtomic();
+});
 
 /** Human-readable label for a raw source string (PDF filename, etc.). */
 export function formatSourceLabel(raw: string): string {
@@ -729,6 +767,8 @@ export async function getSyncStatus(): Promise<CompendiumSyncStatus> {
     lastUpdated: stamps.length ? newestIso(...stamps) : new Date(0).toISOString(),
     storage: mongoConnected ? 'mongodb' : hasLocal || hasExtension ? 'local' : 'unavailable',
     mongoConnected,
+    catalogRev: getCatalogRevision() ?? undefined,
+    entryCounts: getCatalogEntryCounts() ?? undefined,
   };
 }
 
@@ -928,7 +968,6 @@ async function upsertCollectionSpell(entry: OwlbearSpell, isCustom: boolean) {
 }
 
 async function findMonsterAfterSave(name: string): Promise<CompendiumMonster | null> {
-  invalidateCatalogCache();
   const bySlug = await getMonsterById(slugify(name));
   if (bySlug) return bySlug;
   const merged = await getCachedMonsters();
@@ -1072,10 +1111,27 @@ export async function saveSpell(
   return saved;
 }
 
+export interface CompendiumBulkSaveResult<T> {
+  entries: T[];
+  persist: PersistRawGlobalDocResult;
+}
+
 export async function saveMonstersBulk(
   entries: Array<{ entry: OwlbearMonster; opts?: CompendiumSaveOptions }>,
-): Promise<CompendiumMonster[]> {
-  if (entries.length === 0) return [];
+): Promise<CompendiumBulkSaveResult<CompendiumMonster>> {
+  if (entries.length === 0) {
+    const raw = await readRawGlobalDoc({ includeImageData: false });
+    return {
+      entries: [],
+      persist: {
+        doc: normalizeOwlbearGlobalDoc(raw),
+        lastUpdated: raw.lastUpdated
+          ? new Date(raw.lastUpdated as string | Date).toISOString()
+          : new Date(0).toISOString(),
+        mongoPersisted: true,
+      },
+    };
+  }
 
   const prepared = entries.map(({ entry, opts }) => {
     const saveAs = resolveSaveAs(entry, opts);
@@ -1083,7 +1139,7 @@ export async function saveMonstersBulk(
     return { payload, saveAs, opts };
   });
 
-  await saveOwlbearEntriesBulk(
+  const persist = await saveOwlbearEntriesBulk(
     'monster',
     prepared.map(({ payload, saveAs, opts }) => ({
       entry: payload,
@@ -1099,14 +1155,28 @@ export async function saveMonstersBulk(
     prepared.map(({ payload, saveAs }) => ({ entry: payload, isCustom: saveAs === 'homebrew' })),
   );
 
-  invalidateCatalogCache();
-  return prepared.map(({ payload, saveAs }) => monsterPayloadFromSave(payload, saveAs));
+  return {
+    entries: prepared.map(({ payload, saveAs }) => monsterPayloadFromSave(payload, saveAs)),
+    persist,
+  };
 }
 
 export async function saveItemsBulk(
   entries: Array<{ entry: OwlbearItem; opts?: CompendiumSaveOptions }>,
-): Promise<CompendiumItem[]> {
-  if (entries.length === 0) return [];
+): Promise<CompendiumBulkSaveResult<CompendiumItem>> {
+  if (entries.length === 0) {
+    const raw = await readRawGlobalDoc({ includeImageData: false });
+    return {
+      entries: [],
+      persist: {
+        doc: normalizeOwlbearGlobalDoc(raw),
+        lastUpdated: raw.lastUpdated
+          ? new Date(raw.lastUpdated as string | Date).toISOString()
+          : new Date(0).toISOString(),
+        mongoPersisted: true,
+      },
+    };
+  }
 
   const prepared = entries.map(({ entry, opts }) => {
     const saveAs = resolveSaveAs(entry, opts);
@@ -1114,7 +1184,7 @@ export async function saveItemsBulk(
     return { payload, saveAs, opts };
   });
 
-  await saveOwlbearEntriesBulk(
+  const persist = await saveOwlbearEntriesBulk(
     'item',
     prepared.map(({ payload, saveAs, opts }) => ({
       entry: payload,
@@ -1130,14 +1200,28 @@ export async function saveItemsBulk(
     prepared.map(({ payload, saveAs }) => ({ entry: payload, isCustom: saveAs === 'homebrew' })),
   );
 
-  invalidateCatalogCache();
-  return prepared.map(({ payload, saveAs }) => itemPayloadFromSave(payload, saveAs));
+  return {
+    entries: prepared.map(({ payload, saveAs }) => itemPayloadFromSave(payload, saveAs)),
+    persist,
+  };
 }
 
 export async function saveSpellsBulk(
   entries: Array<{ entry: OwlbearSpell; opts?: CompendiumSaveOptions }>,
-): Promise<CompendiumSpell[]> {
-  if (entries.length === 0) return [];
+): Promise<CompendiumBulkSaveResult<CompendiumSpell>> {
+  if (entries.length === 0) {
+    const raw = await readRawGlobalDoc({ includeImageData: false });
+    return {
+      entries: [],
+      persist: {
+        doc: normalizeOwlbearGlobalDoc(raw),
+        lastUpdated: raw.lastUpdated
+          ? new Date(raw.lastUpdated as string | Date).toISOString()
+          : new Date(0).toISOString(),
+        mongoPersisted: true,
+      },
+    };
+  }
 
   const prepared = entries.map(({ entry, opts }) => {
     const saveAs = resolveSaveAs(entry, opts);
@@ -1145,7 +1229,7 @@ export async function saveSpellsBulk(
     return { payload, saveAs, opts };
   });
 
-  await saveOwlbearEntriesBulk(
+  const persist = await saveOwlbearEntriesBulk(
     'spell',
     prepared.map(({ payload, saveAs, opts }) => ({
       entry: payload,
@@ -1161,8 +1245,10 @@ export async function saveSpellsBulk(
     prepared.map(({ payload, saveAs }) => ({ entry: payload, isCustom: saveAs === 'homebrew' })),
   );
 
-  invalidateCatalogCache();
-  return prepared.map(({ payload, saveAs }) => spellPayloadFromSave(payload, saveAs));
+  return {
+    entries: prepared.map(({ payload, saveAs }) => spellPayloadFromSave(payload, saveAs)),
+    persist,
+  };
 }
 
 export async function deleteCompendiumEntry(

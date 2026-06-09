@@ -14,7 +14,7 @@ import {
   loadRawGlobalFallback,
   saveGlobalFallback,
 } from './compendiumGlobalFallback';
-import { notifyCompendiumChanged } from './compendiumChangeNotify';
+import { notifyCompendiumChanged, notifyCompendiumCatalogRebuilt } from './compendiumChangeNotify';
 import { invalidateMongoImageRefsCache } from './compendiumGlobal';
 import { invalidateCompendiumImageMemoryCache, setCachedImageBlob, setCachedImageRef, setCachedEntrySlice } from './compendiumImageMemoryCache';
 import { markCompendiumWritePending } from './compendiumMongoWatch';
@@ -275,6 +275,14 @@ export async function reconcileRawGlobalStorage(): Promise<void> {
   }
 }
 
+export type PersistNotifyMode = 'full' | 'rebuild' | 'none';
+
+export interface PersistRawGlobalDocResult {
+  doc: CompendiumGlobalDoc;
+  lastUpdated: string;
+  mongoPersisted: boolean;
+}
+
 /** Read the raw Owlbear Mongo/fallback doc (override* arrays intact). */
 export type RawGlobalDocReadOptions = {
   /** When false, skip multi-MB image blobs (catalog/list only). Default true for writes. */
@@ -346,18 +354,24 @@ export async function readRawGlobalDoc(opts: RawGlobalDocReadOptions = {}): Prom
   return promise;
 }
 
-export async function persistRawGlobalDoc(raw: OwlbearRawGlobalDoc): Promise<CompendiumGlobalDoc> {
+export async function persistRawGlobalDoc(
+  raw: OwlbearRawGlobalDoc,
+  opts?: { notify?: PersistNotifyMode },
+): Promise<PersistRawGlobalDocResult> {
   const lastUpdated = new Date().toISOString();
   const payload = normalizeRawDoc({ ...raw, lastUpdated });
+  const notify = opts?.notify ?? 'full';
 
   const col = await getCollection<OwlbearRawGlobalDoc>('data');
+  let mongoPersisted = false;
   if (col && !isMongoCircuitOpen()) {
     markCompendiumWritePending();
     try {
-      await withMongoTimeout(
+      const result = await withMongoTimeout(
         col.updateOne({ _id: 'global' }, { $set: payload }, { upsert: true }),
         12_000,
       );
+      mongoPersisted = result.acknowledged;
     } catch (err) {
       console.warn(
         '[Compendium] Mongo write failed, saving locally:',
@@ -371,19 +385,30 @@ export async function persistRawGlobalDoc(raw: OwlbearRawGlobalDoc): Promise<Com
   if (!col && !saved && isMongoCircuitOpen()) {
     throw new Error('MongoDB unavailable and failed to write local compendium mirror');
   }
-  notifyCompendiumChanged(lastUpdated);
+
+  if (notify === 'rebuild') {
+    await notifyCompendiumCatalogRebuilt(lastUpdated);
+  } else if (notify === 'full') {
+    notifyCompendiumChanged(lastUpdated);
+  }
+
   if (process.env['COMPENDIUM_MONGO_ONLY'] !== '1') {
     void notifyExtensionDataChanged(lastUpdated);
   }
-  return normalized;
+  return { doc: normalized, lastUpdated, mongoPersisted };
 }
 
-function invalidateWriteCaches(): void {
+/** Clear read caches before a write without wiping the warm catalog. */
+function clearRawGlobalReadCaches(): void {
   invalidateExtensionGlobalCache();
   clearGlobalFallbackCache();
   clearRawGlobalDocInflight();
-  invalidateCompendiumCaches();
   invalidateMongoImageRefsCache();
+}
+
+function invalidateWriteCaches(): void {
+  clearRawGlobalReadCaches();
+  invalidateCompendiumCaches();
 }
 
 export interface OwlbearSaveOptions {
@@ -451,17 +476,24 @@ function applyOwlbearEntryToRaw(
 export async function saveOwlbearEntriesBulk(
   kind: CompendiumKind,
   entries: Array<{ entry: OwlbearMonster | OwlbearItem | OwlbearSpell; opts: OwlbearSaveOptions }>,
-): Promise<CompendiumGlobalDoc> {
+): Promise<PersistRawGlobalDocResult> {
   if (entries.length === 0) {
-    return normalizeOwlbearGlobalDoc(await readRawGlobalDoc());
+    const raw = await readRawGlobalDoc({ includeImageData: false });
+    return {
+      doc: normalizeOwlbearGlobalDoc(raw),
+      lastUpdated: raw.lastUpdated
+        ? new Date(raw.lastUpdated as string | Date).toISOString()
+        : new Date(0).toISOString(),
+      mongoPersisted: true,
+    };
   }
   return enqueueCompendiumWrite(async () => {
-    invalidateWriteCaches();
-    const raw = await readRawGlobalDoc();
+    clearRawGlobalReadCaches();
+    const raw = await readRawGlobalDoc({ includeImageData: false });
     for (const { entry, opts } of entries) {
       applyOwlbearEntryToRaw(raw, kind, entry, opts);
     }
-    return persistRawGlobalDoc(raw);
+    return persistRawGlobalDoc(raw, { notify: 'rebuild' });
   });
 }
 
@@ -470,7 +502,8 @@ export async function saveOwlbearEntry(
   entry: OwlbearMonster | OwlbearItem | OwlbearSpell,
   opts: OwlbearSaveOptions,
 ): Promise<CompendiumGlobalDoc> {
-  return saveOwlbearEntriesBulk(kind, [{ entry, opts }]);
+  const result = await saveOwlbearEntriesBulk(kind, [{ entry, opts }]);
+  return result.doc;
 }
 
 export interface OwlbearDeleteOptions {
@@ -484,8 +517,8 @@ export async function deleteOwlbearEntry(
   opts: OwlbearDeleteOptions,
 ): Promise<CompendiumGlobalDoc> {
   return enqueueCompendiumWrite(async () => {
-    invalidateWriteCaches();
-    const raw = await readRawGlobalDoc();
+    clearRawGlobalReadCaches();
+    const raw = await readRawGlobalDoc({ includeImageData: false });
     const fields = KIND_FIELDS[kind];
 
     const inCustom = getList(raw, fields.custom).some((e) => namesMatch(e.name, name));
@@ -500,7 +533,7 @@ export async function deleteOwlbearEntry(
       setList(raw, fields.custom, removeEntry(getList(raw, fields.custom), name));
     }
 
-    return persistRawGlobalDoc(raw);
+    return persistRawGlobalDoc(raw, { notify: 'rebuild' }).then((r) => r.doc);
   });
 }
 
@@ -643,6 +676,6 @@ export async function saveOwlbearImageFields(
       setList(raw, fields.custom, applyImage(getList(raw, fields.custom)));
     }
 
-    return persistRawGlobalDoc(raw);
+    return persistRawGlobalDoc(raw, { notify: 'rebuild' }).then((r) => r.doc);
   });
 }

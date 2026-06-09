@@ -13,6 +13,13 @@ function isoTimestamp(value: string | Date | undefined): string {
   return value instanceof Date ? value.toISOString() : value;
 }
 
+/** Registered by compendiumSync — rebuilds in-memory catalog before clients refetch. */
+let catalogRebuildFn: (() => Promise<void>) | null = null;
+
+export function registerCatalogRebuild(rebuild: () => Promise<void>): void {
+  catalogRebuildFn = rebuild;
+}
+
 /** Visibility policy changed only — keep merged catalog cache, refresh policy + notify clients. */
 export function notifyCompendiumPolicyChanged(
   lastUpdated: string | Date | undefined,
@@ -30,5 +37,26 @@ export function notifyCompendiumChanged(lastUpdated: string | Date | undefined):
   invalidateExtensionGlobalCache();
   clearGlobalFallbackCache();
   clearRawGlobalDocInflight();
+  broadcastCompendiumUpdated(isoTimestamp(lastUpdated));
+}
+
+/** Data changed — rebuild catalog atomically, then notify clients (no empty cache window). */
+export async function notifyCompendiumCatalogRebuilt(
+  lastUpdated: string | Date | undefined,
+): Promise<void> {
+  clearRawGlobalDocInflight();
+  if (catalogRebuildFn) {
+    try {
+      await catalogRebuildFn();
+    } catch (err) {
+      console.warn(
+        '[Compendium] Catalog rebuild after write failed:',
+        err instanceof Error ? err.message : err,
+      );
+      invalidateCompendiumCaches();
+    }
+  } else {
+    invalidateCompendiumCaches();
+  }
   broadcastCompendiumUpdated(isoTimestamp(lastUpdated));
 }

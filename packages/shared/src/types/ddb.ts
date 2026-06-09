@@ -185,8 +185,15 @@ export interface DdbLibraryImportResult {
     ddbId: number;
     compendiumId: string;
     name: string;
+    source?: string;
   }>;
   errors: Array<{ id: number; message: string }>;
+  /** Catalog revision after import (server rebuild complete). */
+  catalogRev?: string;
+  /** Book sources unlocked for players after import. */
+  sourcesUnlocked?: string[];
+  /** True when Mongo acknowledged the global doc write. */
+  mongoPersisted?: boolean;
 }
 
 export interface DdbRollBridgePayload {

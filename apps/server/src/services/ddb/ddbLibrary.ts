@@ -19,8 +19,9 @@ import {
   normalizeDdbSpellSummary,
   normalizeDdbSpellToCompendium,
 } from './ddbContentNormalize';
-import { saveItemsBulk, saveMonstersBulk, saveSpellsBulk } from '../compendiumSync';
+import { getCatalogRevision, saveItemsBulk, saveMonstersBulk, saveSpellsBulk } from '../compendiumSync';
 import { unlockCompendiumSource } from '../compendiumSourcePolicy';
+import { splitCompendiumSources } from '@grimoire/shared';
 import { redis } from '../../lib/redis';
 import {
   fetchDdbCatalog,
@@ -372,12 +373,14 @@ function resolveImportSaveOpts(entry: { source?: string }) {
     : { saveAs: 'homebrew' as const };
 }
 
-async function unlockImportedBookSources(catalog: DdbCatalog, sourceIds: number[]): Promise<void> {
+async function unlockImportedBookSources(catalog: DdbCatalog, sourceIds: number[]): Promise<string[]> {
+  const unlocked: string[] = [];
   for (const sourceId of sourceIds) {
     const label = catalog.sourceNames.get(sourceId);
     if (!label || label === 'D&D Beyond') continue;
     try {
       await unlockCompendiumSource(label);
+      unlocked.push(label);
     } catch (err) {
       console.warn(
         '[DDB Import] Could not unlock compendium source:',
@@ -386,6 +389,66 @@ async function unlockImportedBookSources(catalog: DdbCatalog, sourceIds: number[
       );
     }
   }
+  return unlocked;
+}
+
+async function unlockImportedBookSourceLabels(sourceLabels: string[]): Promise<string[]> {
+  const unlocked: string[] = [];
+  for (const label of [...new Set(sourceLabels)]) {
+    if (!label || label === 'D&D Beyond' || label.toLowerCase() === 'custom') continue;
+    try {
+      await unlockCompendiumSource(label);
+      unlocked.push(label);
+    } catch (err) {
+      console.warn(
+        '[DDB Import] Could not unlock compendium source:',
+        label,
+        err instanceof Error ? err.message : err,
+      );
+    }
+  }
+  return unlocked;
+}
+
+function sourceLabelsFromEntries(entries: Array<{ source?: string }>): string[] {
+  const labels = new Set<string>();
+  for (const entry of entries) {
+    if (!entry.source) continue;
+    for (const part of splitCompendiumSources(entry.source)) {
+      if (part && part !== 'D&D Beyond' && part.toLowerCase() !== 'custom') {
+        labels.add(part);
+      }
+    }
+  }
+  return [...labels];
+}
+
+type ImportBatchMeta = {
+  mongoPersisted: boolean;
+  savedEntries: Array<{ source?: string }>;
+};
+
+async function finalizeDdbImportResult(
+  result: DdbLibraryImportResult,
+  catalog: DdbCatalog,
+  meta: ImportBatchMeta,
+  sourceIds?: number[],
+): Promise<DdbLibraryImportResult> {
+  if (result.imported.length === 0) return result;
+
+  const unlockedFromIds = sourceIds?.length
+    ? await unlockImportedBookSources(catalog, sourceIds)
+    : [];
+  const unlockedFromLabels = await unlockImportedBookSourceLabels(
+    sourceLabelsFromEntries(meta.savedEntries),
+  );
+
+  return {
+    ...result,
+    catalogRev: getCatalogRevision() ?? undefined,
+    sourcesUnlocked: [...new Set([...unlockedFromIds, ...unlockedFromLabels])],
+    mongoPersisted: meta.mongoPersisted,
+  };
 }
 
 async function importMonsterIds(
@@ -396,6 +459,8 @@ async function importMonsterIds(
 ): Promise<DdbLibraryImportResult> {
   const imported: DdbLibraryImportResult['imported'] = [];
   const errors: DdbLibraryImportResult['errors'] = [];
+  let mongoPersisted = true;
+  const savedEntries: Array<{ source?: string }> = [];
 
   for (let i = 0; i < ids.length; i += IMPORT_BATCH) {
     const batchIds = ids.slice(i, i + IMPORT_BATCH);
@@ -437,15 +502,18 @@ async function importMonsterIds(
     if (pending.length === 0) continue;
 
     try {
-      const saved = await saveMonstersBulk(
+      const batch = await saveMonstersBulk(
         pending.map(({ entry }) => ({ entry, opts: resolveImportSaveOpts(entry) })),
       );
-      for (let j = 0; j < saved.length; j++) {
+      mongoPersisted = mongoPersisted && batch.persist.mongoPersisted;
+      savedEntries.push(...batch.entries);
+      for (let j = 0; j < batch.entries.length; j++) {
         imported.push({
           kind: 'monster',
           ddbId: pending[j].ddbId,
-          compendiumId: saved[j].id,
-          name: saved[j].name,
+          compendiumId: batch.entries[j].id,
+          name: batch.entries[j].name,
+          source: batch.entries[j].source,
         });
       }
     } catch (err) {
@@ -455,7 +523,12 @@ async function importMonsterIds(
       }
     }
   }
-  return { imported, errors };
+  return finalizeDdbImportResult(
+    { imported, errors },
+    catalog,
+    { mongoPersisted, savedEntries },
+    sourceId != null ? [sourceId] : undefined,
+  );
 }
 
 async function importSpellIds(
@@ -467,6 +540,8 @@ async function importSpellIds(
 ): Promise<DdbLibraryImportResult> {
   const imported: DdbLibraryImportResult['imported'] = [];
   const errors: DdbLibraryImportResult['errors'] = [];
+  let mongoPersisted = true;
+  const savedEntries: Array<{ source?: string }> = [];
   const pool = await loadSpellPool(ctx, campaignId);
   const byId = poolById(pool);
 
@@ -501,15 +576,18 @@ async function importSpellIds(
     if (pending.length === 0) continue;
 
     try {
-      const saved = await saveSpellsBulk(
+      const batch = await saveSpellsBulk(
         pending.map(({ entry }) => ({ entry, opts: resolveImportSaveOpts(entry) })),
       );
-      for (let j = 0; j < saved.length; j++) {
+      mongoPersisted = mongoPersisted && batch.persist.mongoPersisted;
+      savedEntries.push(...batch.entries);
+      for (let j = 0; j < batch.entries.length; j++) {
         imported.push({
           kind: 'spell',
           ddbId: pending[j].ddbId,
-          compendiumId: saved[j].id,
-          name: saved[j].name,
+          compendiumId: batch.entries[j].id,
+          name: batch.entries[j].name,
+          source: batch.entries[j].source,
         });
       }
     } catch (err) {
@@ -519,7 +597,12 @@ async function importSpellIds(
       }
     }
   }
-  return { imported, errors };
+  return finalizeDdbImportResult(
+    { imported, errors },
+    catalog,
+    { mongoPersisted, savedEntries },
+    sourceId != null ? [sourceId] : undefined,
+  );
 }
 
 async function importItemIds(
@@ -531,6 +614,8 @@ async function importItemIds(
 ): Promise<DdbLibraryImportResult> {
   const imported: DdbLibraryImportResult['imported'] = [];
   const errors: DdbLibraryImportResult['errors'] = [];
+  let mongoPersisted = true;
+  const savedEntries: Array<{ source?: string }> = [];
   const pool = await loadItemPool(ctx, campaignId);
   const byId = poolById(pool);
 
@@ -565,15 +650,18 @@ async function importItemIds(
     if (pending.length === 0) continue;
 
     try {
-      const saved = await saveItemsBulk(
+      const batch = await saveItemsBulk(
         pending.map(({ entry }) => ({ entry, opts: resolveImportSaveOpts(entry) })),
       );
-      for (let j = 0; j < saved.length; j++) {
+      mongoPersisted = mongoPersisted && batch.persist.mongoPersisted;
+      savedEntries.push(...batch.entries);
+      for (let j = 0; j < batch.entries.length; j++) {
         imported.push({
           kind: 'item',
           ddbId: pending[j].ddbId,
-          compendiumId: saved[j].id,
-          name: saved[j].name,
+          compendiumId: batch.entries[j].id,
+          name: batch.entries[j].name,
+          source: batch.entries[j].source,
         });
       }
     } catch (err) {
@@ -583,7 +671,12 @@ async function importItemIds(
       }
     }
   }
-  return { imported, errors };
+  return finalizeDdbImportResult(
+    { imported, errors },
+    catalog,
+    { mongoPersisted, savedEntries },
+    sourceId != null ? [sourceId] : undefined,
+  );
 }
 
 
@@ -643,9 +736,17 @@ export async function importAllDdbLibraryFromSource(
 }
 
 function mergeImportResults(...parts: DdbLibraryImportResult[]): DdbLibraryImportResult {
+  const imported = parts.flatMap((p) => p.imported);
+  const errors = parts.flatMap((p) => p.errors);
+  if (imported.length === 0) {
+    return { imported, errors };
+  }
   return {
-    imported: parts.flatMap((p) => p.imported),
-    errors: parts.flatMap((p) => p.errors),
+    imported,
+    errors,
+    sourcesUnlocked: [...new Set(parts.flatMap((p) => p.sourcesUnlocked ?? []))],
+    mongoPersisted: parts.every((p) => p.mongoPersisted !== false),
+    catalogRev: getCatalogRevision() ?? parts.map((p) => p.catalogRev).filter(Boolean).pop(),
   };
 }
 
@@ -678,9 +779,5 @@ export async function importAllDdbLibraryFromSources(
     }
   }
   const merged = mergeImportResults(...results);
-  if (merged.imported.length > 0) {
-    const catalog = await loadDdbCatalog(ctx);
-    await unlockImportedBookSources(catalog, unique);
-  }
   return merged;
 }

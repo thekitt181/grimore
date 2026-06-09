@@ -114,3 +114,24 @@ export async function refetchCompendiumAfterLock(qc: QueryClient): Promise<void>
     type: 'active',
   });
 }
+
+/** Wait for catalog to be ready after DDB import (server rebuilds before responding). */
+export async function refetchCompendiumAfterImport(
+  qc: QueryClient,
+  opts?: { catalogRev?: string },
+): Promise<void> {
+  await qc.refetchQueries({
+    predicate: (query) => query.queryKey[0] === 'compendium',
+    type: 'active',
+  });
+
+  if (!opts?.catalogRev) return;
+
+  const deadline = Date.now() + 8_000;
+  while (Date.now() < deadline) {
+    const status = qc.getQueryData<{ catalogRev?: string }>(['compendium', 'sync-status']);
+    if (status?.catalogRev === opts.catalogRev) return;
+    await qc.refetchQueries({ queryKey: ['compendium', 'sync-status'], type: 'active' });
+    await new Promise((r) => setTimeout(r, 400));
+  }
+}
