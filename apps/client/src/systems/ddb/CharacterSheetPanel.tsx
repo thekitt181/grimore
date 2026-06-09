@@ -18,6 +18,7 @@ import { parsePcActions } from './ddbActionParser';
 import { pullDdbHpToToken } from './useDdbHpSync';
 import { emitItemUpdate } from '@/systems/scene/sceneSync';
 import { useDdbStore } from './ddbStore';
+import { ddbPanelPosition, ddbPanelWidth } from './ddbTokenUtils';
 
 const GOLD = 'var(--color-accent-gold)';
 const BD = 'var(--color-border)';
@@ -456,9 +457,9 @@ function SheetShell({
       title={title}
       subtitle="D&D Beyond character"
       onClose={onClose}
-      defaultPosition={{ x: 16, y: 64 }}
-      width={420}
-      maxHeight="85vh"
+      defaultPosition={ddbPanelPosition(16, 56)}
+      width={ddbPanelWidth(420)}
+      maxHeight="calc(100vh - 72px)"
       zIndex={150}
       footer="Powered by D&D Beyond"
     >

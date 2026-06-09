@@ -11,6 +11,7 @@ import { RollModeBar } from '@/systems/dice/RollModeBar';
 import { PanelAttackResult, PanelTargetPicker } from '@/systems/combat/TokenPanelCombatFlow';
 import { TokenActionCard } from '@/systems/combat/TokenActionCard';
 import { hasMeaningfulActionDetail, stripHtmlText } from '@/systems/compendium/actionDetail';
+import { ddbPanelPosition, ddbPanelWidth } from './ddbTokenUtils';
 
 const GOLD = 'var(--color-accent-gold)';
 
@@ -52,9 +53,9 @@ export function PcActionsPanel({ token, onClose }: { token: TokenItem; onClose: 
         title={token.name}
         subtitle="Character actions"
         onClose={onClose}
-        defaultPosition={{ x: Math.max(16, window.innerWidth - 360), y: 64 }}
-        width={320}
-        maxHeight="calc(100vh - 80px)"
+        defaultPosition={ddbPanelPosition(Math.max(16, window.innerWidth - 360), 56)}
+        width={ddbPanelWidth(320)}
+        maxHeight="calc(100vh - 72px)"
         zIndex={160}
       >
         <div className="px-2 py-1 border-b shrink-0" style={{ borderColor: 'var(--color-border)' }}>

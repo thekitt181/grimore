@@ -27,6 +27,7 @@ import { CharacterImportModal } from '@/systems/ddb/CharacterImportModal';
 import { DdbEncounterPanel } from '@/systems/ddb/DdbEncounterPanel';
 import { DdbLibraryPanel } from '@/systems/ddb/DdbLibraryPanel';
 import { DdbLinkPanel } from '@/systems/ddb/DdbLinkPanel';
+import { MobileDdbTokenBar } from '@/systems/ddb/MobileDdbTokenBar';
 import { useDdbStore } from '@/systems/ddb/ddbStore';
 import { useDdbHpSync } from '@/systems/ddb/useDdbHpSync';
 import { useDdbSocket } from '@/systems/ddb/useDdbSocket';
@@ -237,6 +238,7 @@ export function SessionPage() {
         {/* Map canvas + overlay panels */}
         <div className="flex-1 relative overflow-hidden">
           <MapCanvas />
+          <MobileDdbTokenBar />
 
           {!isGM && !hasMapItems && !isConnected && (
             <div

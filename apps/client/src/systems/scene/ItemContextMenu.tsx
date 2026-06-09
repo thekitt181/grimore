@@ -3,7 +3,7 @@ import { useItemStore } from './store/itemStore';
 import { useMapStore } from '@/systems/map/store/mapStore';
 import { useSessionStore } from '@/store/sessionStore';
 import { clientToWorld } from './sceneRefs';
-import { hitTest, isMapGroundHit, isCanvasContextEvent } from './hitTest';
+import { hitTest, isMapGroundHit, isCanvasContextEvent, isCanvasPointerEvent } from './hitTest';
 import { emitItemAdd, emitItemUpdate, emitItemRemove } from './sceneSync';
 import { syncGridToMap } from './syncGridToMap';
 import type { SessionUser } from '@grimoire/shared';
@@ -21,6 +21,8 @@ import { revealHandoutToPlayers } from '@/systems/compendium/revealHandout';
 import { useHandoutViewerStore } from '@/systems/compendium/handoutViewerStore';
 import { getPersistSessionId } from './sessionPersistence';
 import { DraggablePanel } from '@/components/DraggablePanel';
+import { isMobileClient } from '@/lib/socket';
+import { isDdbPcToken } from '@/systems/ddb/ddbTokenUtils';
 
 const CONDITIONS = [
   'Blinded', 'Charmed', 'Deafened', 'Frightened', 'Grappled', 'Incapacitated',
@@ -38,6 +40,42 @@ interface MapMenuState {
 }
 type MenuState = ItemMenuState | MapMenuState;
 
+function resolveContextMenu(clientX: number, clientY: number, isGM: boolean): MenuState | null {
+  const { x: wx, y: wy } = clientToWorld(clientX, clientY);
+  const all = Object.values(useItemStore.getState().items) as Item[];
+  const visible = isGM ? all : all.filter((i) => i.visible);
+  const hit = hitTest(visible, wx, wy, { includeLocked: true });
+
+  if (isMapGroundHit(hit)) {
+    if (!isGM) return null;
+    useItemStore.getState().clearSelection();
+    return { x: clientX, y: clientY, kind: 'map', worldX: wx, worldY: wy };
+  }
+
+  if (!hit) return null;
+
+  if (!isGM) {
+    if (hit.type === 'handout') {
+      if (!useItemStore.getState().selectedIds.includes(hit.id)) {
+        useItemStore.getState().select([hit.id], 'set');
+      }
+      return { x: clientX, y: clientY, kind: 'item' };
+    }
+    if (hit.type === 'token' && isDdbPcToken(hit as TokenItem)) {
+      if (!useItemStore.getState().selectedIds.includes(hit.id)) {
+        useItemStore.getState().select([hit.id], 'set');
+      }
+      return { x: clientX, y: clientY, kind: 'item' };
+    }
+    return null;
+  }
+
+  if (!useItemStore.getState().selectedIds.includes(hit.id)) {
+    useItemStore.getState().select([hit.id], 'set');
+  }
+  return { x: clientX, y: clientY, kind: 'item' };
+}
+
 interface FloatingPickerState {
   kind: 'monster' | 'item';
   worldX: number;
@@ -49,10 +87,6 @@ interface FloatingPickerState {
 const MENU_WIDTH = 210;
 const MAP_MENU_WIDTH = 220;
 const VIEWPORT_PAD = 8;
-
-function isDdbPcToken(token: TokenItem): boolean {
-  return Boolean(token.isPc || token.ddbCharacterId);
-}
 
 function clampMenuPosition(
   anchorX: number,
@@ -91,51 +125,72 @@ export function ItemContextMenu() {
   useEffect(() => {
     function onContextMenu(e: MouseEvent) {
       if (!isCanvasContextEvent(e)) return;
-      const { x: wx, y: wy } = clientToWorld(e.clientX, e.clientY);
-      const all = Object.values(useItemStore.getState().items) as Item[];
-      const visible = isGM ? all : all.filter((i) => i.visible);
-      const hit = hitTest(visible, wx, wy, { includeLocked: true });
-
-      if (isMapGroundHit(hit)) {
-        if (!isGM) {
-          setMenu(null);
-          return;
-        }
-        e.preventDefault();
-        useItemStore.getState().clearSelection();
-        setMenu({ x: e.clientX, y: e.clientY, kind: 'map', worldX: wx, worldY: wy });
-        return;
-      }
-
-      if (!hit) return;
-      if (!isGM) {
-        if (hit.type === 'handout') {
-          e.preventDefault();
-          if (!useItemStore.getState().selectedIds.includes(hit.id)) {
-            useItemStore.getState().select([hit.id], 'set');
-          }
-          setMenu({ x: e.clientX, y: e.clientY, kind: 'item' });
-          return;
-        }
-        if (hit.type === 'token' && isDdbPcToken(hit as TokenItem)) {
-          e.preventDefault();
-          if (!useItemStore.getState().selectedIds.includes(hit.id)) {
-            useItemStore.getState().select([hit.id], 'set');
-          }
-          setMenu({ x: e.clientX, y: e.clientY, kind: 'item' });
-          return;
-        }
-        setMenu(null);
-        return;
-      }
+      const next = resolveContextMenu(e.clientX, e.clientY, isGM);
+      if (!next) return;
       e.preventDefault();
-      if (!useItemStore.getState().selectedIds.includes(hit.id)) {
-        useItemStore.getState().select([hit.id], 'set');
-      }
-      setMenu({ x: e.clientX, y: e.clientY, kind: 'item' });
+      setMenu(next);
     }
     window.addEventListener('contextmenu', onContextMenu);
     return () => window.removeEventListener('contextmenu', onContextMenu);
+  }, [isGM]);
+
+  // Long-press on mobile (no right-click)
+  useEffect(() => {
+    if (!isMobileClient()) return;
+
+    const LONG_PRESS_MS = 520;
+    const MOVE_CANCEL_PX = 14;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let originX = 0;
+    let originY = 0;
+    let activePointerId: number | null = null;
+
+    function clearTimer() {
+      if (timer) {
+        clearTimeout(timer);
+        timer = null;
+      }
+      activePointerId = null;
+    }
+
+    function onPointerDown(e: PointerEvent) {
+      if (!isCanvasPointerEvent(e) || e.pointerType === 'mouse') return;
+      clearTimer();
+      originX = e.clientX;
+      originY = e.clientY;
+      activePointerId = e.pointerId;
+
+      timer = setTimeout(() => {
+        timer = null;
+        const next = resolveContextMenu(originX, originY, isGM);
+        if (!next) return;
+        navigator.vibrate?.(12);
+        setMenu(next);
+      }, LONG_PRESS_MS);
+    }
+
+    function onPointerMove(e: PointerEvent) {
+      if (timer == null || e.pointerId !== activePointerId) return;
+      if (Math.hypot(e.clientX - originX, e.clientY - originY) > MOVE_CANCEL_PX) {
+        clearTimer();
+      }
+    }
+
+    function onPointerUp(e: PointerEvent) {
+      if (e.pointerId === activePointerId) clearTimer();
+    }
+
+    window.addEventListener('pointerdown', onPointerDown);
+    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerup', onPointerUp);
+    window.addEventListener('pointercancel', onPointerUp);
+    return () => {
+      clearTimer();
+      window.removeEventListener('pointerdown', onPointerDown);
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', onPointerUp);
+      window.removeEventListener('pointercancel', onPointerUp);
+    };
   }, [isGM]);
 
   // Close on outside click

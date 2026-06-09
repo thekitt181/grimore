@@ -47,12 +47,17 @@ export function isMapGroundHit(hit: Item | null): boolean {
   return hit === null || hit.type === 'map';
 }
 
-/** Canvas or a child of the Pixi view (right-click target varies by browser). */
-export function isCanvasContextEvent(e: MouseEvent): boolean {
+/** Canvas or a child of the Pixi view (pointer / right-click target varies by browser). */
+export function isCanvasPointerEvent(e: { target: EventTarget | null }): boolean {
   const canvas = sceneRefs.app.current?.canvas;
   if (!canvas) return false;
   const target = e.target as Node | null;
-  return target === canvas || canvas.contains(target);
+  return target === canvas || (target != null && canvas.contains(target));
+}
+
+/** @deprecated Use isCanvasPointerEvent */
+export function isCanvasContextEvent(e: MouseEvent): boolean {
+  return isCanvasPointerEvent(e);
 }
 
 /** Axis-aligned bounding box of an item's rotated corners (world space). */

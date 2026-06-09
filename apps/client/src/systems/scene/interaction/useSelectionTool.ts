@@ -12,6 +12,10 @@ import { useLiveTransformStore } from '../store/liveTransformStore';
 import { pickHandle } from './useTransformControls';
 import type { Item, HandoutItem } from '../types';
 import { useHandoutViewerStore } from '@/systems/compendium/handoutViewerStore';
+import { isMobileClient } from '@/lib/socket';
+import { isDdbPcToken } from '@/systems/ddb/ddbTokenUtils';
+import { useDdbStore } from '@/systems/ddb/ddbStore';
+import type { TokenItem } from '../types';
 
 interface MoveState {
   ids: string[];
@@ -225,6 +229,12 @@ export function useSelectionTool(appReady: boolean) {
       if (onTop?.type === 'handout') {
         e.preventDefault();
         useHandoutViewerStore.getState().openHandout(onTop as HandoutItem);
+        return;
+      }
+
+      if (onTop?.type === 'token' && isDdbPcToken(onTop as TokenItem) && isMobileClient()) {
+        e.preventDefault();
+        useDdbStore.getState().openSheet(onTop as TokenItem);
         return;
       }
 
