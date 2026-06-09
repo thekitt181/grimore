@@ -6,6 +6,11 @@ import { useItemStore, getActiveMap } from '@/systems/scene/store/itemStore';
 import { emitItemUpdate } from '@/systems/scene/sceneSync';
 import type { MapItem, WallSegment } from '@/systems/scene/types';
 
+const WALL_COLOR = 0xef4444;
+const WALL_STROKE = 3;
+const MIN_POINT_DIST = 6;
+const MIN_SEGMENT_LEN = 4;
+
 function distToSegment(px: number, py: number, seg: WallSegment): number {
   const { a, b } = seg;
   const dx = b.x - a.x;
@@ -18,8 +23,34 @@ function distToSegment(px: number, py: number, seg: WallSegment): number {
   return Math.hypot(px - cx, py - cy);
 }
 
+function toMapLocal(wx: number, wy: number, map: MapItem) {
+  return { x: wx - map.x, y: wy - map.y };
+}
+
+function worldPointsToWallSegments(worldPts: number[], map: MapItem): WallSegment[] {
+  const segs: WallSegment[] = [];
+  for (let i = 0; i < worldPts.length - 2; i += 2) {
+    const a = toMapLocal(worldPts[i]!, worldPts[i + 1]!, map);
+    const b = toMapLocal(worldPts[i + 2]!, worldPts[i + 3]!, map);
+    if (Math.hypot(b.x - a.x, b.y - a.y) < MIN_SEGMENT_LEN) continue;
+    segs.push({ a, b });
+  }
+  return segs;
+}
+
+function drawWallPreview(g: Graphics, pts: number[]) {
+  g.clear();
+  if (pts.length < 4) return;
+  g.setStrokeStyle({ width: WALL_STROKE, color: WALL_COLOR, alpha: 0.95 });
+  g.moveTo(pts[0]!, pts[1]!);
+  for (let i = 2; i < pts.length; i += 2) {
+    g.lineTo(pts[i]!, pts[i + 1]!);
+  }
+  g.stroke();
+}
+
 /**
- * GM wall tool — drag to place LOS segments on the active map.
+ * GM wall tool — freehand draw LOS walls on the active map.
  * Right-click removes the nearest wall segment.
  */
 export function useWallTool(appReady = false) {
@@ -48,9 +79,8 @@ export function useWallTool(appReady = false) {
     }
     const overlay = overlayRef.current;
 
-    let dragging = false;
-    let startWX = 0;
-    let startWY = 0;
+    let drawing = false;
+    const pts: number[] = [];
 
     function toWorld(clientX: number, clientY: number) {
       const rect = canvas.getBoundingClientRect();
@@ -58,10 +88,6 @@ export function useWallTool(appReady = false) {
         x: (clientX - rect.left - world!.x) / world!.scale.x,
         y: (clientY - rect.top - world!.y) / world!.scale.y,
       };
-    }
-
-    function toMapLocal(wx: number, wy: number, map: MapItem) {
-      return { x: wx - map.x, y: wy - map.y };
     }
 
     function onDown(e: PointerEvent) {
@@ -89,38 +115,51 @@ export function useWallTool(appReady = false) {
       if (e.button !== 0) return;
       e.preventDefault();
       const wp = toWorld(e.clientX, e.clientY);
-      startWX = wp.x;
-      startWY = wp.y;
-      dragging = true;
+      drawing = true;
+      pts.length = 0;
+      pts.push(wp.x, wp.y);
       canvas.setPointerCapture(e.pointerId);
     }
 
     function onMove(e: PointerEvent) {
-      if (!dragging) return;
+      if (!drawing) return;
       const wp = toWorld(e.clientX, e.clientY);
-      overlay.clear();
-      overlay.setStrokeStyle({ width: 3, color: 0xef4444, alpha: 0.95 });
-      overlay.moveTo(startWX, startWY);
-      overlay.lineTo(wp.x, wp.y);
-      overlay.stroke();
+      const lastX = pts[pts.length - 2];
+      const lastY = pts[pts.length - 1];
+      if (
+        pts.length >= 2
+        && Math.hypot(wp.x - lastX!, wp.y - lastY!) < MIN_POINT_DIST
+      ) {
+        return;
+      }
+      pts.push(wp.x, wp.y);
+      drawWallPreview(overlay, pts);
     }
 
     function onUp(e: PointerEvent) {
-      if (!dragging) return;
-      dragging = false;
+      if (!drawing) return;
+      drawing = false;
       overlay.clear();
 
       const wp = toWorld(e.clientX, e.clientY);
-      const len = Math.hypot(wp.x - startWX, wp.y - startWY);
-      if (len < 8) return;
+      const lastX = pts[pts.length - 2];
+      const lastY = pts[pts.length - 1];
+      if (
+        pts.length < 2
+        || Math.hypot(wp.x - lastX!, wp.y - lastY!) >= MIN_POINT_DIST
+      ) {
+        pts.push(wp.x, wp.y);
+      }
+
+      if (pts.length < 4) return;
 
       const map = getActiveMap();
       if (!map) return;
 
-      const a = toMapLocal(startWX, startWY, map);
-      const b = toMapLocal(wp.x, wp.y, map);
-      const seg: WallSegment = { a, b };
-      const walls = [...(map.walls ?? []), seg];
+      const newSegs = worldPointsToWallSegments(pts, map);
+      if (newSegs.length === 0) return;
+
+      const walls = [...(map.walls ?? []), ...newSegs];
       const patch: Partial<MapItem> = { walls };
       useItemStore.getState().updateItem(map.id, patch);
       emitItemUpdate([{ id: map.id, patch }]);
@@ -131,6 +170,7 @@ export function useWallTool(appReady = false) {
     canvas.addEventListener('pointerdown', onDown);
     canvas.addEventListener('pointermove', onMove);
     canvas.addEventListener('pointerup', onUp);
+    canvas.addEventListener('pointercancel', onUp);
     canvas.addEventListener('contextmenu', onContextMenu);
 
     return () => {
@@ -138,7 +178,9 @@ export function useWallTool(appReady = false) {
       canvas.removeEventListener('pointerdown', onDown);
       canvas.removeEventListener('pointermove', onMove);
       canvas.removeEventListener('pointerup', onUp);
+      canvas.removeEventListener('pointercancel', onUp);
       canvas.removeEventListener('contextmenu', onContextMenu);
+      overlay.clear();
     };
   }, [appReady, activeTool]);
 }

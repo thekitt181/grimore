@@ -15,7 +15,7 @@ const GM_TOOLS: ToolDef[] = [
   { id: 'pan',       label: 'Pan',     icon: '✋',  title: 'Pan the map (middle-mouse or this tool)' },
   { id: 'fog-reveal',label: 'Reveal',  icon: '☀',  title: 'Reveal fog cells' },
   { id: 'fog-hide',  label: 'Hide',    icon: '🌑', title: 'Hide fog cells' },
-  { id: 'wall',      label: 'Wall',    icon: '🧱', title: 'Draw LOS walls (right-click to erase)' },
+  { id: 'wall',      label: 'Wall',    icon: '🧱', title: 'Freehand draw LOS walls — GM only (right-click to erase)' },
   { id: 'measure',   label: 'Measure', icon: '📏', title: 'Measure distance' },
   { id: 'calibrate', label: 'Calibrate', icon: '⊹', title: 'Calibrate grid — drag a rectangle over one cell' },
 ];

@@ -30,9 +30,11 @@ export function setFogVisibleForSession(visible: boolean): void {
 export function applySessionFogActive(active: boolean): void {
   const role = useSessionStore.getState().myRole;
   useMapStore.getState().setSessionFogActive(active);
-  // Players mirror GM fog on/off; GMs keep local fogEnabled for prep tools.
   if (role !== 'GM') {
     useMapStore.getState().setFogEnabled(active);
+  } else if (active) {
+    // Secondary GM clients (e.g. phone) need fogEnabled so the overlay renders on desktop too.
+    useMapStore.getState().setFogEnabled(true);
   }
 }
 

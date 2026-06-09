@@ -1,11 +1,8 @@
 import {
   Container,
   Graphics,
-  RenderTexture,
-  Sprite,
   type Renderer,
 } from 'pixi.js';
-import { isMobileClient } from '@/lib/socket';
 import type { Item, MapItem } from '@/systems/scene/types';
 import { cellKey } from './store/mapStore';
 import {
@@ -27,23 +24,14 @@ export interface FogDrawOptions {
 }
 
 export interface FogLayers {
-  sprite: Sprite;
-  rt: RenderTexture | null;
   compose: Container;
-  base: Graphics;
-  erase: Graphics;
+  fog: Graphics;
   refog: Graphics;
-  refogClip: Graphics;
 }
 
 const FOG_COLOR = 0x000000;
 
 const layerCache = new WeakMap<Container, FogLayers>();
-
-/** Mobile GPUs often fail erase-blend when rendering into a RenderTexture. */
-function fogUsesDirectCompose(): boolean {
-  return isMobileClient();
-}
 
 function parseCellKey(key: string): { x: number; y: number } | null {
   const [sx, sy] = key.split(',');
@@ -55,55 +43,36 @@ function parseCellKey(key: string): { x: number; y: number } | null {
 
 export function ensureFogLayers(fc: Container): FogLayers {
   const cached = layerCache.get(fc);
-  if (cached && !cached.sprite.destroyed) return cached;
+  if (cached && !cached.compose.destroyed) return cached;
 
   fc.removeChildren();
 
   const compose = new Container();
   compose.label = 'fog-compose';
-  const base = new Graphics();
-  base.label = 'fog-base';
-  const erase = new Graphics();
-  erase.label = 'fog-erase';
-  erase.blendMode = 'erase';
+  const fog = new Graphics();
+  fog.label = 'fog-fill';
   const refog = new Graphics();
   refog.label = 'fog-refog';
-  const refogClip = new Graphics();
-  refogClip.label = 'fog-refog-clip';
-  refogClip.blendMode = 'erase';
-  compose.addChild(base, erase, refog, refogClip);
+  compose.addChild(fog, refog);
+  fc.addChild(compose);
 
-  const sprite = new Sprite();
-  sprite.label = 'fog-sprite';
-  fc.addChild(sprite);
-
-  const layers: FogLayers = { sprite, rt: null, compose, base, erase, refog, refogClip };
+  const layers: FogLayers = { compose, fog, refog };
   layerCache.set(fc, layers);
   return layers;
 }
 
 export function clearFogLayers(layers: FogLayers): void {
-  layers.base.clear();
-  layers.erase.clear();
+  layers.fog.clear();
   layers.refog.clear();
-  layers.refogClip.clear();
 }
 
-function ensureRenderTarget(layers: FogLayers, width: number, height: number): void {
-  if (!layers.rt || layers.rt.width !== width || layers.rt.height !== height) {
-    layers.rt?.destroy(true);
-    layers.rt = RenderTexture.create({ width, height });
-    layers.sprite.texture = layers.rt;
-  }
-}
-
-function erasePolygon(g: Graphics, poly: { x: number; y: number }[]): void {
+function cutPolygon(g: Graphics, poly: { x: number; y: number }[]): void {
   if (poly.length < 3) return;
-  g.poly(poly.flatMap((p) => [p.x, p.y])).fill({ color: 0xffffff, alpha: 1 });
+  g.poly(poly.flatMap((p) => [p.x, p.y])).cut();
 }
 
-function eraseCell(g: Graphics, cx: number, cy: number, gridSize: number): void {
-  g.rect(cx * gridSize, cy * gridSize, gridSize, gridSize).fill({ color: 0xffffff, alpha: 1 });
+function cutCell(g: Graphics, cx: number, cy: number, gridSize: number): void {
+  g.rect(cx * gridSize, cy * gridSize, gridSize, gridSize).cut();
 }
 
 /** True when all 4 orthogonal neighbors are also visible — safe to grid-fill without squaring the cone edge. */
@@ -118,8 +87,7 @@ function isInteriorVisibleCell(cx: number, cy: number, visible: Set<string>): bo
 }
 
 /**
- * Build fog graphics (smooth cone erase + optional refog).
- * Smooth cone from polygon erase; grid cells only patch interior ray gaps.
+ * Build fog using shape cutouts (no erase blend — works on mobile + desktop WebGL).
  */
 function paintFogGraphics(
   layers: FogLayers,
@@ -127,13 +95,10 @@ function paintFogGraphics(
   opts: FogDrawOptions,
 ): void {
   const { width, height, gridSize } = map;
-  const { base, erase, refog } = layers;
+  const { fog, refog } = layers;
 
-  base.clear();
-  base.rect(0, 0, width, height).fill({ color: FOG_COLOR, alpha: 1 });
-
-  erase.clear();
-  erase.blendMode = 'erase';
+  fog.clear();
+  refog.clear();
 
   const visionTokens = getVisionTokens(
     opts.items,
@@ -147,9 +112,11 @@ function paintFogGraphics(
     ? losPolygons(map, visionTokens, gridSize, { directional: true })
     : [];
 
+  fog.rect(0, 0, width, height);
+
   if (polys.length > 0) {
     for (const poly of polys) {
-      erasePolygon(erase, poly);
+      cutPolygon(fog, poly);
     }
 
     const visibleCells = opts.isGM
@@ -166,25 +133,20 @@ function paintFogGraphics(
     for (const key of visibleCells) {
       const cell = parseCellKey(key);
       if (!cell || !isInteriorVisibleCell(cell.x, cell.y, visibleCells)) continue;
-      eraseCell(erase, cell.x, cell.y, gridSize);
+      cutCell(fog, cell.x, cell.y, gridSize);
     }
   } else {
-    // No vision cones — punch out GM-revealed cells for GM and players alike.
-    const cols = Math.ceil(width / gridSize);
-    const rows = Math.ceil(height / gridSize);
-    for (let cx = 0; cx < cols; cx++) {
-      for (let cy = 0; cy < rows; cy++) {
+    for (let cx = 0; cx < Math.ceil(width / gridSize); cx++) {
+      for (let cy = 0; cy < Math.ceil(height / gridSize); cy++) {
         if (!opts.revealedCells.has(cellKey(cx, cy))) continue;
-        eraseCell(erase, cx, cy, gridSize);
+        cutCell(fog, cx, cy, gridSize);
       }
     }
   }
 
-  refog.clear();
-  layers.refogClip.clear();
+  fog.fill({ color: FOG_COLOR, alpha: 1 });
 
-  // GM-revealed fog: cover unrevealed LOS cells with grid fog while keeping the smooth cone edge
-  // from the polygon erase above (do not refog the whole cone then punch square holes).
+  // Re-fog unrevealed LOS cells inside the cone while keeping smooth outer edges.
   if (!opts.isGM && opts.revealedCells.size > 0 && polys.length > 0) {
     const coneCells = losVisibleCellKeys(map, visionTokens, gridSize, { directional: true });
     for (const key of coneCells) {
@@ -198,43 +160,16 @@ function paintFogGraphics(
   }
 }
 
-function mountFogOutput(fc: Container, layers: FogLayers, map: MapItem, opts: FogDrawOptions): void {
-  const alpha = opts.isGM ? 0.5 : 1;
-  const { width, height } = map;
-
-  if (fogUsesDirectCompose()) {
-    layers.sprite.visible = false;
-    if (layers.compose.parent !== fc) {
-      fc.addChild(layers.compose);
-    }
-    layers.compose.visible = true;
-    layers.compose.alpha = alpha;
-    return;
-  }
-
-  layers.compose.visible = false;
-  if (layers.compose.parent === fc) {
-    fc.removeChild(layers.compose);
-  }
-  layers.sprite.visible = true;
-  layers.sprite.alpha = alpha;
-  layers.sprite.width = width;
-  layers.sprite.height = height;
-}
-
 /** Draw fog-of-war (map-local coordinates). */
 export function drawFogLayers(
   layers: FogLayers,
   map: MapItem,
   opts: FogDrawOptions,
-  renderer: Renderer | null,
+  _renderer: Renderer | null,
 ): void {
   clearFogLayers(layers);
 
-  const fc = layers.sprite.parent as Container | null;
-
   if (!opts.visible) {
-    layers.sprite.visible = false;
     layers.compose.visible = false;
     return;
   }
@@ -244,20 +179,8 @@ export function drawFogLayers(
   if (width <= 0 || height <= 0 || gridSize <= 0) return;
 
   paintFogGraphics(layers, map, opts);
-
-  if (!fc) return;
-
-  mountFogOutput(fc, layers, map, opts);
-
-  if (!fogUsesDirectCompose()) {
-    if (!renderer) return;
-    ensureRenderTarget(layers, width, height);
-    renderer.render({
-      container: layers.compose,
-      target: layers.rt!,
-      clear: true,
-    });
-  }
+  layers.compose.visible = true;
+  layers.compose.alpha = opts.isGM ? 0.5 : 1;
 }
 
 /** @deprecated Use drawFogLayers. */

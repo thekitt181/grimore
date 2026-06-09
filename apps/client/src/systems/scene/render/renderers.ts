@@ -94,13 +94,13 @@ export function wallVisualSignature(mapId: string, walls: WallSegment[]): string
   return `walls|${mapId}|${walls.map((w) => `${w.a.x},${w.a.y},${w.b.x},${w.b.y}`).join(';')}`;
 }
 
-/** LOS walls — rendered in a sibling overlay so they sit above the map image/grid. */
+/** LOS walls — GM-only overlay above the map image/grid. */
 export function renderMapWalls(c: Container, walls: WallSegment[]) {
   c.removeChildren();
   if (walls.length === 0) return;
   const wallGfx = new Graphics();
   wallGfx.label = 'walls';
-  wallGfx.setStrokeStyle({ width: 3, color: 0xef4444, alpha: 0.85 });
+  wallGfx.setStrokeStyle({ width: 3, color: 0xef4444, alpha: 0.85, cap: 'round', join: 'round' });
   for (const w of walls) {
     wallGfx.moveTo(w.a.x, w.a.y);
     wallGfx.lineTo(w.b.x, w.b.y);

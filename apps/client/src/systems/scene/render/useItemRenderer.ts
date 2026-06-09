@@ -157,12 +157,10 @@ export function useItemRenderer(
         wc.position.set(map.x + map.width / 2, map.y + map.height / 2);
         wc.rotation = (map.rotation * Math.PI) / 180;
         wc.zIndex = wallDisplayZIndex(map.zIndex);
-        if (map.visible) {
+        // LOS walls affect everyone; only the GM sees the wall overlay.
+        if (gm) {
           wc.visible = true;
-          wc.alpha = 1;
-        } else if (gm) {
-          wc.visible = true;
-          wc.alpha = 0.35;
+          wc.alpha = map.visible ? 1 : 0.35;
         } else {
           wc.visible = false;
         }
