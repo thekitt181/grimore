@@ -1,11 +1,19 @@
 /** Comma-separated browser origins allowed for CORS + Socket.io (e.g. app + www). */
 export function getClientOrigins(): string[] {
-  const raw = process.env['CLIENT_URLS'] ?? process.env['CLIENT_URL'] ?? 'http://localhost:5173';
-  const origins = raw
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean);
-  return origins.length > 0 ? origins : ['http://localhost:5173'];
+  const raw = process.env['CLIENT_URLS'] ?? process.env['CLIENT_URL'];
+  if (raw?.trim()) {
+    const origins = raw
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (origins.length > 0) return origins;
+  }
+
+  // Render sets RENDER_EXTERNAL_URL automatically (e.g. https://grimore.onrender.com)
+  const renderUrl = process.env['RENDER_EXTERNAL_URL']?.trim().replace(/\/$/, '');
+  if (renderUrl) return [renderUrl];
+
+  return ['http://localhost:5173'];
 }
 
 export function getPrimaryClientUrl(): string {
