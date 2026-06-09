@@ -23,7 +23,7 @@ const GM_TOOLS: ToolDef[] = [
 
 const PLAYER_TOOLS: ToolDef[] = [
   { id: 'select',  label: 'Select',  icon: '↖',  title: 'Select & move your token' },
-  { id: 'pan',     label: 'Pan',     icon: '✋',  title: 'Pan the map' },
+  { id: 'pan',     label: 'Pan',     icon: '✋',  title: 'Pan the map (pinch to zoom)' },
   { id: 'measure', label: 'Measure', icon: '📏', title: 'Measure distance' },
 ];
 
