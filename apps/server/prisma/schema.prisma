@@ -1,0 +1,286 @@
+// GrimoireVTT — Prisma Schema
+// Phase 1: Foundation
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Users ────────────────────────────────────────────────────────────────────
+
+model User {
+  id        String   @id @default(cuid())
+  clerkId   String   @unique
+  username  String
+  avatarUrl String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  ownedCampaigns      Campaign[]           @relation("CampaignGM")
+  memberships         CampaignMember[]
+  sessionLogs         SessionLog[]
+  chatMessages        ChatMessage[]
+  ddbConnection       DdbConnection?
+  ddbCharacterCaches  DdbCharacterCache[]
+
+  @@index([clerkId])
+}
+
+// ─── D&D Beyond ───────────────────────────────────────────────────────────────
+
+model DdbConnection {
+  id               String    @id @default(cuid())
+  userId           String    @unique
+  cobaltEncrypted  String
+  linkedAt         DateTime  @default(now())
+  lastValidatedAt  DateTime?
+  syncHpToDdb      Boolean   @default(true)
+  rollBridgeEnabled Boolean  @default(false)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model DdbCharacterCache {
+  id              String   @id @default(cuid())
+  userId          String
+  ddbCharacterId  Int
+  name            String
+  campaignId      Int?
+  snapshot        Json
+  updateId        Int      @default(0)
+  lastSyncedAt    DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, ddbCharacterId])
+  @@index([userId])
+}
+
+model DdbCampaignLink {
+  id             String @id @default(cuid())
+  campaignId     String @unique
+  ddbCampaignId  Int
+  linkedAt       DateTime @default(now())
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+}
+
+// ─── Campaigns ────────────────────────────────────────────────────────────────
+
+model Campaign {
+  id           String   @id @default(cuid())
+  name         String
+  description  String?
+  coverImageUrl String?
+  system       String   @default("D&D 5e")
+  inviteCode   String   @unique
+  gmId         String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Relations
+  gm           User             @relation("CampaignGM", fields: [gmId], references: [id])
+  members      CampaignMember[]
+  sessions     GameSession[]
+  scenes       Scene[]
+  encounters      Encounter[]
+  handouts        Handout[]
+  maps            GameMap[]
+  notes           Note[]
+  ddbCampaignLink DdbCampaignLink?
+
+  @@index([gmId])
+  @@index([inviteCode])
+}
+
+model CampaignMember {
+  id         String   @id @default(cuid())
+  campaignId String
+  userId     String
+  role       MemberRole @default(PLAYER)
+  joinedAt   DateTime @default(now())
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([campaignId, userId])
+  @@index([campaignId])
+  @@index([userId])
+}
+
+enum MemberRole {
+  GM
+  PLAYER
+}
+
+// ─── Sessions ─────────────────────────────────────────────────────────────────
+
+model GameSession {
+  id            String    @id @default(cuid())
+  campaignId    String
+  activeSceneId String?
+  isActive      Boolean   @default(true)
+  startedAt     DateTime  @default(now())
+  endedAt       DateTime?
+
+  campaign Campaign     @relation(fields: [campaignId], references: [id])
+  logs     SessionLog[]
+  messages ChatMessage[]
+
+  @@index([campaignId])
+}
+
+model SessionLog {
+  id        String   @id @default(cuid())
+  sessionId String
+  userId    String?
+  type      LogType
+  data      Json
+  timestamp DateTime @default(now())
+
+  session GameSession @relation(fields: [sessionId], references: [id])
+  user    User?       @relation(fields: [userId], references: [id])
+
+  @@index([sessionId])
+}
+
+enum LogType {
+  DICE_ROLL
+  HP_CHANGE
+  INITIATIVE
+  TOKEN_MOVE
+  SCENE_CHANGE
+  HANDOUT_REVEAL
+  CHAT_MESSAGE
+  SYSTEM
+}
+
+// ─── Scenes ───────────────────────────────────────────────────────────────────
+
+model Scene {
+  id              String  @id @default(cuid())
+  campaignId      String
+  name            String
+  mapId           String?
+  ambientAudioUrl String?
+  backgroundVideoUrl String?
+  lightingPreset  String  @default("default")
+  weatherOverlay  String?
+  sortOrder       Int     @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  campaign Campaign  @relation(fields: [campaignId], references: [id])
+  map      GameMap?  @relation(fields: [mapId], references: [id])
+
+  @@index([campaignId])
+}
+
+// ─── Maps ─────────────────────────────────────────────────────────────────────
+
+model GameMap {
+  id         String  @id @default(cuid())
+  campaignId String
+  name       String
+  imageUrl   String
+  gridType   GridType @default(SQUARE)
+  gridSize   Int      @default(50)
+  scale      String   @default("5ft")
+  width      Int      @default(0)
+  height     Int      @default(0)
+  tags       String[]
+  walls      Json     @default("[]")
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  campaign Campaign @relation(fields: [campaignId], references: [id])
+  scenes   Scene[]
+
+  @@index([campaignId])
+}
+
+enum GridType {
+  SQUARE
+  HEX
+}
+
+// ─── Encounters ───────────────────────────────────────────────────────────────
+
+model Encounter {
+  id         String   @id @default(cuid())
+  campaignId String
+  name       String
+  monsters   Json     @default("[]")
+  totalXp    Int      @default(0)
+  difficulty String?
+  createdAt  DateTime @default(now())
+
+  campaign Campaign @relation(fields: [campaignId], references: [id])
+
+  @@index([campaignId])
+}
+
+// ─── Handouts ─────────────────────────────────────────────────────────────────
+
+model Handout {
+  id         String      @id @default(cuid())
+  campaignId String
+  title      String
+  content    String?
+  imageUrl   String?
+  type       HandoutType @default(TEXT)
+  createdAt  DateTime    @default(now())
+
+  campaign Campaign @relation(fields: [campaignId], references: [id])
+
+  @@index([campaignId])
+}
+
+enum HandoutType {
+  TEXT
+  IMAGE
+  MAP_FRAGMENT
+  ITEM_CARD
+}
+
+// ─── Notes ────────────────────────────────────────────────────────────────────
+
+model Note {
+  id         String    @id @default(cuid())
+  campaignId String
+  title      String
+  content    String
+  isShared   Boolean   @default(false)
+  authorId   String?
+  sceneId    String?
+  npcId      String?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  campaign Campaign @relation(fields: [campaignId], references: [id])
+
+  @@index([campaignId])
+}
+
+// ─── Chat ─────────────────────────────────────────────────────────────────────
+
+model ChatMessage {
+  id          String   @id @default(cuid())
+  sessionId   String
+  senderId    String
+  type        String
+  content     String
+  rollData    Json?
+  whisperToId String?
+  timestamp   DateTime @default(now())
+
+  session  GameSession @relation(fields: [sessionId], references: [id])
+  sender   User        @relation(fields: [senderId], references: [id])
+
+  @@index([sessionId])
+}

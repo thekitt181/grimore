@@ -1,0 +1,560 @@
+import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
+import { useItemStore } from './store/itemStore';
+import { useMapStore } from '@/systems/map/store/mapStore';
+import { useSessionStore } from '@/store/sessionStore';
+import { clientToWorld } from './sceneRefs';
+import { hitTest, isMapGroundHit, isCanvasContextEvent } from './hitTest';
+import { emitItemAdd, emitItemUpdate, emitItemRemove } from './sceneSync';
+import { syncGridToMap } from './syncGridToMap';
+import type { Item, MapItem, TokenItem, HandoutItem } from './types';
+import { isHpHiddenFromPlayers } from './types';
+import { visionFeet, visionRadiusFromFeet } from '@/systems/map/fogLos';
+import { applyTokenHpToCombatants, applyTokenConditionsToCombatants } from '@/systems/initiative/initiativeTokenSync';
+import { useCombatStore } from '@/systems/combat/combatStore';
+import { useDdbStore } from '@/systems/ddb/ddbStore';
+import { applyDamage, applyHeal, readTempHp } from '@/systems/initiative/hpUtils';
+import { useCompendiumUiStore } from '@/systems/compendium/compendiumStore';
+import { SummonMonsterPicker } from '@/systems/compendium/SummonMonsterPicker';
+import { PlaceItemHandoutPicker } from '@/systems/compendium/PlaceItemHandoutPicker';
+import { revealHandoutToPlayers } from '@/systems/compendium/revealHandout';
+import { useHandoutViewerStore } from '@/systems/compendium/handoutViewerStore';
+import { getPersistSessionId } from './sessionPersistence';
+import { DraggablePanel } from '@/components/DraggablePanel';
+
+const CONDITIONS = [
+  'Blinded', 'Charmed', 'Deafened', 'Frightened', 'Grappled', 'Incapacitated',
+  'Invisible', 'Paralyzed', 'Petrified', 'Poisoned', 'Prone', 'Restrained',
+  'Stunned', 'Unconscious', 'Exhaustion',
+];
+
+interface ItemMenuState { x: number; y: number; kind: 'item' }
+interface MapMenuState {
+  x: number;
+  y: number;
+  kind: 'map';
+  worldX: number;
+  worldY: number;
+}
+type MenuState = ItemMenuState | MapMenuState;
+
+interface FloatingPickerState {
+  kind: 'monster' | 'item';
+  worldX: number;
+  worldY: number;
+  anchorX: number;
+  anchorY: number;
+}
+
+const MENU_WIDTH = 210;
+const MAP_MENU_WIDTH = 220;
+const VIEWPORT_PAD = 8;
+
+function clampMenuPosition(
+  anchorX: number,
+  anchorY: number,
+  menuWidth: number,
+  menuHeight: number,
+): { left: number; top: number } {
+  const maxLeft = window.innerWidth - menuWidth - VIEWPORT_PAD;
+  const maxTop = window.innerHeight - menuHeight - VIEWPORT_PAD;
+  return {
+    left: Math.max(VIEWPORT_PAD, Math.min(anchorX, maxLeft)),
+    top: Math.max(VIEWPORT_PAD, Math.min(anchorY, maxTop)),
+  };
+}
+
+export function ItemContextMenu() {
+  const [menu, setMenu] = useState<MenuState | null>(null);
+  const [floatingPicker, setFloatingPicker] = useState<FloatingPickerState | null>(null);
+  const [position, setPosition] = useState<{ left: number; top: number } | null>(null);
+  const openTokenActions = useCombatStore((s) => s.openTokenActions);
+  const openPcActions = useDdbStore((s) => s.openPcActions);
+  const openSheet = useDdbStore((s) => s.openSheet);
+  const setImportModalOpen = useDdbStore((s) => s.setImportModalOpen);
+  const ref = useRef<HTMLDivElement>(null);
+
+  const selectedIds = useItemStore((s) => s.selectedIds);
+  const items = useItemStore((s) => s.items);
+  const myRole = useSessionStore((s) => s.myRole);
+  const isGM = myRole === 'GM';
+
+  const selected = selectedIds.map((id) => items[id]).filter(Boolean) as Item[];
+  const single = selected.length === 1 ? selected[0]! : null;
+
+  // Right-click on canvas → item menu, or map menu (GM) with summon as an option
+  useEffect(() => {
+    function onContextMenu(e: MouseEvent) {
+      if (!isCanvasContextEvent(e)) return;
+      const { x: wx, y: wy } = clientToWorld(e.clientX, e.clientY);
+      const all = Object.values(useItemStore.getState().items) as Item[];
+      const visible = isGM ? all : all.filter((i) => i.visible);
+      const hit = hitTest(visible, wx, wy, { includeLocked: true });
+
+      if (isMapGroundHit(hit)) {
+        if (!isGM) {
+          setMenu(null);
+          return;
+        }
+        e.preventDefault();
+        useItemStore.getState().clearSelection();
+        setMenu({ x: e.clientX, y: e.clientY, kind: 'map', worldX: wx, worldY: wy });
+        return;
+      }
+
+      if (!hit) return;
+      e.preventDefault();
+      if (!isGM && hit.type === 'token' && (hit as TokenItem).monsterId) {
+        setMenu(null);
+        return;
+      }
+      if (!useItemStore.getState().selectedIds.includes(hit.id)) {
+        useItemStore.getState().select([hit.id], 'set');
+      }
+      setMenu({ x: e.clientX, y: e.clientY, kind: 'item' });
+    }
+    window.addEventListener('contextmenu', onContextMenu);
+    return () => window.removeEventListener('contextmenu', onContextMenu);
+  }, [isGM]);
+
+  // Close on outside click
+  useEffect(() => {
+    if (!menu) return;
+    function onDown(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setMenu(null);
+    }
+    window.addEventListener('pointerdown', onDown);
+    return () => window.removeEventListener('pointerdown', onDown);
+  }, [menu]);
+
+  // Measure actual menu height and keep it fully on-screen.
+  useLayoutEffect(() => {
+    if (!menu || !ref.current) {
+      setPosition(null);
+      return;
+    }
+    const el = ref.current;
+    const { width, height } = el.getBoundingClientRect();
+    setPosition(clampMenuPosition(menu.x, menu.y, width || MENU_WIDTH, height));
+  }, [menu, selected.length, single?.type, isGM]);
+
+  function openFloatingPicker(
+    kind: FloatingPickerState['kind'],
+    worldX: number,
+    worldY: number,
+    anchorX: number,
+    anchorY: number,
+  ) {
+    setMenu(null);
+    setFloatingPicker({ kind, worldX, worldY, anchorX, anchorY });
+  }
+
+  if (floatingPicker) {
+    const { kind, worldX, worldY, anchorX, anchorY } = floatingPicker;
+    const defaultPosition = {
+      x: Math.max(VIEWPORT_PAD, Math.min(anchorX, window.innerWidth - 280 - VIEWPORT_PAD)),
+      y: Math.max(VIEWPORT_PAD, anchorY),
+    };
+    return (
+      <DraggablePanel
+        title={kind === 'monster' ? 'Summon monster' : 'Place item handout'}
+        subtitle="Search compendium, click to place on map"
+        onClose={() => setFloatingPicker(null)}
+        defaultPosition={defaultPosition}
+        width={280}
+        zIndex={170}
+      >
+        {kind === 'monster' ? (
+          <SummonMonsterPicker
+            worldX={worldX}
+            worldY={worldY}
+            onSummon={() => setFloatingPicker(null)}
+          />
+        ) : (
+          <PlaceItemHandoutPicker
+            worldX={worldX}
+            worldY={worldY}
+            onPlace={() => setFloatingPicker(null)}
+          />
+        )}
+      </DraggablePanel>
+    );
+  }
+
+  if (!menu) return null;
+
+  function close() { setMenu(null); }
+
+  const menuWidth = menu.kind === 'map' ? MAP_MENU_WIDTH : MENU_WIDTH;
+
+  // ─── Map ground menu (GM) ───────────────────────────────────────────────────
+  if (menu.kind === 'map') {
+    const Btn = ({ label, onClick }: { label: string; onClick: () => void }) => (
+      <button
+        type="button"
+        onClick={onClick}
+        className="w-full text-left px-3 py-1.5 text-xs font-ui rounded transition-colors"
+        style={{ color: 'var(--color-text-primary)' }}
+        onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.background = 'var(--color-bg-tertiary)')}
+        onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.background = 'transparent')}
+      >
+        {label}
+      </button>
+    );
+
+    return (
+      <div
+        ref={ref}
+        className="fixed z-50 rounded-lg shadow-panel py-1 overflow-y-auto"
+        style={{
+          left: position?.left ?? menu.x,
+          top: position?.top ?? menu.y,
+          width: menuWidth,
+          maxHeight: `calc(100vh - ${VIEWPORT_PAD * 2}px)`,
+          visibility: position ? 'visible' : 'hidden',
+          background: 'var(--color-bg-secondary)',
+          border: '1px solid var(--color-border)',
+        }}
+        onContextMenu={(e) => e.preventDefault()}
+      >
+        <>
+          <div className="px-3 py-1 font-display text-xs tracking-wider uppercase" style={{ color: 'var(--color-accent-gold)' }}>
+            Map
+          </div>
+          <div className="gold-divider my-1" />
+          <Btn
+            label="🐉 Summon monster here"
+            onClick={() => openFloatingPicker('monster', menu.worldX, menu.worldY, menu.x, menu.y)}
+          />
+          <Btn
+            label="📜 Place item handout here"
+            onClick={() => openFloatingPicker('item', menu.worldX, menu.worldY, menu.x, menu.y)}
+          />
+          <Btn
+            label="📌 Paste"
+            onClick={() => {
+              const created = useItemStore.getState().paste();
+              created.forEach((c) => emitItemAdd(c));
+              close();
+            }}
+          />
+        </>
+      </div>
+    );
+  }
+
+  if (selected.length === 0) return null;
+
+  const ids = selected.map((i) => i.id);
+  const allLocked = selected.every((i) => i.locked);
+  const allHidden = selected.every((i) => !i.visible);
+
+  function patchAll(patch: Partial<Item>) {
+    const updates = ids.map((id) => ({ id, patch }));
+    useItemStore.getState().updateItems(updates);
+    emitItemUpdate(updates);
+  }
+
+  function toggleLock() { patchAll({ locked: !allLocked } as Partial<Item>); }
+  function toggleHide() { patchAll({ visible: allHidden } as Partial<Item>); close(); }
+
+  function duplicate() {
+    const created = useItemStore.getState().duplicate(ids);
+    created.forEach((c) => emitItemAdd(c));
+    close();
+  }
+  function copy() { useItemStore.getState().copy(ids); close(); }
+  function paste() {
+    const created = useItemStore.getState().paste();
+    created.forEach((c) => emitItemAdd(c));
+    close();
+  }
+  function del() {
+    useItemStore.getState().removeItems(ids);
+    emitItemRemove(ids);
+    close();
+  }
+
+  function zorder(action: 'front' | 'forward' | 'backward' | 'back') {
+    const store = useItemStore.getState();
+    for (const id of ids) {
+      if (action === 'front') store.bringToFront(id);
+      else if (action === 'forward') store.bringForward(id);
+      else if (action === 'backward') store.sendBackward(id);
+      else store.sendToBack(id);
+    }
+    const updates = ids.map((id) => ({ id, patch: { zIndex: useItemStore.getState().items[id]!.zIndex } as Partial<Item> }));
+    emitItemUpdate(updates);
+  }
+
+  const Btn = ({ label, onClick, danger }: { label: string; onClick: () => void; danger?: boolean }) => (
+    <button
+      onClick={onClick}
+      className="w-full text-left px-3 py-1.5 text-xs font-ui rounded transition-colors"
+      style={{ color: danger ? 'var(--color-accent-red-hot)' : 'var(--color-text-primary)' }}
+      onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.background = 'var(--color-bg-tertiary)')}
+      onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.background = 'transparent')}
+    >
+      {label}
+    </button>
+  );
+
+  return (
+    <div
+      ref={ref}
+      className="fixed z-50 rounded-lg shadow-panel py-1 overflow-y-auto"
+      style={{
+        left: position?.left ?? menu.x,
+        top: position?.top ?? menu.y,
+        width: MENU_WIDTH,
+        maxHeight: `calc(100vh - ${VIEWPORT_PAD * 2}px)`,
+        visibility: position ? 'visible' : 'hidden',
+        background: 'var(--color-bg-secondary)',
+        border: '1px solid var(--color-border)',
+      }}
+    >
+      <div className="px-3 py-1 font-display text-xs tracking-wider uppercase" style={{ color: 'var(--color-accent-gold)' }}>
+        {selected.length > 1 ? `${selected.length} items` : single?.type}
+      </div>
+      <div className="gold-divider my-1" />
+
+      <Btn label={allLocked ? '🔓 Unlock' : '🔒 Lock'} onClick={toggleLock} />
+      {isGM && <Btn label={allHidden ? '👁 Show to players' : '🙈 Hide from players'} onClick={toggleHide} />}
+      <Btn label="⧉ Duplicate" onClick={duplicate} />
+      <Btn label="📋 Copy" onClick={copy} />
+      <Btn label="📌 Paste" onClick={paste} />
+
+      <div className="gold-divider my-1" />
+      <Btn label="⤒ Bring to Front" onClick={() => zorder('front')} />
+      <Btn label="↑ Forward" onClick={() => zorder('forward')} />
+      <Btn label="↓ Backward" onClick={() => zorder('backward')} />
+      <Btn label="⤓ Send to Back" onClick={() => zorder('back')} />
+
+      {single?.type === 'map' && isGM && (
+        <>
+          <div className="gold-divider my-1" />
+          <Btn label="⊹ Auto-sync grid" onClick={() => {
+            void syncGridToMap(single as MapItem).then((r) => {
+              if (!r.ok) alert('Could not auto-detect grid. Try Calibrate (drag one cell).');
+              close();
+            });
+          }} />
+          <Btn label="⊹ Calibrate grid (manual)" onClick={() => { useMapStore.getState().setTool('calibrate'); close(); }} />
+        </>
+      )}
+
+      {single?.type === 'token' && isGM && <TokenExtras token={single as TokenItem} />}
+
+      {single?.type === 'token' && (single as TokenItem).monsterId && isGM && (
+        <>
+          <div className="gold-divider my-1" />
+          <Btn label="⚔ Monster actions" onClick={() => {
+            openTokenActions(single as TokenItem);
+            close();
+          }} />
+          <Btn label="📖 View stat block" onClick={() => {
+            useCompendiumUiStore.getState().setTab('monsters');
+            useCompendiumUiStore.getState().selectMonster((single as TokenItem).monsterId!);
+            close();
+          }} />
+        </>
+      )}
+
+      {single?.type === 'token' && ((single as TokenItem).isPc || (single as TokenItem).ddbCharacterId) && (
+        <>
+          <div className="gold-divider my-1" />
+          <Btn label="⚔ Character actions" onClick={() => {
+            openPcActions(single as TokenItem);
+            close();
+          }} />
+          <Btn label="📜 Character sheet" onClick={() => {
+            openSheet(single as TokenItem);
+            close();
+          }} />
+        </>
+      )}
+
+      {single?.type === 'token' && isGM && !(single as TokenItem).ddbCharacterId && (
+        <>
+          <div className="gold-divider my-1" />
+          <Btn label="🔗 Link D&D Beyond character" onClick={() => {
+            setImportModalOpen(true, single!.id);
+            close();
+          }} />
+        </>
+      )}
+
+      {single?.type === 'handout' && isGM && (
+        <>
+          <div className="gold-divider my-1" />
+          <Btn label="📖 View item" onClick={() => {
+            useHandoutViewerStore.getState().openHandout(single as HandoutItem);
+            close();
+          }} />
+          <Btn label="📖 Open in compendium" onClick={() => {
+            useCompendiumUiStore.getState().setTab('items');
+            useCompendiumUiStore.getState().selectItem((single as HandoutItem).compendiumItemId);
+            close();
+          }} />
+          <Btn label="✨ Reveal to players" onClick={() => {
+            const sid = getPersistSessionId();
+            if (sid) revealHandoutToPlayers(single as HandoutItem, sid);
+            close();
+          }} />
+        </>
+      )}
+
+      {single?.type === 'handout' && !isGM && (
+        <>
+          <div className="gold-divider my-1" />
+          <Btn label="📖 View item" onClick={() => {
+            useHandoutViewerStore.getState().openHandout(single as HandoutItem);
+            close();
+          }} />
+        </>
+      )}
+
+      <div className="gold-divider my-1" />
+      <Btn label="🗑 Delete" onClick={del} danger />
+    </div>
+  );
+}
+
+// ─── Token-specific section ─────────────────────────────────────────────────
+
+function TokenExtras({ token }: { token: TokenItem }) {
+  const [hoveredCondition, setHoveredCondition] = useState<string | null>(null);
+  const [tipPos, setTipPos] = useState({ x: 0, y: 0 });
+
+  function showConditionTip(e: ReactMouseEvent<HTMLButtonElement>, label: string) {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const cx = rect.left + rect.width / 2;
+    const pad = 8;
+    const half = 72;
+    setHoveredCondition(label);
+    setTipPos({
+      x: Math.min(Math.max(cx, pad + half), window.innerWidth - pad - half),
+      y: rect.top,
+    });
+  }
+
+  function hideConditionTip() {
+    setHoveredCondition(null);
+  }
+
+  function update(patch: Partial<TokenItem>) {
+    useItemStore.getState().updateItem(token.id, patch);
+    emitItemUpdate([{ id: token.id, patch }]);
+    if (patch.hp !== undefined || patch.maxHp !== undefined || patch.tempHp !== undefined) {
+      applyTokenHpToCombatants(token.id, {
+        ...(patch.hp !== undefined ? { hp: patch.hp } : {}),
+        ...(patch.maxHp !== undefined ? { maxHp: patch.maxHp } : {}),
+        ...(patch.tempHp !== undefined ? { tempHp: patch.tempHp } : {}),
+      });
+    }
+    if (patch.conditions !== undefined) {
+      applyTokenConditionsToCombatants(token.id, patch.conditions);
+    }
+  }
+  function toggleCondition(c: string) {
+    const has = token.conditions.includes(c);
+    const conditions = has ? token.conditions.filter((x) => x !== c) : [...token.conditions, c];
+    update({ conditions });
+  }
+
+  return (
+    <>
+      <div className="gold-divider my-1" />
+      <div className="px-3 py-1 font-ui text-xs" style={{ color: 'var(--color-text-secondary)' }}>HP</div>
+      <div className="px-3 pb-1 flex items-center gap-1">
+        <button className="btn-ghost px-1.5 py-0.5 text-xs" onClick={() => {
+          const { hp, tempHp } = applyDamage(token.hp, readTempHp(token.tempHp), 1);
+          update({ hp, tempHp });
+        }}>−</button>
+        <span className="font-ui text-xs flex-1 text-center" style={{ color: 'var(--color-text-primary)' }}>
+          {token.hp}/{token.maxHp}
+        </span>
+        <button className="btn-ghost px-1.5 py-0.5 text-xs" onClick={() => update({ hp: applyHeal(token.hp, token.maxHp, 1) })}>+</button>
+      </div>
+
+      <div className="px-3 py-1 font-ui text-xs" style={{ color: '#60a5fa' }}>Temp HP</div>
+      <div className="px-3 pb-1 flex items-center gap-1">
+        <button className="btn-ghost px-1.5 py-0.5 text-xs" onClick={() => update({ tempHp: Math.max(0, readTempHp(token.tempHp) - 1) })}>−</button>
+        <span className="font-ui text-xs flex-1 text-center" style={{ color: '#60a5fa' }}>
+          {readTempHp(token.tempHp)}
+        </span>
+        <button className="btn-ghost px-1.5 py-0.5 text-xs" onClick={() => update({ tempHp: readTempHp(token.tempHp) + 1 })}>+</button>
+      </div>
+
+      <div className="px-3 py-1 font-ui text-xs" style={{ color: 'var(--color-text-secondary)' }}>AC</div>
+      <div className="px-3 pb-1 flex items-center gap-1">
+        <button className="btn-ghost px-1.5 py-0.5 text-xs" onClick={() => update({ ac: Math.max(0, (token.ac ?? 10) - 1) })}>−</button>
+        <span className="font-ui text-xs flex-1 text-center" style={{ color: 'var(--color-text-primary)' }}>{token.ac ?? 10}</span>
+        <button className="btn-ghost px-1.5 py-0.5 text-xs" onClick={() => update({ ac: (token.ac ?? 10) + 1 })}>+</button>
+      </div>
+
+      <div className="px-3 py-1 font-ui text-xs" style={{ color: 'var(--color-text-secondary)' }}>Vision (ft)</div>
+      <div className="px-3 pb-1 flex items-center gap-1">
+        <button className="btn-ghost px-1.5 py-0.5 text-xs" onClick={() => update({ visionRadius: visionRadiusFromFeet(Math.max(1, visionFeet(token) - 5)) })}>−</button>
+        <span className="font-ui text-xs flex-1 text-center" style={{ color: 'var(--color-text-primary)' }}>
+          {visionFeet(token)}ft
+        </span>
+        <button className="btn-ghost px-1.5 py-0.5 text-xs" onClick={() => update({ visionRadius: visionRadiusFromFeet(visionFeet(token) + 5) })}>+</button>
+      </div>
+
+      <div className="px-3 py-1 font-ui text-xs" style={{ color: 'var(--color-text-secondary)' }}>Aura (cells)</div>
+      <div className="px-3 pb-1 flex items-center gap-1">
+        <button className="btn-ghost px-1.5 py-0.5 text-xs" onClick={() => update({ auraRadius: Math.max(0, (token.auraRadius ?? 0) - 1) })}>−</button>
+        <span className="font-ui text-xs flex-1 text-center" style={{ color: 'var(--color-text-primary)' }}>{token.auraRadius ?? 0}</span>
+        <button className="btn-ghost px-1.5 py-0.5 text-xs" onClick={() => update({ auraRadius: (token.auraRadius ?? 0) + 1, auraColor: token.auraColor ?? '#4169e1' })}>+</button>
+      </div>
+
+      <div className="gold-divider my-1" />
+      <button
+        type="button"
+        onClick={() => update({ hideHpFromPlayers: !isHpHiddenFromPlayers(token) })}
+        className="w-full text-left px-3 py-1.5 text-xs font-ui rounded transition-colors"
+        style={{ color: 'var(--color-text-primary)' }}
+        onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.background = 'var(--color-bg-tertiary)')}
+        onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.background = 'transparent')}
+      >
+        {isHpHiddenFromPlayers(token) ? '👁 Show HP bar to players' : '🙈 Hide HP bar from players'}
+      </button>
+
+      <div className="px-3 py-1 font-ui text-xs" style={{ color: 'var(--color-text-secondary)' }}>Conditions</div>
+      <div className="px-2 pb-1 flex flex-wrap gap-1">
+        {CONDITIONS.map((c) => {
+          const on = token.conditions.includes(c);
+          return (
+            <button key={c} onClick={() => toggleCondition(c)}
+              title={c}
+              onMouseEnter={(e) => showConditionTip(e, c)}
+              onMouseLeave={hideConditionTip}
+              className="text-xs px-1.5 py-0.5 rounded font-ui"
+              style={{
+                background: on ? 'rgba(201,168,76,0.2)' : 'transparent',
+                color: on ? 'var(--color-accent-gold)' : 'var(--color-text-secondary)',
+                border: `1px solid ${on ? 'var(--color-accent-gold)' : 'var(--color-border)'}`,
+              }}>
+              {c.slice(0, 4)}
+            </button>
+          );
+        })}
+      </div>
+      {hoveredCondition && (
+        <div
+          className="pointer-events-none fixed z-[100] whitespace-nowrap rounded px-1.5 py-0.5 text-xs font-ui shadow-panel"
+          style={{
+            left: tipPos.x,
+            top: tipPos.y,
+            transform: 'translate(-50%, calc(-100% - 6px))',
+            background: 'var(--color-bg-tertiary)',
+            color: 'var(--color-text-primary)',
+            border: '1px solid var(--color-border)',
+          }}
+        >
+          {hoveredCondition}
+        </div>
+      )}
+    </>
+  );
+}

@@ -1,0 +1,35 @@
+{
+  "name": "grimoire-vtt",
+  "version": "0.0.1",
+  "private": true,
+  "description": "GrimoireVTT — Dark Fantasy D&D 5e Virtual Tabletop",
+  "packageManager": "pnpm@9.0.0",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "dev": "pnpm --filter @grimoire/shared build && node scripts/dev-supervisor.mjs",
+    "dev:raw": "pnpm --filter @grimoire/shared build && concurrently -k -n server,client -c blue,green \"pnpm --filter @grimoire/server dev\" \"pnpm --filter @grimoire/client dev\"",
+    "dev:kill-ports": "powershell -NoProfile -Command \"Get-NetTCPConnection -LocalPort 3001,5173 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }\"",
+    "build": "pnpm --filter @grimoire/shared build && pnpm --filter @grimoire/server build && pnpm --filter @grimoire/client build",
+    "lint": "pnpm -r lint",
+    "format": "prettier --write \"**/*.{ts,tsx,json,md}\"",
+    "type-check": "pnpm -r type-check",
+    "db:migrate": "pnpm --filter @grimoire/server db:migrate",
+    "db:studio": "pnpm --filter @grimoire/server db:studio"
+  },
+  "devDependencies": {
+    "@typescript-eslint/eslint-plugin": "^7.0.0",
+    "@typescript-eslint/parser": "^7.0.0",
+    "concurrently": "^8.2.2",
+    "eslint": "^8.57.0",
+    "eslint-config-prettier": "^9.1.0",
+    "prettier": "^3.2.5",
+    "typescript": "^5.4.5"
+  },
+  "pnpm": {
+    "overrides": {
+      "esbuild": "0.21.5"
+    }
+  }
+}

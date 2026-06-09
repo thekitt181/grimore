@@ -1,0 +1,1125 @@
+import type {
+  CompendiumGlobalDoc,
+  CompendiumItem,
+  CompendiumMonster,
+  CompendiumSpell,
+  CompendiumSyncStatus,
+  CompendiumSaveAs,
+  OwlbearItem,
+  OwlbearMonster,
+  OwlbearSpell,
+} from '@grimoire/shared';
+import { isHomebrewEntry, normalizeOwlbearGlobalDoc, splitCompendiumSources } from '@grimoire/shared';
+import { isLikelyValidItem, parseCr, slugify } from '@grimoire/monster-dex';
+import { getCollection, withMongoTimeout, resetMongoClient } from '../lib/mongo';
+import { resolveCompendiumEntryImageUrl } from './compendiumImages';
+import {
+  isLocalCatalogAvailable,
+  loadLocalItems,
+  loadLocalMonsters,
+  loadLocalSpells,
+} from './compendiumLocal';
+import { loadGlobalFallback, globalFallbackFileRevision } from './compendiumGlobalFallback';
+import { fetchExtensionGlobalDoc, invalidateExtensionGlobalCache, fetchExtensionVersion } from './compendiumExtensionBridge';
+import {
+  globalDoc,
+  readMongoGlobalVersion,
+  newestIso,
+  isoTimestamp,
+} from './compendiumGlobal';
+import { saveOwlbearEntry, deleteOwlbearEntry, readRawGlobalDoc, saveOwlbearEntriesBulk, type CompendiumKind } from './compendiumOwlbearPersist';
+import {
+  dedupeByEntryName,
+  entryNameKey,
+  filterCustomEntries,
+  isHiddenBuiltIn,
+  namesMatch,
+} from './compendiumMerge';
+import {
+  registerCompendiumCacheInvalidator,
+  setCachedGlobalLite,
+} from './compendiumCache';
+import {
+  isEntryDraft,
+  policyFromRaw,
+  policyIsSourceLocked,
+  type CompendiumVisibilityPolicy,
+} from './compendiumVisibility';
+import { getCompendiumVisibilityPolicy } from './compendiumSourcePolicy';
+import {
+  readVisibilityPolicyFast,
+  registerCatalogPolicySink,
+} from './compendiumPolicyCache';
+
+type StoredMonster = OwlbearMonster & { _id: string; isCustom?: boolean };
+type StoredItem = OwlbearItem & { _id: string; isCustom?: boolean };
+type StoredSpell = OwlbearSpell & { _id: string; isCustom?: boolean };
+
+function toMonster(
+  entry: StoredMonster,
+  isCustom: boolean,
+  global?: CompendiumGlobalDoc,
+  lite = false,
+): CompendiumMonster {
+  const base: CompendiumMonster = {
+    id: entry._id,
+    name: entry.name,
+    type: entry.type,
+    source: entry.source,
+    hp: entry.hp,
+    ac: entry.ac,
+    cr: String(entry.cr),
+    description: entry.description,
+    ...(entry.image ? { image: entry.image } : {}),
+    ...(entry.stats ? { stats: entry.stats } : {}),
+    isCustom,
+  };
+  if (global && !lite) {
+    const imageUrl = resolveEntryImageUrl(global, 'monster', entry.name, entry.image);
+    if (imageUrl) base.imageUrl = imageUrl;
+  }
+  return base;
+}
+
+function mergeMonsters(
+  base: StoredMonster[],
+  overrides: OwlbearMonster[],
+  customs: OwlbearMonster[],
+  deleted: string[],
+  global?: CompendiumGlobalDoc,
+  lite = false,
+): CompendiumMonster[] {
+  const activeOverrides = dedupeByEntryName(overrides);
+  const activeCustoms = filterCustomEntries('monster', customs, activeOverrides, deleted);
+  const out = new Map<string, CompendiumMonster>();
+
+  for (const b of base) {
+    if (isHiddenBuiltIn(b.name, activeOverrides, deleted)) continue;
+    const ov = activeOverrides.find((o) => namesMatch(o.name, b.name));
+    const merged = ov ? { ...b, ...ov } : b;
+    out.set(entryNameKey(b.name), toMonster(
+      { ...merged, _id: b._id },
+      isHomebrewEntry(Boolean(ov), merged.source),
+      global,
+      lite,
+    ));
+  }
+
+  for (const ov of activeOverrides) {
+    const key = entryNameKey(ov.name);
+    if (out.has(key)) continue;
+    out.set(key, toMonster(
+      { ...ov, _id: slugify(ov.name) } as StoredMonster,
+      isHomebrewEntry(true, ov.source),
+      global,
+      lite,
+    ));
+  }
+
+  for (const c of activeCustoms) {
+    if (deleted.some((d) => namesMatch(d, c.name))) continue;
+    const key = entryNameKey(c.name);
+    if (out.has(key)) continue;
+    out.set(key, toMonster(
+      { ...c, _id: slugify(c.name) } as StoredMonster,
+      true,
+      global,
+      lite,
+    ));
+  }
+
+  return Array.from(out.values());
+}
+
+function mergeItems(
+  base: StoredItem[],
+  overrides: OwlbearItem[],
+  customs: OwlbearItem[],
+  deleted: string[],
+  global?: CompendiumGlobalDoc,
+  lite = false,
+): CompendiumItem[] {
+  const activeOverrides = dedupeByEntryName(overrides);
+  const activeCustoms = filterCustomEntries('item', customs, activeOverrides, deleted);
+  const out = new Map<string, CompendiumItem>();
+
+  for (const b of base) {
+    if (isHiddenBuiltIn(b.name, activeOverrides, deleted)) continue;
+    const ov = activeOverrides.find((o) => namesMatch(o.name, b.name));
+    const merged = ov ? { ...b, ...ov } : b;
+    const item: CompendiumItem = {
+      id: b._id,
+      name: merged.name,
+      type: merged.type,
+      source: merged.source,
+      description: merged.description,
+      ...(merged.rarity ? { rarity: merged.rarity } : {}),
+      ...(merged.flavor ? { flavor: merged.flavor } : {}),
+      ...(merged.details ? { details: merged.details } : {}),
+      ...(merged.image ? { image: merged.image } : {}),
+      isCustom: isHomebrewEntry(Boolean(ov ?? b.isCustom), merged.source),
+    };
+    if (global && !lite) {
+      const imageUrl = resolveEntryImageUrl(global, 'item', merged.name, merged.image);
+      if (imageUrl) item.imageUrl = imageUrl;
+    }
+    out.set(entryNameKey(b.name), item);
+  }
+
+  for (const ov of activeOverrides) {
+    const key = entryNameKey(ov.name);
+    if (out.has(key)) continue;
+    const item: CompendiumItem = {
+      id: slugify(ov.name),
+      ...ov,
+      isCustom: isHomebrewEntry(true, ov.source),
+    };
+    if (global && !lite) {
+      const imageUrl = resolveEntryImageUrl(global, 'item', ov.name, ov.image);
+      if (imageUrl) item.imageUrl = imageUrl;
+    }
+    out.set(key, item);
+  }
+
+  for (const c of activeCustoms) {
+    if (deleted.some((d) => namesMatch(d, c.name))) continue;
+    const key = entryNameKey(c.name);
+    if (out.has(key)) continue;
+    const item: CompendiumItem = {
+      id: slugify(c.name),
+      ...c,
+      isCustom: true,
+    };
+    if (global && !lite) {
+      const imageUrl = resolveEntryImageUrl(global, 'item', c.name, c.image);
+      if (imageUrl) item.imageUrl = imageUrl;
+    }
+    out.set(key, item);
+  }
+
+  return Array.from(out.values());
+}
+
+function mergeSpells(
+  base: StoredSpell[],
+  overrides: OwlbearSpell[],
+  customs: OwlbearSpell[],
+  deleted: string[],
+  global?: CompendiumGlobalDoc,
+  lite = false,
+): CompendiumSpell[] {
+  const activeOverrides = dedupeByEntryName(overrides);
+  const activeCustoms = filterCustomEntries('spell', customs, activeOverrides, deleted);
+  const out = new Map<string, CompendiumSpell>();
+
+  for (const b of base) {
+    if (isHiddenBuiltIn(b.name, activeOverrides, deleted)) continue;
+    const ov = activeOverrides.find((o) => namesMatch(o.name, b.name));
+    const merged = ov ? { ...b, ...ov } : b;
+    const spell: CompendiumSpell = {
+      id: b._id,
+      name: merged.name,
+      level: merged.level,
+      ...(merged.damage ? { damage: merged.damage } : {}),
+      ...(merged.type ? { type: merged.type } : {}),
+      ...(merged.save ? { save: merged.save } : {}),
+      ...(merged.aoe ? { aoe: merged.aoe } : {}),
+      ...(merged.attack !== undefined ? { attack: merged.attack } : {}),
+      ...(merged.secondary ? { secondary: merged.secondary } : {}),
+      ...(merged.description ? { description: merged.description } : {}),
+      ...(merged.source ? { source: merged.source } : {}),
+      isCustom: isHomebrewEntry(Boolean(ov ?? b.isCustom), merged.source),
+    };
+    if (global && !lite) {
+      const imageUrl = resolveEntryImageUrl(global, 'spell', merged.name, undefined);
+      if (imageUrl) spell.imageUrl = imageUrl;
+    }
+    out.set(entryNameKey(b.name), spell);
+  }
+
+  for (const ov of activeOverrides) {
+    const key = entryNameKey(ov.name);
+    if (out.has(key)) continue;
+    const spell: CompendiumSpell = {
+      id: slugify(ov.name),
+      ...ov,
+      isCustom: isHomebrewEntry(true, ov.source),
+    };
+    if (global && !lite) {
+      const imageUrl = resolveEntryImageUrl(global, 'spell', ov.name, undefined);
+      if (imageUrl) spell.imageUrl = imageUrl;
+    }
+    out.set(key, spell);
+  }
+
+  for (const c of activeCustoms) {
+    if (deleted.some((d) => namesMatch(d, c.name))) continue;
+    const key = entryNameKey(c.name);
+    if (out.has(key)) continue;
+    const spell: CompendiumSpell = {
+      id: slugify(c.name),
+      ...c,
+      isCustom: true,
+    };
+    if (global && !lite) {
+      const imageUrl = resolveEntryImageUrl(global, 'spell', c.name, undefined);
+      if (imageUrl) spell.imageUrl = imageUrl;
+    }
+    out.set(key, spell);
+  }
+
+  return Array.from(out.values());
+}
+
+function filterMonsters(list: CompendiumMonster[], q: string, crMin?: number, crMax?: number): CompendiumMonster[] {
+  const lower = q.trim().toLowerCase();
+  return list.filter((m) => {
+    if (lower && !m.name.toLowerCase().includes(lower) && !m.description.toLowerCase().includes(lower)) {
+      return false;
+    }
+    const cr = parseCr(m.cr);
+    if (crMin !== undefined && cr < crMin) return false;
+    if (crMax !== undefined && cr > crMax) return false;
+    return true;
+  });
+}
+
+function paginate<T>(list: T[], page: number, limit: number) {
+  const start = (page - 1) * limit;
+  return {
+    items: list.slice(start, start + limit),
+    total: list.length,
+    page,
+    limit,
+  };
+}
+
+/** Prefer fast local JSON catalog; Mongo collection is homebrew-only fallback. */
+async function loadBaseMonsters(): Promise<StoredMonster[]> {
+  const local = loadLocalMonsters();
+  if (local.length > 0) return local;
+  try {
+    const col = await getCollection<StoredMonster>('monsters');
+    if (!col) return [];
+    return await withMongoTimeout(col.find({}).limit(10_000).toArray());
+  } catch {
+    resetMongoClient();
+    return loadLocalMonsters();
+  }
+}
+
+async function loadBaseItems(): Promise<StoredItem[]> {
+  const local = loadLocalItems();
+  if (local.length > 0) return local;
+  try {
+    const col = await getCollection<StoredItem>('items');
+    if (!col) return [];
+    return await withMongoTimeout(col.find({}).limit(10_000).toArray());
+  } catch {
+    resetMongoClient();
+    return loadLocalItems();
+  }
+}
+
+async function loadBaseSpells(): Promise<StoredSpell[]> {
+  const local = loadLocalSpells();
+  if (local.length > 0) return local;
+  try {
+    const col = await getCollection<StoredSpell>('spells');
+    if (!col) return [];
+    return await withMongoTimeout(col.find({}).limit(10_000).toArray());
+  } catch {
+    resetMongoClient();
+    return loadLocalSpells();
+  }
+}
+
+type CatalogCache = {
+  rev: string;
+  policy: CompendiumVisibilityPolicy;
+  monsters: CompendiumMonster[];
+  items: CompendiumItem[];
+  spells: CompendiumSpell[];
+};
+
+let catalogCache: CatalogCache | null = null;
+let catalogBuildPromise: Promise<CatalogCache> | null = null;
+
+function invalidateCatalogCache(): void {
+  catalogCache = null;
+  catalogBuildPromise = null;
+}
+
+function policyCacheRev(policy: CompendiumVisibilityPolicy): string {
+  return `${policy.lockedSources.join('\0')}::${policy.publishedEntryKeys.join('\0')}`;
+}
+
+export function applyVisibilityPolicyUpdate(
+  policy: CompendiumVisibilityPolicy,
+  lastUpdated: string,
+): void {
+  if (catalogCache) {
+    catalogCache = {
+      ...catalogCache,
+      policy,
+      rev: `${lastUpdated}:${policyCacheRev(policy)}`,
+    };
+  }
+}
+
+registerCatalogPolicySink({
+  patch: applyVisibilityPolicyUpdate,
+});
+
+async function buildCatalogCache(): Promise<CatalogCache> {
+  const version = await readMongoGlobalVersion();
+  const versionRev = version ?? '';
+  if (catalogCache && versionRev && catalogCache.rev.startsWith(`${versionRev}:`)) return catalogCache;
+  if (catalogBuildPromise) return catalogBuildPromise;
+
+  catalogBuildPromise = (async () => {
+    try {
+      const raw = await readRawGlobalDoc({ includeImageData: false });
+      const global = normalizeOwlbearGlobalDoc({
+        ...raw,
+        images: {},
+        imagesData: {},
+        entryImages: {},
+      });
+      setCachedGlobalLite(global);
+      const effectiveRev = isoTimestamp(global.lastUpdated);
+      const deleted = raw.deleted ?? [];
+
+      const policy = policyFromRaw(raw);
+      const [monsters, items, spells] = await Promise.all([
+        mergeMonsters(await loadBaseMonsters(), raw.overrideMonsters ?? [], raw.monsters ?? [], deleted, global, true),
+        mergeItems(await loadBaseItems(), raw.overrideItems ?? [], raw.items ?? [], deleted, global, true),
+        mergeSpells(await loadBaseSpells(), raw.overrideSpells ?? [], raw.spells ?? [], deleted, global, true),
+      ]);
+      monsters.sort((a, b) => a.name.localeCompare(b.name));
+      items.sort((a, b) => a.name.localeCompare(b.name));
+      spells.sort((a, b) => a.name.localeCompare(b.name));
+      catalogCache = {
+        rev: `${effectiveRev}:${policyCacheRev(policy)}`,
+        policy,
+        monsters,
+        items,
+        spells,
+      };
+      return catalogCache;
+    } finally {
+      catalogBuildPromise = null;
+    }
+  })();
+
+  return catalogBuildPromise;
+}
+
+async function getCachedMonsters(): Promise<CompendiumMonster[]> {
+  return (await buildCatalogCache()).monsters;
+}
+
+async function getCachedItems(): Promise<CompendiumItem[]> {
+  return (await buildCatalogCache()).items;
+}
+
+async function getCachedSpells(): Promise<CompendiumSpell[]> {
+  return (await buildCatalogCache()).spells;
+}
+
+async function getCatalogPolicy(): Promise<CompendiumVisibilityPolicy> {
+  if (catalogCache) return catalogCache.policy;
+  return readVisibilityPolicyFast();
+}
+
+function markDraft<T extends { isDraft?: boolean }>(
+  kind: CompendiumKind,
+  entry: T & { name: string; source?: string },
+  policy: CompendiumVisibilityPolicy,
+): T {
+  if (isEntryDraft(kind, entry.name, entry.source, policy)) {
+    return { ...entry, isDraft: true };
+  }
+  return entry;
+}
+
+function filterVisible<T extends { name: string; source?: string; isDraft?: boolean }>(
+  kind: CompendiumKind,
+  entries: T[],
+  policy: CompendiumVisibilityPolicy,
+  includeDrafts: boolean,
+): T[] {
+  const marked = entries.map((e) => markDraft(kind, e, policy));
+  if (includeDrafts) return marked;
+  return marked.filter((e) => !e.isDraft);
+}
+
+function sourceIsLocked(sourceId: string, policy: CompendiumVisibilityPolicy): boolean {
+  return policyIsSourceLocked(sourceId, policy);
+}
+
+/** Pre-build merged catalogs on server start so first search is instant. */
+export async function warmCompendiumCatalog(): Promise<void> {
+  try {
+    const cache = await buildCatalogCache();
+    console.log(
+      `[Compendium] Catalog warmed: ${cache.monsters.length} monsters, ${cache.items.length} items, ${cache.spells.length} spells`,
+    );
+  } catch (err) {
+    console.warn('[Compendium] Catalog warm failed:', err);
+  }
+}
+
+registerCompendiumCacheInvalidator(invalidateCatalogCache);
+
+/** Human-readable label for a raw source string (PDF filename, etc.). */
+export function formatSourceLabel(raw: string): string {
+  let label = raw.trim();
+  label = label.replace(/\.pdf$/i, '').replace(/\.PDF$/i, '');
+  label = label.replace(/_/g, ' ');
+  label = label.replace(/\s+/g, ' ').trim();
+  return label || raw;
+}
+
+function splitSources(source: string | undefined): string[] {
+  return splitCompendiumSources(source);
+}
+
+function entryMatchesSource(source: string | undefined, filterSource: string): boolean {
+  return splitSources(source).some((p) => p === filterSource);
+}
+
+export interface CompendiumSaveOptions {
+  previousName?: string;
+  hidePrevious?: boolean;
+  saveAs?: CompendiumSaveAs;
+}
+
+function resolveSaveAs(entry: { source?: string }, opts?: CompendiumSaveOptions): CompendiumSaveAs {
+  if (opts?.saveAs) return opts.saveAs;
+  const parts = splitSources(entry.source);
+  if (parts.length > 0 && !parts.every((p) => p.toLowerCase() === 'custom')) {
+    return 'replace';
+  }
+  return 'homebrew';
+}
+
+function prepareSavePayload<T extends { source?: string }>(entry: T, saveAs: CompendiumSaveAs): T {
+  if (saveAs === 'homebrew') {
+    return { ...entry, source: 'Custom' };
+  }
+  return { ...entry, source: entry.source?.trim() ? entry.source : 'Custom' };
+}
+
+export async function listSources(
+  kind: 'monsters' | 'items' | 'spells',
+  opts?: { includeDrafts?: boolean },
+): Promise<Array<{ id: string; label: string; count: number; locked?: boolean; draftCount?: number }>> {
+  const includeDrafts = opts?.includeDrafts ?? false;
+  const policy = await getCatalogPolicy();
+
+  if (kind === 'monsters') {
+    const merged = await getCachedMonsters();
+    const counts = new Map<string, { total: number; public: number; draft: number }>();
+    for (const m of merged) {
+      if (isHomebrewEntry(m.isCustom, m.source)) continue;
+      const draft = isEntryDraft('monster', m.name, m.source, policy);
+      for (const part of splitSources(m.source)) {
+        if (part.toLowerCase() === 'custom') continue;
+        const cur = counts.get(part) ?? { total: 0, public: 0, draft: 0 };
+        cur.total += 1;
+        if (draft) cur.draft += 1;
+        else cur.public += 1;
+        counts.set(part, cur);
+      }
+    }
+    return Array.from(counts.entries())
+      .filter(([id, c]) => {
+        if (!includeDrafts && sourceIsLocked(id, policy)) return false;
+        if (includeDrafts) return c.total > 0;
+        return c.public > 0;
+      })
+      .map(([id, c]) => ({
+        id,
+        label: formatSourceLabel(id),
+        count: includeDrafts ? c.total : c.public,
+        ...(includeDrafts && sourceIsLocked(id, policy) ? { locked: true } : {}),
+        ...(includeDrafts && c.draft > 0 ? { draftCount: c.draft } : {}),
+      }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }
+
+  if (kind === 'items') {
+    const merged = await getCachedItems();
+    const counts = new Map<string, { total: number; public: number; draft: number }>();
+    for (const i of merged) {
+      if (isHomebrewEntry(i.isCustom, i.source)) continue;
+      const draft = isEntryDraft('item', i.name, i.source, policy);
+      for (const part of splitSources(i.source)) {
+        if (part.toLowerCase() === 'custom') continue;
+        const cur = counts.get(part) ?? { total: 0, public: 0, draft: 0 };
+        cur.total += 1;
+        if (draft) cur.draft += 1;
+        else cur.public += 1;
+        counts.set(part, cur);
+      }
+    }
+    return Array.from(counts.entries())
+      .filter(([id, c]) => {
+        if (!includeDrafts && sourceIsLocked(id, policy)) return false;
+        if (includeDrafts) return c.total > 0;
+        return c.public > 0;
+      })
+      .map(([id, c]) => ({
+        id,
+        label: formatSourceLabel(id),
+        count: includeDrafts ? c.total : c.public,
+        ...(includeDrafts && sourceIsLocked(id, policy) ? { locked: true } : {}),
+        ...(includeDrafts && c.draft > 0 ? { draftCount: c.draft } : {}),
+      }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }
+
+  const merged = await getCachedSpells();
+  const counts = new Map<string, { total: number; public: number; draft: number }>();
+  for (const s of merged) {
+    if (isHomebrewEntry(s.isCustom, s.source)) continue;
+    const draft = isEntryDraft('spell', s.name, s.source, policy);
+    for (const part of splitSources(s.source)) {
+      if (part.toLowerCase() === 'custom') continue;
+      const cur = counts.get(part) ?? { total: 0, public: 0, draft: 0 };
+      cur.total += 1;
+      if (draft) cur.draft += 1;
+      else cur.public += 1;
+      counts.set(part, cur);
+    }
+  }
+  return Array.from(counts.entries())
+    .filter(([id, c]) => {
+      if (!includeDrafts && sourceIsLocked(id, policy)) return false;
+      if (includeDrafts) return c.total > 0;
+      return c.public > 0;
+    })
+    .map(([id, c]) => ({
+      id,
+      label: formatSourceLabel(id),
+      count: includeDrafts ? c.total : c.public,
+      ...(includeDrafts && sourceIsLocked(id, policy) ? { locked: true } : {}),
+      ...(includeDrafts && c.draft > 0 ? { draftCount: c.draft } : {}),
+    }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+}
+
+export async function getSyncStatus(): Promise<CompendiumSyncStatus> {
+  const stamps: string[] = [];
+
+  const mongoVersion = await readMongoGlobalVersion();
+  if (mongoVersion) stamps.push(mongoVersion);
+
+  const extVersion = await fetchExtensionVersion();
+  if (extVersion) stamps.push(extVersion);
+
+  const file = loadGlobalFallback(true);
+  if (file?.lastUpdated) stamps.push(new Date(file.lastUpdated).toISOString());
+
+  const fileRev = globalFallbackFileRevision();
+  if (fileRev) stamps.push(fileRev);
+
+  const col = await getCollection<CompendiumGlobalDoc>('data');
+  const mongoConnected = Boolean(col && mongoVersion);
+  const hasLocal = isLocalCatalogAvailable() || Boolean(file);
+  const hasExtension = Boolean(extVersion);
+
+  return {
+    lastUpdated: stamps.length ? newestIso(...stamps) : new Date(0).toISOString(),
+    storage: mongoConnected ? 'mongodb' : hasLocal || hasExtension ? 'local' : 'unavailable',
+    mongoConnected,
+  };
+}
+
+export async function searchMonsters(opts: {
+  q?: string;
+  crMin?: number;
+  crMax?: number;
+  page?: number;
+  limit?: number;
+  isCustom?: boolean;
+  source?: string;
+  includeDrafts?: boolean;
+}) {
+  const page = opts.page ?? 1;
+  const limit = Math.min(opts.limit ?? 50, 100);
+  const policy = await getCatalogPolicy();
+  const merged = filterVisible('monster', await getCachedMonsters(), policy, opts.includeDrafts ?? false);
+  let filtered = filterMonsters(merged, opts.q ?? '', opts.crMin, opts.crMax);
+  if (opts.isCustom === true) {
+    filtered = filtered.filter((m) => isHomebrewEntry(m.isCustom, m.source));
+  } else if (opts.isCustom === false) {
+    filtered = filtered.filter((m) => !isHomebrewEntry(m.isCustom, m.source));
+  }
+  if (opts.source) {
+    filtered = filtered.filter((m) => entryMatchesSource(m.source, opts.source!));
+  }
+  return paginate(filtered, page, limit);
+}
+
+export async function getMonsterById(id: string, opts?: { includeDrafts?: boolean }): Promise<CompendiumMonster | null> {
+  const policy = await getCatalogPolicy();
+  const hit = (await getCachedMonsters()).find((m) => m.id === id);
+  if (!hit) return null;
+  const marked = markDraft('monster', hit, policy);
+  if (marked.isDraft && !opts?.includeDrafts) return null;
+  const imageUrl = await resolveCompendiumEntryImageUrl('monster', hit.name, hit.image);
+  const out = imageUrl ? { ...marked, imageUrl } : marked;
+  return out;
+}
+
+export async function findCatalogMonster(id: string): Promise<CompendiumMonster | null> {
+  return (await getCachedMonsters()).find((m) => m.id === id) ?? null;
+}
+
+export async function searchItems(opts: {
+  q?: string;
+  page?: number;
+  limit?: number;
+  isCustom?: boolean;
+  source?: string;
+  includeDrafts?: boolean;
+}) {
+  const page = opts.page ?? 1;
+  const limit = Math.min(opts.limit ?? 50, 100);
+  const policy = await getCatalogPolicy();
+  const merged = filterVisible('item', await getCachedItems(), policy, opts.includeDrafts ?? false);
+  const lower = (opts.q ?? '').trim().toLowerCase();
+  let filtered = merged.filter((i) => {
+    if (!lower) return true;
+    return i.name.toLowerCase().includes(lower) || i.description.toLowerCase().includes(lower);
+  });
+  if (opts.isCustom === true) {
+    filtered = filtered.filter((i) => isHomebrewEntry(i.isCustom, i.source));
+  } else if (opts.isCustom === false) {
+    filtered = filtered.filter((i) => !isHomebrewEntry(i.isCustom, i.source));
+  }
+  if (opts.source) {
+    filtered = filtered.filter((i) => entryMatchesSource(i.source, opts.source!));
+  }
+  filtered.sort((a, b) => a.name.localeCompare(b.name));
+  return paginate(filtered, page, limit);
+}
+
+export async function getItemById(id: string, opts?: { includeDrafts?: boolean }): Promise<CompendiumItem | null> {
+  const policy = await getCatalogPolicy();
+  const hit = (await getCachedItems()).find((i) => i.id === id);
+  if (!hit) return null;
+  const marked = markDraft('item', hit, policy);
+  if (marked.isDraft && !opts?.includeDrafts) return null;
+  const imageUrl = await resolveCompendiumEntryImageUrl('item', hit.name, hit.image);
+  return imageUrl ? { ...marked, imageUrl } : marked;
+}
+
+export async function findCatalogItem(id: string): Promise<CompendiumItem | null> {
+  return (await getCachedItems()).find((i) => i.id === id) ?? null;
+}
+
+export async function searchSpells(opts: {
+  q?: string;
+  page?: number;
+  limit?: number;
+  isCustom?: boolean;
+  source?: string;
+  includeDrafts?: boolean;
+}) {
+  const page = opts.page ?? 1;
+  const limit = Math.min(opts.limit ?? 50, 100);
+  const policy = await getCatalogPolicy();
+  const merged = filterVisible('spell', await getCachedSpells(), policy, opts.includeDrafts ?? false);
+  const lower = (opts.q ?? '').trim().toLowerCase();
+  let filtered = merged.filter((s) => {
+    if (!lower) return true;
+    return s.name.toLowerCase().includes(lower);
+  });
+  if (opts.isCustom === true) {
+    filtered = filtered.filter((s) => isHomebrewEntry(s.isCustom, s.source));
+  } else if (opts.isCustom === false) {
+    filtered = filtered.filter((s) => !isHomebrewEntry(s.isCustom, s.source));
+  }
+  if (opts.source) {
+    filtered = filtered.filter((s) => entryMatchesSource(s.source, opts.source!));
+  }
+  filtered.sort((a, b) => a.name.localeCompare(b.name));
+  return paginate(filtered, page, limit);
+}
+
+export async function getSpellById(id: string, opts?: { includeDrafts?: boolean }): Promise<CompendiumSpell | null> {
+  const policy = await getCatalogPolicy();
+  const hit = (await getCachedSpells()).find((s) => s.id === id);
+  if (!hit) return null;
+  const marked = markDraft('spell', hit, policy);
+  if (marked.isDraft && !opts?.includeDrafts) return null;
+  const imageUrl = await resolveCompendiumEntryImageUrl('spell', hit.name, undefined);
+  return imageUrl ? { ...marked, imageUrl } : marked;
+}
+
+export { getCompendiumVisibilityPolicy };
+
+export async function findCatalogSpell(id: string): Promise<CompendiumSpell | null> {
+  return (await getCachedSpells()).find((s) => s.id === id) ?? null;
+}
+
+async function upsertCollectionMonstersBulk(entries: Array<{ entry: OwlbearMonster; isCustom: boolean }>) {
+  const col = await getCollection<StoredMonster>('monsters');
+  if (!col || entries.length === 0) return;
+  await col.bulkWrite(
+    entries.map(({ entry, isCustom }) => {
+      const _id = slugify(entry.name);
+      return {
+        updateOne: {
+          filter: { _id },
+          update: { $set: { ...entry, _id, isCustom } },
+          upsert: true,
+        },
+      };
+    }),
+    { ordered: false },
+  );
+}
+
+async function upsertCollectionItemsBulk(entries: Array<{ entry: OwlbearItem; isCustom: boolean }>) {
+  const col = await getCollection<StoredItem>('items');
+  if (!col || entries.length === 0) return;
+  await col.bulkWrite(
+    entries.map(({ entry, isCustom }) => {
+      const _id = slugify(entry.name);
+      return {
+        updateOne: {
+          filter: { _id },
+          update: { $set: { ...entry, _id, isCustom } },
+          upsert: true,
+        },
+      };
+    }),
+    { ordered: false },
+  );
+}
+
+async function upsertCollectionSpellsBulk(entries: Array<{ entry: OwlbearSpell; isCustom: boolean }>) {
+  const col = await getCollection<StoredSpell>('spells');
+  if (!col || entries.length === 0) return;
+  await col.bulkWrite(
+    entries.map(({ entry, isCustom }) => {
+      const _id = slugify(entry.name);
+      return {
+        updateOne: {
+          filter: { _id },
+          update: { $set: { ...entry, _id, isCustom } },
+          upsert: true,
+        },
+      };
+    }),
+    { ordered: false },
+  );
+}
+
+async function upsertCollectionMonster(entry: OwlbearMonster, isCustom: boolean) {
+  await upsertCollectionMonstersBulk([{ entry, isCustom }]);
+}
+
+async function upsertCollectionItem(entry: OwlbearItem, isCustom: boolean) {
+  await upsertCollectionItemsBulk([{ entry, isCustom }]);
+}
+
+async function upsertCollectionSpell(entry: OwlbearSpell, isCustom: boolean) {
+  await upsertCollectionSpellsBulk([{ entry, isCustom }]);
+}
+
+async function findMonsterAfterSave(name: string): Promise<CompendiumMonster | null> {
+  invalidateCatalogCache();
+  const bySlug = await getMonsterById(slugify(name));
+  if (bySlug) return bySlug;
+  const merged = await getCachedMonsters();
+  return merged.find((m) => namesMatch(m.name, name)) ?? null;
+}
+
+function monsterPayloadFromSave(
+  payload: OwlbearMonster,
+  saveAs: CompendiumSaveAs,
+): CompendiumMonster {
+  return {
+    id: slugify(payload.name),
+    name: payload.name,
+    type: payload.type,
+    source: payload.source,
+    hp: payload.hp,
+    ac: payload.ac,
+    cr: String(payload.cr),
+    description: payload.description,
+    ...(payload.image ? { image: payload.image } : {}),
+    ...(payload.stats ? { stats: payload.stats } : {}),
+    isCustom: saveAs === 'homebrew',
+  };
+}
+
+function itemPayloadFromSave(
+  payload: OwlbearItem,
+  saveAs: CompendiumSaveAs,
+): CompendiumItem {
+  return {
+    id: slugify(payload.name),
+    name: payload.name,
+    type: payload.type,
+    source: payload.source,
+    description: payload.description,
+    ...(payload.rarity ? { rarity: payload.rarity } : {}),
+    ...(payload.flavor ? { flavor: payload.flavor } : {}),
+    ...(payload.details ? { details: payload.details } : {}),
+    ...(payload.image ? { image: payload.image } : {}),
+    isCustom: saveAs === 'homebrew',
+  };
+}
+
+function spellPayloadFromSave(
+  payload: OwlbearSpell,
+  saveAs: CompendiumSaveAs,
+): CompendiumSpell {
+  return {
+    id: slugify(payload.name),
+    name: payload.name,
+    level: payload.level,
+    ...(payload.damage ? { damage: payload.damage } : {}),
+    ...(payload.type ? { type: payload.type } : {}),
+    ...(payload.save ? { save: payload.save } : {}),
+    ...(payload.aoe ? { aoe: payload.aoe } : {}),
+    ...(payload.attack !== undefined ? { attack: payload.attack } : {}),
+    ...(payload.secondary ? { secondary: payload.secondary } : {}),
+    ...(payload.description ? { description: payload.description } : {}),
+    source: payload.source,
+    isCustom: saveAs === 'homebrew',
+  };
+}
+
+export async function saveMonster(
+  entry: OwlbearMonster,
+  opts?: CompendiumSaveOptions,
+): Promise<CompendiumMonster> {
+  const saveAs = resolveSaveAs(entry, opts);
+  const payload = prepareSavePayload({ ...entry, source: entry.source || 'Custom' }, saveAs);
+
+  if (opts?.previousName && opts.previousName !== payload.name) {
+    const col = await getCollection<StoredMonster>('monsters');
+    if (col) await col.deleteOne({ _id: slugify(opts.previousName) });
+  }
+
+  await saveOwlbearEntry('monster', payload, {
+    saveAs,
+    previousName: opts?.previousName,
+    hidePrevious: opts?.hidePrevious,
+  });
+
+  await upsertCollectionMonster(payload, saveAs === 'homebrew');
+
+  const saved = await findMonsterAfterSave(payload.name);
+  if (saved) return saved;
+
+  console.warn('[Compendium] saveMonster: catalog lookup missed after write, returning payload', {
+    name: payload.name,
+    saveAs,
+  });
+  return monsterPayloadFromSave(payload, saveAs);
+}
+
+export async function saveItem(
+  entry: OwlbearItem,
+  opts?: CompendiumSaveOptions,
+): Promise<CompendiumItem> {
+  const saveAs = resolveSaveAs(entry, opts);
+  const payload = prepareSavePayload({ ...entry, source: entry.source || 'Custom' }, saveAs);
+
+  if (opts?.previousName && opts.previousName !== payload.name) {
+    const col = await getCollection<StoredItem>('items');
+    if (col) await col.deleteOne({ _id: slugify(opts.previousName) });
+  }
+
+  await saveOwlbearEntry('item', payload, {
+    saveAs,
+    previousName: opts?.previousName,
+    hidePrevious: opts?.hidePrevious,
+  });
+
+  await upsertCollectionItem(payload, saveAs === 'homebrew');
+
+  const saved = await getItemById(slugify(payload.name));
+  if (!saved) throw new Error('Failed to save item');
+  return saved;
+}
+
+export async function saveSpell(
+  entry: OwlbearSpell,
+  opts?: CompendiumSaveOptions,
+): Promise<CompendiumSpell> {
+  const saveAs = resolveSaveAs(entry, opts);
+  const payload = prepareSavePayload({ ...entry, source: entry.source || 'Custom' }, saveAs);
+
+  if (opts?.previousName && opts.previousName !== payload.name) {
+    const col = await getCollection<StoredSpell>('spells');
+    if (col) await col.deleteOne({ _id: slugify(opts.previousName) });
+  }
+
+  await saveOwlbearEntry('spell', payload, {
+    saveAs,
+    previousName: opts?.previousName,
+    hidePrevious: opts?.hidePrevious,
+  });
+
+  await upsertCollectionSpell(payload, saveAs === 'homebrew');
+
+  const saved = await getSpellById(slugify(payload.name));
+  if (!saved) throw new Error('Failed to save spell');
+  return saved;
+}
+
+export async function saveMonstersBulk(
+  entries: Array<{ entry: OwlbearMonster; opts?: CompendiumSaveOptions }>,
+): Promise<CompendiumMonster[]> {
+  if (entries.length === 0) return [];
+
+  const prepared = entries.map(({ entry, opts }) => {
+    const saveAs = resolveSaveAs(entry, opts);
+    const payload = prepareSavePayload({ ...entry, source: entry.source || 'Custom' }, saveAs);
+    return { payload, saveAs, opts };
+  });
+
+  await saveOwlbearEntriesBulk(
+    'monster',
+    prepared.map(({ payload, saveAs, opts }) => ({
+      entry: payload,
+      opts: {
+        saveAs,
+        previousName: opts?.previousName,
+        hidePrevious: opts?.hidePrevious,
+      },
+    })),
+  );
+
+  await upsertCollectionMonstersBulk(
+    prepared.map(({ payload, saveAs }) => ({ entry: payload, isCustom: saveAs === 'homebrew' })),
+  );
+
+  invalidateCatalogCache();
+  return prepared.map(({ payload, saveAs }) => monsterPayloadFromSave(payload, saveAs));
+}
+
+export async function saveItemsBulk(
+  entries: Array<{ entry: OwlbearItem; opts?: CompendiumSaveOptions }>,
+): Promise<CompendiumItem[]> {
+  if (entries.length === 0) return [];
+
+  const prepared = entries.map(({ entry, opts }) => {
+    const saveAs = resolveSaveAs(entry, opts);
+    const payload = prepareSavePayload({ ...entry, source: entry.source || 'Custom' }, saveAs);
+    return { payload, saveAs, opts };
+  });
+
+  await saveOwlbearEntriesBulk(
+    'item',
+    prepared.map(({ payload, saveAs, opts }) => ({
+      entry: payload,
+      opts: {
+        saveAs,
+        previousName: opts?.previousName,
+        hidePrevious: opts?.hidePrevious,
+      },
+    })),
+  );
+
+  await upsertCollectionItemsBulk(
+    prepared.map(({ payload, saveAs }) => ({ entry: payload, isCustom: saveAs === 'homebrew' })),
+  );
+
+  invalidateCatalogCache();
+  return prepared.map(({ payload, saveAs }) => itemPayloadFromSave(payload, saveAs));
+}
+
+export async function saveSpellsBulk(
+  entries: Array<{ entry: OwlbearSpell; opts?: CompendiumSaveOptions }>,
+): Promise<CompendiumSpell[]> {
+  if (entries.length === 0) return [];
+
+  const prepared = entries.map(({ entry, opts }) => {
+    const saveAs = resolveSaveAs(entry, opts);
+    const payload = prepareSavePayload({ ...entry, source: entry.source || 'Custom' }, saveAs);
+    return { payload, saveAs, opts };
+  });
+
+  await saveOwlbearEntriesBulk(
+    'spell',
+    prepared.map(({ payload, saveAs, opts }) => ({
+      entry: payload,
+      opts: {
+        saveAs,
+        previousName: opts?.previousName,
+        hidePrevious: opts?.hidePrevious,
+      },
+    })),
+  );
+
+  await upsertCollectionSpellsBulk(
+    prepared.map(({ payload, saveAs }) => ({ entry: payload, isCustom: saveAs === 'homebrew' })),
+  );
+
+  invalidateCatalogCache();
+  return prepared.map(({ payload, saveAs }) => spellPayloadFromSave(payload, saveAs));
+}
+
+export async function deleteCompendiumEntry(
+  name: string,
+  kind: 'monster' | 'item' | 'spell',
+): Promise<void> {
+  const id = slugify(name);
+
+  let inBaseCatalog = false;
+  if (kind === 'monster') {
+    const col = await getCollection<StoredMonster>('monsters');
+    const base = col ? await col.findOne({ _id: id }) : null;
+    inBaseCatalog = Boolean(base && !base.isCustom);
+  } else if (kind === 'item') {
+    const col = await getCollection<StoredItem>('items');
+    const base = col ? await col.findOne({ _id: id }) : null;
+    inBaseCatalog = Boolean(base && !base.isCustom);
+  } else {
+    const col = await getCollection<StoredSpell>('spells');
+    const base = col ? await col.findOne({ _id: id }) : null;
+    inBaseCatalog = Boolean(base && !base.isCustom);
+  }
+
+  let customOnly = false;
+
+  {
+    const global = await globalDoc();
+    const inGlobalMonsters = (global.monsters ?? []).some((m) => m.name === name);
+    const inGlobalItems = (global.items ?? []).some((i) => i.name === name);
+    const inGlobalSpells = (global.spells ?? []).some((s) => s.name.toLowerCase() === name.toLowerCase());
+
+    customOnly = kind === 'monster'
+      ? inGlobalMonsters && !inBaseCatalog
+      : kind === 'item'
+        ? inGlobalItems && !inBaseCatalog
+        : inGlobalSpells && !inBaseCatalog;
+  }
+
+  await deleteOwlbearEntry(kind, name, { inBaseCatalog });
+
+  if (!customOnly) return;
+
+  if (kind === 'monster') {
+    const col = await getCollection<StoredMonster>('monsters');
+    if (col) await col.deleteOne({ _id: id });
+  } else if (kind === 'item') {
+    const col = await getCollection<StoredItem>('items');
+    if (col) await col.deleteOne({ _id: id });
+  } else {
+    const col = await getCollection<StoredSpell>('spells');
+    if (col) await col.deleteOne({ _id: id });
+  }
+}
+
+export { isLikelyValidItem, slugify };

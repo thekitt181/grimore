@@ -1,0 +1,245 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ─── CSS Custom Properties ───────────────────────────────────────────────── */
+:root {
+  --color-bg-primary: #0a0a0f;
+  --color-bg-secondary: #12121a;
+  --color-bg-tertiary: #1c1c28;
+  --color-accent-gold: #c9a84c;
+  --color-accent-red: #8b1a1a;
+  --color-accent-red-hot: #d42b2b;
+  --color-text-primary: #e8e0d0;
+  --color-text-secondary: #8a8075;
+  --color-border: #2a2a3a;
+  --color-border-gold: #c9a84c44;
+  --font-display: 'Cinzel', serif;
+  --font-body: 'Crimson Text', serif;
+  --font-ui: 'Inter', sans-serif;
+}
+
+/* ─── Base Reset ──────────────────────────────────────────────────────────── */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  scroll-behavior: smooth;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  background-color: var(--color-bg-primary);
+  color: var(--color-text-primary);
+  font-family: var(--font-body);
+  font-size: 16px;
+  line-height: 1.6;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* ─── Scrollbar styling ───────────────────────────────────────────────────── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--color-bg-secondary);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-accent-gold);
+}
+
+/* ─── Typography helpers ──────────────────────────────────────────────────── */
+.font-display {
+  font-family: var(--font-display);
+  letter-spacing: 0.05em;
+}
+
+.font-body {
+  font-family: var(--font-body);
+}
+
+.font-ui {
+  font-family: var(--font-ui);
+}
+
+/* ─── Panel component ─────────────────────────────────────────────────────── */
+@layer components {
+  .panel {
+    @apply bg-bg-secondary border border-border rounded-lg p-4 shadow-panel;
+  }
+
+  .panel-tertiary {
+    @apply bg-bg-tertiary border border-border rounded-lg p-4;
+  }
+
+  .panel-gold {
+    @apply bg-bg-secondary rounded-lg p-4;
+    border: 1px solid var(--color-border-gold);
+    box-shadow: 0 0 12px rgba(201, 168, 76, 0.15);
+  }
+
+  .btn-primary {
+    @apply font-ui font-medium px-5 py-2.5 rounded-md transition-all duration-200 text-sm;
+    background: linear-gradient(135deg, #c9a84c, #a87e30);
+    color: #0a0a0f;
+    box-shadow: 0 2px 8px rgba(201, 168, 76, 0.25);
+  }
+
+  .btn-primary:hover {
+    box-shadow: 0 4px 16px rgba(201, 168, 76, 0.4);
+    transform: translateY(-1px);
+  }
+
+  .btn-primary:active {
+    transform: translateY(0);
+  }
+
+  .btn-danger {
+    @apply font-ui font-medium px-5 py-2.5 rounded-md transition-all duration-200 text-sm;
+    background: linear-gradient(135deg, #8b1a1a, #6a1414);
+    color: #e8e0d0;
+    box-shadow: 0 2px 8px rgba(139, 26, 26, 0.3);
+  }
+
+  .btn-danger:hover {
+    background: linear-gradient(135deg, #d42b2b, #8b1a1a);
+    box-shadow: 0 4px 16px rgba(212, 43, 43, 0.4);
+  }
+
+  .btn-ghost {
+    @apply font-ui font-medium px-5 py-2.5 rounded-md transition-all duration-200 text-sm;
+    color: var(--color-text-secondary);
+    border: 1px solid var(--color-border);
+    background: transparent;
+  }
+
+  .btn-ghost:hover {
+    border-color: var(--color-accent-gold);
+    color: var(--color-accent-gold);
+  }
+
+  .input-dark {
+    @apply w-full rounded-md px-3 py-2 text-sm font-ui transition-all duration-200 outline-none;
+    background: var(--color-bg-primary);
+    border: 1px solid var(--color-border);
+    color: var(--color-text-primary);
+  }
+
+  .input-dark::placeholder {
+    color: var(--color-text-secondary);
+  }
+
+  .input-dark:focus {
+    border-color: var(--color-accent-gold);
+    box-shadow: 0 0 0 2px rgba(201, 168, 76, 0.15);
+  }
+
+  /* Compact numeric fields (HP, AC, etc.) — fits 4 digits (e.g. 1000) */
+  .input-stat {
+    @apply rounded-md text-xs font-ui transition-all duration-200 outline-none text-center tabular-nums;
+    width: 4.5rem;
+    min-width: 4.5rem;
+    padding: 0.125rem 0.375rem;
+    background: var(--color-bg-primary);
+    border: 1px solid var(--color-border);
+    color: var(--color-text-primary);
+    -moz-appearance: textfield;
+    appearance: textfield;
+  }
+
+  .input-stat::-webkit-outer-spin-button,
+  .input-stat::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+
+  .input-stat:focus {
+    border-color: var(--color-accent-gold);
+    box-shadow: 0 0 0 2px rgba(201, 168, 76, 0.15);
+  }
+
+  .gold-divider {
+    height: 1px;
+    background: linear-gradient(to right, transparent, var(--color-accent-gold), transparent);
+    opacity: 0.4;
+  }
+
+  .badge-cr {
+    @apply text-xs font-ui font-semibold px-2 py-0.5 rounded;
+    background: var(--color-bg-tertiary);
+    color: var(--color-accent-gold);
+    border: 1px solid var(--color-border-gold);
+  }
+
+  .badge-role-gm {
+    @apply text-xs font-ui font-semibold px-2 py-0.5 rounded;
+    background: rgba(139, 26, 26, 0.3);
+    color: #ff6b6b;
+    border: 1px solid rgba(139, 26, 26, 0.5);
+  }
+
+  .badge-role-player {
+    @apply text-xs font-ui font-semibold px-2 py-0.5 rounded;
+    background: rgba(201, 168, 76, 0.15);
+    color: var(--color-accent-gold);
+    border: 1px solid var(--color-border-gold);
+  }
+}
+
+/* ─── Animations ──────────────────────────────────────────────────────────── */
+@keyframes torchFlicker {
+  0%,
+  100% {
+    opacity: 1;
+    filter: brightness(1);
+  }
+  33% {
+    opacity: 0.9;
+    filter: brightness(0.92);
+  }
+  66% {
+    opacity: 0.95;
+    filter: brightness(0.96);
+  }
+}
+
+@keyframes shimmer {
+  from {
+    background-position: -200% center;
+  }
+  to {
+    background-position: 200% center;
+  }
+}
+
+.animate-torch {
+  animation: torchFlicker 2.5s ease-in-out infinite;
+}
+
+/* ─── Loading skeleton ────────────────────────────────────────────────────── */
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--color-bg-secondary) 25%,
+    var(--color-bg-tertiary) 50%,
+    var(--color-bg-secondary) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  border-radius: 4px;
+}

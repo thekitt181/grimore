@@ -1,0 +1,1 @@
+{"version":3,"file":"compendiumExtensionBridge.d.ts","sourceRoot":"","sources":["compendiumExtensionBridge.ts"],"names":[],"mappings":"AAAA,OAAO,KAAK,EAAE,mBAAmB,EAAuB,MAAM,kBAAkB,CAAC;AAejF,wBAAsB,qBAAqB,IAAI,OAAO,CAAC,MAAM,GAAG,IAAI,CAAC,CAYpE;AAED,mFAAmF;AACnF,wBAAsB,uBAAuB,CAAC,KAAK,UAAQ,GAAG,OAAO,CAAC,mBAAmB,GAAG,IAAI,CAAC,CAgChG;AAED,wBAAgB,8BAA8B,IAAI,IAAI,CAGrD"}

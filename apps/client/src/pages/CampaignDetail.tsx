@@ -1,0 +1,166 @@
+import { useParams, useNavigate } from 'react-router-dom';
+import { useQuery, useMutation } from '@tanstack/react-query';
+import { api } from '@/lib/axios';
+import { AppShell } from '@/components/layout/AppShell';
+import { InvitePanel } from '@/components/campaign/InvitePanel';
+import { DdbLinkPanelEmbedded } from '@/systems/ddb/DdbLinkPanel';
+import type { CampaignWithMembers, CampaignMember } from '@grimoire/shared';
+
+interface MemberWithUser extends CampaignMember {
+  user: { id: string; username: string; avatarUrl: string | null };
+}
+
+interface CampaignDetailResponse {
+  campaign: CampaignWithMembers;
+  myRole: 'GM' | 'PLAYER';
+}
+
+export function CampaignDetail() {
+  const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['campaign', id],
+    queryFn: async () => {
+      const res = await api.get<CampaignDetailResponse>(`/campaigns/${id}`);
+      return res.data;
+    },
+    enabled: !!id,
+  });
+
+  const startSessionMutation = useMutation({
+    mutationFn: async () => {
+      const res = await api.post<{ session: { id: string } }>(`/campaigns/${id}/sessions`);
+      return res.data.session;
+    },
+    onSuccess: (session) => {
+      navigate(`/session/${session.id}`);
+    },
+  });
+
+  if (isLoading) {
+    return (
+      <AppShell>
+        <div className="flex-1 flex items-center justify-center">
+          <div className="font-display text-lg animate-torch" style={{ color: 'var(--color-accent-gold)' }}>
+            Loading campaign...
+          </div>
+        </div>
+      </AppShell>
+    );
+  }
+
+  if (!data) {
+    return (
+      <AppShell>
+        <div className="flex-1 flex items-center justify-center">
+          <p style={{ color: 'var(--color-text-secondary)' }}>Campaign not found.</p>
+        </div>
+      </AppShell>
+    );
+  }
+
+  const { campaign, myRole } = data;
+  const isGM = myRole === 'GM';
+
+  return (
+    <AppShell>
+      <div className="flex-1 p-6 md:p-10 max-w-5xl mx-auto w-full">
+        {/* Header */}
+        <div className="flex flex-col md:flex-row gap-6 mb-8">
+          {/* Cover art */}
+          <div
+            className="w-full md:w-48 h-48 rounded-lg overflow-hidden shrink-0"
+            style={{ background: 'var(--color-bg-tertiary)', border: '1px solid var(--color-border)' }}
+          >
+            {campaign.coverImageUrl ? (
+              <img src={campaign.coverImageUrl} alt={campaign.name} className="w-full h-full object-cover" />
+            ) : (
+              <div className="w-full h-full flex items-center justify-center text-6xl opacity-30">🐉</div>
+            )}
+          </div>
+
+          <div className="flex-1">
+            <div className="flex items-start justify-between gap-4 flex-wrap">
+              <div>
+                <h1
+                  className="font-display text-3xl font-bold tracking-wide mb-2"
+                  style={{ color: 'var(--color-text-primary)' }}
+                >
+                  {campaign.name}
+                </h1>
+                <p className="font-ui text-sm mb-3" style={{ color: 'var(--color-text-secondary)' }}>
+                  {campaign.system} · {campaign._count.members} members · {campaign._count.scenes} scenes
+                </p>
+                {campaign.description && (
+                  <p className="font-body text-base" style={{ color: 'var(--color-text-secondary)' }}>
+                    {campaign.description}
+                  </p>
+                )}
+                <div className="mt-3">
+                  <span className={isGM ? 'badge-role-gm' : 'badge-role-player'}>
+                    {myRole}
+                  </span>
+                </div>
+              </div>
+
+              {isGM && (
+                <button
+                  className="btn-primary"
+                  onClick={() => startSessionMutation.mutate()}
+                  disabled={startSessionMutation.isPending}
+                >
+                  {startSessionMutation.isPending ? 'Starting...' : '▶ Start Session'}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="gold-divider mb-8" />
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          {/* Members list */}
+          <div className="md:col-span-2">
+            <h2
+              className="font-display text-base font-semibold tracking-wider mb-4"
+              style={{ color: 'var(--color-accent-gold)' }}
+            >
+              Members
+            </h2>
+            <div className="space-y-2">
+              {(campaign.members as MemberWithUser[]).map((member) => (
+                <div
+                  key={member.id}
+                  className="flex items-center gap-3 rounded-md p-3"
+                  style={{ background: 'var(--color-bg-tertiary)', border: '1px solid var(--color-border)' }}
+                >
+                  <div
+                    className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-ui font-semibold shrink-0"
+                    style={{ background: 'var(--color-bg-primary)', color: 'var(--color-accent-gold)' }}
+                  >
+                    {member.user.username.charAt(0).toUpperCase()}
+                  </div>
+                  <span className="font-ui text-sm flex-1" style={{ color: 'var(--color-text-primary)' }}>
+                    {member.user.username}
+                  </span>
+                  <span className={member.role === 'GM' ? 'badge-role-gm' : 'badge-role-player'}>
+                    {member.role}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Invite panel (GM only) */}
+          {isGM && id && (
+            <div className="space-y-4">
+              <InvitePanel campaignId={id} />
+              <DdbLinkPanelEmbedded />
+            </div>
+          )}
+        </div>
+      </div>
+    </AppShell>
+  );
+}

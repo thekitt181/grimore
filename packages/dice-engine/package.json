@@ -1,0 +1,17 @@
+{
+  "name": "@grimoire/dice-engine",
+  "version": "0.0.1",
+  "private": true,
+  "main": "./src/index.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch"
+  },
+  "dependencies": {
+    "@dice-roller/rpg-dice-roller": "^5.4.0",
+    "@grimoire/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.5"
+  }
+}
