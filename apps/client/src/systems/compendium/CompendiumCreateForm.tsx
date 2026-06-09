@@ -1,8 +1,9 @@
-import { useMemo, useState, type CSSProperties } from 'react';
+import { useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { CompendiumTab } from './compendiumStore';
 import { useCompendiumUiStore } from './compendiumStore';
-import { createItem, createMonster, createSpell, fetchSources } from './compendiumApi';
+import { createItem, createMonster, createSpell, fetchSources, saveEntryImages } from './compendiumApi';
+import { fileToDataUrl } from '@/lib/imagePersistence';
 
 type SourceKind = 'homebrew' | 'book';
 const NEW_BOOK = '__new__';
@@ -41,6 +42,9 @@ export function CompendiumCreateForm({ tab }: { tab: CompendiumTab }) {
   const [cr, setCr] = useState('0');
   const [level, setLevel] = useState(0);
   const [description, setDescription] = useState('');
+  const [imageUrl, setImageUrl] = useState('');
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const imageFileRef = useRef<HTMLInputElement>(null);
 
   const sourcesQ = useQuery({
     queryKey: ['compendium', 'sources', tab, 'create'],
@@ -79,6 +83,8 @@ export function CompendiumCreateForm({ tab }: { tab: CompendiumTab }) {
           cr,
           description,
         });
+        const img = imagePreview ?? (imageUrl.trim() || null);
+        if (img) await saveEntryImages('monster', entry.id, img);
       } else if (tab === 'items') {
         entry = await createItem({
           name: trimmed,
@@ -194,6 +200,41 @@ export function CompendiumCreateForm({ tab }: { tab: CompendiumTab }) {
             AC <input type="number" className="input-stat" value={ac} onChange={(e) => setAc(Number(e.target.value))} />
             CR <input className="input-dark text-xs py-0.5 w-12" value={cr} onChange={(e) => setCr(e.target.value)} />
           </label>
+          <div className="space-y-1">
+            <p className="font-ui text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>Image (optional)</p>
+            {imagePreview && (
+              <img src={imagePreview} alt="" className="max-h-20 rounded object-contain" />
+            )}
+            <input
+              className="input-dark text-xs w-full py-0.5"
+              placeholder="Image URL"
+              value={imageUrl}
+              onChange={(e) => {
+                setImageUrl(e.target.value);
+                setImagePreview(e.target.value.trim() || null);
+              }}
+            />
+            <input
+              ref={imageFileRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={async (e) => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+                const dataUrl = await fileToDataUrl(file);
+                setImagePreview(dataUrl);
+                setImageUrl('');
+              }}
+            />
+            <button
+              type="button"
+              className="btn-ghost text-xs py-0.5 px-1"
+              onClick={() => imageFileRef.current?.click()}
+            >
+              Upload image
+            </button>
+          </div>
         </>
       )}
       {tab === 'items' && (

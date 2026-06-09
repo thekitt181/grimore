@@ -6,6 +6,14 @@ import type { Combatant } from '@/systems/map/store/initiativeStore';
 const ITEMS_PREFIX = 'grimoire:items:';
 const FOG_PREFIX = 'grimoire:fog:';
 const INITIATIVE_PREFIX = 'grimoire:initiative:';
+const DELETED_PREFIX = 'grimoire:deleted:';
+const VIEWPORT_PREFIX = 'grimoire:viewport:';
+
+export interface PersistedViewport {
+  x: number;
+  y: number;
+  scale: number;
+}
 
 /** Session id from store or URL — works before SessionPage finishes hydrating. */
 export function getPersistSessionId(): string | null {
@@ -121,6 +129,55 @@ export function persistInitiativeLocal(sessionId: string, state: PersistedInitia
     localStorage.setItem(scopedKey(INITIATIVE_PREFIX, sessionId), JSON.stringify(state));
   } catch {
     /* quota */
+  }
+}
+
+export function loadDeletedIds(sessionId: string): Set<string> {
+  try {
+    const raw = localStorage.getItem(scopedKey(DELETED_PREFIX, sessionId));
+    if (!raw) return new Set();
+    const list = JSON.parse(raw) as string[];
+    return new Set(Array.isArray(list) ? list : []);
+  } catch {
+    return new Set();
+  }
+}
+
+export function addDeletedIds(sessionId: string, ids: string[]): void {
+  if (!ids.length) return;
+  const set = loadDeletedIds(sessionId);
+  for (const id of ids) set.add(id);
+  try {
+    localStorage.setItem(scopedKey(DELETED_PREFIX, sessionId), JSON.stringify([...set]));
+  } catch {
+    /* quota */
+  }
+}
+
+export function persistViewportLocal(sessionId: string, viewport: PersistedViewport): void {
+  try {
+    localStorage.setItem(scopedKey(VIEWPORT_PREFIX, sessionId), JSON.stringify(viewport));
+  } catch {
+    /* quota */
+  }
+}
+
+export function loadViewportLocal(sessionId: string): PersistedViewport | null {
+  try {
+    const raw = localStorage.getItem(scopedKey(VIEWPORT_PREFIX, sessionId));
+    if (!raw) return null;
+    const vp = JSON.parse(raw) as PersistedViewport;
+    if (
+      typeof vp.x === 'number'
+      && typeof vp.y === 'number'
+      && typeof vp.scale === 'number'
+      && vp.scale > 0
+    ) {
+      return vp;
+    }
+    return null;
+  } catch {
+    return null;
   }
 }
 

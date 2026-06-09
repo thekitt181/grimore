@@ -153,12 +153,16 @@ export function initSocket(httpServer: HttpServer): Server {
         const avatarUrl = socket.data['avatarUrl'] as string | undefined;
         const sessionUser: SessionUser = { id: userId, username, avatarUrl, role };
 
+        try {
+          const currentUsers = await getRoomUsers(sessionId);
+          await setRoomUsers(sessionId, [...new Set([...currentUsers, userId])]);
+        } catch (redisErr) {
+          console.warn('[Socket] Redis room tracking skipped:', redisErr);
+        }
+
         socket.join(sessionId);
         socket.data['sessionId'] = sessionId;
         socket.data['role'] = role;
-
-        const currentUsers = await getRoomUsers(sessionId);
-        await setRoomUsers(sessionId, [...new Set([...currentUsers, userId])]);
 
         if (!userHasOtherSocketInRoom(io, sessionId, userId, socket.id)) {
           socket.to(sessionId).emit('session:userJoined', { sessionId, user: sessionUser });
@@ -169,14 +173,27 @@ export function initSocket(httpServer: HttpServer): Server {
         const connectedUsers: SessionUser[] = [];
 
         if (allSocketIds) {
+          const uidBySocket = new Map<string, string>();
+          const uniqueUserIds = new Set<string>();
           for (const socketId of allSocketIds) {
             const s = io.sockets.sockets.get(socketId);
-            if (!s?.data['userId']) continue;
-            const uid = s.data['userId'] as string;
-            const memberRecord = await prisma.campaignMember.findFirst({
-              where: { campaignId, userId: uid },
-              include: { campaign: { select: { gmId: true } } },
-            });
+            const uid = s?.data['userId'] as string | undefined;
+            if (!uid) continue;
+            uidBySocket.set(socketId, uid);
+            uniqueUserIds.add(uid);
+          }
+
+          const memberRecords = await prisma.campaignMember.findMany({
+            where: { campaignId, userId: { in: [...uniqueUserIds] } },
+            include: { campaign: { select: { gmId: true } } },
+          });
+          const memberByUserId = new Map(memberRecords.map((m) => [m.userId, m]));
+
+          for (const socketId of allSocketIds) {
+            const s = io.sockets.sockets.get(socketId);
+            const uid = uidBySocket.get(socketId);
+            if (!s || !uid) continue;
+            const memberRecord = memberByUserId.get(uid);
             if (memberRecord) {
               connectedUsers.push({
                 id: uid,

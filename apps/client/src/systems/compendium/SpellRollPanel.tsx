@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import type { CompendiumSpell } from '@grimoire/shared';
 import type { ActionDamage } from './statBlockParser';
 import { RollButton } from '@/systems/dice/RollButton';
@@ -5,8 +6,11 @@ import { RollableText } from '@/systems/dice/RollableText';
 import { AoeTemplateBlock } from '@/systems/combat/AoeTemplateBlock';
 import { CasterTokenHint } from '@/systems/combat/CasterTokenHint';
 import { SaveAreaEffectBlock } from '@/systems/combat/SaveAreaEffectBlock';
+import { TargetedAttackButton } from '@/systems/combat/TargetedAttackButton';
 import { useCasterToken } from '@/systems/combat/useCasterToken';
 import { hasAoeTemplate } from './statBlockParser';
+
+const RANGED_SPELL = { kind: 'ranged' as const, reachFt: 5, rangeNormalFt: 120 };
 
 function spellDamages(spell: CompendiumSpell): ActionDamage[] {
   const out: ActionDamage[] = [];
@@ -21,13 +25,19 @@ function isSaveAreaCompendiumSpell(spell: CompendiumSpell, damages: ActionDamage
 
 export function SpellRollPanel({ spell }: { spell: CompendiumSpell }) {
   const caster = useCasterToken();
+  const [attackMod, setAttackMod] = useState(0);
   const damages = spellDamages(spell);
   const aoe = spell.aoe;
   const hasAoe = hasAoeTemplate(aoe);
   const isSaveArea = isSaveAreaCompendiumSpell(spell, damages);
+  const canTargetCast = Boolean(caster && spell.attack && damages.length > 0 && !hasAoe);
 
   return (
     <div className="space-y-2">
+      <p className="font-ui text-[10px] uppercase tracking-wide" style={{ color: 'var(--color-text-secondary)' }}>
+        Cast spell
+      </p>
+
       {hasAoe && aoe && (
         caster ? (
           isSaveArea ? (
@@ -53,7 +63,30 @@ export function SpellRollPanel({ spell }: { spell: CompendiumSpell }) {
         )
       )}
 
-      {!hasAoe && (
+      {canTargetCast && caster && (
+        <div className="space-y-1">
+          <label className="font-ui text-[10px] flex gap-2 items-center" style={{ color: 'var(--color-text-secondary)' }}>
+            Spell attack
+            <input
+              type="number"
+              className="input-stat w-12"
+              value={attackMod}
+              onChange={(e) => setAttackMod(Number(e.target.value))}
+            />
+          </label>
+          <TargetedAttackButton
+            attackerTokenId={caster.id}
+            attackerName={caster.name}
+            actionName={spell.name}
+            toHit={attackMod}
+            damages={damages}
+            range={RANGED_SPELL}
+            className="w-full text-center py-1"
+          />
+        </div>
+      )}
+
+      {!hasAoe && !canTargetCast && (
         <div className="flex flex-wrap gap-1">
           {damages.map((dmg, i) => (
             <RollButton
@@ -63,7 +96,8 @@ export function SpellRollPanel({ spell }: { spell: CompendiumSpell }) {
               variant="damage"
             />
           ))}
-          {spell.attack && (
+          {spell.attack && !caster && <CasterTokenHint />}
+          {spell.attack && caster && damages.length === 0 && (
             <RollButton notation="1d20" label="Spell Attack (d20)" variant="attack" />
           )}
           {spell.save && (
@@ -77,8 +111,16 @@ export function SpellRollPanel({ spell }: { spell: CompendiumSpell }) {
         </div>
       )}
 
-      {hasAoe && spell.attack && (
-        <RollButton notation="1d20" label="Spell Attack (d20)" variant="attack" />
+      {hasAoe && spell.attack && caster && (
+        <TargetedAttackButton
+          attackerTokenId={caster.id}
+          attackerName={caster.name}
+          actionName={spell.name}
+          toHit={attackMod}
+          damages={damages}
+          range={RANGED_SPELL}
+          className="w-full text-center py-1"
+        />
       )}
 
       {spell.description && (

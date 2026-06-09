@@ -146,6 +146,18 @@ export function useSelectionTool(appReady: boolean) {
         if (ids.length) { beginMove(ids); return; }
       }
 
+      // GM: keep sidebar-selected locked map selected when clicking its surface.
+      if (gm && mapAt && store.selectedIds.includes(mapAt.id)) {
+        marquee = { startWX: wx, startWY: wy };
+        if (!marqueeGfx) {
+          marqueeGfx = new Graphics();
+          marqueeGfx.label = 'marquee';
+          overlay!.addChild(marqueeGfx);
+        }
+        canvas.setPointerCapture(e.pointerId);
+        return;
+      }
+
       // Otherwise start a marquee.
       if (!e.shiftKey) store.clearSelection();
       marquee = { startWX: wx, startWY: wy };
@@ -274,7 +286,7 @@ export function useSelectionTool(appReady: boolean) {
       if (onTop) return;
 
       const mapHit = hitTestMap(selectableItems(), wx, wy);
-      if (!mapHit || !canManipulate(mapHit)) return;
+      if (!mapHit) return;
 
       e.preventDefault();
       move = null;

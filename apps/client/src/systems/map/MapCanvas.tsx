@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Container, Application } from 'pixi.js';
 import { v4 as uuidv4 } from 'uuid';
 import { usePixiApp } from './hooks/usePixiApp';
-import { useMapViewport, fitMapToScreen } from './hooks/useMapViewport';
+import { useMapViewport, fitMapToScreen, applyViewport } from './hooks/useMapViewport';
 import { useFogRenderer } from './hooks/useFogRenderer';
 import { useMapFogOverlay } from './hooks/useMapFogOverlay';
 import { useMapMeasure } from './hooks/useMapMeasure';
@@ -21,8 +21,15 @@ import { emitItemAdd, emitItemUpdate, emitItemsSync } from '@/systems/scene/scen
 import { applyFogData, emitFogSync, flushFogScene, hydrateFogFromServer, parseFogCells, restoreFogFromLocal } from '@/systems/scene/fogSync';
 import { bindFogActiveSocket, syncFogActiveToSession } from '@/systems/scene/fogActiveSync';
 import { useParams } from 'react-router-dom';
-import { loadItemsLocal, persistItemsLocal } from '@/systems/scene/sessionPersistence';
-import { mergeSceneItems, sanitizePersistedItems } from '@/systems/scene/mergeSceneItems';
+import {
+  addDeletedIds,
+  getPersistSessionId,
+  loadDeletedIds,
+  loadItemsLocal,
+  loadViewportLocal,
+  persistItemsLocal,
+} from '@/systems/scene/sessionPersistence';
+import { mergeSceneItems, sameSceneItemSnapshot, sanitizePersistedItems } from '@/systems/scene/mergeSceneItems';
 import { fileToDataUrl } from '@/lib/imagePersistence';
 import { useWallTool } from './hooks/useWallTool';
 import type { Item, MapItem, TokenItem } from '@/systems/scene/types';
@@ -61,10 +68,12 @@ export function MapCanvas() {
   const items = useItemStore((s) => s.items);
   const initialSyncRef = useRef({ received: false, hadItems: false, pushed: false });
   const fogSyncedRef = useRef(false);
+  const viewportInitializedRef = useRef(false);
 
   useEffect(() => {
     initialSyncRef.current = { received: false, hadItems: false, pushed: false };
     fogSyncedRef.current = false;
+    viewportInitializedRef.current = false;
   }, [sessionId]);
 
   // Restore last saved scene from localStorage before the server snapshot arrives.
@@ -130,7 +139,15 @@ export function MapCanvas() {
     sceneRefs.measure.current = measure;
     sceneRefs.overlay.current = overlay;
 
-    fitMapToScreen(app, world);
+    const sid = getPersistSessionId();
+    const savedVp = sid ? loadViewportLocal(sid) : null;
+    if (savedVp) {
+      applyViewport(world, savedVp);
+      viewportInitializedRef.current = true;
+    } else {
+      fitMapToScreen(app, world);
+      viewportInitializedRef.current = true;
+    }
     setAppReady(true);
 
     return () => {
@@ -164,6 +181,7 @@ export function MapCanvas() {
       persistLocal();
     };
     const onRemove = ({ ids }: { ids: string[] }) => {
+      addDeletedIds(sessionId, ids);
       useItemStore.getState().removeItems(ids);
       persistLocal();
     };
@@ -173,13 +191,17 @@ export function MapCanvas() {
       const localItems = loadItemsLocal(sessionId) ?? (
         Object.values(useItemStore.getState().items) as Item[]
       );
+      const deletedIds = loadDeletedIds(sessionId);
       initialSyncRef.current.hadItems = serverItems.length > 0 || localItems.length > 0;
 
       if (serverItems.length > 0 || localItems.length > 0) {
         const merged = serverItems.length > 0
-          ? mergeSceneItems(serverItems, localItems)
-          : localItems;
-        useItemStore.getState().setItems(merged);
+          ? mergeSceneItems(serverItems, localItems, deletedIds)
+          : localItems.filter((i) => !deletedIds.has(i.id));
+        const current = useItemStore.getState().items;
+        if (!sameSceneItemSnapshot(merged, current)) {
+          useItemStore.getState().setItems(merged);
+        }
         if (sessionId) persistItemsLocal(sessionId, merged);
         if (serverItems.length === 0 && localItems.length > 0 && !initialSyncRef.current.pushed) {
           initialSyncRef.current.pushed = true;
@@ -262,14 +284,20 @@ export function MapCanvas() {
     };
   }, [sessionId]);
 
-  // Re-fit viewport once a saved map loads after Pixi is ready.
+  // Fit viewport only on first map load — not on every item sync (avoids jump on reconnect).
   useEffect(() => {
-    if (!appReady || !sessionId) return;
+    if (!appReady || !sessionId || viewportInitializedRef.current) return;
     const app = sceneRefs.app.current;
     const world = sceneRefs.world.current;
     const map = getActiveMap();
     if (!app || !world || !map) return;
-    fitMapToScreen(app, world);
+    const savedVp = loadViewportLocal(sessionId);
+    if (savedVp) {
+      applyViewport(world, savedVp);
+    } else {
+      fitMapToScreen(app, world);
+    }
+    viewportInitializedRef.current = true;
   }, [appReady, sessionId, items]);
 
   // ── Hooks ───────────────────────────────────────────────────────────────

@@ -34,9 +34,15 @@ export async function setRoomUsers(sessionId: string, userIds: string[]): Promis
 }
 
 export async function getRoomUsers(sessionId: string): Promise<string[]> {
-  const raw = await redis.get(`room:${sessionId}:users`);
-  if (!raw) return [];
-  return JSON.parse(raw) as string[];
+  try {
+    const raw = await redis.get(`room:${sessionId}:users`);
+    if (!raw) return [];
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((id): id is string => typeof id === 'string');
+  } catch {
+    return [];
+  }
 }
 
 export async function setSessionFog(sessionId: string, fogData: string): Promise<void> {

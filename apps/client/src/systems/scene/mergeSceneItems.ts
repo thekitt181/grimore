@@ -21,12 +21,17 @@ function mergeMapItem(server: MapItem, local: MapItem): MapItem {
 }
 
 /** Prefer local map images/walls when server snapshot is stale or incomplete. */
-export function mergeSceneItems(server: Item[], local: Item[]): Item[] {
+export function mergeSceneItems(
+  server: Item[],
+  local: Item[],
+  deletedIds: Set<string> = new Set(),
+): Item[] {
   const localById = new Map(local.map((i) => [i.id, i]));
   const seen = new Set<string>();
   const merged: Item[] = [];
 
   for (const item of server) {
+    if (deletedIds.has(item.id)) continue;
     seen.add(item.id);
     const loc = localById.get(item.id);
     if (item.type === 'map' && loc?.type === 'map') {
@@ -51,10 +56,18 @@ export function mergeSceneItems(server: Item[], local: Item[]): Item[] {
   }
 
   for (const item of local) {
-    if (!seen.has(item.id)) merged.push(item);
+    if (!seen.has(item.id) && !deletedIds.has(item.id)) merged.push(item);
   }
 
   return merged;
+}
+
+/** Skip store updates when reconnect sync did not change item ids. */
+export function sameSceneItemSnapshot(items: Item[], current: Record<string, Item>): boolean {
+  const keys = Object.keys(current);
+  if (items.length !== keys.length) return false;
+  const ids = new Set(keys);
+  return items.every((i) => ids.has(i.id));
 }
 
 /** Strip dead blob URLs so maps render the placeholder instead of failing silently. */

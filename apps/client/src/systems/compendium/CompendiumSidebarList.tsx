@@ -138,9 +138,9 @@ export function CompendiumSidebarList() {
   const inBookView = browseMode === 'sources' && Boolean(selectedSource);
 
   const sourcesQ = useQuery({
-    queryKey: ['compendium', 'sources', tab],
+    queryKey: ['compendium', 'sources', tab, isAdmin],
     queryFn: () => fetchSources(tab),
-    enabled: compendiumReady && (showSourcePicker || (isAdmin && inBookView)),
+    enabled: compendiumReady && (showSourcePicker || (isAdmin && browseMode === 'sources')),
     staleTime: 5_000,
   });
 

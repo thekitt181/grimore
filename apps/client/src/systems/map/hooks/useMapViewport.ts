@@ -2,6 +2,28 @@ import { useEffect, useRef } from 'react';
 import type { Application, Container } from 'pixi.js';
 import { isMobileClient } from '@/lib/socket';
 import { useMapStore } from '../store/mapStore';
+import { getPersistSessionId, persistViewportLocal } from '@/systems/scene/sessionPersistence';
+import type { MapViewport } from '../store/mapStore';
+
+let viewportPersistTimer: ReturnType<typeof setTimeout> | null = null;
+
+function scheduleViewportPersist(vp: MapViewport): void {
+  const sid = getPersistSessionId();
+  if (!sid) return;
+  if (viewportPersistTimer) clearTimeout(viewportPersistTimer);
+  viewportPersistTimer = setTimeout(() => {
+    viewportPersistTimer = null;
+    persistViewportLocal(sid, vp);
+  }, 300);
+}
+
+/** Restore a saved pan/zoom onto the Pixi world container. */
+export function applyViewport(world: Container, vp: MapViewport): void {
+  world.scale.set(vp.scale);
+  world.x = vp.x;
+  world.y = vp.y;
+  useMapStore.getState().setViewport(vp);
+}
 
 const MIN_SCALE = 0.08;
 const MAX_SCALE_DESKTOP = 8;
@@ -30,7 +52,9 @@ function applyZoomAt(
   world.x = screenX - (screenX - world.x) * ratio;
   world.y = screenY - (screenY - world.y) * ratio;
   world.scale.set(clamped);
-  setViewport({ x: world.x, y: world.y, scale: clamped });
+  const vp = { x: world.x, y: world.y, scale: clamped };
+  setViewport(vp);
+  scheduleViewportPersist(vp);
 }
 
 /**
@@ -47,7 +71,9 @@ export function fitMapToScreen(app: Application, world: Container) {
   world.x = (app.screen.width - mapWidth * scale) / 2 - mapX * scale;
   world.y = (app.screen.height - mapHeight * scale) / 2 - mapY * scale;
 
-  useMapStore.getState().setViewport({ x: world.x, y: world.y, scale });
+  const vp = { x: world.x, y: world.y, scale };
+  useMapStore.getState().setViewport(vp);
+  scheduleViewportPersist(vp);
 }
 
 /**
@@ -165,7 +191,9 @@ export function useMapViewport(
       if (!isPanning.current) return;
       w.x = panStart.current.vpX + (e.clientX - panStart.current.x);
       w.y = panStart.current.vpY + (e.clientY - panStart.current.y);
-      setViewport({ x: w.x, y: w.y, scale: w.scale.x });
+      const vp = { x: w.x, y: w.y, scale: w.scale.x };
+      setViewport(vp);
+      scheduleViewportPersist(vp);
     }
 
     function onPointerUp(e: PointerEvent) {

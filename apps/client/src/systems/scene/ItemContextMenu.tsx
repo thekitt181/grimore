@@ -3,7 +3,7 @@ import { useItemStore } from './store/itemStore';
 import { useMapStore } from '@/systems/map/store/mapStore';
 import { useSessionStore } from '@/store/sessionStore';
 import { clientToWorld } from './sceneRefs';
-import { hitTest, isMapGroundHit, isCanvasContextEvent, isCanvasPointerEvent } from './hitTest';
+import { hitTest, hitTestMap, isMapGroundHit, isCanvasContextEvent, isCanvasPointerEvent } from './hitTest';
 import { emitItemAdd, emitItemUpdate, emitItemRemove } from './sceneSync';
 import { syncGridToMap } from './syncGridToMap';
 import type { SessionUser } from '@grimoire/shared';
@@ -40,7 +40,12 @@ interface MapMenuState {
 }
 type MenuState = ItemMenuState | MapMenuState;
 
-function resolveContextMenu(clientX: number, clientY: number, isGM: boolean): MenuState | null {
+function resolveContextMenu(
+  clientX: number,
+  clientY: number,
+  isGM: boolean,
+  shiftKey = false,
+): MenuState | null {
   const { x: wx, y: wy } = clientToWorld(clientX, clientY);
   const all = Object.values(useItemStore.getState().items) as Item[];
   const visible = isGM ? all : all.filter((i) => i.visible);
@@ -48,6 +53,12 @@ function resolveContextMenu(clientX: number, clientY: number, isGM: boolean): Me
 
   if (isMapGroundHit(hit)) {
     if (!isGM) return null;
+    const mapAt = hit?.type === 'map' ? hit : hitTestMap(visible, wx, wy);
+    // Right-click map surface: select map for lock/unlock/delete (shift = ground menu).
+    if (!shiftKey && mapAt?.type === 'map') {
+      useItemStore.getState().select([mapAt.id], 'set');
+      return { x: clientX, y: clientY, kind: 'item' };
+    }
     useItemStore.getState().clearSelection();
     return { x: clientX, y: clientY, kind: 'map', worldX: wx, worldY: wy };
   }
@@ -125,7 +136,7 @@ export function ItemContextMenu() {
   useEffect(() => {
     function onContextMenu(e: MouseEvent) {
       if (!isCanvasContextEvent(e)) return;
-      const next = resolveContextMenu(e.clientX, e.clientY, isGM);
+      const next = resolveContextMenu(e.clientX, e.clientY, isGM, e.shiftKey);
       if (!next) return;
       e.preventDefault();
       setMenu(next);

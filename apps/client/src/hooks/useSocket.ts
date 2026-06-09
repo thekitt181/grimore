@@ -22,6 +22,8 @@ type SocketHandlers = {
   onConnect: () => void;
 };
 
+const JOIN_RETRY_MAX = 6;
+
 /**
  * Establishes and manages the Socket.io connection for a session.
  * Handlers are always removed by reference — never socket.off('connect') without a fn.
@@ -37,6 +39,8 @@ export function useSocket(
 
   const handlersRef = useRef<SocketHandlers | null>(null);
   const joinedRef = useRef(false);
+  const joinRetryRef = useRef(0);
+  const joinRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (!sessionId || !campaignId || !isLoaded) return;
@@ -60,10 +64,32 @@ export function useSocket(
     let alive = true;
     const socket = getSocket();
 
+    function clearJoinRetry() {
+      if (joinRetryTimerRef.current) {
+        clearTimeout(joinRetryTimerRef.current);
+        joinRetryTimerRef.current = null;
+      }
+      joinRetryRef.current = 0;
+    }
+
     const joinRoom = () => {
       socket.emit('session:join', { sessionId, campaignId });
       joinedRef.current = true;
     };
+
+    function scheduleJoinRetry() {
+      if (!alive || !socket.connected) return;
+      if (joinRetryRef.current >= JOIN_RETRY_MAX) return;
+      joinedRef.current = false;
+      const attempt = joinRetryRef.current;
+      joinRetryRef.current += 1;
+      const wait = isMobileClient() ? 2000 * (attempt + 1) : 1200 * (attempt + 1);
+      joinRetryTimerRef.current = setTimeout(() => {
+        joinRetryTimerRef.current = null;
+        if (!alive || !socket.connected) return;
+        joinRoom();
+      }, wait);
+    }
 
     function detachHandlers() {
       const h = handlersRef.current;
@@ -83,6 +109,8 @@ export function useSocket(
 
       const h: SocketHandlers = {
         onRoomState: ({ users, fogActive }) => {
+          clearJoinRetry();
+          joinedRef.current = true;
           setConnectedUsers(users);
           setConnected(true);
           clearConnectionError();
@@ -97,8 +125,16 @@ export function useSocket(
           console.error('[Socket] Error:', message);
           setConnectionError(message);
           setConnected(false);
+          joinedRef.current = false;
+          if (
+            message.includes('join session')
+            || message.includes('member of this campaign')
+          ) {
+            scheduleJoinRetry();
+          }
         },
         onDisconnect: (reason) => {
+          clearJoinRetry();
           joinedRef.current = false;
           setConnected(false);
           if (reason === 'io server disconnect') {
@@ -107,7 +143,6 @@ export function useSocket(
         },
         onConnect: () => {
           clearConnectionError();
-          setConnected(true);
           joinRoom();
           bindFogActiveSocket();
           bindDdbRollSocket(true);
@@ -150,7 +185,6 @@ export function useSocket(
         await connectSocket(token, { retries: isMobileClient() ? 6 : 3 });
         if (!alive) return;
 
-        setConnected(socket.connected);
         joinRoom();
         syncFogActiveToSession();
         window.dispatchEvent(new CustomEvent('grimoire:socket-connected'));
@@ -170,6 +204,7 @@ export function useSocket(
     }
 
     joinedRef.current = false;
+    clearJoinRetry();
     void connect();
 
     const onVisible = () => {
@@ -185,6 +220,7 @@ export function useSocket(
 
     return () => {
       alive = false;
+      clearJoinRetry();
       document.removeEventListener('visibilitychange', onVisible);
       if (joinedRef.current) {
         socket.emit('session:leave', { sessionId });

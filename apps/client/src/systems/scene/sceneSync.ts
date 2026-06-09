@@ -1,7 +1,7 @@
 import { getSocket } from '@/lib/socket';
 import { useSessionStore } from '@/store/sessionStore';
 import { useItemStore } from './store/itemStore';
-import { persistItemsLocal } from './sessionPersistence';
+import { addDeletedIds, persistItemsLocal } from './sessionPersistence';
 import type { Item } from './types';
 
 let pendingServerSync: ReturnType<typeof setTimeout> | null = null;
@@ -57,6 +57,7 @@ export function emitItemUpdate(patches: Array<{ id: string; patch: Partial<Item>
 export function emitItemRemove(ids: string[]) {
   const s = sid();
   if (!s || !ids.length) return;
+  addDeletedIds(s, ids);
   (getSocket() as any).emit('item:remove', { sessionId: s, ids });
   persistScene(true);
 }

@@ -1,11 +1,12 @@
 import { useState } from 'react';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { fetchAdminConfigured, verifyCompendiumAdminPassword } from './compendiumApi';
 import { useCompendiumAdminStore } from './compendiumAdminStore';
 
 const GOLD = 'var(--color-accent-gold)';
 
 export function CompendiumAdminUnlock() {
+  const qc = useQueryClient();
   const unlocked = useCompendiumAdminStore((s) => s.unlocked);
   const unlock = useCompendiumAdminStore((s) => s.unlock);
   const lock = useCompendiumAdminStore((s) => s.lock);
@@ -25,6 +26,8 @@ export function CompendiumAdminUnlock() {
         unlock(password);
         setPassword('');
         setOpen(false);
+        void qc.invalidateQueries({ queryKey: ['compendium', 'sources'] });
+        void qc.invalidateQueries({ queryKey: ['compendium'] });
       }
     },
   });
@@ -37,7 +40,10 @@ export function CompendiumAdminUnlock() {
         type="button"
         className="font-ui text-[10px] px-1.5 py-0.5 rounded shrink-0"
         style={{ border: '1px solid var(--color-border)', color: GOLD }}
-        onClick={lock}
+        onClick={() => {
+          lock();
+          void qc.invalidateQueries({ queryKey: ['compendium', 'sources'] });
+        }}
         title="Compendium admin active — click to preview player view (hides locked/draft content)"
       >
         Admin ✓
