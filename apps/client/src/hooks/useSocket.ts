@@ -1,18 +1,30 @@
-import { useCallback, useEffect, useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import { useAuth } from '@clerk/clerk-react';
 import { getSocket, connectSocket, isMobileClient } from '@/lib/socket';
 import { useSessionStore } from '@/store/sessionStore';
 import { useChatStore } from '@/store/chatStore';
 import { applySessionFogActive, bindFogActiveSocket, syncFogActiveToSession } from '@/systems/scene/fogActiveSync';
 import { bindDdbRollSocket } from '@/systems/ddb/bindDdbRollSocket';
+import type { ChatMessagePayload } from '@grimoire/shared';
+import type { SessionUser } from '@grimoire/shared';
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+type SocketHandlers = {
+  onRoomState: (payload: { users: SessionUser[]; fogActive?: boolean }) => void;
+  onUserJoined: (payload: { user: SessionUser }) => void;
+  onUserLeft: (payload: { userId: string }) => void;
+  onChat: (payload: ChatMessagePayload) => void;
+  onError: (payload: { message: string }) => void;
+  onDisconnect: (reason: string) => void;
+  onConnect: () => void;
+};
+
 /**
  * Establishes and manages the Socket.io connection for a session.
- * Handles authentication, room events, and cleanup on unmount.
+ * Handlers are always removed by reference — never socket.off('connect') without a fn.
  */
 export function useSocket(
   sessionId: string | null,
@@ -23,129 +35,132 @@ export function useSocket(
   const getTokenRef = useRef(getToken);
   getTokenRef.current = getToken;
 
-  const {
-    setConnected,
-    addUser,
-    removeUser,
-    setConnectedUsers,
-    setConnectionError,
-    clearConnectionError,
-  } = useSessionStore();
-  const { addMessage } = useChatStore();
-  const setupGen = useRef(0);
+  const handlersRef = useRef<SocketHandlers | null>(null);
   const joinedRef = useRef(false);
-
-  const attachListeners = useCallback((sid: string) => {
-    const socket = getSocket();
-
-    socket.off('session:roomState');
-    socket.off('session:userJoined');
-    socket.off('session:userLeft');
-    socket.off('chat:message');
-    socket.off('error');
-    socket.off('disconnect');
-    socket.off('connect');
-
-    const joinRoom = () => {
-      if (!campaignId) return;
-      socket.emit('session:join', { sessionId: sid, campaignId });
-      joinedRef.current = true;
-    };
-
-    socket.on('session:roomState', ({ users, fogActive }) => {
-      setConnectedUsers(users);
-      setConnected(true);
-      clearConnectionError();
-      if (typeof fogActive === 'boolean') {
-        applySessionFogActive(fogActive);
-      }
-    });
-
-    socket.on('session:userJoined', ({ user }) => {
-      addUser(user);
-    });
-
-    socket.on('session:userLeft', ({ userId }) => {
-      removeUser(userId);
-    });
-
-    socket.on('chat:message', (payload) => {
-      addMessage(payload);
-    });
-
-    socket.on('error', ({ message }) => {
-      console.error('[Socket] Error:', message);
-      setConnectionError(message);
-      setConnected(false);
-    });
-
-    socket.on('disconnect', (reason) => {
-      joinedRef.current = false;
-      setConnected(false);
-      if (reason === 'io server disconnect') {
-        void socket.connect();
-      }
-    });
-
-    socket.on('connect', () => {
-      clearConnectionError();
-      setConnected(true);
-      joinRoom();
-      bindFogActiveSocket();
-      bindDdbRollSocket(true);
-      syncFogActiveToSession();
-    });
-
-    // Register handlers before join so we never miss the initial room snapshot.
-    bindFogActiveSocket();
-    bindDdbRollSocket(true);
-    joinRoom();
-    syncFogActiveToSession();
-  }, [campaignId, addUser, removeUser, setConnectedUsers, addMessage, setConnected, setConnectionError, clearConnectionError]);
 
   useEffect(() => {
     if (!sessionId || !campaignId || !isLoaded) return;
+
+    const {
+      setConnected,
+      setConnectedUsers,
+      addUser,
+      removeUser,
+      setConnectionError,
+      clearConnectionError,
+    } = useSessionStore.getState();
+    const { addMessage } = useChatStore.getState();
+
     if (!isSignedIn) {
       setConnectionError('Sign in to join the live session');
       setConnected(false);
       return;
     }
 
-    const gen = ++setupGen.current;
-    let cancelled = false;
-    joinedRef.current = false;
+    let alive = true;
+    const socket = getSocket();
 
-    async function setup(attempt = 0): Promise<void> {
-      const maxAttempts = isMobileClient() ? 10 : 5;
+    const joinRoom = () => {
+      socket.emit('session:join', { sessionId, campaignId });
+      joinedRef.current = true;
+    };
+
+    function detachHandlers() {
+      const h = handlersRef.current;
+      if (!h) return;
+      socket.off('session:roomState', h.onRoomState);
+      socket.off('session:userJoined', h.onUserJoined);
+      socket.off('session:userLeft', h.onUserLeft);
+      socket.off('chat:message', h.onChat);
+      socket.off('error', h.onError);
+      socket.off('disconnect', h.onDisconnect);
+      socket.off('connect', h.onConnect);
+      handlersRef.current = null;
+    }
+
+    function attachHandlers() {
+      detachHandlers();
+
+      const h: SocketHandlers = {
+        onRoomState: ({ users, fogActive }) => {
+          setConnectedUsers(users);
+          setConnected(true);
+          clearConnectionError();
+          if (typeof fogActive === 'boolean') {
+            applySessionFogActive(fogActive);
+          }
+        },
+        onUserJoined: ({ user }) => addUser(user),
+        onUserLeft: ({ userId }) => removeUser(userId),
+        onChat: (payload) => addMessage(payload),
+        onError: ({ message }) => {
+          console.error('[Socket] Error:', message);
+          setConnectionError(message);
+          setConnected(false);
+        },
+        onDisconnect: (reason) => {
+          joinedRef.current = false;
+          setConnected(false);
+          if (reason === 'io server disconnect') {
+            void socket.connect();
+          }
+        },
+        onConnect: () => {
+          clearConnectionError();
+          setConnected(true);
+          joinRoom();
+          bindFogActiveSocket();
+          bindDdbRollSocket(true);
+          syncFogActiveToSession();
+        },
+      };
+
+      handlersRef.current = h;
+      socket.on('session:roomState', h.onRoomState);
+      socket.on('session:userJoined', h.onUserJoined);
+      socket.on('session:userLeft', h.onUserLeft);
+      socket.on('chat:message', h.onChat);
+      socket.on('error', h.onError);
+      socket.on('disconnect', h.onDisconnect);
+      socket.on('connect', h.onConnect);
+
+      bindFogActiveSocket();
+      bindDdbRollSocket(true);
+    }
+
+    async function connect(attempt = 0): Promise<void> {
+      const maxAttempts = isMobileClient() ? 8 : 5;
       try {
         clearConnectionError();
         const token = await getTokenRef.current({ skipCache: attempt > 0 });
+        if (!alive) return;
+
         if (!token) {
-          if (attempt < maxAttempts - 1 && !cancelled && gen === setupGen.current) {
+          if (attempt < maxAttempts - 1) {
             await delay(isMobileClient() ? 2000 * (attempt + 1) : 1200 * (attempt + 1));
-            return setup(attempt + 1);
+            return connect(attempt + 1);
           }
-          if (!cancelled && gen === setupGen.current) {
-            setConnectionError('Sign-in expired — refresh and try again');
-          }
+          setConnectionError('Sign-in expired — refresh and try again');
+          setConnected(false);
           return;
         }
 
-        if (cancelled || gen !== setupGen.current) return;
+        attachHandlers();
 
-        await connectSocket(token, { retries: isMobileClient() ? 8 : 3 });
-        if (cancelled || gen !== setupGen.current) return;
+        await connectSocket(token, { retries: isMobileClient() ? 6 : 3 });
+        if (!alive) return;
 
-        setConnected(true);
-        attachListeners(sessionId!);
+        setConnected(socket.connected);
+        joinRoom();
+        syncFogActiveToSession();
         window.dispatchEvent(new CustomEvent('grimoire:socket-connected'));
       } catch (err) {
         console.error('[Socket] Setup failed:', err);
-        if (cancelled || gen !== setupGen.current) return;
+        if (!alive) return;
 
         if (attempt < maxAttempts - 1) {
           await delay(isMobileClient() ? 2500 * (attempt + 1) : 1500 * (attempt + 1));
-          return setup(attempt + 1);
+          return connect(attempt + 1);
         }
 
         const msg = err instanceof Error ? err.message : 'Connection failed';
@@ -154,36 +169,29 @@ export function useSocket(
       }
     }
 
-    void setup();
+    joinedRef.current = false;
+    void connect();
 
     const onVisible = () => {
-      if (document.visibilityState !== 'visible') return;
-      if (!sessionId || !campaignId) return;
-      const socket = getSocket();
+      if (document.visibilityState !== 'visible' || !alive) return;
       if (!socket.connected) {
-        void setup();
+        void connect();
       } else if (!joinedRef.current) {
-        attachListeners(sessionId);
+        attachHandlers();
+        joinRoom();
       }
     };
     document.addEventListener('visibilitychange', onVisible);
 
     return () => {
-      cancelled = true;
+      alive = false;
       document.removeEventListener('visibilitychange', onVisible);
-      const socket = getSocket();
-      if (sessionId && joinedRef.current) {
+      if (joinedRef.current) {
         socket.emit('session:leave', { sessionId });
       }
       joinedRef.current = false;
-      socket.off('session:roomState');
-      socket.off('session:userJoined');
-      socket.off('session:userLeft');
-      socket.off('chat:message');
-      socket.off('error');
-      socket.off('disconnect');
-      socket.off('connect');
+      detachHandlers();
       setConnected(false);
     };
-  }, [sessionId, campaignId, retryNonce, isLoaded, isSignedIn, setConnected, attachListeners, setConnectionError, clearConnectionError]);
+  }, [sessionId, campaignId, retryNonce, isLoaded, isSignedIn]);
 }

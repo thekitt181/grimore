@@ -21,7 +21,8 @@ export function getPrimaryClientUrl(): string {
 }
 
 export function isClientOriginAllowed(origin: string | undefined): boolean {
-  if (!origin) return false;
+  // No Origin header — same-origin or non-browser clients.
+  if (!origin) return true;
   const allowed = getClientOrigins();
   if (allowed.includes(origin)) return true;
   if (process.env['NODE_ENV'] !== 'production') {

@@ -17,11 +17,10 @@ function socketOptions() {
   const mobile = isMobileClient();
   return {
     autoConnect: false,
-    path: '/socket.io/',
-    // Mobile networks + Render cold starts: polling-only is far more reliable.
+    // Mobile: polling-only. Desktop: try websocket first, fall back to polling.
     transports: mobile ? ['polling'] : ['websocket', 'polling'],
     upgrade: !mobile,
-    timeout: mobile ? 60_000 : 25_000,
+    timeout: mobile ? 60_000 : 30_000,
     reconnection: true,
     reconnectionAttempts: 15,
     reconnectionDelay: 1500,
@@ -78,20 +77,18 @@ async function connectSocketOnce(token: string): Promise<void> {
   const s = getSocket();
   s.auth = { token };
 
+  // Re-handshake when reconnecting so Clerk token is always fresh.
   if (s.connected) {
-    const { bindDdbRollSocket } = await import('@/systems/ddb/bindDdbRollSocket');
-    bindDdbRollSocket(true);
-    return;
-  }
-
-  if (s.active) {
+    s.disconnect();
+    await delay(150);
+  } else if (s.active) {
     s.disconnect();
     await delay(100);
   }
 
   s.connect();
 
-  const timeoutMs = isMobileClient() ? 60_000 : 25_000;
+  const timeoutMs = isMobileClient() ? 60_000 : 30_000;
   await new Promise<void>((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error('Connection timed out — server may be waking up')), timeoutMs);
     const onConnect = () => {

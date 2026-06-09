@@ -41,7 +41,7 @@ import type {
 } from '@grimoire/shared';
 import { setCompendiumSocketServer } from '../services/compendiumBroadcast';
 import { startRollBridge, stopRollBridge, isRollBridgeActive, resolveRollBridgeUserId } from '../services/ddb/ddbRollBridge';
-import { getClientOrigins } from '../lib/clientOrigins';
+import { isClientOriginAllowed } from '../lib/clientOrigins';
 
 const clerk = createClerkClient({
   secretKey: process.env['CLERK_SECRET_KEY'] ?? '',
@@ -51,13 +51,18 @@ const clerk = createClerkClient({
 const sessionFogActive = new Map<string, boolean>();
 
 export function initSocket(httpServer: HttpServer): Server {
-  const allowedOrigins = getClientOrigins();
   const io = new Server<ClientToServerEvents, ServerToClientEvents>(httpServer, {
     cors: {
-      origin: allowedOrigins.length === 1 ? allowedOrigins[0] : allowedOrigins,
+      origin: (origin, callback) => {
+        if (isClientOriginAllowed(origin)) {
+          callback(null, true);
+        } else {
+          console.warn(`[Socket] CORS blocked origin: ${origin ?? '(none)'}`);
+          callback(new Error('CORS blocked'));
+        }
+      },
       credentials: true,
     },
-    path: '/socket.io/',
     transports: ['websocket', 'polling'],
     pingTimeout: 60_000,
     pingInterval: 25_000,

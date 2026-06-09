@@ -2,6 +2,8 @@ import { getSocket } from '@/lib/socket';
 import { useMapStore } from '@/systems/map/store/mapStore';
 import { useSessionStore } from '@/store/sessionStore';
 
+let fogActiveHandler: ((payload: { active: boolean }) => void) | null = null;
+
 /** Whether the fog overlay should render for the current client. */
 export function isFogOverlayVisible(): boolean {
   const { fogEnabled, sessionFogActive } = useMapStore.getState();
@@ -27,7 +29,6 @@ export function setFogVisibleForSession(visible: boolean): void {
 
 export function applySessionFogActive(active: boolean): void {
   const role = useSessionStore.getState().myRole;
-  // GM is authoritative locally — ignore stale server echoes on join/reconnect.
   if (role === 'GM') return;
   useMapStore.getState().setSessionFogActive(active);
   useMapStore.getState().setFogEnabled(active);
@@ -35,10 +36,13 @@ export function applySessionFogActive(active: boolean): void {
 
 export function bindFogActiveSocket(): void {
   const socket = getSocket();
-  socket.off('fog:active');
-  socket.on('fog:active', ({ active }) => {
+  if (fogActiveHandler) {
+    socket.off('fog:active', fogActiveHandler);
+  }
+  fogActiveHandler = ({ active }) => {
     applySessionFogActive(active);
-  });
+  };
+  socket.on('fog:active', fogActiveHandler);
 }
 
 /** Push current fog visibility to players (call after socket connects). */
