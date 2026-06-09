@@ -116,11 +116,15 @@ export const useMapStore = create<SceneState>((set) => ({
   drawStroke:   3,
 
   setTool: (activeTool) =>
-    set((s) => ({
-      activeTool,
-      fogEnabled:
-        s.fogEnabled || activeTool === 'fog-reveal' || activeTool === 'fog-hide',
-    })),
+    set((s) => {
+      const fogTool = activeTool === 'fog-reveal' || activeTool === 'fog-hide';
+      const fogEnabled = s.fogEnabled || fogTool;
+      return {
+        activeTool,
+        fogEnabled,
+        sessionFogActive: fogTool ? true : s.sessionFogActive,
+      };
+    }),
   setViewport:    (viewport) => set({ viewport }),
   setFogBrushSize:(fogBrushSize) => set({ fogBrushSize }),
   setFogEnabled:  (fogEnabled) => set({ fogEnabled }),

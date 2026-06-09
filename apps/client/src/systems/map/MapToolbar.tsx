@@ -7,7 +7,7 @@ import { mapLayerRefs } from './MapCanvas';
 import { emitItemUpdate, emitItemRemove } from '@/systems/scene/sceneSync';
 import { emitFogUpdate } from '@/systems/scene/fogSync';
 import { clsx } from 'clsx';
-import { emitFogActive } from '@/systems/scene/fogActiveSync';
+import { setFogVisibleForSession } from '@/systems/scene/fogActiveSync';
 
 type ToolDef = { id: MapTool; label: string; icon: string; title: string };
 
@@ -39,7 +39,12 @@ const BTN = 'w-9 h-9 rounded flex items-center justify-center text-sm font-ui tr
 const ACTIVE_BTN = 'bg-[#c9a84c22] text-[#c9a84c] ring-1 ring-[#c9a84c66]';
 
 export function MapToolbar() {
-  const { activeTool, setTool, revealAll, hideAll, drawColor, drawStroke, setDrawColor, setDrawStroke, fogEnabled, setFogEnabled } = useMapStore();
+  const {
+    activeTool, setTool, revealAll, hideAll,
+    drawColor, drawStroke, setDrawColor, setDrawStroke,
+    fogEnabled, sessionFogActive,
+  } = useMapStore();
+  const fogOverlayOn = fogEnabled || sessionFogActive;
   const snapToGrid = useItemStore((s) => s.snapToGrid);
   const setSnap = useItemStore((s) => s.setSnap);
   const items = useItemStore((s) => s.items);
@@ -134,26 +139,22 @@ export function MapToolbar() {
           <>
             <div className="gold-divider my-1" />
             <button
-              title={fogEnabled ? 'Fog overlay: ON (click to hide)' : 'Fog overlay: OFF (click to show)'}
+              title={fogOverlayOn ? 'Fog overlay: ON (click to hide)' : 'Fog overlay: OFF (click to show)'}
               onClick={() => {
-                const next = !fogEnabled;
-                setFogEnabled(next);
-                useMapStore.getState().setSessionFogActive(next);
-                emitFogActive(next);
+                const next = !fogOverlayOn;
+                setFogVisibleForSession(next);
                 if (!next) {
                   useMapStore.getState().setTool('select');
                 }
               }}
-              className={clsx(BTN, fogEnabled && ACTIVE_BTN)}
+              className={clsx(BTN, fogOverlayOn && ACTIVE_BTN)}
             >
               🌫
             </button>
             <button
               title="Reveal entire map"
               onClick={() => {
-                setFogEnabled(true);
-                useMapStore.getState().setSessionFogActive(true);
-                emitFogActive(true);
+                setFogVisibleForSession(true);
                 revealAll();
                 emitFogUpdate();
               }}
@@ -164,9 +165,7 @@ export function MapToolbar() {
             <button
               title="Hide entire map"
               onClick={() => {
-                setFogEnabled(true);
-                useMapStore.getState().setSessionFogActive(true);
-                emitFogActive(true);
+                setFogVisibleForSession(true);
                 hideAll();
                 emitFogUpdate();
               }}

@@ -33,8 +33,7 @@ export function useMapFogOverlay(
   const fogContainers = useRef<Map<string, Container>>(new Map());
 
   const isGM = myRole === 'GM';
-  /** Session-wide fog toggle (synced from GM via fog:active). Same rule for GM and players. */
-  const showFogOverlay = sessionFogActive;
+  const showFogOverlay = fogEnabled || sessionFogActive;
 
   useEffect(() => {
     if (!appReady) {

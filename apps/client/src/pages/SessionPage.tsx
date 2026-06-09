@@ -1,7 +1,6 @@
 import { useEffect, useLayoutEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { useAuth } from '@clerk/clerk-react';
 import { api } from '@/lib/axios';
 import { useSocket } from '@/hooks/useSocket';
 import { useSessionStore } from '@/store/sessionStore';
@@ -54,7 +53,6 @@ interface SessionInfo {
 export function SessionPage() {
   const { sessionId } = useParams<{ sessionId: string }>();
   const navigate = useNavigate();
-  const { getToken } = useAuth();
   const {
     isConnected,
     connectionError,
@@ -98,16 +96,11 @@ export function SessionPage() {
   const { data: sessionInfo, isLoading } = useQuery({
     queryKey: ['session', sessionId],
     queryFn: async () => {
-      const token = await getToken();
-      if (token) {
-        const { connectSocket } = await import('@/lib/socket');
-        await connectSocket(token).catch(() => null);
-      }
       const res = await api.get<{ session: SessionInfo }>(`/sessions/${sessionId}`);
       return res.data.session;
     },
     enabled: !!sessionId,
-    retry: 1,
+    retry: 2,
   });
 
   // Set session id before child effects run (fog/items need this on first paint).

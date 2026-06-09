@@ -4,7 +4,7 @@ import { getActiveMap } from '@/systems/scene/store/itemStore';
 import { useSessionStore } from '@/store/sessionStore';
 import { getPersistSessionId } from '@/systems/scene/sessionPersistence';
 import { emitFogUpdate } from '@/systems/scene/fogSync';
-import { emitFogActive } from '@/systems/scene/fogActiveSync';
+import { setFogVisibleForSession } from '@/systems/scene/fogActiveSync';
 import { sceneRefs, clientToWorld } from '@/systems/scene/sceneRefs';
 
 function worldToMapLocal(wx: number, wy: number): { x: number; y: number } {
@@ -38,9 +38,7 @@ export function useFogRenderer(appReady = false) {
 
   useEffect(() => {
     if (!isGM || !isFogTool) return;
-    useMapStore.getState().setSessionFogActive(true);
-    useMapStore.getState().setFogEnabled(true);
-    emitFogActive(true);
+    setFogVisibleForSession(true);
   }, [isGM, isFogTool]);
 
   useEffect(() => {

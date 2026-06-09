@@ -1,11 +1,10 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { useAuth } from '@clerk/clerk-react';
-import { getSocket, connectSocket } from '@/lib/socket';
+import { getSocket, connectSocket, isMobileClient } from '@/lib/socket';
 import { useSessionStore } from '@/store/sessionStore';
 import { useChatStore } from '@/store/chatStore';
-import { bindFogActiveSocket, emitFogActive } from '@/systems/scene/fogActiveSync';
+import { bindFogActiveSocket, syncFogActiveToSession } from '@/systems/scene/fogActiveSync';
 import { bindDdbRollSocket } from '@/systems/ddb/bindDdbRollSocket';
-import { useMapStore } from '@/systems/map/store/mapStore';
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -20,7 +19,7 @@ export function useSocket(
   campaignId: string | null,
   retryNonce = 0,
 ) {
-  const { getToken } = useAuth();
+  const { isLoaded, isSignedIn, getToken } = useAuth();
   const {
     setConnected,
     addUser,
@@ -31,6 +30,7 @@ export function useSocket(
   } = useSessionStore();
   const { addMessage } = useChatStore();
   const setupGen = useRef(0);
+  const joinedRef = useRef(false);
 
   const attachListeners = useCallback((sid: string) => {
     const socket = getSocket();
@@ -43,10 +43,18 @@ export function useSocket(
     socket.off('disconnect');
     socket.off('connect');
 
-    socket.emit('session:join', { sessionId: sid, campaignId: campaignId! });
+    const joinRoom = () => {
+      if (!campaignId) return;
+      socket.emit('session:join', { sessionId: sid, campaignId });
+      joinedRef.current = true;
+    };
+
+    joinRoom();
 
     socket.on('session:roomState', ({ users }) => {
       setConnectedUsers(users);
+      setConnected(true);
+      clearConnectionError();
     });
 
     socket.on('session:userJoined', ({ user }) => {
@@ -66,38 +74,49 @@ export function useSocket(
       setConnectionError(message);
     });
 
-    socket.on('disconnect', () => {
+    socket.on('disconnect', (reason) => {
+      joinedRef.current = false;
       setConnected(false);
+      if (reason === 'io server disconnect') {
+        // Server kicked — reconnect manually
+        void socket.connect();
+      }
     });
 
     socket.on('connect', () => {
       clearConnectionError();
       setConnected(true);
-      socket.emit('session:join', { sessionId: sid, campaignId: campaignId! });
+      joinRoom();
+      bindFogActiveSocket();
+      bindDdbRollSocket(true);
+      syncFogActiveToSession();
     });
 
     bindFogActiveSocket();
     bindDdbRollSocket(true);
-
-    if (useSessionStore.getState().myRole === 'GM') {
-      emitFogActive(useMapStore.getState().fogEnabled);
-    }
+    syncFogActiveToSession();
   }, [campaignId, addUser, removeUser, setConnectedUsers, addMessage, setConnected, setConnectionError, clearConnectionError]);
 
   useEffect(() => {
-    if (!sessionId || !campaignId) return;
+    if (!sessionId || !campaignId || !isLoaded) return;
+    if (!isSignedIn) {
+      setConnectionError('Sign in to join the live session');
+      setConnected(false);
+      return;
+    }
 
     const gen = ++setupGen.current;
     let cancelled = false;
+    joinedRef.current = false;
 
     async function setup(attempt = 0): Promise<void> {
-      const maxAttempts = 5;
+      const maxAttempts = isMobileClient() ? 8 : 5;
       try {
         clearConnectionError();
         const token = await getToken({ skipCache: attempt > 0 });
         if (!token) {
           if (attempt < maxAttempts - 1 && !cancelled && gen === setupGen.current) {
-            await delay(1200 * (attempt + 1));
+            await delay(isMobileClient() ? 2000 * (attempt + 1) : 1200 * (attempt + 1));
             return setup(attempt + 1);
           }
           if (!cancelled && gen === setupGen.current) {
@@ -108,17 +127,18 @@ export function useSocket(
 
         if (cancelled || gen !== setupGen.current) return;
 
-        await connectSocket(token, { retries: 3 });
+        await connectSocket(token, { retries: isMobileClient() ? 6 : 3 });
         if (cancelled || gen !== setupGen.current) return;
 
         setConnected(true);
         attachListeners(sessionId!);
+        window.dispatchEvent(new CustomEvent('grimoire:socket-connected'));
       } catch (err) {
         console.error('[Socket] Setup failed:', err);
         if (cancelled || gen !== setupGen.current) return;
 
         if (attempt < maxAttempts - 1) {
-          await delay(1500 * (attempt + 1));
+          await delay(isMobileClient() ? 2500 * (attempt + 1) : 1500 * (attempt + 1));
           return setup(attempt + 1);
         }
 
@@ -130,12 +150,26 @@ export function useSocket(
 
     void setup();
 
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible') return;
+      if (!sessionId || !campaignId) return;
+      const socket = getSocket();
+      if (!socket.connected) {
+        void setup();
+      } else if (!joinedRef.current) {
+        attachListeners(sessionId);
+      }
+    };
+    document.addEventListener('visibilitychange', onVisible);
+
     return () => {
       cancelled = true;
+      document.removeEventListener('visibilitychange', onVisible);
       const socket = getSocket();
-      if (sessionId) {
+      if (sessionId && joinedRef.current) {
         socket.emit('session:leave', { sessionId });
       }
+      joinedRef.current = false;
       socket.off('session:roomState');
       socket.off('session:userJoined');
       socket.off('session:userLeft');
@@ -145,5 +179,5 @@ export function useSocket(
       socket.off('connect');
       setConnected(false);
     };
-  }, [sessionId, campaignId, retryNonce, getToken, setConnected, attachListeners, setConnectionError, clearConnectionError]);
+  }, [sessionId, campaignId, retryNonce, isLoaded, isSignedIn, getToken, setConnected, attachListeners, setConnectionError, clearConnectionError]);
 }

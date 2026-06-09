@@ -2,38 +2,58 @@ import { io, Socket } from 'socket.io-client';
 import type { ServerToClientEvents, ClientToServerEvents } from '@grimoire/shared';
 import { getServerOrigin } from './appUrls';
 
-const SERVER_URL = getServerOrigin();
 let socket: Socket<ServerToClientEvents, ClientToServerEvents> | null = null;
 
-function preferPollingFirst(): boolean {
+export function isMobileClient(): boolean {
   if (typeof navigator === 'undefined') return false;
-  return /iPhone|iPad|iPod|Android|Mobile/i.test(navigator.userAgent);
+  return /iPhone|iPad|iPod|Android|Mobile|webOS|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
 }
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function socketOptions() {
+  const mobile = isMobileClient();
+  return {
+    autoConnect: false,
+    // Mobile networks + Render cold starts: polling-only is far more reliable.
+    transports: mobile ? ['polling'] : ['websocket', 'polling'],
+    upgrade: !mobile,
+    timeout: mobile ? 45_000 : 25_000,
+    reconnection: true,
+    reconnectionAttempts: 12,
+    reconnectionDelay: 1500,
+    reconnectionDelayMax: 10_000,
+    withCredentials: true,
+  };
+}
+
 export function getSocket(): Socket<ServerToClientEvents, ClientToServerEvents> {
   if (!socket) {
-    socket = io(SERVER_URL, {
-      autoConnect: false,
-      transports: preferPollingFirst() ? ['polling', 'websocket'] : ['websocket', 'polling'],
-      timeout: 20_000,
-      reconnection: true,
-      reconnectionAttempts: 8,
-      reconnectionDelay: 1000,
-      reconnectionDelayMax: 8000,
-    });
+    socket = io(getServerOrigin(), socketOptions());
   }
   return socket;
+}
+
+/** Full teardown (logout / leave app). Preserves listeners during connect retries. */
+export function resetSocket(): void {
+  if (!socket) return;
+  socket.removeAllListeners();
+  socket.disconnect();
+  socket = null;
+}
+
+function softDisconnect(): void {
+  if (!socket) return;
+  socket.disconnect();
 }
 
 export async function connectSocket(
   token: string,
   options?: { retries?: number },
 ): Promise<void> {
-  const retries = options?.retries ?? 3;
+  const retries = options?.retries ?? (isMobileClient() ? 6 : 3);
   let lastError: unknown;
 
   for (let attempt = 0; attempt < retries; attempt++) {
@@ -42,10 +62,10 @@ export async function connectSocket(
       return;
     } catch (err) {
       lastError = err;
-      const s = getSocket();
-      if (s.connected) s.disconnect();
+      console.warn(`[Socket] connect attempt ${attempt + 1}/${retries} failed:`, err);
+      softDisconnect();
       if (attempt < retries - 1) {
-        await delay(1000 * (attempt + 1));
+        await delay(isMobileClient() ? 2000 * (attempt + 1) : 1000 * (attempt + 1));
       }
     }
   }
@@ -63,9 +83,16 @@ async function connectSocketOnce(token: string): Promise<void> {
     return;
   }
 
+  if (s.active) {
+    s.disconnect();
+    await delay(100);
+  }
+
   s.connect();
+
+  const timeoutMs = isMobileClient() ? 45_000 : 25_000;
   await new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('Connection timed out')), 20_000);
+    const timer = setTimeout(() => reject(new Error('Connection timed out — server may be waking up')), timeoutMs);
     const onConnect = () => {
       clearTimeout(timer);
       cleanup();
@@ -89,6 +116,5 @@ async function connectSocketOnce(token: string): Promise<void> {
 }
 
 export function disconnectSocket(): void {
-  socket?.disconnect();
-  socket = null;
+  resetSocket();
 }

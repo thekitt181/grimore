@@ -19,7 +19,7 @@ import { sceneRefs } from '@/systems/scene/sceneRefs';
 import { DEFAULT_MAP_GRID_SIZE, defaultMapGrid, gridSizeForMap } from '@/systems/scene/types';
 import { emitItemAdd, emitItemUpdate, emitItemsSync } from '@/systems/scene/sceneSync';
 import { applyFogData, emitFogSync, flushFogScene, hydrateFogFromServer, parseFogCells, restoreFogFromLocal } from '@/systems/scene/fogSync';
-import { bindFogActiveSocket, emitFogActive } from '@/systems/scene/fogActiveSync';
+import { bindFogActiveSocket, syncFogActiveToSession } from '@/systems/scene/fogActiveSync';
 import { useParams } from 'react-router-dom';
 import { loadItemsLocal, persistItemsLocal } from '@/systems/scene/sessionPersistence';
 import { mergeSceneItems, sanitizePersistedItems } from '@/systems/scene/mergeSceneItems';
@@ -57,7 +57,6 @@ export function MapCanvas() {
 
   const { sessionId: routeSessionId } = useParams<{ sessionId: string }>();
   const storeSessionId = useSessionStore((s) => s.sessionId);
-  const myUserId = useSessionStore((s) => s.myUserId);
   const sessionId = storeSessionId ?? routeSessionId ?? null;
   const items = useItemStore((s) => s.items);
   const initialSyncRef = useRef({ received: false, hadItems: false, pushed: false });
@@ -69,6 +68,7 @@ export function MapCanvas() {
   }, [sessionId]);
 
   // Restore last saved scene from localStorage before the server snapshot arrives.
+  // Only reset when sessionId changes — NOT when myUserId arrives (that was wiping fog state).
   useEffect(() => {
     if (!sessionId) return;
     useItemStore.getState().reset();
@@ -82,8 +82,7 @@ export function MapCanvas() {
     }
 
     restoreFogFromLocal(sessionId);
-    useMapStore.getState().setFogEnabled(false);
-  }, [sessionId, myUserId]);
+  }, [sessionId]);
 
   // Flush fog to storage + server before the page unloads.
   useEffect(() => {
@@ -151,7 +150,7 @@ export function MapCanvas() {
   // ── Socket listeners (generic item sync) ──────────────────────────────────
   useEffect(() => {
     if (!sessionId) return;
-    const socket = getSocket();
+
     const persistLocal = () => {
       if (!sessionId) return;
       persistItemsLocal(sessionId, Object.values(useItemStore.getState().items) as Item[]);
@@ -221,19 +220,12 @@ export function MapCanvas() {
       if (useSessionStore.getState().myRole === 'GM') {
         emitItemsSync(Object.values(useItemStore.getState().items) as Item[]);
         emitFogSync();
-        emitFogActive(useMapStore.getState().fogEnabled);
+        syncFogActiveToSession();
       }
     };
 
-    socket.on('item:add', onAdd as any);
-    socket.on('item:update', onUpdate as any);
-    socket.on('item:remove', onRemove as any);
-    socket.on('items:sync', onSync as any);
-    socket.on('map:fogUpdate', onFog as any);
-    socket.on('fog:sync', onFogSync as any);
-    socket.on('session:userJoined', onUserJoined as any);
-    bindFogActiveSocket();
-    return () => {
+    function attachSceneListeners() {
+      const socket = getSocket();
       socket.off('item:add', onAdd as any);
       socket.off('item:update', onUpdate as any);
       socket.off('item:remove', onRemove as any);
@@ -241,6 +233,32 @@ export function MapCanvas() {
       socket.off('map:fogUpdate', onFog as any);
       socket.off('fog:sync', onFogSync as any);
       socket.off('session:userJoined', onUserJoined as any);
+      socket.on('item:add', onAdd as any);
+      socket.on('item:update', onUpdate as any);
+      socket.on('item:remove', onRemove as any);
+      socket.on('items:sync', onSync as any);
+      socket.on('map:fogUpdate', onFog as any);
+      socket.on('fog:sync', onFogSync as any);
+      socket.on('session:userJoined', onUserJoined as any);
+      bindFogActiveSocket();
+    }
+
+    attachSceneListeners();
+    const socket = getSocket();
+    socket.on('connect', attachSceneListeners);
+    const onSocketReady = () => attachSceneListeners();
+    window.addEventListener('grimoire:socket-connected', onSocketReady);
+
+    return () => {
+      window.removeEventListener('grimoire:socket-connected', onSocketReady);
+      getSocket().off('connect', attachSceneListeners);
+      getSocket().off('item:add', onAdd as any);
+      getSocket().off('item:update', onUpdate as any);
+      getSocket().off('item:remove', onRemove as any);
+      getSocket().off('items:sync', onSync as any);
+      getSocket().off('map:fogUpdate', onFog as any);
+      getSocket().off('fog:sync', onFogSync as any);
+      getSocket().off('session:userJoined', onUserJoined as any);
     };
   }, [sessionId]);
 
