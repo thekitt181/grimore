@@ -1,5 +1,6 @@
 import { normalizeDiceNotation, type GrimoireAttack, type GrimoireCharacter, type GrimoireSpell } from '@grimoire/shared';
 import { stripHtmlText } from '@/systems/compendium/actionDetail';
+import type { ActionDamage, ActionRange, ParsedAction } from '@/systems/compendium/statBlockParser';
 
 function defaultRange(): ActionRange {
   return { kind: 'melee', reachFt: 5 };

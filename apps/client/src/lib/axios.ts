@@ -1,4 +1,4 @@
-import axios from 'axios';
+import axios, { type InternalAxiosRequestConfig } from 'axios';
 import { getApiBaseUrl } from './appUrls';
 
 export const api = axios.create({
@@ -14,7 +14,7 @@ export function setAuthTokenGetter(fn: AuthTokenGetter) {
   getAuthToken = fn;
 }
 
-async function attachAuthHeaders(config: axios.InternalAxiosRequestConfig): Promise<void> {
+async function attachAuthHeaders(config: InternalAxiosRequestConfig): Promise<void> {
   if (getAuthToken) {
     const token = await getAuthToken();
     if (token) {
@@ -46,7 +46,7 @@ api.interceptors.request.use(async (config) => {
   return config;
 });
 
-type RetriableConfig = axios.InternalAxiosRequestConfig & { __authRetried?: boolean };
+type RetriableConfig = InternalAxiosRequestConfig & { __authRetried?: boolean };
 
 api.interceptors.response.use(
   (res) => res,

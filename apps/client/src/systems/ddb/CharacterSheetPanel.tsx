@@ -62,8 +62,8 @@ export function CharacterSheetPanel({ token, onClose }: { token: TokenItem; onCl
   const deathSaveMutation = useMutation({
     mutationFn: (payload: { deathSaves: DeathSavesState; hp?: number; tempHp?: number }) =>
       patchDdbDeathSaves(ddbId!, payload.deathSaves, {
-        hp: payload.hp,
-        tempHp: payload.tempHp,
+        ...(payload.hp != null ? { hp: payload.hp } : {}),
+        ...(payload.tempHp != null ? { tempHp: payload.tempHp } : {}),
       }),
     onSuccess: (result) => {
       void qc.setQueryData(['ddb', 'character', ddbId], result.character);
@@ -93,8 +93,8 @@ export function CharacterSheetPanel({ token, onClose }: { token: TokenItem; onCl
     if (liveToken.syncHpToDdb) {
       deathSaveMutation.mutate({
         deathSaves: normalized,
-        hp,
-        tempHp: tempHp ?? character?.tempHp ?? 0,
+        ...(hp != null ? { hp } : {}),
+        ...(tempHp != null ? { tempHp } : { tempHp: character?.tempHp ?? 0 }),
       });
     }
   }

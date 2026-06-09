@@ -36,7 +36,7 @@ export function SaveAreaEffectBlock({
           token={token}
           damage={dmg}
           aoe={aoe}
-          {...(save ? { save } : {})}
+          {...(save && save.dc !== undefined ? { save: { dc: save.dc, stat: save.stat } } : {})}
         />
       ))}
     </div>

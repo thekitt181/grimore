@@ -99,6 +99,10 @@ export interface CompendiumMonster extends OwlbearMonster {
   isDraft?: boolean;
   /** Resolved loadable URL (custom override or catalog default). */
   imageUrl?: string;
+  /** Parsed from stat block when available. */
+  damageResistances?: string[];
+  damageImmunities?: string[];
+  damageVulnerabilities?: string[];
 }
 
 export interface CompendiumItem extends OwlbearItem {
