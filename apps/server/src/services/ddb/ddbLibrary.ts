@@ -39,7 +39,9 @@ export { fetchDdbMonsterDetail } from './ddbMonsterFetch';
 
 const SPELL_CACHE_TTL = 60 * 60;
 const ITEM_CACHE_TTL = 60 * 30;
-const IMPORT_BATCH = 100;
+const FETCH_BATCH = 100;
+/** Smaller Mongo writes — full global doc RMW times out on large batches from Render→Atlas. */
+const SAVE_BATCH = 15;
 const CATALOG_CACHE_TTL = 60 * 60;
 
 async function loadDdbCatalog(ctx: DdbAuthContext): Promise<DdbCatalog> {
@@ -428,6 +430,62 @@ type ImportBatchMeta = {
   savedEntries: Array<{ source?: string }>;
 };
 
+async function saveImportBatch<T extends OwlbearMonster | OwlbearItem | OwlbearSpell>(
+  kind: 'monster' | 'item' | 'spell',
+  pending: Array<{ entry: T; ddbId: number }>,
+  saveBulk: (entries: Array<{ entry: T; opts: { saveAs: 'replace' | 'homebrew' } }>) => Promise<{
+    entries: Array<{ id: string; name: string; source?: string }>;
+    persist: { mongoPersisted: boolean };
+  }>,
+  imported: DdbLibraryImportResult['imported'],
+  errors: DdbLibraryImportResult['errors'],
+  meta: ImportBatchMeta,
+): Promise<void> {
+  for (let i = 0; i < pending.length; i += SAVE_BATCH) {
+    const slice = pending.slice(i, i + SAVE_BATCH);
+    const payloads = slice.map(({ entry }) => ({ entry, opts: resolveImportSaveOpts(entry) }));
+
+    try {
+      const batch = await saveBulk(payloads);
+      meta.mongoPersisted = meta.mongoPersisted && batch.persist.mongoPersisted;
+      meta.savedEntries.push(...batch.entries);
+      for (let j = 0; j < batch.entries.length; j++) {
+        imported.push({
+          kind,
+          ddbId: slice[j]!.ddbId,
+          compendiumId: batch.entries[j]!.id,
+          name: batch.entries[j]!.name,
+          source: batch.entries[j]!.source,
+        });
+      }
+    } catch (batchErr) {
+      const batchMessage = batchErr instanceof Error ? batchErr.message : 'Import failed';
+      console.warn(`[DDB Import] ${kind} batch save failed (${slice.length}), trying per-entry:`, batchMessage);
+      for (const { entry, ddbId } of slice) {
+        try {
+          const single = await saveBulk([{ entry, opts: resolveImportSaveOpts(entry) }]);
+          meta.mongoPersisted = meta.mongoPersisted && single.persist.mongoPersisted;
+          meta.savedEntries.push(...single.entries);
+          if (single.entries[0]) {
+            imported.push({
+              kind,
+              ddbId,
+              compendiumId: single.entries[0].id,
+              name: single.entries[0].name,
+              source: single.entries[0].source,
+            });
+          }
+        } catch (err) {
+          errors.push({
+            id: ddbId,
+            message: err instanceof Error ? err.message : batchMessage,
+          });
+        }
+      }
+    }
+  }
+}
+
 async function finalizeDdbImportResult(
   result: DdbLibraryImportResult,
   catalog: DdbCatalog,
@@ -459,11 +517,10 @@ async function importMonsterIds(
 ): Promise<DdbLibraryImportResult> {
   const imported: DdbLibraryImportResult['imported'] = [];
   const errors: DdbLibraryImportResult['errors'] = [];
-  let mongoPersisted = true;
-  const savedEntries: Array<{ source?: string }> = [];
+  const meta: ImportBatchMeta = { mongoPersisted: true, savedEntries: [] };
 
-  for (let i = 0; i < ids.length; i += IMPORT_BATCH) {
-    const batchIds = ids.slice(i, i + IMPORT_BATCH);
+  for (let i = 0; i < ids.length; i += FETCH_BATCH) {
+    const batchIds = ids.slice(i, i + FETCH_BATCH);
     const rawById = await fetchMonstersForImport(ctx, batchIds);
     const enriched = await enrichMonstersForImport(ctx, [...rawById.values()]);
     const enrichedById = new Map<number, Record<string, unknown>>();
@@ -478,11 +535,11 @@ async function importMonsterIds(
       try {
         const raw = enrichedById.get(id) ?? rawById.get(id);
         if (!raw) {
-          errors.push({ id, message: 'Monster not found' });
+          errors.push({ id, message: 'Monster not found on D&D Beyond (check account access)' });
           continue;
         }
         if (!monsterHasImportableStatBlock(raw)) {
-          errors.push({ id, message: 'Incomplete stat block from D&D Beyond' });
+          errors.push({ id, message: 'No stat block text returned from D&D Beyond' });
           continue;
         }
         const withSource = normalizeDdbMonsterToCompendium(raw, catalog, sourceId);
@@ -501,32 +558,19 @@ async function importMonsterIds(
 
     if (pending.length === 0) continue;
 
-    try {
-      const batch = await saveMonstersBulk(
-        pending.map(({ entry }) => ({ entry, opts: resolveImportSaveOpts(entry) })),
-      );
-      mongoPersisted = mongoPersisted && batch.persist.mongoPersisted;
-      savedEntries.push(...batch.entries);
-      for (let j = 0; j < batch.entries.length; j++) {
-        imported.push({
-          kind: 'monster',
-          ddbId: pending[j].ddbId,
-          compendiumId: batch.entries[j].id,
-          name: batch.entries[j].name,
-          source: batch.entries[j].source,
-        });
-      }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Import failed';
-      for (const { ddbId } of pending) {
-        errors.push({ id: ddbId, message });
-      }
-    }
+    await saveImportBatch(
+      'monster',
+      pending,
+      (entries) => saveMonstersBulk(entries),
+      imported,
+      errors,
+      meta,
+    );
   }
   return finalizeDdbImportResult(
     { imported, errors },
     catalog,
-    { mongoPersisted, savedEntries },
+    { mongoPersisted: meta.mongoPersisted, savedEntries: meta.savedEntries },
     sourceId != null ? [sourceId] : undefined,
   );
 }
@@ -540,17 +584,16 @@ async function importSpellIds(
 ): Promise<DdbLibraryImportResult> {
   const imported: DdbLibraryImportResult['imported'] = [];
   const errors: DdbLibraryImportResult['errors'] = [];
-  let mongoPersisted = true;
-  const savedEntries: Array<{ source?: string }> = [];
+  const meta: ImportBatchMeta = { mongoPersisted: true, savedEntries: [] };
   const pool = await loadSpellPool(ctx, campaignId);
   const byId = poolById(pool);
 
-  for (let i = 0; i < ids.length; i += IMPORT_BATCH) {
-    const batchIds = ids.slice(i, i + IMPORT_BATCH);
+  for (let i = 0; i < ids.length; i += FETCH_BATCH) {
+    const batchIds = ids.slice(i, i + FETCH_BATCH);
     const batchRaw = batchIds
       .map((id) => byId.get(id))
       .filter((raw): raw is Record<string, unknown> => Boolean(raw));
-    const enriched = await enrichEntitiesWithFullDefinitions(ctx, 'spell', batchRaw, campaignId);
+    const enriched = await enrichEntitiesWithFullDefinitions(ctx, 'spell', batchRaw, campaignId, true);
     const enrichedById = poolById(enriched);
 
     const pending: Array<{ entry: OwlbearSpell; ddbId: number }> = [];
@@ -575,32 +618,19 @@ async function importSpellIds(
 
     if (pending.length === 0) continue;
 
-    try {
-      const batch = await saveSpellsBulk(
-        pending.map(({ entry }) => ({ entry, opts: resolveImportSaveOpts(entry) })),
-      );
-      mongoPersisted = mongoPersisted && batch.persist.mongoPersisted;
-      savedEntries.push(...batch.entries);
-      for (let j = 0; j < batch.entries.length; j++) {
-        imported.push({
-          kind: 'spell',
-          ddbId: pending[j].ddbId,
-          compendiumId: batch.entries[j].id,
-          name: batch.entries[j].name,
-          source: batch.entries[j].source,
-        });
-      }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Import failed';
-      for (const { ddbId } of pending) {
-        errors.push({ id: ddbId, message });
-      }
-    }
+    await saveImportBatch(
+      'spell',
+      pending,
+      (entries) => saveSpellsBulk(entries),
+      imported,
+      errors,
+      meta,
+    );
   }
   return finalizeDdbImportResult(
     { imported, errors },
     catalog,
-    { mongoPersisted, savedEntries },
+    { mongoPersisted: meta.mongoPersisted, savedEntries: meta.savedEntries },
     sourceId != null ? [sourceId] : undefined,
   );
 }
@@ -614,17 +644,16 @@ async function importItemIds(
 ): Promise<DdbLibraryImportResult> {
   const imported: DdbLibraryImportResult['imported'] = [];
   const errors: DdbLibraryImportResult['errors'] = [];
-  let mongoPersisted = true;
-  const savedEntries: Array<{ source?: string }> = [];
+  const meta: ImportBatchMeta = { mongoPersisted: true, savedEntries: [] };
   const pool = await loadItemPool(ctx, campaignId);
   const byId = poolById(pool);
 
-  for (let i = 0; i < ids.length; i += IMPORT_BATCH) {
-    const batchIds = ids.slice(i, i + IMPORT_BATCH);
+  for (let i = 0; i < ids.length; i += FETCH_BATCH) {
+    const batchIds = ids.slice(i, i + FETCH_BATCH);
     const batchRaw = batchIds
       .map((id) => byId.get(id))
       .filter((raw): raw is Record<string, unknown> => Boolean(raw));
-    const enriched = await enrichEntitiesWithFullDefinitions(ctx, 'item', batchRaw, campaignId);
+    const enriched = await enrichEntitiesWithFullDefinitions(ctx, 'item', batchRaw, campaignId, true);
     const enrichedById = poolById(enriched);
 
     const pending: Array<{ entry: OwlbearItem; ddbId: number }> = [];
@@ -649,32 +678,19 @@ async function importItemIds(
 
     if (pending.length === 0) continue;
 
-    try {
-      const batch = await saveItemsBulk(
-        pending.map(({ entry }) => ({ entry, opts: resolveImportSaveOpts(entry) })),
-      );
-      mongoPersisted = mongoPersisted && batch.persist.mongoPersisted;
-      savedEntries.push(...batch.entries);
-      for (let j = 0; j < batch.entries.length; j++) {
-        imported.push({
-          kind: 'item',
-          ddbId: pending[j].ddbId,
-          compendiumId: batch.entries[j].id,
-          name: batch.entries[j].name,
-          source: batch.entries[j].source,
-        });
-      }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Import failed';
-      for (const { ddbId } of pending) {
-        errors.push({ id: ddbId, message });
-      }
-    }
+    await saveImportBatch(
+      'item',
+      pending,
+      (entries) => saveItemsBulk(entries),
+      imported,
+      errors,
+      meta,
+    );
   }
   return finalizeDdbImportResult(
     { imported, errors },
     catalog,
-    { mongoPersisted, savedEntries },
+    { mongoPersisted: meta.mongoPersisted, savedEntries: meta.savedEntries },
     sourceId != null ? [sourceId] : undefined,
   );
 }

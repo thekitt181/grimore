@@ -1,10 +1,11 @@
 import { DDB_URLS } from './config';
 import { authHeaders, type DdbAuthContext } from './ddbAuthContext';
+import { fetchWithRetry } from './ddbFetchRetry';
 import { stripDdbHtml } from './ddbHtml';
 
 const MONSTER_BATCH_SIZE = 40;
-const MONSTER_BATCH_CONCURRENCY = 4;
-const MONSTER_DETAIL_CONCURRENCY = 8;
+const MONSTER_BATCH_CONCURRENCY = 3;
+const MONSTER_DETAIL_CONCURRENCY = 4;
 
 export async function runWithConcurrency<T>(
   items: T[],
@@ -147,6 +148,23 @@ function hasActionOrTraitContent(raw: Record<string, unknown>): boolean {
   return false;
 }
 
+function hasRichNarrativeContent(raw: Record<string, unknown>): boolean {
+  for (const key of [
+    'characteristicsDescription',
+    'statBlockDescription',
+    'fullDescription',
+    'description',
+    'actionsDescription',
+    'specialTraitsDescription',
+    'statBlockHtml',
+  ]) {
+    if (stripDdbHtml(raw[key]).length >= 60) return true;
+  }
+  const actions = raw.actions ?? raw.monsterActions;
+  if (Array.isArray(actions) && actions.length > 0) return true;
+  return false;
+}
+
 /** True when DDB payload has enough data for a usable stat block (strict — ignores placeholder 0 AC/HP). */
 export function monsterHasFullStatBlock(raw: Record<string, unknown>): boolean {
   if (!hasMeaningfulCombatStats(raw)) return false;
@@ -157,8 +175,12 @@ export function monsterHasFullStatBlock(raw: Record<string, unknown>): boolean {
   return false;
 }
 
+/** Accept import when full stat block OR substantial narrative content exists (third-party books). */
 export function monsterHasImportableStatBlock(raw: Record<string, unknown>): boolean {
-  return monsterHasFullStatBlock(raw);
+  if (monsterHasFullStatBlock(raw)) return true;
+  const name = String(raw.name ?? '').trim();
+  if (!name) return false;
+  return hasRichNarrativeContent(raw);
 }
 
 export async function fetchDdbMonstersByIds(
@@ -175,10 +197,13 @@ export async function fetchDdbMonstersByIds(
   }
 
   await runWithConcurrency(batches, MONSTER_BATCH_CONCURRENCY, async (batch) => {
-    const res = await fetch(DDB_URLS.monstersByIds(batch), {
+    const res = await fetchWithRetry(DDB_URLS.monstersByIds(batch), {
       headers: monsterAuthHeaders(ctx),
-    });
-    if (!res.ok) return;
+    }, { label: `monsters batch (${batch.length})` });
+    if (!res.ok) {
+      console.warn(`[DDB] monster batch fetch HTTP ${res.status} for ${batch.length} ids`);
+      return;
+    }
     const json = (await res.json()) as Record<string, unknown>;
     const list = Array.isArray(json.data) ? json.data : [];
     for (const entry of list) {
@@ -196,9 +221,9 @@ async function fetchDdbMonsterDetailOnly(
   ctx: DdbAuthContext,
   ddbId: number,
 ): Promise<Record<string, unknown> | null> {
-  const res = await fetch(DDB_URLS.monsterById(ddbId), {
+  const res = await fetchWithRetry(DDB_URLS.monsterById(ddbId), {
     headers: monsterAuthHeaders(ctx, ddbId),
-  });
+  }, { label: `monster ${ddbId}` });
   if (res.status === 404) return null;
   if (!res.ok) throw new Error(`DDB monster fetch failed (${res.status})`);
   return unwrapMonsterPayload(await res.json());
@@ -211,7 +236,7 @@ async function enrichMonsterRecord(
 ): Promise<Record<string, unknown> | null> {
   let merged = existing ?? null;
 
-  if (!merged || !monsterHasFullStatBlock(merged)) {
+  if (!merged || !monsterHasImportableStatBlock(merged)) {
     try {
       const detail = await fetchDdbMonsterDetailOnly(ctx, id);
       if (detail) {
@@ -222,7 +247,7 @@ async function enrichMonsterRecord(
     }
   }
 
-  if (!merged || !monsterHasFullStatBlock(merged)) {
+  if (!merged || !monsterHasImportableStatBlock(merged)) {
     const batch = await fetchDdbMonstersByIds(ctx, [id]);
     const richer = batch.get(id);
     if (richer) {
@@ -233,7 +258,7 @@ async function enrichMonsterRecord(
   return merged;
 }
 
-/** Batch-fetch monsters for import; always detail-fetches entries missing a real stat block. */
+/** Batch-fetch monsters for import; detail-fetches every entry missing importable data. */
 export async function fetchMonstersForImport(
   ctx: DdbAuthContext,
   ids: number[],
@@ -243,13 +268,32 @@ export async function fetchMonstersForImport(
 
   const needsDetail = unique.filter((id) => {
     const raw = out.get(id);
-    return !raw || !monsterHasFullStatBlock(raw);
+    return !raw || !monsterHasImportableStatBlock(raw);
   });
 
   await runWithConcurrency(needsDetail, MONSTER_DETAIL_CONCURRENCY, async (id) => {
     const enriched = await enrichMonsterRecord(ctx, id, out.get(id));
     if (enriched) out.set(id, enriched);
   });
+
+  // Last resort: retry detail for anything still missing (rate-limit recovery).
+  const stillMissing = unique.filter((id) => {
+    const raw = out.get(id);
+    return !raw || !monsterHasImportableStatBlock(raw);
+  });
+  if (stillMissing.length > 0) {
+    await runWithConcurrency(stillMissing, 2, async (id) => {
+      try {
+        const detail = await fetchDdbMonsterDetailOnly(ctx, id);
+        if (detail) {
+          const merged = out.has(id) ? mergeMonsterDetail(out.get(id)!, detail) : detail;
+          out.set(id, merged);
+        }
+      } catch (err) {
+        console.warn(`[DDB] monster ${id} detail retry failed:`, err instanceof Error ? err.message : err);
+      }
+    });
+  }
 
   return out;
 }
@@ -276,7 +320,7 @@ export async function enrichMonstersForImport(
   entries: Record<string, unknown>[],
 ): Promise<Record<string, unknown>[]> {
   const incompleteIds = entries
-    .filter((entry) => !monsterHasFullStatBlock(entry))
+    .filter((entry) => !monsterHasImportableStatBlock(entry))
     .map((entry) => Number(entry.id))
     .filter((id): id is number => Number.isFinite(id) && id > 0);
 

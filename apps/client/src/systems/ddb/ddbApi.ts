@@ -245,22 +245,53 @@ export async function searchDdbLibraryItems(params: {
   return data.items ?? [];
 }
 
+const IMPORT_CHUNK_SIZE = 50;
+
+function mergeImportResults(a: DdbLibraryImportResult, b: DdbLibraryImportResult): DdbLibraryImportResult {
+  const catalogRev = b.catalogRev ?? a.catalogRev;
+  return {
+    imported: [...a.imported, ...b.imported],
+    errors: [...a.errors, ...b.errors],
+    sourcesUnlocked: [...new Set([...(a.sourcesUnlocked ?? []), ...(b.sourcesUnlocked ?? [])])],
+    mongoPersisted: a.mongoPersisted !== false && b.mongoPersisted !== false,
+    ...(catalogRev ? { catalogRev } : {}),
+  };
+}
+
 export async function importDdbLibraryEntries(body: {
   kind: 'monster' | 'item' | 'spell';
   ids: number[];
   campaignId?: number;
   sourceId?: number;
 }): Promise<DdbLibraryImportResult> {
-  try {
-    const { data } = await api.post<DdbLibraryImportResult>('/ddb/library/import', body);
-    return data;
-  } catch (err) {
-    if (axios.isAxiosError(err)) {
-      const msg = (err.response?.data as { error?: string } | undefined)?.error;
-      throw new Error(msg ?? 'Import failed');
-    }
-    throw err;
+  const ids = [...new Set(body.ids.filter((id) => Number.isFinite(id) && id > 0))];
+  if (ids.length === 0) {
+    return { imported: [], errors: [{ id: 0, message: 'No entries selected' }] };
   }
+
+  let merged: DdbLibraryImportResult = { imported: [], errors: [] };
+
+  for (let i = 0; i < ids.length; i += IMPORT_CHUNK_SIZE) {
+    const chunkIds = ids.slice(i, i + IMPORT_CHUNK_SIZE);
+    try {
+      const { data } = await api.post<DdbLibraryImportResult>('/ddb/library/import', {
+        ...body,
+        ids: chunkIds,
+      });
+      merged = mergeImportResults(merged, data);
+    } catch (err) {
+      if (axios.isAxiosError(err)) {
+        const msg = (err.response?.data as { error?: string } | undefined)?.error;
+        for (const id of chunkIds) {
+          merged.errors.push({ id, message: msg ?? 'Import failed' });
+        }
+        continue;
+      }
+      throw err;
+    }
+  }
+
+  return merged;
 }
 
 export async function importAllDdbLibraryFromSource(body: {

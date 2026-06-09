@@ -366,17 +366,23 @@ export async function persistRawGlobalDoc(
   let mongoPersisted = false;
   if (col && !isMongoCircuitOpen()) {
     markCompendiumWritePending();
-    try {
-      const result = await withMongoTimeout(
-        col.updateOne({ _id: 'global' }, { $set: payload }, { upsert: true }),
-        12_000,
-      );
-      mongoPersisted = result.acknowledged;
-    } catch (err) {
-      console.warn(
-        '[Compendium] Mongo write failed, saving locally:',
-        err instanceof Error ? err.message : err,
-      );
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const result = await withMongoTimeout(
+          col.updateOne({ _id: 'global' }, { $set: payload }, { upsert: true }),
+          12_000,
+        );
+        mongoPersisted = result.acknowledged;
+        break;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (attempt < 2) {
+          console.warn(`[Compendium] Mongo write retry ${attempt + 1}/3:`, msg);
+          await new Promise((r) => setTimeout(r, 600 * (attempt + 1)));
+          continue;
+        }
+        console.warn('[Compendium] Mongo write failed, saving locally:', msg);
+      }
     }
   }
 

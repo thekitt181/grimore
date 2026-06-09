@@ -479,7 +479,7 @@ router.get('/library/items', requireAuth, async (req: AuthenticatedRequest, res)
 
 const importSchema = z.object({
   kind: z.enum(['monster', 'item', 'spell']),
-  ids: z.array(z.number().int().positive()).min(1).max(50),
+  ids: z.array(z.number().int().positive()).min(1).max(200),
   campaignId: z.number().int().positive().optional(),
   sourceId: z.number().int().positive().optional(),
 });

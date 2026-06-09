@@ -2,6 +2,7 @@ import { DDB_URLS } from './config';
 import { authHeaders, type DdbAuthContext } from './ddbAuthContext';
 import { ddbEntityId } from './ddbContentNormalize';
 import { stripDdbHtml } from './ddbHtml';
+import { fetchWithRetry } from './ddbFetchRetry';
 import { runWithConcurrency } from './ddbMonsterFetch';
 
 const DEFINITION_BATCH_SIZE = 40;
@@ -45,6 +46,22 @@ function indexDefinitions(definitions: Record<string, unknown>[]): Map<number, R
   return byId;
 }
 
+const DEFINITION_MERGE_KEYS = [
+  'description',
+  'fullDescription',
+  'snippet',
+  'summary',
+  'details',
+  'higherLevelDescription',
+  'atHigherLevelsDescription',
+  'higherLevelsDescription',
+  'componentsDescription',
+  'materialsDescription',
+  'materialDescription',
+  'attunementDescription',
+  'flavor',
+] as const;
+
 /** Merge a full DDB definition payload into a game-data list entry. */
 export function mergeEntityDefinition(
   raw: Record<string, unknown>,
@@ -53,12 +70,19 @@ export function mergeEntityDefinition(
   const existing = ((raw.definition ?? raw) as Record<string, unknown>) ?? {};
   const mergedDef = { ...existing, ...fullDef };
 
-  for (const key of ['description', 'snippet', 'higherLevelDescription', 'details'] as const) {
+  for (const key of DEFINITION_MERGE_KEYS) {
     const existingText = stripDdbHtml(existing[key]);
     const fullText = stripDdbHtml(fullDef[key]);
     if (fullText.length > existingText.length) {
       mergedDef[key] = fullDef[key];
     }
+  }
+
+  if (Array.isArray(fullDef.atHigherLevels) && !Array.isArray(mergedDef.atHigherLevels)) {
+    mergedDef.atHigherLevels = fullDef.atHigherLevels;
+  }
+  if (Array.isArray(fullDef.properties) && (!Array.isArray(mergedDef.properties) || mergedDef.properties.length === 0)) {
+    mergedDef.properties = fullDef.properties;
   }
 
   return { ...raw, definition: mergedDef };
@@ -88,14 +112,14 @@ async function postDefinitionCollection(
 
   for (const path of COLLECTION_PATHS[kind]) {
     const url = `${DDB_URLS.characterBase}/game-data/${path}`;
-    const res = await fetch(url, {
+    const res = await fetchWithRetry(url, {
       method: 'POST',
       headers: {
         ...authHeaders(ctx),
         'Content-Type': 'application/json',
       },
       body,
-    });
+    }, { label: `${kind} definitions (${ids.length})` });
     if (!res.ok) continue;
 
     const definitions = unwrapDefinitionCollection(await res.json());
@@ -134,12 +158,13 @@ export async function enrichEntitiesWithFullDefinitions(
   kind: 'spell' | 'item',
   entries: Record<string, unknown>[],
   campaignId?: number,
+  force = false,
 ): Promise<Record<string, unknown>[]> {
   const ids = entries
     .map((entry) => ddbEntityId(entry))
     .filter((id): id is number => id != null);
 
-  const needsFetch = entries.some((entry) => entityNeedsDefinitionFetch(entry));
+  const needsFetch = force || entries.some((entry) => entityNeedsDefinitionFetch(entry));
   if (!needsFetch) return entries;
 
   const definitions = await fetchFullDefinitions(ctx, kind, ids, campaignId);

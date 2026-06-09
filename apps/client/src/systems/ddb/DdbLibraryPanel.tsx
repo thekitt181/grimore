@@ -53,6 +53,18 @@ function tabToKind(tab: LibraryTab): 'monster' | 'item' | 'spell' {
 
 function formatImportResultMessage(result: DdbLibraryImportResult, base: string): string {
   let msg = base;
+  if (result.errors.length > 0) {
+    const byMessage = new Map<string, number>();
+    for (const err of result.errors) {
+      byMessage.set(err.message, (byMessage.get(err.message) ?? 0) + 1);
+    }
+    const summary = [...byMessage.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 4)
+      .map(([text, count]) => `${count}× ${text}`)
+      .join('; ');
+    msg += ` Failures: ${summary}.`;
+  }
   if (result.mongoPersisted === false) {
     msg += ' Warning: save may be temporary until MongoDB reconnects.';
   }

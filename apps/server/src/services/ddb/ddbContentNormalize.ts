@@ -93,6 +93,20 @@ function formatAbilityScores(raw: unknown): string {
   return `STR DEX CON INT WIS CHA\n${scores.map((s) => s ?? '—').join(' ')} (${mods.join(' ')})`;
 }
 
+function parseAcFromText(text: string): number | undefined {
+  const m = text.match(/(?:Armor Class|AC)\s*(?:\(.*?\))?\s*(\d+)/i);
+  if (!m?.[1]) return undefined;
+  const n = parseInt(m[1], 10);
+  return Number.isFinite(n) && n > 0 ? n : undefined;
+}
+
+function parseHpFromText(text: string): number | undefined {
+  const m = text.match(/Hit Points\s+(\d+)/i);
+  if (!m?.[1]) return undefined;
+  const n = parseInt(m[1], 10);
+  return Number.isFinite(n) && n > 0 ? n : undefined;
+}
+
 function pickRichText(obj: Record<string, unknown>, keys: string[]): string {
   let best = '';
   for (const key of keys) {
@@ -423,7 +437,13 @@ function buildSpellDescription(def: Record<string, unknown>): string {
   if (def.concentration) meta.push('Concentration');
   if (meta.length) sections.push({ title: 'Casting', body: meta.join('\n') });
 
-  const description = pickRichText(def, ['description', 'fullDescription', 'details', 'snippet']);
+  const description = pickRichText(def, [
+    'description',
+    'fullDescription',
+    'details',
+    'snippet',
+    'specialDescription',
+  ]);
   if (description) sections.push({ title: 'Description', body: description });
 
   const higher = formatAtHigherLevels(def);
@@ -435,7 +455,13 @@ function buildSpellDescription(def: Record<string, unknown>): string {
 function buildItemTexts(def: Record<string, unknown>, name: string): { description: string; flavor: string; details: string } {
   const flavor = pickRichText(def, ['snippet', 'flavor', 'summary']);
   const properties = formatItemProperties(def);
-  const details = pickRichText(def, ['description', 'fullDescription', 'details']);
+  const details = pickRichText(def, [
+    'description',
+    'fullDescription',
+    'details',
+    'specialDescription',
+    'notesDescription',
+  ]);
   const description = joinSections([
     ...(properties ? [{ title: 'Properties', body: properties }] : []),
     ...(details ? [{ title: 'Description', body: details }] : []),
@@ -836,8 +862,8 @@ export function normalizeDdbMonsterToCompendium(
   if (immune) stats.damageImmunities = immune;
   if (vuln) stats.damageVulnerabilities = vuln;
 
-  const hpRaw = summary.hp;
-  const acRaw = summary.ac;
+  const hpRaw = summary.hp ?? parseHpFromText(description);
+  const acRaw = summary.ac ?? parseAcFromText(description);
   const hp = hpRaw != null && hpRaw > 0 ? hpRaw : 1;
   const ac = acRaw != null && acRaw > 0 ? acRaw : 10;
 
@@ -850,7 +876,11 @@ export function normalizeDdbMonsterToCompendium(
     cr: summary.cr,
     description: description || summary.name,
     ...(summary.imageUrl ? { image: summary.imageUrl } : {}),
-    stats,
+    stats: {
+      ...stats,
+      ...(hpRaw == null && description ? { hpEstimated: true } : {}),
+      ...(acRaw == null && description ? { acEstimated: true } : {}),
+    },
   };
 }
 
