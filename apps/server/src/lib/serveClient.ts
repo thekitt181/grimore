@@ -4,17 +4,25 @@ import express, { type Express } from 'express';
 
 function resolveClientDist(): string | null {
   const configured = process.env['CLIENT_DIST_PATH']?.trim();
-  if (configured && fs.existsSync(configured)) return configured;
+  if (configured && fs.existsSync(path.join(configured, 'index.html'))) return configured;
 
+  // Paths relative to compiled server (apps/server/dist/lib/serveClient.js)
   const candidates = [
-    path.resolve(process.cwd(), '../client/dist'),
-    path.resolve(process.cwd(), 'apps/client/dist'),
+    path.resolve(__dirname, '../../client-dist'),
     path.resolve(__dirname, '../../../client/dist'),
+    path.resolve(process.cwd(), 'apps/client/dist'),
+    path.resolve(process.cwd(), '../client/dist'),
   ];
+
   for (const dir of candidates) {
     if (fs.existsSync(path.join(dir, 'index.html'))) return dir;
   }
   return null;
+}
+
+function hasAssetBundle(dist: string): boolean {
+  const assetsDir = path.join(dist, 'assets');
+  return fs.existsSync(assetsDir) && fs.readdirSync(assetsDir).length > 0;
 }
 
 /** Serve Vite build + SPA fallback when dist exists or SERVE_CLIENT=1. */
@@ -28,11 +36,21 @@ export function mountClientSpa(app: Express): boolean {
     return false;
   }
 
+  if (!hasAssetBundle(dist)) {
+    console.warn(`[Server] Client dist at ${dist} has no assets/ — rebuild the client`);
+  }
+
   console.log(`[Server] Serving client static files from ${dist}`);
   app.use(express.static(dist, { index: false, maxAge: '1h' }));
+
   app.get('*', (req, res, next) => {
     if (req.path.startsWith('/api') || req.path.startsWith('/socket.io')) {
       next();
+      return;
+    }
+    // Missing hashed bundles must 404 — do not return index.html (breaks MIME types).
+    if (req.path.startsWith('/assets/') || path.extname(req.path) !== '') {
+      res.status(404).type('text/plain').send('Not found');
       return;
     }
     res.sendFile(path.join(dist, 'index.html'));
