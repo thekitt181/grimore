@@ -46,7 +46,6 @@ export function CharacterSheetPanel({ token, onClose }: { token: TokenItem; onCl
     },
     enabled: Boolean(ddbId),
     staleTime: 30_000,
-    refetchOnMount: 'always',
   });
 
   const syncMutation = useMutation({

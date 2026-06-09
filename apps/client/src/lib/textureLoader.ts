@@ -2,6 +2,17 @@ import { Texture } from 'pixi.js';
 import { isDdbHostedImageUrl, proxiedDdbImageUrl } from '@/systems/ddb/ddbImageUrl';
 
 const cache = new Map<string, Texture>();
+const MAX_TEXTURE_CACHE = 200;
+
+function trimTextureCache(): void {
+  while (cache.size > MAX_TEXTURE_CACHE) {
+    const oldest = cache.keys().next().value;
+    if (oldest == null) break;
+    const tex = cache.get(oldest);
+    tex?.destroy(true);
+    cache.delete(oldest);
+  }
+}
 
 function loadImageElement(src: string, crossOrigin: boolean): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
@@ -30,6 +41,7 @@ function textureFromImage(img: HTMLImageElement, cacheKey: string): Texture {
   try {
     const texture = Texture.from(img);
     cache.set(cacheKey, texture);
+    trimTextureCache();
     return texture;
   } catch (err) {
     throw err instanceof Error ? err : new Error('Failed to create texture');

@@ -237,13 +237,17 @@ export function MapCanvas() {
         applyFogData(fogData);
       }
     };
-    // When a player joins, the GM pushes the current scene + fog snapshot to them.
+    // When players join, GM pushes scene snapshot (debounced so bursts coalesce).
+    let joinPushTimer: ReturnType<typeof setTimeout> | null = null;
     const onUserJoined = () => {
-      if (useSessionStore.getState().myRole === 'GM') {
+      if (useSessionStore.getState().myRole !== 'GM') return;
+      if (joinPushTimer) clearTimeout(joinPushTimer);
+      joinPushTimer = setTimeout(() => {
+        joinPushTimer = null;
         emitItemsSync(Object.values(useItemStore.getState().items) as Item[]);
         emitFogSync();
         syncFogActiveToSession();
-      }
+      }, 600);
     };
 
     function attachSceneListeners() {
@@ -272,6 +276,7 @@ export function MapCanvas() {
     window.addEventListener('grimoire:socket-connected', onSocketReady);
 
     return () => {
+      if (joinPushTimer) clearTimeout(joinPushTimer);
       window.removeEventListener('grimoire:socket-connected', onSocketReady);
       getSocket().off('connect', attachSceneListeners);
       getSocket().off('item:add', onAdd as any);

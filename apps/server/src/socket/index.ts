@@ -1,11 +1,17 @@
 import type { Server as HttpServer } from 'http';
+import type { Socket } from 'socket.io';
 import { Server } from 'socket.io';
-import { createClerkClient, verifyToken } from '@clerk/backend';
+import { verifyToken } from '@clerk/backend';
 import { prisma } from '../lib/prisma';
+import { resolveAuthUser } from '../lib/authUserCache';
 import type { Prisma } from '@prisma/client';
 import {
   setRoomUsers,
   getRoomUsers,
+  getSessionFog,
+  getSessionItems,
+  setSessionFog,
+  setSessionItems,
 } from '../lib/redis';
 import {
   dedupeSessionUsers,
@@ -44,12 +50,46 @@ import { setCompendiumSocketServer } from '../services/compendiumBroadcast';
 import { startRollBridge, stopRollBridge, isRollBridgeActive, resolveRollBridgeUserId } from '../services/ddb/ddbRollBridge';
 import { isClientOriginAllowed } from '../lib/clientOrigins';
 
-const clerk = createClerkClient({
-  secretKey: process.env['CLERK_SECRET_KEY'] ?? '',
-});
-
 /** Per-session fog active flag (GM toggles off during prep). */
 const sessionFogActive = new Map<string, boolean>();
+
+function isJoinedSession(socket: Socket, sessionId: string): boolean {
+  return socket.data['sessionId'] === sessionId;
+}
+
+function isSessionGM(socket: Socket): boolean {
+  return socket.data['role'] === 'GM';
+}
+
+async function hydrateSessionFromCache(socket: Socket, sessionId: string): Promise<void> {
+  const [cachedFog, cachedItemsRaw] = await Promise.all([
+    getSessionFog(sessionId),
+    getSessionItems(sessionId),
+  ]);
+
+  socket.emit('fog:sync', { sessionId, fogData: cachedFog ?? '[]' });
+
+  if (cachedItemsRaw) {
+    try {
+      const items = JSON.parse(cachedItemsRaw) as unknown;
+      if (Array.isArray(items)) {
+        socket.emit('items:sync', { sessionId, items });
+        return;
+      }
+    } catch {
+      /* fall through */
+    }
+  }
+  socket.emit('items:sync', { sessionId, items: [] });
+}
+
+function cacheSessionFog(sessionId: string, fogData: string): void {
+  void setSessionFog(sessionId, fogData);
+}
+
+function cacheSessionItems(sessionId: string, items: unknown[]): void {
+  void setSessionItems(sessionId, JSON.stringify(items));
+}
 
 function userHasOtherSocketInRoom(
   io: Server,
@@ -98,26 +138,7 @@ export function initSocket(httpServer: HttpServer): Server {
       const clerkUserId = payload.sub;
       if (!clerkUserId) return next(new Error('Invalid token'));
 
-      let user = await prisma.user.findUnique({
-        where: { clerkId: clerkUserId },
-        select: { id: true, username: true, avatarUrl: true },
-      });
-
-      if (!user) {
-        const clerkUser = await clerk.users.getUser(clerkUserId);
-        user = await prisma.user.create({
-          data: {
-            clerkId: clerkUserId,
-            username:
-              clerkUser.username ??
-              clerkUser.firstName ??
-              clerkUser.emailAddresses[0]?.emailAddress.split('@')[0] ??
-              'Adventurer',
-            avatarUrl: clerkUser.imageUrl ?? null,
-          },
-          select: { id: true, username: true, avatarUrl: true },
-        });
-      }
+      const user = await resolveAuthUser(clerkUserId);
 
       socket.data['userId'] = user.id;
       socket.data['username'] = user.username;
@@ -161,9 +182,8 @@ export function initSocket(httpServer: HttpServer): Server {
 
         // Fast ack — client shows Live before slower roster / DDB work.
         socket.emit('session:roomState', { users: [sessionUser], fogActive });
-        socket.emit('fog:sync', { sessionId, fogData: '[]' });
         socket.emit('fog:active', { sessionId, active: fogActive });
-        socket.emit('items:sync', { sessionId, items: [] });
+        void hydrateSessionFromCache(socket, sessionId);
 
         void getRoomUsers(sessionId)
           .then((currentUsers) => setRoomUsers(sessionId, [...new Set([...currentUsers, userId])]))
@@ -250,28 +270,44 @@ export function initSocket(httpServer: HttpServer): Server {
 
     // ── Generic scene items (unified editor) — relay only; clients persist locally ──
     socket.on('item:add', (payload: ItemAddPayload) => {
+      if (!isJoinedSession(socket, payload.sessionId)) return;
       socket.to(payload.sessionId).emit('item:add', payload);
     });
     socket.on('item:update', (payload: ItemUpdatePayload) => {
+      if (!isJoinedSession(socket, payload.sessionId)) return;
       socket.to(payload.sessionId).emit('item:update', payload);
     });
     socket.on('item:remove', (payload: ItemRemovePayload) => {
+      if (!isJoinedSession(socket, payload.sessionId)) return;
       socket.to(payload.sessionId).emit('item:remove', payload);
     });
     socket.on('items:sync', (payload: ItemsSyncPayload) => {
+      if (!isJoinedSession(socket, payload.sessionId)) return;
+      if (isSessionGM(socket)) {
+        cacheSessionItems(payload.sessionId, payload.items);
+      }
       socket.to(payload.sessionId).emit('items:sync', payload);
     });
 
     // ── Map ──────────────────────────────────────────────────────────────────
     socket.on('map:tokenMove', (payload: TokenMovePayload) => {
+      if (!isJoinedSession(socket, payload.sessionId)) return;
       socket.to(payload.sessionId).emit('map:tokenMove', payload);
     });
 
     socket.on('map:fogUpdate', (payload: FogUpdatePayload) => {
+      if (!isJoinedSession(socket, payload.sessionId)) return;
+      if (isSessionGM(socket)) {
+        cacheSessionFog(payload.sessionId, payload.fogData);
+      }
       socket.to(payload.sessionId).emit('map:fogUpdate', payload);
     });
 
     socket.on('fog:sync', (payload: FogSyncPayload) => {
+      if (!isJoinedSession(socket, payload.sessionId)) return;
+      if (isSessionGM(socket)) {
+        cacheSessionFog(payload.sessionId, payload.fogData);
+      }
       socket.to(payload.sessionId).emit('fog:sync', payload);
     });
 
@@ -283,64 +319,82 @@ export function initSocket(httpServer: HttpServer): Server {
     });
 
     socket.on('map:gridUpdate', (payload) => {
-      socket.to((payload as { sessionId: string }).sessionId).emit('map:gridUpdate', payload);
+      const sessionId = (payload as { sessionId: string }).sessionId;
+      if (!isJoinedSession(socket, sessionId)) return;
+      socket.to(sessionId).emit('map:gridUpdate', payload);
     });
 
     socket.on('map:mapMove', (payload: MapMovePayload) => {
+      if (!isJoinedSession(socket, payload.sessionId)) return;
       socket.to(payload.sessionId).emit('map:mapMove', payload);
     });
     socket.on('map:mapResize', (payload: MapResizePayload) => {
+      if (!isJoinedSession(socket, payload.sessionId)) return;
       socket.to(payload.sessionId).emit('map:mapResize', payload);
     });
     socket.on('map:mapLock', (payload: MapLockPayload) => {
+      if (!isJoinedSession(socket, payload.sessionId)) return;
       socket.to(payload.sessionId).emit('map:mapLock', payload);
     });
     socket.on('map:mapHide', (payload: MapHidePayload) => {
+      if (!isJoinedSession(socket, payload.sessionId)) return;
       socket.to(payload.sessionId).emit('map:mapHide', payload);
     });
     socket.on('map:mapDelete', (payload: MapDeletePayload) => {
+      if (!isJoinedSession(socket, payload.sessionId)) return;
       socket.to(payload.sessionId).emit('map:mapDelete', payload);
     });
     socket.on('map:gridStyle', (payload: MapGridStylePayload) => {
+      if (!isJoinedSession(socket, payload.sessionId)) return;
       socket.to(payload.sessionId).emit('map:gridStyle', payload);
     });
     socket.on('map:gridOffset', (payload: MapGridOffsetPayload) => {
+      if (!isJoinedSession(socket, payload.sessionId)) return;
       socket.to(payload.sessionId).emit('map:gridOffset', payload);
     });
     socket.on('map:tokenConditions', (payload: TokenConditionsPayload) => {
+      if (!isJoinedSession(socket, payload.sessionId)) return;
       socket.to(payload.sessionId).emit('map:tokenConditions', payload);
     });
     socket.on('map:tokenAura', (payload: TokenAuraPayload) => {
+      if (!isJoinedSession(socket, payload.sessionId)) return;
       socket.to(payload.sessionId).emit('map:tokenAura', payload);
     });
 
     // ── Drawing ──────────────────────────────────────────────────────────────
     socket.on('drawing:add', (payload: DrawingAddPayload) => {
+      if (!isJoinedSession(socket, payload.sessionId)) return;
       socket.to(payload.sessionId).emit('drawing:add', payload);
     });
     socket.on('drawing:remove', (payload: DrawingRemovePayload) => {
+      if (!isJoinedSession(socket, payload.sessionId)) return;
       socket.to(payload.sessionId).emit('drawing:remove', payload);
     });
     socket.on('drawing:clear', (payload: DrawingClearPayload) => {
+      if (!isJoinedSession(socket, payload.sessionId)) return;
       socket.to(payload.sessionId).emit('drawing:clear', payload);
     });
 
     // ── Initiative sync ──────────────────────────────────────────────────────
     socket.on('initiative:sync', (payload: InitiativeSyncPayload) => {
+      if (!isJoinedSession(socket, payload.sessionId)) return;
       io.to(payload.sessionId).emit('initiative:sync', payload);
     });
 
     // ── Combat ───────────────────────────────────────────────────────────────
     socket.on('combat:initiative', (payload: InitiativePayload) => {
+      if (!isJoinedSession(socket, payload.sessionId)) return;
       io.to(payload.sessionId).emit('combat:initiative', payload);
     });
 
     socket.on('combat:hpUpdate', (payload: HpUpdatePayload) => {
+      if (!isJoinedSession(socket, payload.sessionId)) return;
       io.to(payload.sessionId).emit('combat:hpUpdate', payload);
     });
 
     // ── Dice ─────────────────────────────────────────────────────────────────
     socket.on('dice:roll', async (payload: DiceRollPayload) => {
+      if (!isJoinedSession(socket, payload.sessionId)) return;
       if (payload.isSecret) {
         const room = io.sockets.adapter.rooms.get(payload.sessionId);
         if (room) {
@@ -384,11 +438,13 @@ export function initSocket(httpServer: HttpServer): Server {
 
     // ── Scene ────────────────────────────────────────────────────────────────
     socket.on('scene:change', (payload: SceneChangePayload) => {
+      if (!isJoinedSession(socket, payload.sessionId)) return;
       io.to(payload.sessionId).emit('scene:change', payload);
     });
 
     // ── Handout ──────────────────────────────────────────────────────────────
     socket.on('handout:reveal', (payload: HandoutRevealPayload) => {
+      if (!isJoinedSession(socket, payload.sessionId)) return;
       if (payload.targetUserIds === 'all') {
         io.to(payload.sessionId).emit('handout:reveal', payload);
       } else {
@@ -437,6 +493,7 @@ export function initSocket(httpServer: HttpServer): Server {
 
     // ── Chat ─────────────────────────────────────────────────────────────────
     socket.on('chat:message', async (payload: ChatMessagePayload) => {
+      if (!isJoinedSession(socket, payload.sessionId)) return;
       if (payload.whisperToId) {
         const room = io.sockets.adapter.rooms.get(payload.sessionId);
         if (room) {

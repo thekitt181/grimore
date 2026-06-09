@@ -31,7 +31,6 @@ export function PcActionsPanel({ token, onClose }: { token: TokenItem; onClose: 
     },
     enabled: Boolean(ddbId),
     staleTime: 30_000,
-    refetchOnMount: 'always',
   });
 
   const { data: spellData } = useQuery({

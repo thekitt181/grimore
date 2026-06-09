@@ -9,7 +9,7 @@ import { readMongoGlobalVersion, newestIso } from './compendiumGlobal';
 import { isMongoCircuitOpen } from '../lib/mongo';
 import { notifyCompendiumChanged } from './compendiumChangeNotify';
 
-const POLL_MS = 8_000;
+const POLL_MS = 30_000;
 
 let lastMongoVersion = '';
 let lastExtVersion = '';

@@ -14,30 +14,17 @@ function snapshotItems(): Item[] {
   return Object.values(useItemStore.getState().items) as Item[];
 }
 
-/** Save locally immediately; debounce a full server snapshot so patches never miss base items. */
+/** Save locally on every edit; full server snapshot only on explicit sync (join/remove). */
 function persistScene(fullSync = false) {
   const s = sid();
   if (!s) return;
-  const items = snapshotItems();
-  persistItemsLocal(s, items);
+  persistItemsLocal(s, snapshotItems());
 
-  if (fullSync) {
-    if (pendingServerSync) clearTimeout(pendingServerSync);
-    pendingServerSync = null;
-    (getSocket() as any).emit('items:sync', { sessionId: s, items });
-    return;
-  }
+  if (!fullSync) return;
 
   if (pendingServerSync) clearTimeout(pendingServerSync);
-  pendingServerSync = setTimeout(() => {
-    pendingServerSync = null;
-    const sessionId = sid();
-    if (!sessionId) return;
-    (getSocket() as any).emit('items:sync', {
-      sessionId,
-      items: snapshotItems(),
-    });
-  }, 400);
+  pendingServerSync = null;
+  (getSocket() as any).emit('items:sync', { sessionId: s, items: snapshotItems() });
 }
 
 export function emitItemAdd(item: Item) {

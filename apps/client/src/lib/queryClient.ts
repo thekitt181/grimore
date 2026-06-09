@@ -12,3 +12,8 @@ export const queryClient = new QueryClient({
     },
   },
 });
+
+queryClient.setQueryDefaults(['compendium', 'spells', 'lookup'], {
+  staleTime: 1000 * 60 * 30,
+  gcTime: 1000 * 60 * 60,
+});

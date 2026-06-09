@@ -743,7 +743,14 @@ export async function listSources(
     .sort((a, b) => a.label.localeCompare(b.label));
 }
 
+let syncStatusCache: { at: number; value: CompendiumSyncStatus } | null = null;
+const SYNC_STATUS_TTL_MS = 5_000;
+
 export async function getSyncStatus(): Promise<CompendiumSyncStatus> {
+  if (syncStatusCache && Date.now() - syncStatusCache.at < SYNC_STATUS_TTL_MS) {
+    return syncStatusCache.value;
+  }
+
   const stamps: string[] = [];
 
   const mongoVersion = await readMongoGlobalVersion();
@@ -763,13 +770,15 @@ export async function getSyncStatus(): Promise<CompendiumSyncStatus> {
   const hasLocal = isLocalCatalogAvailable() || Boolean(file);
   const hasExtension = Boolean(extVersion);
 
-  return {
+  const value: CompendiumSyncStatus = {
     lastUpdated: stamps.length ? newestIso(...stamps) : new Date(0).toISOString(),
     storage: mongoConnected ? 'mongodb' : hasLocal || hasExtension ? 'local' : 'unavailable',
     mongoConnected,
     catalogRev: getCatalogRevision() ?? undefined,
     entryCounts: getCatalogEntryCounts() ?? undefined,
   };
+  syncStatusCache = { at: Date.now(), value };
+  return value;
 }
 
 export async function searchMonsters(opts: {

@@ -1,10 +1,6 @@
 import type { Request, Response, NextFunction } from 'express';
-import { createClerkClient, verifyToken } from '@clerk/backend';
-import { prisma } from '../lib/prisma';
-
-const clerk = createClerkClient({
-  secretKey: process.env['CLERK_SECRET_KEY'] ?? '',
-});
+import { verifyToken } from '@clerk/backend';
+import { resolveAuthUser } from '../lib/authUserCache';
 
 export interface AuthenticatedRequest extends Request {
   userId?: string;
@@ -39,23 +35,8 @@ export async function requireAuth(
       return;
     }
 
-    // Find or create the user in our database
-    let user = await prisma.user.findUnique({ where: { clerkId: clerkUserId } });
-
-    if (!user) {
-      const clerkUser = await clerk.users.getUser(clerkUserId);
-      user = await prisma.user.create({
-        data: {
-          clerkId: clerkUserId,
-          username:
-            clerkUser.username ??
-            clerkUser.firstName ??
-            clerkUser.emailAddresses[0]?.emailAddress.split('@')[0] ??
-            'Adventurer',
-          avatarUrl: clerkUser.imageUrl ?? null,
-        },
-      });
-    }
+    // Find or create the user in our database (cached after first lookup).
+    const user = await resolveAuthUser(clerkUserId);
 
     req.userId = user.id;
     req.clerkUserId = clerkUserId;

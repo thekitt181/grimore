@@ -2,6 +2,8 @@ import type { Server } from 'socket.io';
 import type { ServerToClientEvents, ClientToServerEvents } from '@grimoire/shared';
 
 let io: Server<ClientToServerEvents, ServerToClientEvents> | null = null;
+let pendingBroadcast: ReturnType<typeof setTimeout> | null = null;
+let pendingLastUpdated = '';
 
 export function setCompendiumSocketServer(
   server: Server<ClientToServerEvents, ServerToClientEvents>,
@@ -14,5 +16,11 @@ export function getSocketServer(): Server<ClientToServerEvents, ServerToClientEv
 }
 
 export function broadcastCompendiumUpdated(lastUpdated: string): void {
-  io?.emit('compendium:updated', { lastUpdated });
+  if (!io) return;
+  pendingLastUpdated = lastUpdated;
+  if (pendingBroadcast) return;
+  pendingBroadcast = setTimeout(() => {
+    pendingBroadcast = null;
+    io?.emit('compendium:updated', { lastUpdated: pendingLastUpdated });
+  }, 400);
 }

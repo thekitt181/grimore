@@ -41,6 +41,7 @@ import { useHandoutRevealSocket } from '@/systems/compendium/useHandoutRevealSoc
 import { useCompendiumSyncPoll } from '@/systems/compendium/useCompendiumSync';
 import { useCompendiumUiStore } from '@/systems/compendium/compendiumStore';
 import { getSocket, isMobileClient } from '@/lib/socket';
+import type { InitiativeSyncPayload } from '@grimoire/shared';
 import { loadInitiativeLocal, persistInitiativeLocal } from '@/systems/scene/sessionPersistence';
 import { useItemStore } from '@/systems/scene/store/itemStore';
 
@@ -130,11 +131,12 @@ export function SessionPage() {
     }
 
     const socket = getSocket();
-    socket.on('initiative:sync', (payload) => {
+    const onInitiativeSync = (payload: InitiativeSyncPayload) => {
       useInitiativeStore.getState().syncFromServer(payload);
       persistInitiativeLocal(sessionId, payload);
-    });
-    return () => { socket.off('initiative:sync'); };
+    };
+    socket.on('initiative:sync', onInitiativeSync);
+    return () => { socket.off('initiative:sync', onInitiativeSync); };
   }, [socketReady, sessionId]);
 
   // ── Socket room management ─────────────────────────────────────────────────

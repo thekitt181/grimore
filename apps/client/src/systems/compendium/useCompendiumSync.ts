@@ -4,18 +4,20 @@ import { fetchSyncStatus } from './compendiumApi';
 import { useCompendiumUiStore } from './compendiumStore';
 import { getSocket } from '@/lib/socket';
 
-const POLL_MS = 12_000;
-const POLL_SLOW_MS = 45_000;
+/** Backup poll when socket push is healthy — compendium:updated drives refetches. */
+const POLL_CONNECTED_MS = 120_000;
+const POLL_MS = 45_000;
+const POLL_SLOW_MS = 120_000;
 
 function refetchAllCompendium(queryClient: ReturnType<typeof useQueryClient>) {
-  void queryClient.invalidateQueries({
+  void queryClient.refetchQueries({
     predicate: (query) => {
       const key = query.queryKey;
       if (key[0] !== 'compendium') return false;
       const scope = key[1];
       return scope === 'monsters' || scope === 'items' || scope === 'spells' || scope === 'sources';
     },
-    refetchType: 'active',
+    type: 'active',
   });
 }
 
@@ -25,6 +27,7 @@ export function useCompendiumSyncPoll(enabled = true) {
   const setLastSyncAt = useCompendiumUiStore((s) => s.setLastSyncAt);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [pollMs, setPollMs] = useState(POLL_MS);
+  const [socketConnected, setSocketConnected] = useState(() => getSocket().connected);
 
   const scheduleRefetch = () => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -37,9 +40,9 @@ export function useCompendiumSyncPoll(enabled = true) {
     queryKey: ['compendium', 'sync-status'],
     queryFn: fetchSyncStatus,
     enabled,
-    staleTime: 5_000,
-    refetchInterval: enabled ? pollMs : false,
-    refetchOnWindowFocus: true,
+    staleTime: 15_000,
+    refetchInterval: enabled ? (socketConnected ? POLL_CONNECTED_MS : pollMs) : false,
+    refetchOnWindowFocus: !socketConnected,
     retry: 1,
   });
 
@@ -61,15 +64,24 @@ export function useCompendiumSyncPoll(enabled = true) {
       scheduleRefetch();
     };
 
+    const onConnect = () => setSocketConnected(true);
+    const onDisconnect = () => setSocketConnected(false);
+
     const attach = () => {
+      socket.off('compendium:updated', onUpdated);
       socket.on('compendium:updated', onUpdated);
     };
 
-    if (socket.connected) attach();
+    setSocketConnected(socket.connected);
+    attach();
+    socket.on('connect', onConnect);
+    socket.on('disconnect', onDisconnect);
     socket.on('connect', attach);
 
     return () => {
       socket.off('compendium:updated', onUpdated);
+      socket.off('connect', onConnect);
+      socket.off('disconnect', onDisconnect);
       socket.off('connect', attach);
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };

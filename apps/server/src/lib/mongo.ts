@@ -108,7 +108,7 @@ export async function getMongoDb(): Promise<Db | null> {
         serverSelectionTimeoutMS: 8_000,
         socketTimeoutMS: 20_000,
         connectTimeoutMS: 8_000,
-        maxPoolSize: 6,
+        maxPoolSize: Number(process.env['MONGODB_POOL_SIZE'] ?? 20),
         family: 4,
       });
       await client.connect();

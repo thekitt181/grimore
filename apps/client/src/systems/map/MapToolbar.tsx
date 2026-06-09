@@ -38,11 +38,14 @@ const BTN = 'w-9 h-9 rounded flex items-center justify-center text-sm font-ui tr
 const ACTIVE_BTN = 'bg-[#c9a84c22] text-[#c9a84c] ring-1 ring-[#c9a84c66]';
 
 export function MapToolbar() {
-  const {
-    activeTool, setTool,
-    drawColor, drawStroke, setDrawColor, setDrawStroke,
-    fogEnabled, sessionFogActive,
-  } = useMapStore();
+  const activeTool = useMapStore((s) => s.activeTool);
+  const setTool = useMapStore((s) => s.setTool);
+  const drawColor = useMapStore((s) => s.drawColor);
+  const drawStroke = useMapStore((s) => s.drawStroke);
+  const setDrawColor = useMapStore((s) => s.setDrawColor);
+  const setDrawStroke = useMapStore((s) => s.setDrawStroke);
+  const fogEnabled = useMapStore((s) => s.fogEnabled);
+  const sessionFogActive = useMapStore((s) => s.sessionFogActive);
   const fogOverlayOn = fogEnabled || sessionFogActive;
   const snapToGrid = useItemStore((s) => s.snapToGrid);
   const setSnap = useItemStore((s) => s.setSnap);
