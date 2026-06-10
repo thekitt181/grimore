@@ -665,11 +665,112 @@ function monsterTypeLine(raw: Record<string, unknown>, catalog?: DdbCatalog): st
   return `${size} ${type}${alignment ? `, ${alignment.toLowerCase()}` : ''}`;
 }
 
-function buildMonsterDescription(raw: Record<string, unknown>, catalog?: DdbCatalog): string {
+function ddbPrimaryStatBlockText(raw: Record<string, unknown>): string {
+  for (const key of [
+    'characteristicsDescription',
+    'statBlockDescription',
+    'statBlockHtml',
+    'fullDescription',
+  ]) {
+    const text = stripDdbHtml(raw[key]);
+    if (text.length >= 80) return text;
+  }
+  return '';
+}
+
+function looksLikeDdbFullStatBlock(text: string): boolean {
+  if (text.length < 100) return false;
+  const lower = text.toLowerCase();
+  const hasCombat = /armor class|hit points|challenge/i.test(lower);
+  const hasDepth =
+    text.length >= 240
+    || /actions|traits|legendary|spellcasting|multiattack|reactions|bonus actions/i.test(lower);
+  return hasCombat && hasDepth;
+}
+
+function appendSectionsIfMissing(base: string, sections: string[]): string {
+  const lower = base.toLowerCase();
+  const extra: string[] = [];
+  for (const section of sections) {
+    const trimmed = section.trim();
+    if (!trimmed) continue;
+    const titleLine = trimmed.split('\n')[0]?.trim().toLowerCase() ?? '';
+    if (titleLine && lower.includes(titleLine)) continue;
+    if (trimmed.length > 48 && base.includes(trimmed.slice(0, 48))) continue;
+    extra.push(trimmed);
+  }
+  if (extra.length === 0) return base;
+  return `${base}\n\n${extra.join('\n\n')}`.trim();
+}
+
+function appendMonsterActionSectionsOnly(
+  parts: string[],
+  raw: Record<string, unknown>,
+  catalog?: DdbCatalog,
+): void {
+  appendMonsterActionSection(
+    parts,
+    'ACTIONS',
+    collectMonsterActionBlocks(raw),
+    raw.actionsDescription,
+    raw,
+    catalog,
+  );
+  appendMonsterActionSection(
+    parts,
+    'Bonus Actions',
+    raw.bonusActions,
+    raw.bonusActionsDescription,
+    raw,
+    catalog,
+  );
+  appendMonsterActionSection(
+    parts,
+    'REACTIONS',
+    raw.reactions,
+    raw.reactionsDescription,
+    raw,
+    catalog,
+  );
+  appendMonsterActionSection(
+    parts,
+    'LEGENDARY ACTIONS',
+    raw.legendaryActions,
+    raw.legendaryActionsDescription,
+    raw,
+    catalog,
+  );
+  appendMonsterActionSection(
+    parts,
+    'MYTHIC ACTIONS',
+    raw.mythicActions,
+    raw.mythicActionsDescription,
+    raw,
+    catalog,
+  );
+  const lair = stripDdbHtml(raw.lairDescription);
+  if (lair) appendSection(parts, `Lair Actions\n${lair}`);
+}
+
+function monsterHasCombatFields(raw: Record<string, unknown>): boolean {
+  const ac = pickNumber(raw.armorClass, raw.ac);
+  const hp = pickNumber(raw.averageHitPoints, raw.hitPoints, raw.hp);
+  return ac != null && ac > 0 && hp != null && hp > 0;
+}
+
+function buildStructuredMonsterDescription(
+  raw: Record<string, unknown>,
+  catalog?: DdbCatalog,
+): string {
   const parts: string[] = [];
 
   const characteristics = stripDdbHtml(raw.characteristicsDescription);
-  if (characteristics) parts.push(characteristics);
+  const characteristicsIsStatBlock = characteristics
+    && (looksLikeDdbFullStatBlock(characteristics)
+      || /armor class|hit points/i.test(characteristics));
+  if (characteristics && !characteristicsIsStatBlock && !monsterHasCombatFields(raw)) {
+    parts.push(characteristics);
+  }
 
   const ac = pickNumber(raw.armorClass, raw.ac);
   const acDesc = stripDdbHtml(raw.armorClassDescription);
@@ -792,6 +893,21 @@ function buildMonsterDescription(raw: Record<string, unknown>, catalog?: DdbCata
     return structured ? `${structured}\n\n${htmlBlock}` : htmlBlock;
   }
   return structured || htmlBlock || '';
+}
+
+function buildMonsterDescription(raw: Record<string, unknown>, catalog?: DdbCatalog): string {
+  const ddbPrimary = ddbPrimaryStatBlockText(raw);
+
+  if (ddbPrimary && looksLikeDdbFullStatBlock(ddbPrimary)) {
+    const extras: string[] = [];
+    appendMonsterActionSectionsOnly(extras, raw, catalog);
+    return appendSectionsIfMissing(ddbPrimary, extras);
+  }
+
+  const structured = buildStructuredMonsterDescription(raw, catalog);
+  if (structured.length > ddbPrimary.length + 60) return structured;
+  if (ddbPrimary) return appendSectionsIfMissing(ddbPrimary, [structured]);
+  return structured || ddbPrimary || '';
 }
 
 export function resolveMonsterCr(

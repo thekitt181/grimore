@@ -30,7 +30,6 @@ import {
 } from './ddbSources';
 import { enrichEntitiesWithFullDefinitions } from './ddbDefinitionFetch';
 import {
-  enrichMonstersForImport,
   fetchMonstersForImport,
   monsterHasImportableStatBlock,
 } from './ddbMonsterFetch';
@@ -522,18 +521,12 @@ async function importMonsterIds(
   for (let i = 0; i < ids.length; i += FETCH_BATCH) {
     const batchIds = ids.slice(i, i + FETCH_BATCH);
     const rawById = await fetchMonstersForImport(ctx, batchIds);
-    const enriched = await enrichMonstersForImport(ctx, [...rawById.values()]);
-    const enrichedById = new Map<number, Record<string, unknown>>();
-    for (const raw of enriched) {
-      const id = Number(raw.id);
-      if (Number.isFinite(id) && id > 0) enrichedById.set(id, raw);
-    }
 
     const pending: Array<{ entry: OwlbearMonster; ddbId: number }> = [];
 
     for (const id of batchIds) {
       try {
-        const raw = enrichedById.get(id) ?? rawById.get(id);
+        const raw = rawById.get(id);
         if (!raw) {
           errors.push({ id, message: 'Monster not found on D&D Beyond (check account access)' });
           continue;
@@ -733,9 +726,11 @@ export async function importAllDdbLibraryFromSource(
         skip,
         take,
       });
+      if (items.length === 0) break;
       allIds.push(...items.map((m) => m.ddbId));
-      skip += take;
-      if (items.length === 0 || skip >= total) break;
+      skip += items.length;
+      if (items.length < take) break;
+      if (Number.isFinite(total) && total > 0 && skip >= total) break;
     }
     return importMonsterIds(ctx, allIds, catalog, opts.sourceId);
   }

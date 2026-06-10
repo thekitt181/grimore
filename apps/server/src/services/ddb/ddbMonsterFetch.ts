@@ -5,7 +5,7 @@ import { stripDdbHtml } from './ddbHtml';
 
 const MONSTER_BATCH_SIZE = 40;
 const MONSTER_BATCH_CONCURRENCY = 3;
-const MONSTER_DETAIL_CONCURRENCY = 4;
+const MONSTER_DETAIL_CONCURRENCY = 6;
 
 export async function runWithConcurrency<T>(
   items: T[],
@@ -101,6 +101,20 @@ export function mergeMonsterDetail(
     'conditionImmunitiesDescription',
     'challengeRatingDescription',
     'armorClassDescription',
+    'statBlockDescription',
+    'statBlockHtml',
+    'fullDescription',
+    'actions',
+    'monsterActions',
+    'bonusActions',
+    'reactions',
+    'legendaryActions',
+    'mythicActions',
+    'specialAbilities',
+    'traits',
+    'traitSections',
+    'spellcasting',
+    'spells',
   ]) {
     pickRicherField(merged, secondary, key);
   }
@@ -135,6 +149,24 @@ function hasMeaningfulCombatStats(raw: Record<string, unknown>): boolean {
   return ac != null && ac > 0 && hp != null && hp > 0;
 }
 
+function hasStructuredActionOrTraitArrays(raw: Record<string, unknown>): boolean {
+  for (const key of [
+    'actions',
+    'monsterActions',
+    'bonusActions',
+    'reactions',
+    'legendaryActions',
+    'mythicActions',
+    'specialAbilities',
+    'traits',
+    'traitSections',
+  ]) {
+    const val = raw[key];
+    if (Array.isArray(val) && val.length > 0) return true;
+  }
+  return false;
+}
+
 function hasActionOrTraitContent(raw: Record<string, unknown>): boolean {
   for (const key of [
     'actionsDescription',
@@ -145,7 +177,11 @@ function hasActionOrTraitContent(raw: Record<string, unknown>): boolean {
   ]) {
     if (stripDdbHtml(raw[key]).length > 40) return true;
   }
-  return false;
+  return hasStructuredActionOrTraitArrays(raw);
+}
+
+function characteristicsLooksComplete(text: string): boolean {
+  return text.length > 180 && /actions|traits|legendary|multiattack|spellcasting/i.test(text);
 }
 
 function hasRichNarrativeContent(raw: Record<string, unknown>): boolean {
@@ -167,11 +203,14 @@ function hasRichNarrativeContent(raw: Record<string, unknown>): boolean {
 
 /** True when DDB payload has enough data for a usable stat block (strict — ignores placeholder 0 AC/HP). */
 export function monsterHasFullStatBlock(raw: Record<string, unknown>): boolean {
-  if (!hasMeaningfulCombatStats(raw)) return false;
-  if (hasNonZeroAbilityScores(raw)) return true;
-  if (hasActionOrTraitContent(raw)) return true;
   const characteristics = stripDdbHtml(raw.characteristicsDescription);
-  if (characteristics.length > 120 && /hit points\s+\d+/i.test(characteristics)) return true;
+  const hasCombat = hasMeaningfulCombatStats(raw)
+    || (characteristics.length > 120 && /hit points\s+\d+/i.test(characteristics));
+
+  if (!hasCombat) return false;
+  if (hasActionOrTraitContent(raw)) return true;
+  if (characteristicsLooksComplete(characteristics)) return true;
+  // Batch payloads often include AC/HP/stats but omit actions — detail fetch fills those in.
   return false;
 }
 
@@ -229,6 +268,11 @@ async function fetchDdbMonsterDetailOnly(
   return unwrapMonsterPayload(await res.json());
 }
 
+/** True when batch payload is enough — otherwise fetch per-monster detail for full stat blocks. */
+export function monsterNeedsDetailFetch(raw: Record<string, unknown>): boolean {
+  return !monsterHasFullStatBlock(raw);
+}
+
 async function enrichMonsterRecord(
   ctx: DdbAuthContext,
   id: number,
@@ -236,7 +280,7 @@ async function enrichMonsterRecord(
 ): Promise<Record<string, unknown> | null> {
   let merged = existing ?? null;
 
-  if (!merged || !monsterHasImportableStatBlock(merged)) {
+  if (!merged || monsterNeedsDetailFetch(merged)) {
     try {
       const detail = await fetchDdbMonsterDetailOnly(ctx, id);
       if (detail) {
@@ -247,7 +291,7 @@ async function enrichMonsterRecord(
     }
   }
 
-  if (!merged || !monsterHasImportableStatBlock(merged)) {
+  if (!merged || monsterNeedsDetailFetch(merged)) {
     const batch = await fetchDdbMonstersByIds(ctx, [id]);
     const richer = batch.get(id);
     if (richer) {
@@ -258,7 +302,7 @@ async function enrichMonsterRecord(
   return merged;
 }
 
-/** Batch-fetch monsters for import; detail-fetches every entry missing importable data. */
+/** Batch-fetch monsters for import; detail-fetches entries missing full stat blocks. */
 export async function fetchMonstersForImport(
   ctx: DdbAuthContext,
   ids: number[],
@@ -268,7 +312,7 @@ export async function fetchMonstersForImport(
 
   const needsDetail = unique.filter((id) => {
     const raw = out.get(id);
-    return !raw || !monsterHasImportableStatBlock(raw);
+    return !raw || monsterNeedsDetailFetch(raw);
   });
 
   await runWithConcurrency(needsDetail, MONSTER_DETAIL_CONCURRENCY, async (id) => {
@@ -320,7 +364,7 @@ export async function enrichMonstersForImport(
   entries: Record<string, unknown>[],
 ): Promise<Record<string, unknown>[]> {
   const incompleteIds = entries
-    .filter((entry) => !monsterHasImportableStatBlock(entry))
+    .filter((entry) => monsterNeedsDetailFetch(entry))
     .map((entry) => Number(entry.id))
     .filter((id): id is number => Number.isFinite(id) && id > 0);
 
