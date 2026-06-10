@@ -6,7 +6,7 @@ import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
 import { prisma } from './lib/prisma';
 import { connectRedisOptional, isRedisOperational, redis } from './lib/redis';
-import { attachRedisSocketAdapter } from './lib/socketRedisAdapter';
+import { attachRedisSocketAdapter, isSocketRedisAdapterEnabled } from './lib/socketRedisAdapter';
 import { getMongoCircuitStatus, isMongoConfigured } from './lib/mongo';
 import { initSocket } from './socket';
 import campaignRoutes from './routes/campaigns';
@@ -28,6 +28,8 @@ const httpServer = http.createServer(app);
 
 const PORT = parseInt(process.env['PORT'] ?? '3001', 10);
 const clientOrigins = getClientOrigins();
+
+let servicesReady = false;
 
 if (process.env['TRUST_PROXY'] === '1') {
   app.set('trust proxy', 1);
@@ -52,25 +54,34 @@ app.use(cors({
 app.use(express.json({ limit: '50mb' }));
 app.use(cookieParser());
 
-// ─── Routes ───────────────────────────────────────────────────────────────────
-app.use('/api/campaigns', campaignRoutes);
-app.use('/api/users', userRoutes);
-app.use('/api/sessions', sessionRoutes);
-app.use('/api/compendium', compendiumRoutes);
-app.use('/api/ddb', ddbRoutes);
-
 app.get('/health', (_req, res) => {
   const mongo = getMongoCircuitStatus();
   res.json({
-    status: 'ok',
+    status: servicesReady ? 'ok' : 'starting',
+    ready: servicesReady,
     redis: isRedisOperational() ? 'connected' : 'degraded',
-    socketAdapter: process.env['SOCKET_REDIS_ADAPTER'] === '0' ? 'disabled' : 'redis-when-available',
+    socketAdapter: isSocketRedisAdapterEnabled() ? 'redis-when-available' : 'disabled',
     mongo: isMongoConfigured()
       ? (mongo.open ? 'circuit-open' : 'configured')
       : 'disabled',
     timestamp: new Date().toISOString(),
   });
 });
+
+app.use('/api', (req, res, next) => {
+  if (!servicesReady) {
+    res.status(503).json({ error: 'Server is starting — retry shortly' });
+    return;
+  }
+  next();
+});
+
+// ─── Routes ───────────────────────────────────────────────────────────────────
+app.use('/api/campaigns', campaignRoutes);
+app.use('/api/users', userRoutes);
+app.use('/api/sessions', sessionRoutes);
+app.use('/api/compendium', compendiumRoutes);
+app.use('/api/ddb', ddbRoutes);
 
 mountClientSpa(app);
 
@@ -93,48 +104,61 @@ async function startCompendiumBackground(): Promise<void> {
   void reconcileRawGlobalStorage();
 }
 
-// ─── Start ────────────────────────────────────────────────────────────────────
-async function start() {
+async function bootServices(): Promise<void> {
   try {
     await prisma.$connect();
     console.log('[DB] PostgreSQL connected');
 
-    const redisOk = await connectRedisOptional();
+    let redisOk = false;
+    try {
+      redisOk = await connectRedisOptional();
+    } catch (err) {
+      console.warn('[Redis] Startup error — continuing without Redis:', err);
+    }
     if (!redisOk) {
       console.warn('[Redis] Running without Redis — session caches and DDB dedup are degraded');
-    } else {
+    } else if (isSocketRedisAdapterEnabled()) {
       await attachRedisSocketAdapter(io);
+    } else {
+      console.log('[Socket] Single-instance mode (no Redis socket adapter)');
     }
 
-    httpServer.on('error', (err: NodeJS.ErrnoException) => {
-      if (err.code === 'EADDRINUSE') {
-        console.error(
-          `[Server] Port ${PORT} is already in use. Stop the other process (or run: Get-NetTCPConnection -LocalPort ${PORT} | Stop-Process -Id {OwningProcess})`,
-        );
-        process.exit(1);
-      }
-      console.error('[Server] HTTP error:', err);
-      process.exit(1);
-    });
-
-    httpServer.listen(PORT, () => {
-      console.log(`[Server] GrimoireVTT API on port ${PORT}`);
-      console.log(`[Server] Allowed client origins: ${clientOrigins.join(', ')}`);
-      console.log(`[Server] Public app URL (invites): ${getPrimaryClientUrl()}`);
-    });
-
+    servicesReady = true;
+    console.log('[Server] API ready');
     void startCompendiumBackground();
   } catch (err) {
-    console.error('[Server] Startup failed:', err);
-    process.exit(1);
+    console.error('[Server] Service boot failed:', err);
   }
 }
 
-void start();
+function start() {
+  httpServer.on('error', (err: NodeJS.ErrnoException) => {
+    if (err.code === 'EADDRINUSE') {
+      console.error(
+        `[Server] Port ${PORT} is already in use. Stop the other process (or run: Get-NetTCPConnection -LocalPort ${PORT} | Stop-Process -Id {OwningProcess})`,
+      );
+      process.exit(1);
+    }
+    console.error('[Server] HTTP error:', err);
+    process.exit(1);
+  });
 
-// ─── Graceful shutdown ────────────────────────────────────────────────────────
+  httpServer.keepAliveTimeout = 120_000;
+  httpServer.headersTimeout = 125_000;
+
+  httpServer.listen(PORT, () => {
+    console.log(`[Server] GrimoireVTT listening on port ${PORT}`);
+    console.log(`[Server] Allowed client origins: ${clientOrigins.join(', ')}`);
+    console.log(`[Server] Public app URL (invites): ${getPrimaryClientUrl()}`);
+    void bootServices();
+  });
+}
+
+start();
+
 process.on('SIGTERM', async () => {
   console.log('[Server] Shutting down...');
+  servicesReady = false;
   await prisma.$disconnect();
   await closeMongo();
   redis.disconnect();

@@ -46,7 +46,17 @@ api.interceptors.request.use(async (config) => {
   return config;
 });
 
-type RetriableConfig = InternalAxiosRequestConfig & { __authRetried?: boolean };
+type RetriableConfig = InternalAxiosRequestConfig & {
+  __authRetried?: boolean;
+  __wakeRetryCount?: number;
+};
+
+const WAKE_RETRY_MAX = 4;
+const WAKE_RETRY_STATUSES = new Set([502, 503, 504]);
+
+function wakeRetryDelayMs(attempt: number): number {
+  return Math.min(1500 * 2 ** attempt, 12_000);
+}
 
 api.interceptors.response.use(
   (res) => res,
@@ -58,6 +68,15 @@ api.interceptors.response.use(
     const config = err.config as RetriableConfig;
     const status = err.response?.status;
 
+    if (status != null && WAKE_RETRY_STATUSES.has(status)) {
+      const attempt = config.__wakeRetryCount ?? 0;
+      if (attempt < WAKE_RETRY_MAX) {
+        config.__wakeRetryCount = attempt + 1;
+        await new Promise((r) => setTimeout(r, wakeRetryDelayMs(attempt)));
+        return api.request(config);
+      }
+    }
+
     if (status === 401 && !config.__authRetried && getAuthToken) {
       config.__authRetried = true;
       const token = await getAuthToken({ skipCache: true });
@@ -67,7 +86,7 @@ api.interceptors.response.use(
       }
     }
 
-    if (status !== 401) {
+    if (status !== 401 && !(status != null && WAKE_RETRY_STATUSES.has(status))) {
       const data = err.response?.data as { error?: string; message?: string } | undefined;
       const msg = data?.error ?? data?.message ?? err.message;
       console.error('[API]', msg);

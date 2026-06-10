@@ -35,6 +35,15 @@ function compendiumErrorHint(error: unknown): string {
     }
     if (error.response.status === 401) return 'Sign in required to load the compendium.';
     if (error.response.status === 403) return 'Admin password required to edit. Unlock admin mode or sign in.';
+    if (error.response.status === 502 || error.response.status === 504) {
+      return 'API server unreachable (502). The server may have crashed or is still waking up — wait 30s and refresh.';
+    }
+    if (error.response.status === 503) {
+      const msg = error.response.data?.error;
+      if (typeof msg === 'string' && msg.includes('starting')) {
+        return 'Server is still starting — wait a few seconds and refresh.';
+      }
+    }
     if (error.response.status >= 500) {
       const msg = error.response.data?.error;
       if (typeof msg === 'string' && msg.trim()) {

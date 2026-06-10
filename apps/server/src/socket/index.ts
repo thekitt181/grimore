@@ -123,10 +123,11 @@ export function initSocket(httpServer: HttpServer): Server {
       },
       credentials: true,
     },
-    transports: ['websocket', 'polling'],
-    pingTimeout: 60_000,
+    transports: ['polling', 'websocket'],
+    pingTimeout: 120_000,
     pingInterval: 25_000,
-    connectTimeout: 60_000,
+    connectTimeout: 90_000,
+    maxHttpBufferSize: 1e7,
   });
 
   // ─── Auth middleware ─────────────────────────────────────────────────────────

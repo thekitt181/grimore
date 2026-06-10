@@ -13,19 +13,25 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function isRenderHost(): boolean {
+  if (typeof window === 'undefined') return false;
+  return /\.onrender\.com$/i.test(window.location.hostname);
+}
+
 function socketOptions() {
   const mobile = isMobileClient();
   const dev = import.meta.env.DEV;
+  const renderHosted = isRenderHost();
+  const pollingFirst = mobile || dev || renderHosted;
   return {
     autoConnect: false,
-    // Polling first in dev/mobile — websocket upgrade is optional after connect.
-    transports: mobile || dev ? ['polling', 'websocket'] : ['websocket', 'polling'],
-    upgrade: !(mobile || dev),
-    timeout: mobile ? 90_000 : 45_000,
+    transports: pollingFirst ? ['polling', 'websocket'] : ['websocket', 'polling'],
+    upgrade: !pollingFirst,
+    timeout: mobile || renderHosted ? 90_000 : 45_000,
     reconnection: true,
     reconnectionAttempts: Infinity,
     reconnectionDelay: 1000,
-    reconnectionDelayMax: 8_000,
+    reconnectionDelayMax: 12_000,
     withCredentials: true,
   };
 }

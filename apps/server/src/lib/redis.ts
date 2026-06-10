@@ -8,8 +8,33 @@ function isQuotaError(message: string): boolean {
   return message.includes('max requests limit') || message.includes('limit exceeded');
 }
 
+/** Disable Redis for this process (Upstash quota, repeated failures). Never throws. */
+export function disableRedisDueToQuota(reason?: string): void {
+  if (!redisEnabled) return;
+  redisEnabled = false;
+  console.warn(
+    '[Redis] Quota or limit hit - disabling Redis for this server instance',
+    reason ? `(${reason})` : '',
+  );
+  try {
+    redis.disconnect(false);
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Prevent uncaught ReplyError crashes on pub/sub or duplicate clients. */
+export function bindRedisClientGuards(client: Redis, label: string): void {
+  client.on('error', (err) => {
+    const msg = err.message;
+    console.warn(`[Redis] ${label} error:`, msg);
+    if (isQuotaError(msg)) {
+      disableRedisDueToQuota(label);
+    }
+  });
+}
+
 export const redis = new Redis(REDIS_URL, {
-  // Avoid throwing on every command when disconnected (Upstash quota / outages).
   maxRetriesPerRequest: null,
   lazyConnect: true,
   enableReadyCheck: false,
@@ -21,42 +46,39 @@ export const redis = new Redis(REDIS_URL, {
 });
 
 redis.on('connect', () => console.log('[Redis] Connected'));
+bindRedisClientGuards(redis, 'main');
 redis.on('error', (err) => {
   const msg = err.message;
-  console.warn('[Redis] Error:', msg);
   if (isQuotaError(msg)) {
-    redisEnabled = false;
-    console.warn('[Redis] Quota or limit hit — disabling Redis for this server instance');
-    try {
-      redis.disconnect(false);
-    } catch {
-      /* ignore */
-    }
+    disableRedisDueToQuota('main');
   }
 });
 
-/** True when Redis accepted a connection and has not been disabled due to quota/errors. */
 export function isRedisOperational(): boolean {
   return redisEnabled && (redis.status === 'ready' || redis.status === 'connect');
 }
 
-/** Connect at startup; never throws — returns false when Redis is unavailable. */
 export async function connectRedisOptional(): Promise<boolean> {
   if (!process.env['REDIS_URL']) {
-    console.warn('[Redis] REDIS_URL not set — running without Redis cache');
+    console.warn('[Redis] REDIS_URL not set - running without Redis cache');
     redisEnabled = false;
     return false;
   }
   try {
-    if (redis.status === 'ready' || redis.status === 'connect' || redis.status === 'connecting') {
-      return true;
+    if (redis.status === 'ready' || redis.status === 'connect') {
+      return isRedisOperational();
+    }
+    if (redis.status === 'connecting') {
+      await redis.ping();
+      return isRedisOperational();
     }
     await redis.connect();
+    await redis.ping();
     return isRedisOperational();
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.warn('[Redis] Startup connect failed — running without Redis:', msg);
-    if (isQuotaError(msg)) redisEnabled = false;
+    console.warn('[Redis] Startup connect failed - running without Redis:', msg);
+    if (isQuotaError(msg)) disableRedisDueToQuota('startup');
     return false;
   }
 }
@@ -70,20 +92,13 @@ async function safeRedis<T>(fallback: T, op: () => Promise<T>): Promise<T> {
     const msg = err instanceof Error ? err.message : String(err);
     console.warn('[Redis] Operation failed:', msg);
     if (isQuotaError(msg)) {
-      redisEnabled = false;
-      try {
-        redis.disconnect(false);
-      } catch {
-        /* ignore */
-      }
+      disableRedisDueToQuota('operation');
     }
     return fallback;
   }
 }
 
-// ─── Session state helpers ─────────────────────────────────────────────────────
-
-const SESSION_TTL = 60 * 60 * 24; // 24 hours in seconds
+const SESSION_TTL = 60 * 60 * 24;
 
 export async function setSessionState(sessionId: string, data: unknown): Promise<void> {
   await safeRedis(undefined, () =>
