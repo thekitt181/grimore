@@ -40,9 +40,10 @@ export { fetchDdbMonsterDetail } from './ddbMonsterFetch';
 const SPELL_CACHE_TTL = 60 * 60;
 const ITEM_CACHE_TTL = 60 * 30;
 const FETCH_BATCH = 100;
-const MONSTER_IMPORT_BATCH = 8;
+const MONSTER_IMPORT_BATCH = 3;
 /** Smaller Mongo writes — full global doc RMW times out on large batches from Render→Atlas. */
-const SAVE_BATCH = 15;
+const SAVE_BATCH = 5;
+const DDB_IMPORT_SAVE_OPTS = { deferCatalogRebuild: true } as const;
 const CATALOG_CACHE_TTL = 60 * 60;
 
 async function loadDdbCatalog(ctx: DdbAuthContext): Promise<DdbCatalog> {
@@ -556,7 +557,7 @@ async function importMonsterIds(
     await saveImportBatch(
       'monster',
       pending,
-      (entries) => saveMonstersBulk(entries),
+      (entries) => saveMonstersBulk(entries, DDB_IMPORT_SAVE_OPTS),
       imported,
       errors,
       meta,
@@ -616,7 +617,7 @@ async function importSpellIds(
     await saveImportBatch(
       'spell',
       pending,
-      (entries) => saveSpellsBulk(entries),
+      (entries) => saveSpellsBulk(entries, DDB_IMPORT_SAVE_OPTS),
       imported,
       errors,
       meta,
@@ -676,7 +677,7 @@ async function importItemIds(
     await saveImportBatch(
       'item',
       pending,
-      (entries) => saveItemsBulk(entries),
+      (entries) => saveItemsBulk(entries, DDB_IMPORT_SAVE_OPTS),
       imported,
       errors,
       meta,
@@ -793,4 +794,9 @@ export async function importAllDdbLibraryFromSources(
   }
   const merged = mergeImportResults(...results);
   return merged;
+}
+
+export async function finishDdbLibraryImport(): Promise<{ catalogRev: string | null }> {
+  const { finishBulkCompendiumImport } = await import('../compendiumSync');
+  return finishBulkCompendiumImport();
 }

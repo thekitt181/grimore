@@ -482,6 +482,7 @@ function applyOwlbearEntryToRaw(
 export async function saveOwlbearEntriesBulk(
   kind: CompendiumKind,
   entries: Array<{ entry: OwlbearMonster | OwlbearItem | OwlbearSpell; opts: OwlbearSaveOptions }>,
+  opts?: { notify?: PersistNotifyMode },
 ): Promise<PersistRawGlobalDocResult> {
   if (entries.length === 0) {
     const raw = await readRawGlobalDoc({ includeImageData: false });
@@ -493,13 +494,14 @@ export async function saveOwlbearEntriesBulk(
       mongoPersisted: true,
     };
   }
+  const notify = opts?.notify ?? 'rebuild';
   return enqueueCompendiumWrite(async () => {
     clearRawGlobalReadCaches();
     const raw = await readRawGlobalDoc({ includeImageData: false });
-    for (const { entry, opts } of entries) {
-      applyOwlbearEntryToRaw(raw, kind, entry, opts);
+    for (const { entry, opts: entryOpts } of entries) {
+      applyOwlbearEntryToRaw(raw, kind, entry, entryOpts);
     }
-    return persistRawGlobalDoc(raw, { notify: 'rebuild' });
+    return persistRawGlobalDoc(raw, { notify });
   });
 }
 

@@ -18,6 +18,7 @@ import {
   browseDdbLibraryItems,
   importFromDdbLibrary,
   importAllFromDdbLibrarySource,
+  finishDdbLibraryImportSession,
   patchCharacterHp,
   patchCharacterDeathSaves,
   unlinkDdbAccount,
@@ -515,6 +516,16 @@ const importAllSchema = z
   .refine((data) => data.sourceIds.length > 0, {
     message: 'Select at least one source book',
   });
+
+router.post('/library/finish-import', requireAuth, async (_req: AuthenticatedRequest, res) => {
+  try {
+    const result = await finishDdbLibraryImportSession();
+    res.json(result);
+  } catch (err) {
+    console.error('[DDB] finish-import failed:', err);
+    res.status(400).json({ error: err instanceof Error ? err.message : 'Import finish failed' });
+  }
+});
 
 router.post('/library/import-all', requireAuth, async (req: AuthenticatedRequest, res) => {
   try {

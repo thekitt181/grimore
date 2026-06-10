@@ -245,11 +245,65 @@ export async function searchDdbLibraryItems(params: {
   return data.items ?? [];
 }
 
-const MONSTER_IMPORT_CHUNK = 8;
-const DEFAULT_IMPORT_CHUNK = 15;
+const MONSTER_IMPORT_CHUNK = 3;
+const DEFAULT_IMPORT_CHUNK = 10;
 
 function importChunkSize(kind: 'monster' | 'item' | 'spell'): number {
   return kind === 'monster' ? MONSTER_IMPORT_CHUNK : DEFAULT_IMPORT_CHUNK;
+}
+
+function isTimeoutStatus(status?: number): boolean {
+  return status === 502 || status === 503 || status === 504;
+}
+
+async function postImportChunk(
+  body: {
+    kind: 'monster' | 'item' | 'spell';
+    ids: number[];
+    campaignId?: number;
+    sourceId?: number;
+  },
+): Promise<DdbLibraryImportResult> {
+  const { data } = await api.post<DdbLibraryImportResult>('/ddb/library/import', body);
+  return data;
+}
+
+async function importChunkWithRetry(
+  body: {
+    kind: 'monster' | 'item' | 'spell';
+    ids: number[];
+    campaignId?: number;
+    sourceId?: number;
+  },
+): Promise<DdbLibraryImportResult> {
+  try {
+    return await postImportChunk(body);
+  } catch (err) {
+    if (!axios.isAxiosError(err) || body.ids.length <= 1) throw err;
+    const status = err.response?.status;
+    if (!isTimeoutStatus(status)) throw err;
+
+    let merged: DdbLibraryImportResult = { imported: [], errors: [] };
+    for (const id of body.ids) {
+      try {
+        merged = mergeImportResults(merged, await postImportChunk({ ...body, ids: [id] }));
+      } catch (singleErr) {
+        if (axios.isAxiosError(singleErr)) {
+          const msg = (singleErr.response?.data as { error?: string } | undefined)?.error
+            ?? 'Server timed out — try again later';
+          merged.errors.push({ id, message: msg });
+          continue;
+        }
+        throw singleErr;
+      }
+    }
+    return merged;
+  }
+}
+
+export async function finishDdbLibraryImport(): Promise<{ catalogRev: string | null }> {
+  const { data } = await api.post<{ catalogRev: string | null }>('/ddb/library/finish-import');
+  return data;
 }
 
 function chunkIds(ids: number[], size: number): number[][] {
@@ -285,12 +339,15 @@ function mergeImportResults(a: DdbLibraryImportResult, b: DdbLibraryImportResult
   };
 }
 
-export async function importDdbLibraryEntries(body: {
-  kind: 'monster' | 'item' | 'spell';
-  ids: number[];
-  campaignId?: number;
-  sourceId?: number;
-}): Promise<DdbLibraryImportResult> {
+export async function importDdbLibraryEntries(
+  body: {
+    kind: 'monster' | 'item' | 'spell';
+    ids: number[];
+    campaignId?: number;
+    sourceId?: number;
+  },
+  opts?: { skipFinish?: boolean },
+): Promise<DdbLibraryImportResult> {
   const ids = [...new Set(body.ids.filter((id) => Number.isFinite(id) && id > 0))];
   if (ids.length === 0) {
     return { imported: [], errors: [{ id: 0, message: 'No entries selected' }] };
@@ -298,21 +355,30 @@ export async function importDdbLibraryEntries(body: {
 
   let merged: DdbLibraryImportResult = { imported: [], errors: [] };
   const chunkSize = importChunkSize(body.kind);
+  const importOpts = {
+    ...(body.campaignId != null && Number(body.campaignId) > 0
+      ? { campaignId: Number(body.campaignId) }
+      : {}),
+    ...(body.sourceId != null ? { sourceId: body.sourceId } : {}),
+  };
 
   for (let i = 0; i < ids.length; i += chunkSize) {
     const chunkIds = ids.slice(i, i + chunkSize);
     try {
-      const { data } = await api.post<DdbLibraryImportResult>('/ddb/library/import', {
-        ...body,
-        ids: chunkIds,
-      });
-      merged = mergeImportResults(merged, data);
+      merged = mergeImportResults(
+        merged,
+        await importChunkWithRetry({
+          kind: body.kind,
+          ids: chunkIds,
+          ...importOpts,
+        }),
+      );
     } catch (err) {
       if (axios.isAxiosError(err)) {
         const status = err.response?.status;
         const msg = (err.response?.data as { error?: string } | undefined)?.error;
         const detail = msg
-          ?? (status === 504 || status === 502 || status === 503
+          ?? (isTimeoutStatus(status)
             ? 'Server timed out — try importing fewer entries at a time'
             : undefined)
           ?? err.message
@@ -323,6 +389,15 @@ export async function importDdbLibraryEntries(body: {
         continue;
       }
       throw err;
+    }
+  }
+
+  if (!opts?.skipFinish && merged.imported.length > 0) {
+    try {
+      const fin = await finishDdbLibraryImport();
+      if (fin.catalogRev) merged.catalogRev = fin.catalogRev;
+    } catch (err) {
+      console.warn('[DDB] finish-import failed:', err);
     }
   }
 
@@ -373,7 +448,10 @@ export async function importAllDdbLibraryFromSource(
       });
       merged = mergeImportResults(
         merged,
-        await importDdbLibraryEntries({ kind: 'monster', ids: chunk, sourceId, ...importOpts }),
+        await importDdbLibraryEntries(
+          { kind: 'monster', ids: chunk, sourceId, ...importOpts },
+          { skipFinish: true },
+        ),
       );
     }
 
@@ -393,7 +471,10 @@ export async function importAllDdbLibraryFromSource(
       });
       merged = mergeImportResults(
         merged,
-        await importDdbLibraryEntries({ kind: 'spell', ids: chunk, sourceId, ...importOpts }),
+        await importDdbLibraryEntries(
+          { kind: 'spell', ids: chunk, sourceId, ...importOpts },
+          { skipFinish: true },
+        ),
       );
     }
 
@@ -413,8 +494,20 @@ export async function importAllDdbLibraryFromSource(
       });
       merged = mergeImportResults(
         merged,
-        await importDdbLibraryEntries({ kind: 'item', ids: chunk, sourceId, ...importOpts }),
+        await importDdbLibraryEntries(
+          { kind: 'item', ids: chunk, sourceId, ...importOpts },
+          { skipFinish: true },
+        ),
       );
+    }
+  }
+
+  if (merged.imported.length > 0) {
+    try {
+      const fin = await finishDdbLibraryImport();
+      if (fin.catalogRev) merged.catalogRev = fin.catalogRev;
+    } catch (err) {
+      console.warn('[DDB] finish-import failed:', err);
     }
   }
 

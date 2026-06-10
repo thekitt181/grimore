@@ -12,6 +12,7 @@ import {
   importDdbLibraryEntries,
   importAllDdbLibraryFromSource,
   importAllDdbLibraryFromSources,
+  finishDdbLibraryImport,
   searchDdbItems,
   searchDdbMonsters,
   searchDdbSpells,
@@ -368,6 +369,10 @@ export async function importAllFromDdbLibrarySource(
     sourceIds,
     campaignId: opts.campaignId,
   });
+}
+
+export async function finishDdbLibraryImportSession(): Promise<{ catalogRev: string | null }> {
+  return finishDdbLibraryImport();
 }
 
 export { fetchDdbCampaigns, fetchDdbCharacterList, fetchDdbEncounters };

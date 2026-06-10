@@ -1125,8 +1125,20 @@ export interface CompendiumBulkSaveResult<T> {
   persist: PersistRawGlobalDocResult;
 }
 
+export interface CompendiumBulkSaveOptions {
+  /** Skip catalog rebuild per batch — call finishBulkCompendiumImport() once after bulk work. */
+  deferCatalogRebuild?: boolean;
+}
+
+export async function finishBulkCompendiumImport(): Promise<{ catalogRev: string | null }> {
+  const { notifyCompendiumCatalogRebuilt } = await import('./compendiumChangeNotify');
+  await notifyCompendiumCatalogRebuilt(new Date().toISOString());
+  return { catalogRev: getCatalogRevision() };
+}
+
 export async function saveMonstersBulk(
   entries: Array<{ entry: OwlbearMonster; opts?: CompendiumSaveOptions }>,
+  bulkOpts?: CompendiumBulkSaveOptions,
 ): Promise<CompendiumBulkSaveResult<CompendiumMonster>> {
   if (entries.length === 0) {
     const raw = await readRawGlobalDoc({ includeImageData: false });
@@ -1158,6 +1170,7 @@ export async function saveMonstersBulk(
         hidePrevious: opts?.hidePrevious,
       },
     })),
+    { notify: bulkOpts?.deferCatalogRebuild ? 'none' : 'rebuild' },
   );
 
   await upsertCollectionMonstersBulk(
@@ -1172,6 +1185,7 @@ export async function saveMonstersBulk(
 
 export async function saveItemsBulk(
   entries: Array<{ entry: OwlbearItem; opts?: CompendiumSaveOptions }>,
+  bulkOpts?: CompendiumBulkSaveOptions,
 ): Promise<CompendiumBulkSaveResult<CompendiumItem>> {
   if (entries.length === 0) {
     const raw = await readRawGlobalDoc({ includeImageData: false });
@@ -1203,6 +1217,7 @@ export async function saveItemsBulk(
         hidePrevious: opts?.hidePrevious,
       },
     })),
+    { notify: bulkOpts?.deferCatalogRebuild ? 'none' : 'rebuild' },
   );
 
   await upsertCollectionItemsBulk(
@@ -1217,6 +1232,7 @@ export async function saveItemsBulk(
 
 export async function saveSpellsBulk(
   entries: Array<{ entry: OwlbearSpell; opts?: CompendiumSaveOptions }>,
+  bulkOpts?: CompendiumBulkSaveOptions,
 ): Promise<CompendiumBulkSaveResult<CompendiumSpell>> {
   if (entries.length === 0) {
     const raw = await readRawGlobalDoc({ includeImageData: false });
@@ -1248,6 +1264,7 @@ export async function saveSpellsBulk(
         hidePrevious: opts?.hidePrevious,
       },
     })),
+    { notify: bulkOpts?.deferCatalogRebuild ? 'none' : 'rebuild' },
   );
 
   await upsertCollectionSpellsBulk(
