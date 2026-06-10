@@ -6,7 +6,7 @@ import { notifyCompendiumPolicyChanged } from './compendiumChangeNotify';
 import { patchRawGlobalFallbackPolicy } from './compendiumGlobalFallback';
 import { normalizeEntryName } from './compendiumMerge';
 import { markCompendiumWritePending } from './compendiumMongoWatch';
-import { clearRawGlobalDocInflight, persistRawGlobalDoc, readRawGlobalDoc } from './compendiumOwlbearPersist';
+import { clearRawGlobalDocInflight, readRawGlobalDoc } from './compendiumOwlbearPersist';
 import { invalidateVisibilityPolicyCache, setVisibilityPolicyCache } from './compendiumPolicyCache';
 import { normalizeSourceLabel, policyFromRaw, sourceMatchesLocked } from './compendiumVisibility';
 import { enqueueCompendiumWrite } from './compendiumWriteQueue';
@@ -35,9 +35,17 @@ export function collectBundledSourceLabels(): string[] {
   return [...labels];
 }
 
+export function bundledSourceLabelSet(): Set<string> {
+  return new Set(collectBundledSourceLabels().map((l) => normalizeSourceLabel(l)));
+}
+
+export function isBundledSourceLabel(sourceId: string): boolean {
+  return bundledSourceLabelSet().has(normalizeSourceLabel(sourceId));
+}
+
 /** Source labels that exist only in Mongo/file overrides (e.g. DDB imports), not bundled JSON. */
 export async function collectOverrideOnlySourceLabels(): Promise<string[]> {
-  const bundled = new Set(collectBundledSourceLabels().map((l) => normalizeSourceLabel(l)));
+  const bundled = bundledSourceLabelSet();
   const raw = await readRawGlobalDoc({ includeImageData: false });
   const overrideLabels = new Set<string>();
   for (const list of [raw.overrideMonsters, raw.overrideItems, raw.overrideSpells]) {
@@ -46,36 +54,25 @@ export async function collectOverrideOnlySourceLabels(): Promise<string[]> {
   return [...overrideLabels].filter((label) => !bundled.has(normalizeSourceLabel(label)));
 }
 
-function rawHasBundledSeedFlag(raw: OwlbearRawGlobalDoc): boolean {
-  return Boolean((raw as OwlbearRawGlobalDoc & { bundledSourcesSeeded?: boolean }).bundledSourcesSeeded);
-}
-
 function normalizeLockLabel(sourceLabel: string): string {
   return normalizeSourceLabel(sourceLabel) || normalizeEntryName(sourceLabel).toLowerCase();
 }
 
-async function writeBundledSeedFlag(raw: OwlbearRawGlobalDoc, notify: 'none' | 'rebuild'): Promise<void> {
-  await persistRawGlobalDoc(
-    { ...raw, bundledSourcesSeeded: true } as OwlbearRawGlobalDoc,
-    { notify },
-  );
-}
-
 /**
- * One-time: lock every bundled third-party source book so players only see DDB imports
- * and books you explicitly unlock.
+ * Keep every bundled third-party source locked (idempotent).
+ * DDB imports use override-only source names and are unlocked separately on import finish.
  */
 export async function ensureBundledSourcesLocked(reason: string): Promise<number> {
   return enqueueCompendiumWrite(async () => {
-    const raw = await readRawGlobalDoc({ includeImageData: false });
-    if (rawHasBundledSeedFlag(raw)) return 0;
-
     const bundled = collectBundledSourceLabels();
     if (bundled.length === 0) {
-      await writeBundledSeedFlag(raw, 'none');
+      console.warn(
+        `[Compendium] No bundled source labels found (${reason}) — check apps/server/data/compendium on disk`,
+      );
       return 0;
     }
 
+    const raw = await readRawGlobalDoc({ includeImageData: false });
     const policy = policyFromRaw(raw);
     const locked = [...policy.lockedSources];
     const toLock: string[] = [];
@@ -87,48 +84,41 @@ export async function ensureBundledSourcesLocked(reason: string): Promise<number
       toLock.push(norm);
     }
 
-    if (toLock.length > 0) {
-      const lastUpdated = new Date().toISOString();
-      const next = { ...policy, lockedSources: locked };
-      const col = await getCollection<OwlbearRawGlobalDoc>('data');
-      if (col && !isMongoCircuitOpen()) {
-        markCompendiumWritePending();
-        try {
-          await withMongoTimeout(
-            col.updateOne(
-              { _id: 'global' },
-              {
-                $set: {
-                  lockedSources: next.lockedSources,
-                  publishedEntryKeys: next.publishedEntryKeys,
-                  lastUpdated,
-                  bundledSourcesSeeded: true,
-                },
+    if (toLock.length === 0) return 0;
+
+    const lastUpdated = new Date().toISOString();
+    const next = { ...policy, lockedSources: locked };
+    const col = await getCollection<OwlbearRawGlobalDoc>('data');
+    if (col && !isMongoCircuitOpen()) {
+      markCompendiumWritePending();
+      try {
+        await withMongoTimeout(
+          col.updateOne(
+            { _id: 'global' },
+            {
+              $set: {
+                lockedSources: next.lockedSources,
+                publishedEntryKeys: next.publishedEntryKeys,
+                lastUpdated,
               },
-              { upsert: true },
-            ),
-            15_000,
-          );
-        } catch (err) {
-          console.warn(
-            '[Compendium] Mongo bundled-lock write failed, using fallback:',
-            err instanceof Error ? err.message : err,
-          );
-        }
+            },
+            { upsert: true },
+          ),
+          15_000,
+        );
+      } catch (err) {
+        console.warn(
+          '[Compendium] Mongo bundled-lock write failed, using fallback:',
+          err instanceof Error ? err.message : err,
+        );
       }
-      patchRawGlobalFallbackPolicy(next, lastUpdated);
-      clearRawGlobalDocInflight();
-      invalidateVisibilityPolicyCache();
-      setVisibilityPolicyCache(next, lastUpdated);
-      notifyCompendiumPolicyChanged(lastUpdated, next);
-      console.log(`[Compendium] Locked ${toLock.length} bundled source book(s) (${reason})`);
     }
-
-    const fresh = await readRawGlobalDoc({ includeImageData: false });
-    if (!rawHasBundledSeedFlag(fresh)) {
-      await writeBundledSeedFlag(fresh, toLock.length > 0 ? 'rebuild' : 'none');
-    }
-
+    patchRawGlobalFallbackPolicy(next, lastUpdated);
+    clearRawGlobalDocInflight();
+    invalidateVisibilityPolicyCache();
+    setVisibilityPolicyCache(next, lastUpdated);
+    notifyCompendiumPolicyChanged(lastUpdated, next);
+    console.log(`[Compendium] Locked ${toLock.length} bundled source book(s) (${reason})`);
     return toLock.length;
   });
 }

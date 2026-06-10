@@ -51,11 +51,13 @@ import {
 import { registerCatalogRebuild } from './compendiumChangeNotify';
 import {
   isEntryDraft,
+  normalizeSourceLabel,
   policyFromRaw,
   policyIsSourceLocked,
   type CompendiumVisibilityPolicy,
 } from './compendiumVisibility';
 import { getCompendiumVisibilityPolicy } from './compendiumSourcePolicy';
+import { bundledSourceLabelSet, ensureBundledSourcesLocked } from './compendiumBundledLock';
 import {
   readVisibilityPolicyFast,
   registerCatalogPolicySink,
@@ -670,11 +672,29 @@ function prepareSavePayload<T extends { source?: string }>(entry: T, saveAs: Com
   return { ...entry, source: entry.source?.trim() ? entry.source : 'Custom' };
 }
 
+function sourceListFilter(
+  id: string,
+  c: { total: number; public: number },
+  policy: CompendiumVisibilityPolicy,
+  includeDrafts: boolean,
+  excludeBundled: boolean,
+  bundled: Set<string> | null,
+): boolean {
+  if (excludeBundled && bundled?.has(normalizeSourceLabel(id))) return false;
+  if (!includeDrafts && sourceIsLocked(id, policy)) return false;
+  if (includeDrafts) return c.total > 0;
+  return c.public > 0;
+}
+
 export async function listSources(
   kind: 'monsters' | 'items' | 'spells',
-  opts?: { includeDrafts?: boolean },
+  opts?: { includeDrafts?: boolean; excludeBundled?: boolean },
 ): Promise<Array<{ id: string; label: string; count: number; locked?: boolean; draftCount?: number }>> {
+  await ensureBundledSourcesLocked('listSources');
+
   const includeDrafts = opts?.includeDrafts ?? false;
+  const excludeBundled = opts?.excludeBundled ?? false;
+  const bundled = excludeBundled ? bundledSourceLabelSet() : null;
   const policy = await getCatalogPolicy();
 
   if (kind === 'monsters') {
@@ -693,11 +713,7 @@ export async function listSources(
       }
     }
     return Array.from(counts.entries())
-      .filter(([id, c]) => {
-        if (!includeDrafts && sourceIsLocked(id, policy)) return false;
-        if (includeDrafts) return c.total > 0;
-        return c.public > 0;
-      })
+      .filter(([id, c]) => sourceListFilter(id, c, policy, includeDrafts, excludeBundled, bundled))
       .map(([id, c]) => ({
         id,
         label: formatSourceLabel(id),
@@ -724,11 +740,7 @@ export async function listSources(
       }
     }
     return Array.from(counts.entries())
-      .filter(([id, c]) => {
-        if (!includeDrafts && sourceIsLocked(id, policy)) return false;
-        if (includeDrafts) return c.total > 0;
-        return c.public > 0;
-      })
+      .filter(([id, c]) => sourceListFilter(id, c, policy, includeDrafts, excludeBundled, bundled))
       .map(([id, c]) => ({
         id,
         label: formatSourceLabel(id),
@@ -754,11 +766,7 @@ export async function listSources(
     }
   }
   return Array.from(counts.entries())
-    .filter(([id, c]) => {
-      if (!includeDrafts && sourceIsLocked(id, policy)) return false;
-      if (includeDrafts) return c.total > 0;
-      return c.public > 0;
-    })
+    .filter(([id, c]) => sourceListFilter(id, c, policy, includeDrafts, excludeBundled, bundled))
     .map(([id, c]) => ({
       id,
       label: formatSourceLabel(id),

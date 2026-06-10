@@ -233,7 +233,11 @@ router.get('/sources', ...auth, async (req: AuthenticatedRequest, res) => {
       res.status(400).json({ error: 'kind must be monsters, items, or spells' });
       return;
     }
-    res.json(await listSources(kind, { includeDrafts: isCompendiumAdmin(req) }));
+    const books = req.query['books'] === '1' || req.query['books'] === 'true';
+    res.json(await listSources(kind, {
+      includeDrafts: !books && isCompendiumAdmin(req),
+      excludeBundled: books,
+    }));
   } catch (err) {
     console.error('[Compendium] list sources:', err);
     res.status(500).json({ error: 'Failed to list sources' });

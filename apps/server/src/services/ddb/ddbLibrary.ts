@@ -925,19 +925,10 @@ export async function finishDdbLibraryImport(
   }
   if (opts?.unlockAllImportedSources) {
     unlocked.push(...await unlockImportedBookSourceLabels(compendiumLabels));
+  }
+  // DDB imports live in overrides — always unlock non-bundled override sources.
+  if (overrideOnlyLabels.length > 0) {
     unlocked.push(...await unlockImportedBookSourceLabels(overrideOnlyLabels));
-  } else if (opts?.sourceIds?.length || opts?.sourceLabels?.length) {
-    // DDB imports live in overrides — unlock any override-only book matching this import.
-    const importLabels = new Set([
-      ...(opts.sourceLabels ?? []),
-      ...(opts.sourceIds ?? []).map((id) => catalog.sourceNames.get(id)).filter(Boolean) as string[],
-    ]);
-    const ddbLabels = overrideOnlyLabels.filter((label) =>
-      [...importLabels].some((name) => sourceMatchesLocked(name, label) || name === label),
-    );
-    if (ddbLabels.length > 0) {
-      unlocked.push(...await unlockImportedBookSourceLabels(ddbLabels));
-    }
   }
   const { finishBulkCompendiumImport } = await import('../compendiumSync');
   const result = await finishBulkCompendiumImport();

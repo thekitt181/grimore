@@ -152,8 +152,8 @@ export function CompendiumSidebarList() {
   const inBookView = browseMode === 'sources' && Boolean(selectedSource);
 
   const sourcesQ = useQuery({
-    queryKey: ['compendium', 'sources', tab, isAdmin],
-    queryFn: () => fetchSources(tab),
+    queryKey: ['compendium', 'sources', tab, isAdmin, 'books'],
+    queryFn: () => fetchSources(tab, { books: true }),
     enabled: compendiumReady && (showSourcePicker || (isAdmin && browseMode === 'sources')),
     staleTime: 5_000,
   });
@@ -359,8 +359,8 @@ export function CompendiumSidebarList() {
               {query.trim()
                 ? 'No source books match your search.'
                 : (sourcesQ.data?.length ?? 0) === 0
-                  ? 'No source books yet. Import from D&D Beyond (Library import), then check All — or use bundled content on All.'
-                  : 'All source books are hidden (locked). Unlock them in admin mode or browse All.'}
+                  ? 'No imported books yet. Use D&D Beyond Library → Import all, then Sync compendium. Bundled books are hidden here.'
+                  : 'All source books are hidden (locked). Unlock a book in admin mode or import from D&D Beyond.'}
             </p>
             {!query.trim() && (
               <button

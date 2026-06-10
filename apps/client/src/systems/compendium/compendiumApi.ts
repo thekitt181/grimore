@@ -65,8 +65,13 @@ export async function unpublishCompendiumEntry(
   return data;
 }
 
-export async function fetchSources(kind: 'monsters' | 'items' | 'spells'): Promise<CompendiumSource[]> {
-  const { data } = await api.get<CompendiumSource[]>('/compendium/sources', { params: { kind } });
+export async function fetchSources(
+  kind: 'monsters' | 'items' | 'spells',
+  opts?: { books?: boolean },
+): Promise<CompendiumSource[]> {
+  const { data } = await api.get<CompendiumSource[]>('/compendium/sources', {
+    params: { kind, ...(opts?.books ? { books: '1' } : {}) },
+  });
   return data;
 }
 
