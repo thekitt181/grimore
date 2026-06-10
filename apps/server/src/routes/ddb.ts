@@ -520,14 +520,22 @@ const importAllSchema = z
 
 router.post('/library/finish-import', requireAuth, async (req: AuthenticatedRequest, res) => {
   try {
-    const body = req.body as { sourceIds?: number[]; sourceLabels?: string[] };
+    const body = req.body as {
+      sourceIds?: number[];
+      sourceLabels?: string[];
+      unlockAllImportedSources?: boolean;
+    };
     const sourceIds = Array.isArray(body.sourceIds)
       ? body.sourceIds.map((id) => Number(id)).filter((id) => Number.isFinite(id) && id > 0)
       : undefined;
     const sourceLabels = Array.isArray(body.sourceLabels)
       ? body.sourceLabels.map((s) => String(s).trim()).filter(Boolean)
       : undefined;
-    const result = await finishDdbLibraryImportSession(req.userId!, { sourceIds, sourceLabels });
+    const result = await finishDdbLibraryImportSession(req.userId!, {
+      sourceIds,
+      sourceLabels,
+      unlockAllImportedSources: body.unlockAllImportedSources === true,
+    });
     res.json(result);
   } catch (err) {
     console.error('[DDB] finish-import failed:', err);

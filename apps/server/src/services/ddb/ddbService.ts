@@ -373,7 +373,11 @@ export async function importAllFromDdbLibrarySource(
 
 export async function finishDdbLibraryImportSession(
   userId: string,
-  opts?: { sourceIds?: number[]; sourceLabels?: string[] },
+  opts?: {
+    sourceIds?: number[];
+    sourceLabels?: string[];
+    unlockAllImportedSources?: boolean;
+  },
 ): Promise<{ catalogRev: string | null; sourcesUnlocked?: string[] }> {
   const ctx = await requireDdbAuth(userId);
   return finishDdbLibraryImport(ctx, opts);

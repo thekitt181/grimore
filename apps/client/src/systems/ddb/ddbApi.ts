@@ -329,12 +329,51 @@ async function importChunkWithRetry(
 export async function finishDdbLibraryImport(opts?: {
   sourceIds?: number[];
   sourceLabels?: string[];
+  unlockAllImportedSources?: boolean;
 }): Promise<{ catalogRev: string | null; sourcesUnlocked?: string[] }> {
-  const { data } = await api.post<{ catalogRev: string | null; sourcesUnlocked?: string[] }>(
-    '/ddb/library/finish-import',
-    opts ?? {},
-  );
-  return data;
+  try {
+    const { data } = await api.post<{ catalogRev: string | null; sourcesUnlocked?: string[] }>(
+      '/ddb/library/finish-import',
+      opts ?? {},
+    );
+    return data;
+  } catch (err) {
+    throw new Error(extractApiError(err, 'Could not sync compendium catalog'));
+  }
+}
+
+/** Rebuild compendium catalog and unlock imported books after an interrupted import. */
+export async function syncCompendiumAfterImport(opts?: {
+  sourceIds?: number[];
+  unlockAllImportedSources?: boolean;
+}): Promise<{ catalogRev: string | null; sourcesUnlocked?: string[] }> {
+  return finishDdbLibraryImport({
+    ...(opts?.sourceIds?.length ? { sourceIds: opts.sourceIds } : {}),
+    unlockAllImportedSources: opts?.unlockAllImportedSources ?? true,
+  });
+}
+
+async function finalizeImportedCompendium(
+  merged: DdbLibraryImportResult,
+  sourceIds: number[],
+): Promise<DdbLibraryImportResult> {
+  if (merged.imported.length === 0) return merged;
+  try {
+    const sourceLabels = [
+      ...new Set(merged.imported.map((e) => e.source).filter((s): s is string => Boolean(s))),
+    ];
+    const fin = await finishDdbLibraryImport({
+      sourceIds,
+      ...(sourceLabels.length > 0 ? { sourceLabels } : {}),
+    });
+    if (fin.catalogRev) merged.catalogRev = fin.catalogRev;
+    if (fin.sourcesUnlocked?.length) {
+      merged.sourcesUnlocked = [...new Set([...(merged.sourcesUnlocked ?? []), ...fin.sourcesUnlocked])];
+    }
+  } catch (err) {
+    console.warn('[DDB] finish-import failed:', err);
+  }
+  return merged;
 }
 
 function chunkIds(ids: number[], size: number): number[][] {
@@ -414,21 +453,8 @@ export async function importDdbLibraryEntries(
   }
 
   if (!opts?.skipFinish && merged.imported.length > 0) {
-    try {
-      const sourceLabels = [
-        ...new Set(merged.imported.map((e) => e.source).filter((s): s is string => Boolean(s))),
-      ];
-      const fin = await finishDdbLibraryImport({
-        ...(body.sourceId != null ? { sourceIds: [body.sourceId] } : {}),
-        ...(sourceLabels.length > 0 ? { sourceLabels } : {}),
-      });
-      if (fin.catalogRev) merged.catalogRev = fin.catalogRev;
-      if (fin.sourcesUnlocked?.length) {
-        merged.sourcesUnlocked = [...new Set([...(merged.sourcesUnlocked ?? []), ...fin.sourcesUnlocked])];
-      }
-    } catch (err) {
-      console.warn('[DDB] finish-import failed:', err);
-    }
+    const finishSourceIds = body.sourceId != null ? [body.sourceId] : [];
+    await finalizeImportedCompendium(merged, finishSourceIds);
   }
 
   return merged;
@@ -467,87 +493,73 @@ export async function importAllDdbLibraryFromSource(
       : {}),
   };
 
-  for (const sourceId of sourceIds) {
-    const monsterIds = await collectMonsterIdsForSource(sourceId);
-    for (const [i, chunk] of chunkIds(monsterIds, MONSTER_IMPORT_CHUNK).entries()) {
-      onProgress?.({
-        phase: 'monsters',
-        sourceId,
-        done: Math.min((i + 1) * MONSTER_IMPORT_CHUNK, monsterIds.length),
-        total: monsterIds.length,
-      });
-      merged = mergeImportResults(
-        merged,
-        await importDdbLibraryEntries(
-          { kind: 'monster', ids: chunk, sourceId, ...importOpts },
-          { skipFinish: true },
-        ),
-      );
-    }
-
-    const spells = await searchDdbLibrarySpells({
-      sourceId,
-      sourceIds: [sourceId],
-      limit: 5000,
-      ...importOpts,
-    });
-    const spellIds = spells.map((s) => s.ddbId).filter((id) => Number.isFinite(id) && id > 0);
-    for (const [i, chunk] of chunkIds(spellIds, DEFAULT_IMPORT_CHUNK).entries()) {
-      onProgress?.({
-        phase: 'spells',
-        sourceId,
-        done: Math.min((i + 1) * DEFAULT_IMPORT_CHUNK, spellIds.length),
-        total: spellIds.length,
-      });
-      merged = mergeImportResults(
-        merged,
-        await importDdbLibraryEntries(
-          { kind: 'spell', ids: chunk, sourceId, ...importOpts },
-          { skipFinish: true },
-        ),
-      );
-    }
-
-    const items = await searchDdbLibraryItems({
-      sourceId,
-      sourceIds: [sourceId],
-      limit: 5000,
-      ...importOpts,
-    });
-    const itemIds = items.map((item) => item.ddbId).filter((id) => Number.isFinite(id) && id > 0);
-    for (const [i, chunk] of chunkIds(itemIds, DEFAULT_IMPORT_CHUNK).entries()) {
-      onProgress?.({
-        phase: 'items',
-        sourceId,
-        done: Math.min((i + 1) * DEFAULT_IMPORT_CHUNK, itemIds.length),
-        total: itemIds.length,
-      });
-      merged = mergeImportResults(
-        merged,
-        await importDdbLibraryEntries(
-          { kind: 'item', ids: chunk, sourceId, ...importOpts },
-          { skipFinish: true },
-        ),
-      );
-    }
-  }
-
-  if (merged.imported.length > 0) {
-    try {
-      const sourceLabels = [
-        ...new Set(merged.imported.map((e) => e.source).filter((s): s is string => Boolean(s))),
-      ];
-      const fin = await finishDdbLibraryImport({
-        sourceIds,
-        ...(sourceLabels.length > 0 ? { sourceLabels } : {}),
-      });
-      if (fin.catalogRev) merged.catalogRev = fin.catalogRev;
-      if (fin.sourcesUnlocked?.length) {
-        merged.sourcesUnlocked = [...new Set([...(merged.sourcesUnlocked ?? []), ...fin.sourcesUnlocked])];
+  try {
+    for (const sourceId of sourceIds) {
+      const monsterIds = await collectMonsterIdsForSource(sourceId);
+      for (const [i, chunk] of chunkIds(monsterIds, MONSTER_IMPORT_CHUNK).entries()) {
+        onProgress?.({
+          phase: 'monsters',
+          sourceId,
+          done: Math.min((i + 1) * MONSTER_IMPORT_CHUNK, monsterIds.length),
+          total: monsterIds.length,
+        });
+        merged = mergeImportResults(
+          merged,
+          await importDdbLibraryEntries(
+            { kind: 'monster', ids: chunk, sourceId, ...importOpts },
+            { skipFinish: true },
+          ),
+        );
       }
-    } catch (err) {
-      console.warn('[DDB] finish-import failed:', err);
+
+      const spells = await searchDdbLibrarySpells({
+        sourceId,
+        sourceIds: [sourceId],
+        limit: 5000,
+        ...importOpts,
+      });
+      const spellIds = spells.map((s) => s.ddbId).filter((id) => Number.isFinite(id) && id > 0);
+      for (const [i, chunk] of chunkIds(spellIds, DEFAULT_IMPORT_CHUNK).entries()) {
+        onProgress?.({
+          phase: 'spells',
+          sourceId,
+          done: Math.min((i + 1) * DEFAULT_IMPORT_CHUNK, spellIds.length),
+          total: spellIds.length,
+        });
+        merged = mergeImportResults(
+          merged,
+          await importDdbLibraryEntries(
+            { kind: 'spell', ids: chunk, sourceId, ...importOpts },
+            { skipFinish: true },
+          ),
+        );
+      }
+
+      const items = await searchDdbLibraryItems({
+        sourceId,
+        sourceIds: [sourceId],
+        limit: 5000,
+        ...importOpts,
+      });
+      const itemIds = items.map((item) => item.ddbId).filter((id) => Number.isFinite(id) && id > 0);
+      for (const [i, chunk] of chunkIds(itemIds, DEFAULT_IMPORT_CHUNK).entries()) {
+        onProgress?.({
+          phase: 'items',
+          sourceId,
+          done: Math.min((i + 1) * DEFAULT_IMPORT_CHUNK, itemIds.length),
+          total: itemIds.length,
+        });
+        merged = mergeImportResults(
+          merged,
+          await importDdbLibraryEntries(
+            { kind: 'item', ids: chunk, sourceId, ...importOpts },
+            { skipFinish: true },
+          ),
+        );
+      }
     }
+  } finally {
+    await finalizeImportedCompendium(merged, sourceIds);
   }
 
   return merged;

@@ -823,9 +823,41 @@ export async function importAllDdbLibraryFromSources(
   return merged;
 }
 
+async function collectSourceLabelsFromCompendium(): Promise<string[]> {
+  const { readRawGlobalDoc } = await import('../compendiumOwlbearPersist');
+  const raw = await readRawGlobalDoc({ includeImageData: false });
+  const labels = new Set<string>();
+  const arrays = [
+    raw.monsters,
+    raw.overrideMonsters,
+    raw.items,
+    raw.overrideItems,
+    raw.spells,
+    raw.overrideSpells,
+  ];
+  for (const list of arrays) {
+    if (!Array.isArray(list)) continue;
+    for (const entry of list) {
+      if (!entry || typeof entry !== 'object') continue;
+      const source = String(entry.source ?? '').trim();
+      for (const part of splitCompendiumSources(source)) {
+        if (part && part !== 'D&D Beyond' && part.toLowerCase() !== 'custom') {
+          labels.add(part);
+        }
+      }
+    }
+  }
+  return [...labels];
+}
+
 export async function finishDdbLibraryImport(
   ctx: DdbAuthContext,
-  opts?: { sourceIds?: number[]; sourceLabels?: string[] },
+  opts?: {
+    sourceIds?: number[];
+    sourceLabels?: string[];
+    /** Unlock every book source found in saved compendium entries (recovery after interrupted import). */
+    unlockAllImportedSources?: boolean;
+  },
 ): Promise<{ catalogRev: string | null; sourcesUnlocked?: string[] }> {
   const catalog = await loadDdbCatalog(ctx);
   const unlocked: string[] = [];
@@ -834,6 +866,9 @@ export async function finishDdbLibraryImport(
   }
   if (opts?.sourceLabels?.length) {
     unlocked.push(...await unlockImportedBookSourceLabels(opts.sourceLabels));
+  }
+  if (opts?.unlockAllImportedSources) {
+    unlocked.push(...await unlockImportedBookSourceLabels(await collectSourceLabelsFromCompendium()));
   }
   const { finishBulkCompendiumImport } = await import('../compendiumSync');
   const result = await finishBulkCompendiumImport();

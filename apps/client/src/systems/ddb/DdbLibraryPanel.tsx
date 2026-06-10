@@ -8,6 +8,7 @@ import {
   fetchGrimoireDdbLink,
   importDdbLibraryEntries,
   importAllDdbLibraryFromSource,
+  syncCompendiumAfterImport,
   searchDdbLibraryItems,
   searchDdbLibraryMonsters,
   searchDdbLibrarySpells,
@@ -283,8 +284,31 @@ export function DdbLibraryPanel({ onClose }: { onClose: () => void }) {
       await afterCompendiumImport(qc, result);
     },
     onError: (err: unknown) => {
-      setMessage(extractApiError(err, 'Import failed — check D&D Beyond link and try again'));
+      const detail = extractApiError(err, 'Import failed — check D&D Beyond link and try again');
+      setMessage(
+        `${detail} If entries were saved before the error, click “Sync compendium” then check Compendium → Books.`,
+      );
     },
+  });
+
+  const syncCatalogMut = useMutation({
+    mutationFn: () =>
+      syncCompendiumAfterImport({
+        ...(selectedSourceIds.size > 0 ? { sourceIds: [...selectedSourceIds] } : {}),
+        unlockAllImportedSources: true,
+      }),
+    onSuccess: async (result) => {
+      const unlocked = result.sourcesUnlocked?.length ?? 0;
+      setMessage(
+        unlocked > 0
+          ? `Compendium synced — ${unlocked} book${unlocked === 1 ? '' : 's'} unlocked. Open Compendium → Books.`
+          : 'Compendium catalog rebuilt. Open Compendium → Books to browse imported sources.',
+      );
+      useCompendiumUiStore.getState().setBrowseMode('sources');
+      useCompendiumUiStore.getState().setPanelOpen(true);
+      await refetchCompendiumAfterImport(qc, result.catalogRev ? { catalogRev: result.catalogRev } : undefined);
+    },
+    onError: (err: unknown) => setMessage(extractApiError(err, 'Could not sync compendium')),
   });
 
   function toggleSourceId(id: number) {
@@ -576,10 +600,10 @@ export function DdbLibraryPanel({ onClose }: { onClose: () => void }) {
             </p>
           )}
 
-          <div className="flex gap-2 shrink-0">
+          <div className="flex gap-2 shrink-0 flex-wrap">
             <button
               type="button"
-              disabled={selected.size === 0 || importMut.isPending || importAllMut.isPending}
+              disabled={selected.size === 0 || importMut.isPending || importAllMut.isPending || syncCatalogMut.isPending}
               onClick={() => importMut.mutate()}
               className="font-ui text-xs flex-1 py-2 rounded font-semibold disabled:opacity-40"
               style={{
@@ -594,9 +618,9 @@ export function DdbLibraryPanel({ onClose }: { onClose: () => void }) {
             </button>
             <button
               type="button"
-              disabled={selectedSourceIds.size === 0 || importMut.isPending || importAllMut.isPending}
+              disabled={selectedSourceIds.size === 0 || importMut.isPending || importAllMut.isPending || syncCatalogMut.isPending}
               onClick={() => importAllMut.mutate()}
-              className="font-ui text-xs flex-1 py-2 rounded font-semibold disabled:opacity-40"
+              className="font-ui text-xs flex-1 py-2 rounded font-semibold disabled:opacity-40 min-w-[8rem]"
               style={{
                 background: 'rgba(201,168,76,0.08)',
                 border: `1px solid ${BD}`,
@@ -613,6 +637,20 @@ export function DdbLibraryPanel({ onClose }: { onClose: () => void }) {
                 : selectedSourceIds.size > 0
                   ? `Import all types (${selectedSourceIds.size} book${selectedSourceIds.size === 1 ? '' : 's'})`
                   : 'Import all from books'}
+            </button>
+            <button
+              type="button"
+              disabled={importMut.isPending || importAllMut.isPending || syncCatalogMut.isPending}
+              onClick={() => syncCatalogMut.mutate()}
+              className="font-ui text-xs w-full py-2 rounded font-semibold disabled:opacity-40"
+              style={{
+                background: 'rgba(255,255,255,0.04)',
+                border: `1px solid ${BD}`,
+                color: GOLD,
+              }}
+              title="Rebuild compendium catalog and unlock imported books after an interrupted import"
+            >
+              {syncCatalogMut.isPending ? 'Syncing…' : 'Sync compendium'}
             </button>
           </div>
         </>
