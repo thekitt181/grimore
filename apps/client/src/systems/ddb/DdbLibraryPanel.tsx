@@ -68,7 +68,7 @@ function formatImportResultMessage(result: DdbLibraryImportResult, base: string)
     msg += ` Failures: ${summary}.`;
   }
   if (result.mongoPersisted === false) {
-    msg += ' Warning: save may be temporary until MongoDB reconnects.';
+    msg += ' Warning: compendium save failed — try Sync compendium or re-import.';
   }
   return msg;
 }

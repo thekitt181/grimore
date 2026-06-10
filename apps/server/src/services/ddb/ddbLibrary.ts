@@ -369,7 +369,10 @@ function poolById(pool: Record<string, unknown>[]): Map<number, Record<string, u
   return byId;
 }
 
-function resolveImportSaveOpts(entry: { source?: string }) {
+function resolveImportSaveOpts(entry: { source?: string }, importSourceId?: number) {
+  if (importSourceId != null && importSourceId > 0) {
+    return { saveAs: 'replace' as const };
+  }
   return entry.source && entry.source !== 'D&D Beyond' && entry.source !== 'Custom'
     ? { saveAs: 'replace' as const }
     : { saveAs: 'homebrew' as const };
@@ -440,10 +443,14 @@ async function saveImportBatch<T extends OwlbearMonster | OwlbearItem | OwlbearS
   imported: DdbLibraryImportResult['imported'],
   errors: DdbLibraryImportResult['errors'],
   meta: ImportBatchMeta,
+  importSourceId?: number,
 ): Promise<void> {
   for (let i = 0; i < pending.length; i += SAVE_BATCH) {
     const slice = pending.slice(i, i + SAVE_BATCH);
-    const payloads = slice.map(({ entry }) => ({ entry, opts: resolveImportSaveOpts(entry) }));
+    const payloads = slice.map(({ entry }) => ({
+      entry,
+      opts: resolveImportSaveOpts(entry, importSourceId),
+    }));
 
     try {
       const batch = await saveBulk(payloads);
@@ -463,7 +470,7 @@ async function saveImportBatch<T extends OwlbearMonster | OwlbearItem | OwlbearS
       console.warn(`[DDB Import] ${kind} batch save failed (${slice.length}), trying per-entry:`, batchMessage);
       for (const { entry, ddbId } of slice) {
         try {
-          const single = await saveBulk([{ entry, opts: resolveImportSaveOpts(entry) }]);
+          const single = await saveBulk([{ entry, opts: resolveImportSaveOpts(entry, importSourceId) }]);
           meta.mongoPersisted = meta.mongoPersisted && single.persist.mongoPersisted;
           meta.savedEntries.push(...single.entries);
           if (single.entries[0]) {
@@ -566,6 +573,7 @@ async function importMonsterIds(
       imported,
       errors,
       meta,
+      sourceId,
     );
   }
   return finalizeDdbImportResult(
@@ -627,6 +635,7 @@ async function importSpellIds(
       imported,
       errors,
       meta,
+      sourceId,
     );
   }
   return finalizeDdbImportResult(
@@ -688,6 +697,7 @@ async function importItemIds(
       imported,
       errors,
       meta,
+      sourceId,
     );
   }
   return finalizeDdbImportResult(

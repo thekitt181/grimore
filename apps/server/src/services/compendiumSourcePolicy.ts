@@ -1,5 +1,5 @@
 import type { OwlbearRawGlobalDoc } from '@grimoire/shared';
-import { getCollection, withMongoTimeout } from '../lib/mongo';
+import { getCollection, isMongoCircuitOpen, withMongoTimeout } from '../lib/mongo';
 import { enqueueCompendiumWrite } from './compendiumWriteQueue';
 import type { CompendiumKind } from './compendiumOwlbearPersist';
 import { clearRawGlobalDocInflight, readRawGlobalDoc } from './compendiumOwlbearPersist';
@@ -69,22 +69,29 @@ async function writePolicyDoc(
   lastUpdated: string,
 ): Promise<void> {
   const col = await getCollection<OwlbearRawGlobalDoc>('data');
-  if (col) {
+  if (col && !isMongoCircuitOpen()) {
     markCompendiumWritePending();
-    await withMongoTimeout(
-      col.updateOne(
-        { _id: 'global' },
-        {
-          $set: {
-            lockedSources: policy.lockedSources,
-            publishedEntryKeys: policy.publishedEntryKeys,
-            lastUpdated,
+    try {
+      await withMongoTimeout(
+        col.updateOne(
+          { _id: 'global' },
+          {
+            $set: {
+              lockedSources: policy.lockedSources,
+              publishedEntryKeys: policy.publishedEntryKeys,
+              lastUpdated,
+            },
           },
-        },
-        { upsert: true },
-      ),
-      15_000,
-    );
+          { upsert: true },
+        ),
+        15_000,
+      );
+    } catch (err) {
+      console.warn(
+        '[Compendium] Mongo policy write failed, using fallback:',
+        err instanceof Error ? err.message : err,
+      );
+    }
   }
 
   patchRawGlobalFallbackPolicy(policy, lastUpdated);

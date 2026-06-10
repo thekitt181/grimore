@@ -387,8 +387,8 @@ export async function persistRawGlobalDoc(
   }
 
   const normalized = normalizeOwlbearGlobalDoc(payload);
-  const saved = saveGlobalFallback(normalized, payload);
-  if (!col && !saved && isMongoCircuitOpen()) {
+  const fallbackPersisted = Boolean(saveGlobalFallback(normalized, payload));
+  if (!col && !fallbackPersisted && isMongoCircuitOpen()) {
     throw new Error('MongoDB unavailable and failed to write local compendium mirror');
   }
 
@@ -401,7 +401,11 @@ export async function persistRawGlobalDoc(
   if (process.env['COMPENDIUM_MONGO_ONLY'] !== '1') {
     void notifyExtensionDataChanged(lastUpdated);
   }
-  return { doc: normalized, lastUpdated, mongoPersisted };
+  return {
+    doc: normalized,
+    lastUpdated,
+    mongoPersisted: mongoPersisted || fallbackPersisted,
+  };
 }
 
 /** Clear read caches before a write without wiping the warm catalog. */
@@ -479,6 +483,20 @@ function applyOwlbearEntryToRaw(
   }
 }
 
+async function persistEntriesToRawDoc(
+  kind: CompendiumKind,
+  entries: Array<{ entry: OwlbearMonster | OwlbearItem | OwlbearSpell; opts: OwlbearSaveOptions }>,
+  notify: PersistNotifyMode,
+): Promise<PersistRawGlobalDocResult> {
+  clearRawGlobalReadCaches();
+  clearRawGlobalDocInflight();
+  const raw = await readRawGlobalDoc({ includeImageData: false });
+  for (const { entry, opts: entryOpts } of entries) {
+    applyOwlbearEntryToRaw(raw, kind, entry, entryOpts);
+  }
+  return persistRawGlobalDoc(raw, { notify });
+}
+
 export async function saveOwlbearEntriesBulk(
   kind: CompendiumKind,
   entries: Array<{ entry: OwlbearMonster | OwlbearItem | OwlbearSpell; opts: OwlbearSaveOptions }>,
@@ -495,17 +513,10 @@ export async function saveOwlbearEntriesBulk(
     };
   }
   const notify = opts?.notify ?? 'rebuild';
-  return enqueueCompendiumWrite(async () => {
-    clearRawGlobalReadCaches();
-    const raw = await readRawGlobalDoc({ includeImageData: false });
-    for (const { entry, opts: entryOpts } of entries) {
-      applyOwlbearEntryToRaw(raw, kind, entry, entryOpts);
-    }
-    return persistRawGlobalDoc(raw, { notify });
-  });
+  return enqueueCompendiumWrite(async () => persistEntriesToRawDoc(kind, entries, notify));
 }
 
-/** Fast Mongo patches for bulk import — no full global doc read/write. */
+/** Fast Mongo patches for bulk import; falls back to full doc persist when Mongo is down. */
 export async function patchOwlbearEntriesBulk(
   kind: CompendiumKind,
   entries: Array<{ entry: OwlbearMonster | OwlbearItem | OwlbearSpell; opts: OwlbearSaveOptions }>,
@@ -515,10 +526,13 @@ export async function patchOwlbearEntriesBulk(
   }
 
   return enqueueCompendiumWrite(async () => {
-    const col = await getCollection<OwlbearRawGlobalDoc>('data');
     const lastUpdated = new Date().toISOString();
+    const col = await getCollection<OwlbearRawGlobalDoc>('data');
+
     if (!col || isMongoCircuitOpen()) {
-      return { mongoPersisted: false, lastUpdated };
+      console.warn('[Compendium] Mongo unavailable — saving import via compendium doc fallback');
+      const result = await persistEntriesToRawDoc(kind, entries, 'none');
+      return { mongoPersisted: result.mongoPersisted, lastUpdated: result.lastUpdated };
     }
 
     const fields = KIND_FIELDS[kind];
@@ -557,14 +571,15 @@ export async function patchOwlbearEntriesBulk(
     }
 
     try {
-      await withMongoTimeout(col.bulkWrite(ops, { ordered: true }), 20_000);
+      await withMongoTimeout(col.bulkWrite(ops, { ordered: true }), 30_000);
       return { mongoPersisted: true, lastUpdated };
     } catch (err) {
       console.warn(
-        '[Compendium] patchOwlbearEntriesBulk failed:',
+        '[Compendium] patchOwlbearEntriesBulk failed, using doc fallback:',
         err instanceof Error ? err.message : err,
       );
-      return { mongoPersisted: false, lastUpdated };
+      const result = await persistEntriesToRawDoc(kind, entries, 'none');
+      return { mongoPersisted: result.mongoPersisted, lastUpdated: result.lastUpdated };
     }
   });
 }

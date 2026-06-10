@@ -150,6 +150,11 @@ export function resolveMonsterSourceLabel(
   catalog: DdbSourceNameMap,
   preferredSourceId?: number,
 ): string {
+  if (preferredSourceId != null && catalog.has(preferredSourceId)) {
+    return catalog.get(preferredSourceId)!;
+  }
+  const resolved = resolveDdbSourceLabel(raw, catalog, preferredSourceId);
+  if (resolved !== 'D&D Beyond') return resolved;
   const sourceId = preferredSourceId ?? pickPrimaryMonsterSourceId(raw);
   if (sourceId != null && catalog.has(sourceId)) {
     return catalog.get(sourceId)!;
