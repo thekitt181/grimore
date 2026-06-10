@@ -109,6 +109,24 @@ async function commitPolicyChange(
   return policy;
 }
 
+export async function lockCompendiumSourcesBulk(sourceLabels: string[]): Promise<CompendiumVisibilityPolicy> {
+  const labels = [...new Set(sourceLabels.map(normalizeLockLabel).filter(Boolean))];
+  if (labels.length === 0) return emptyVisibilityPolicy();
+
+  return enqueueCompendiumWrite(async () => {
+    const { policy } = await readPolicyDoc();
+    const locked = [...policy.lockedSources];
+    for (const label of labels) {
+      if (!locked.some((s) => sourceMatchesLocked(s, label))) {
+        locked.push(label);
+      }
+    }
+    const next = { ...policy, lockedSources: locked };
+    const lastUpdated = new Date().toISOString();
+    return commitPolicyChange(next, lastUpdated);
+  });
+}
+
 export async function lockCompendiumSource(sourceLabel: string): Promise<CompendiumVisibilityPolicy> {
   const label = normalizeLockLabel(sourceLabel);
   if (!label) return emptyVisibilityPolicy();

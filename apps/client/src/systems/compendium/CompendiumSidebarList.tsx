@@ -232,11 +232,12 @@ export function CompendiumSidebarList() {
 
   const filteredSources = useMemo(() => {
     const list = sourcesQ.data ?? [];
-    const visible = isAdmin ? list : list.filter((s) => !s.locked);
+    // Books tab shows player-visible sources only — locked books stay in admin All/drafts.
+    const visible = list.filter((s) => !s.locked);
     const q = query.trim().toLowerCase();
     if (!q) return visible;
     return visible.filter((s) => s.label.toLowerCase().includes(q) || s.id.toLowerCase().includes(q));
-  }, [sourcesQ.data, query, isAdmin]);
+  }, [sourcesQ.data, query]);
 
   const selectedSourceMeta = sourcesQ.data?.find((s) => s.id === selectedSource);
   const selectedSourceLabel = selectedSourceMeta?.label ?? selectedSource;

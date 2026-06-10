@@ -23,6 +23,7 @@ import {
 import { getCatalogRevision, saveItemsBulkForImport, saveMonstersBulkForImport, saveSpellsBulkForImport } from '../compendiumSync';
 import { unlockCompendiumSource } from '../compendiumSourcePolicy';
 import { sourceMatchesLocked } from '../compendiumVisibility';
+import { collectOverrideOnlySourceLabels, ensureBundledSourcesLocked } from '../compendiumBundledLock';
 import { splitCompendiumSources } from '@grimoire/shared';
 import { redis } from '../../lib/redis';
 import {
@@ -903,12 +904,14 @@ export async function finishDdbLibraryImport(
 ): Promise<{ catalogRev: string | null; sourcesUnlocked?: string[] }> {
   const { promoteFallbackToMongo } = await import('../compendiumFallbackMongoSync');
   await promoteFallbackToMongo('ddb-finish-import');
+  await ensureBundledSourcesLocked('ddb-finish-import');
 
   const { clearRawGlobalDocInflight } = await import('../compendiumOwlbearPersist');
   clearRawGlobalDocInflight();
 
   const catalog = await loadDdbCatalog(ctx);
   const compendiumLabels = await collectSourceLabelsFromCompendium();
+  const overrideOnlyLabels = await collectOverrideOnlySourceLabels();
   const unlocked: string[] = [];
   if (opts?.sourceIds?.length) {
     unlocked.push(...await unlockImportedBookSources(catalog, opts.sourceIds));
@@ -922,6 +925,19 @@ export async function finishDdbLibraryImport(
   }
   if (opts?.unlockAllImportedSources) {
     unlocked.push(...await unlockImportedBookSourceLabels(compendiumLabels));
+    unlocked.push(...await unlockImportedBookSourceLabels(overrideOnlyLabels));
+  } else if (opts?.sourceIds?.length || opts?.sourceLabels?.length) {
+    // DDB imports live in overrides — unlock any override-only book matching this import.
+    const importLabels = new Set([
+      ...(opts.sourceLabels ?? []),
+      ...(opts.sourceIds ?? []).map((id) => catalog.sourceNames.get(id)).filter(Boolean) as string[],
+    ]);
+    const ddbLabels = overrideOnlyLabels.filter((label) =>
+      [...importLabels].some((name) => sourceMatchesLocked(name, label) || name === label),
+    );
+    if (ddbLabels.length > 0) {
+      unlocked.push(...await unlockImportedBookSourceLabels(ddbLabels));
+    }
   }
   const { finishBulkCompendiumImport } = await import('../compendiumSync');
   const result = await finishBulkCompendiumImport();
