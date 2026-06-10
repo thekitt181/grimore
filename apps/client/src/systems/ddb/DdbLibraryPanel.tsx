@@ -243,14 +243,31 @@ export function DdbLibraryPanel({ onClose }: { onClose: () => void }) {
   const importAllMut = useMutation({
     mutationFn: () => {
       if (selectedSourceIds.size === 0) throw new Error('Select at least one source book');
+      const sourceNames = Object.fromEntries(sources.map((s) => [s.id, s.name]));
       return importAllDdbLibraryFromSource(
         {
           sourceIds: [...selectedSourceIds].map((id) => Number(id)),
+          sourceNames,
           ...(ddbCampaignId != null && ddbCampaignId > 0 ? { campaignId: ddbCampaignId } : {}),
         },
         (progress) => {
-          setMessage(
-            `Importing ${progress.phase}… ${progress.done}/${progress.total || '?'}`,
+          const book = progress.sourceName ? `${progress.sourceName}: ` : '';
+          if (progress.phase === 'complete') {
+            const ok = progress.bookImported ?? 0;
+            const fail = progress.bookErrors ?? 0;
+            setMessage(
+              `${book}import complete (${ok} entries${fail ? `, ${fail} failed` : ''}) — compendium updated.`,
+            );
+            return;
+          }
+          setMessage(`${book}importing ${progress.phase}… ${progress.done}/${progress.total || '?'}`);
+        },
+        async (info) => {
+          useCompendiumUiStore.getState().setBrowseMode('sources');
+          useCompendiumUiStore.getState().setPanelOpen(true);
+          await refetchCompendiumAfterImport(
+            qc,
+            info.catalogRev ? { catalogRev: info.catalogRev } : undefined,
           );
         },
       );
