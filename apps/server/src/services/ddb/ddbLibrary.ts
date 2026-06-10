@@ -11,7 +11,7 @@ import { DDB_SPELL_CLASS_IDS, DDB_URLS } from './config';
 import { authHeaders, type DdbAuthContext } from './ddbAuthContext';
 import {
   ddbEntityId,
-  ddbMonsterHasUsableDescription,
+  ddbMonsterCanImport,
   entryHasSourceId,
   normalizeDdbItemSummary,
   normalizeDdbItemToCompendium,
@@ -32,8 +32,6 @@ import {
 import { enrichEntitiesWithFullDefinitions } from './ddbDefinitionFetch';
 import {
   fetchMonstersForImport,
-  monsterHasFullStatBlock,
-  monsterHasImportableStatBlock,
 } from './ddbMonsterFetch';
 
 export { fetchDdbMonsterDetail } from './ddbMonsterFetch';
@@ -41,7 +39,7 @@ export { fetchDdbMonsterDetail } from './ddbMonsterFetch';
 const SPELL_CACHE_TTL = 60 * 60;
 const ITEM_CACHE_TTL = 60 * 30;
 const FETCH_BATCH = 100;
-const MONSTER_IMPORT_BATCH = 3;
+const MONSTER_IMPORT_BATCH = 2;
 /** Smaller Mongo writes — patch global doc arrays instead of full RMW. */
 const SAVE_BATCH = 5;
 const CATALOG_CACHE_TTL = 60 * 60;
@@ -535,11 +533,12 @@ async function importMonsterIds(
           errors.push({ id, message: 'Monster not found on D&D Beyond (check account access)' });
           continue;
         }
-        if (!monsterHasImportableStatBlock(raw) && !ddbMonsterHasUsableDescription(raw, catalog)) {
+        if (!ddbMonsterCanImport(raw, catalog)) {
+          const desc = String(raw.name ?? '').trim();
           errors.push({
             id,
-            message: monsterHasFullStatBlock(raw)
-              ? 'Stat block text too short from D&D Beyond'
+            message: desc
+              ? `No stat block text returned from D&D Beyond for ${desc}`
               : 'No stat block text returned from D&D Beyond',
           });
           continue;

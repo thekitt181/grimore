@@ -35,26 +35,31 @@ function monsterAuthHeaders(ctx: DdbAuthContext, ddbId?: number): Record<string,
 function unwrapMonsterPayload(json: unknown): Record<string, unknown> | null {
   if (!json || typeof json !== 'object') return null;
   const root = json as Record<string, unknown>;
-  let data: unknown = root.data ?? root;
-  if (!data || typeof data !== 'object') return null;
 
-  const pick = (obj: Record<string, unknown>): Record<string, unknown> | null => {
-    const nested = obj.monster;
-    if (nested && typeof nested === 'object') return nested as Record<string, unknown>;
-    if (obj.id != null || obj.name != null) return obj;
+  const tryPick = (value: unknown): Record<string, unknown> | null => {
+    if (!value || typeof value !== 'object') return null;
+    if (Array.isArray(value)) {
+      for (const entry of value) {
+        const picked = tryPick(entry);
+        if (picked) return picked;
+      }
+      return null;
+    }
+    const obj = value as Record<string, unknown>;
+    const nested = obj.monster ?? obj.definition;
+    if (nested && typeof nested === 'object' && !Array.isArray(nested)) {
+      return normalizeDdbMonsterRaw({
+        ...obj,
+        ...(nested as Record<string, unknown>),
+      });
+    }
+    if (obj.id != null || obj.name != null) {
+      return normalizeDdbMonsterRaw(obj);
+    }
     return null;
   };
 
-  let picked = pick(data as Record<string, unknown>);
-  if (picked) return picked;
-
-  const inner = (data as Record<string, unknown>).data;
-  if (inner && typeof inner === 'object') {
-    picked = pick(inner as Record<string, unknown>);
-    if (picked) return picked;
-  }
-
-  return null;
+  return tryPick(root.data) ?? tryPick(root);
 }
 
 /** Flatten nested DDB monster payloads (batch/detail wrappers). */
@@ -236,7 +241,7 @@ function hasRichNarrativeContent(raw: Record<string, unknown>): boolean {
 export function monsterHasFullStatBlock(raw: Record<string, unknown>): boolean {
   const characteristics = stripDdbHtml(raw.characteristicsDescription);
   const hasCombat = hasMeaningfulCombatStats(raw)
-    || (characteristics.length > 120 && /hit points\s+\d+/i.test(characteristics));
+    || (characteristics.length > 80 && /(?:hit points|hp)\s*\d+/i.test(characteristics));
 
   if (!hasCombat) return false;
   if (hasActionOrTraitContent(raw)) return true;
@@ -296,13 +301,21 @@ async function fetchDdbMonsterDetailOnly(
   ctx: DdbAuthContext,
   ddbId: number,
 ): Promise<Record<string, unknown> | null> {
-  const res = await fetchWithRetry(DDB_URLS.monsterById(ddbId), {
-    headers: monsterAuthHeaders(ctx, ddbId),
-  }, { label: `monster ${ddbId}`, attempts: MONSTER_DETAIL_RETRY_ATTEMPTS });
-  if (res.status === 404) return null;
-  if (!res.ok) throw new Error(`DDB monster fetch failed (${res.status})`);
-  const payload = unwrapMonsterPayload(await res.json());
-  return payload ? normalizeDdbMonsterRaw(payload) : null;
+  try {
+    const res = await fetchWithRetry(DDB_URLS.monsterById(ddbId), {
+      headers: monsterAuthHeaders(ctx, ddbId),
+    }, { label: `monster ${ddbId}`, attempts: MONSTER_DETAIL_RETRY_ATTEMPTS });
+    if (res.status === 404) return null;
+    if (!res.ok) {
+      console.warn(`[DDB] monster ${ddbId} detail HTTP ${res.status}`);
+      return null;
+    }
+    const payload = unwrapMonsterPayload(await res.json());
+    return payload ? normalizeDdbMonsterRaw(payload) : null;
+  } catch (err) {
+    console.warn(`[DDB] monster ${ddbId} detail error:`, err instanceof Error ? err.message : err);
+    return null;
+  }
 }
 
 /** True when batch payload is enough — otherwise fetch per-monster detail for full stat blocks. */
@@ -339,7 +352,7 @@ async function enrichMonsterRecord(
   return merged;
 }
 
-/** Batch-fetch monsters for import; detail-fetches entries missing full stat blocks. */
+/** Batch-fetch monsters for import; always detail-fetches then merges batch seed. */
 export async function fetchMonstersForImport(
   ctx: DdbAuthContext,
   ids: number[],
@@ -347,41 +360,21 @@ export async function fetchMonstersForImport(
   const unique = [...new Set(ids.filter((id) => Number.isFinite(id) && id > 0))];
   const out = await fetchDdbMonstersByIds(ctx, unique);
 
-  const needsDetail = unique.filter((id) => {
-    const raw = out.get(id);
-    return !raw || monsterNeedsDetailFetch(raw);
-  });
-
-  if (needsDetail.length > 0) {
-    await runWithConcurrency(needsDetail, 3, async (id) => {
-      try {
-        const detail = await fetchDdbMonsterDetailOnly(ctx, id);
-        if (!detail) return;
-        const existing = out.get(id);
-        out.set(id, existing ? mergeMonsterDetail(existing, detail) : detail);
-      } catch (err) {
-        console.warn(`[DDB] monster ${id} detail fetch:`, err instanceof Error ? err.message : err);
+  await runWithConcurrency(unique, 2, async (id) => {
+    let merged: Record<string, unknown> | null = out.get(id) ?? null;
+    const detail = await fetchDdbMonsterDetailOnly(ctx, id);
+    if (detail) {
+      merged = merged ? mergeMonsterDetail(merged, detail) : detail;
+    }
+    if (!merged || monsterNeedsDetailFetch(merged)) {
+      const batch = await fetchDdbMonstersByIds(ctx, [id]);
+      const richer = batch.get(id);
+      if (richer) {
+        merged = merged ? mergeMonsterDetail(merged, richer) : richer;
       }
-    });
-  }
-
-  // Retry detail once for anything still thin after merge.
-  const stillThin = unique.filter((id) => {
-    const raw = out.get(id);
-    return raw && monsterNeedsDetailFetch(raw);
+    }
+    if (merged) out.set(id, merged);
   });
-  if (stillThin.length > 0) {
-    await runWithConcurrency(stillThin, 2, async (id) => {
-      try {
-        const detail = await fetchDdbMonsterDetailOnly(ctx, id);
-        if (!detail) return;
-        const existing = out.get(id);
-        out.set(id, existing ? mergeMonsterDetail(existing, detail) : detail);
-      } catch {
-        /* best effort */
-      }
-    });
-  }
 
   return out;
 }

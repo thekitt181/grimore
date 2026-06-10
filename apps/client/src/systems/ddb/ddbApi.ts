@@ -245,7 +245,7 @@ export async function searchDdbLibraryItems(params: {
   return data.items ?? [];
 }
 
-const MONSTER_IMPORT_CHUNK = 3;
+const MONSTER_IMPORT_CHUNK = 2;
 const DEFAULT_IMPORT_CHUNK = 10;
 
 function importChunkSize(kind: 'monster' | 'item' | 'spell'): number {

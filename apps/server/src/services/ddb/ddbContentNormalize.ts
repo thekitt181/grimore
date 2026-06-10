@@ -6,7 +6,7 @@ import type {
 import type { OwlbearItem, OwlbearMonster, OwlbearSpell } from '@grimoire/shared';
 import { normalizeAbilityName } from '@grimoire/shared';
 import { joinSections, stripDdbHtml } from './ddbHtml';
-import { monsterHasFullStatBlock } from './ddbMonsterFetch';
+import { monsterHasFullStatBlock, monsterHasImportableStatBlock } from './ddbMonsterFetch';
 import {
   formatChallengeRatingValue,
   resolveMonsterSourceLabel,
@@ -914,15 +914,27 @@ export function ddbMonsterHasUsableDescription(
   raw: Record<string, unknown>,
   catalog?: DdbCatalog,
 ): boolean {
+  return ddbMonsterCanImport(raw, catalog);
+}
+
+export function ddbMonsterCanImport(
+  raw: Record<string, unknown>,
+  catalog?: DdbCatalog,
+): boolean {
+  const name = String(raw.name ?? '').trim();
+  if (!name) return false;
   if (monsterHasFullStatBlock(raw)) return true;
+
   const desc = buildMonsterDescription(raw, catalog).trim();
   if (desc.length >= 200) return true;
+
   const lower = desc.toLowerCase();
   if (desc.length >= 80 && /actions|traits|multiattack|legendary/i.test(lower)) return true;
-  if (desc.length >= 60 && /armor class \d+/i.test(lower) && /hit points \d+/i.test(lower)
-    && /str \d+|dex \d+|con \d+/i.test(lower)) {
+  if (desc.length >= 50 && /armor class \d+/i.test(lower) && /(?:hit points|hp) \d+/i.test(lower)) {
     return true;
   }
+  if (monsterHasImportableStatBlock(raw) && desc.length >= 40) return true;
+
   return false;
 }
 
