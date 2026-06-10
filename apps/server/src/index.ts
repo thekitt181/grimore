@@ -91,9 +91,8 @@ const io = initSocket(httpServer);
 async function startCompendiumBackground(): Promise<void> {
   try {
     await syncCompendiumStorageOnStartup();
-    const { ensureBundledSourcesLocked } = await import('./services/compendiumBundledLock');
+    const { ensureBundledSourcesLocked, ensureImportedSourcesUnlocked } = await import('./services/compendiumBundledLock');
     await ensureBundledSourcesLocked('startup');
-    const { ensureImportedSourcesUnlocked } = await import('./services/compendiumBundledLock');
     await ensureImportedSourcesUnlocked('startup');
     await warmCompendiumCatalog();
     startCompendiumMongoWatch();

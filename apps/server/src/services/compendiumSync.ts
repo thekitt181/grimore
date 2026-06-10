@@ -621,6 +621,76 @@ function sourceIsLocked(sourceId: string, policy: CompendiumVisibilityPolicy): b
   return policyIsSourceLocked(sourceId, policy);
 }
 
+type SourceCountMap = Map<string, { total: number; public: number; draft: number }>;
+
+function tallySourceCounts(
+  entries: Array<{ name: string; source?: string; isCustom?: boolean }>,
+  kind: CompendiumKind,
+  policy: CompendiumVisibilityPolicy,
+  counts: SourceCountMap = new Map(),
+): SourceCountMap {
+  for (const entry of entries) {
+    if (isHomebrewEntry(Boolean(entry.isCustom), entry.source)) continue;
+    const draft = isEntryDraft(kind, entry.name, entry.source, policy);
+    for (const part of splitSources(entry.source)) {
+      if (part.toLowerCase() === 'custom') continue;
+      const cur = counts.get(part) ?? { total: 0, public: 0, draft: 0 };
+      cur.total += 1;
+      if (draft) cur.draft += 1;
+      else cur.public += 1;
+      counts.set(part, cur);
+    }
+  }
+  return counts;
+}
+
+function mapSourceListResults(
+  counts: SourceCountMap,
+  policy: CompendiumVisibilityPolicy,
+  includeDrafts: boolean,
+  excludeBundled: boolean,
+  bundled: Set<string> | null,
+  importedOverrides: Set<string> | null,
+) {
+  return Array.from(counts.entries())
+    .filter(([id, c]) => sourceListFilter(id, c, policy, includeDrafts, excludeBundled, bundled, importedOverrides))
+    .map(([id, c]) => ({
+      id,
+      label: formatSourceLabel(id),
+      count: includeDrafts ? c.total : c.public,
+      ...(includeDrafts && sourceIsLocked(id, policy) ? { locked: true } : {}),
+      ...(includeDrafts && c.draft > 0 ? { draftCount: c.draft } : {}),
+    }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+}
+
+async function loadEntriesForSourceList(
+  kind: 'monsters' | 'items' | 'spells',
+  excludeBundled: boolean,
+): Promise<Array<{ name: string; source?: string; isCustom?: boolean }>> {
+  if (!excludeBundled) {
+    if (kind === 'monsters') return getCachedMonsters();
+    if (kind === 'items') return getCachedItems();
+    return getCachedSpells();
+  }
+
+  // Books tab: list imported override sources straight from Mongo — not the merged catalog cache.
+  const raw = await readRawGlobalDoc({ includeImageData: false });
+  const overrides =
+    kind === 'monsters'
+      ? raw.overrideMonsters
+      : kind === 'items'
+        ? raw.overrideItems
+        : raw.overrideSpells;
+  return (overrides ?? []).map((entry) => ({ ...entry, isCustom: true }));
+}
+
+function kindToCompendiumKind(kind: 'monsters' | 'items' | 'spells'): CompendiumKind {
+  if (kind === 'monsters') return 'monster';
+  if (kind === 'items') return 'item';
+  return 'spell';
+}
+
 /** Pre-build merged catalogs on server start so first search is instant. */
 export async function warmCompendiumCatalog(): Promise<void> {
   try {
@@ -715,85 +785,10 @@ export async function listSources(
   const bundled = excludeBundled ? bundledSourceLabelSet() : null;
   const importedOverrides = excludeBundled ? await importedSourceLabelSet() : null;
   const policy = await readVisibilityPolicyFast();
-
-  if (kind === 'monsters') {
-    const merged = await getCachedMonsters();
-    const counts = new Map<string, { total: number; public: number; draft: number }>();
-    for (const m of merged) {
-      if (isHomebrewEntry(m.isCustom, m.source)) continue;
-      const draft = isEntryDraft('monster', m.name, m.source, policy);
-      for (const part of splitSources(m.source)) {
-        if (part.toLowerCase() === 'custom') continue;
-        const cur = counts.get(part) ?? { total: 0, public: 0, draft: 0 };
-        cur.total += 1;
-        if (draft) cur.draft += 1;
-        else cur.public += 1;
-        counts.set(part, cur);
-      }
-    }
-    return Array.from(counts.entries())
-      .filter(([id, c]) => sourceListFilter(id, c, policy, includeDrafts, excludeBundled, bundled, importedOverrides))
-      .map(([id, c]) => ({
-        id,
-        label: formatSourceLabel(id),
-        count: includeDrafts ? c.total : c.public,
-        ...(includeDrafts && sourceIsLocked(id, policy) ? { locked: true } : {}),
-        ...(includeDrafts && c.draft > 0 ? { draftCount: c.draft } : {}),
-      }))
-      .sort((a, b) => a.label.localeCompare(b.label));
-  }
-
-  if (kind === 'items') {
-    const merged = await getCachedItems();
-    const counts = new Map<string, { total: number; public: number; draft: number }>();
-    for (const i of merged) {
-      if (isHomebrewEntry(i.isCustom, i.source)) continue;
-      const draft = isEntryDraft('item', i.name, i.source, policy);
-      for (const part of splitSources(i.source)) {
-        if (part.toLowerCase() === 'custom') continue;
-        const cur = counts.get(part) ?? { total: 0, public: 0, draft: 0 };
-        cur.total += 1;
-        if (draft) cur.draft += 1;
-        else cur.public += 1;
-        counts.set(part, cur);
-      }
-    }
-    return Array.from(counts.entries())
-      .filter(([id, c]) => sourceListFilter(id, c, policy, includeDrafts, excludeBundled, bundled, importedOverrides))
-      .map(([id, c]) => ({
-        id,
-        label: formatSourceLabel(id),
-        count: includeDrafts ? c.total : c.public,
-        ...(includeDrafts && sourceIsLocked(id, policy) ? { locked: true } : {}),
-        ...(includeDrafts && c.draft > 0 ? { draftCount: c.draft } : {}),
-      }))
-      .sort((a, b) => a.label.localeCompare(b.label));
-  }
-
-  const merged = await getCachedSpells();
-  const counts = new Map<string, { total: number; public: number; draft: number }>();
-  for (const s of merged) {
-    if (isHomebrewEntry(s.isCustom, s.source)) continue;
-    const draft = isEntryDraft('spell', s.name, s.source, policy);
-    for (const part of splitSources(s.source)) {
-      if (part.toLowerCase() === 'custom') continue;
-      const cur = counts.get(part) ?? { total: 0, public: 0, draft: 0 };
-      cur.total += 1;
-      if (draft) cur.draft += 1;
-      else cur.public += 1;
-      counts.set(part, cur);
-    }
-  }
-  return Array.from(counts.entries())
-    .filter(([id, c]) => sourceListFilter(id, c, policy, includeDrafts, excludeBundled, bundled, importedOverrides))
-    .map(([id, c]) => ({
-      id,
-      label: formatSourceLabel(id),
-      count: includeDrafts ? c.total : c.public,
-      ...(includeDrafts && sourceIsLocked(id, policy) ? { locked: true } : {}),
-      ...(includeDrafts && c.draft > 0 ? { draftCount: c.draft } : {}),
-    }))
-    .sort((a, b) => a.label.localeCompare(b.label));
+  const compendiumKind = kindToCompendiumKind(kind);
+  const entries = await loadEntriesForSourceList(kind, excludeBundled);
+  const counts = tallySourceCounts(entries, compendiumKind, policy);
+  return mapSourceListResults(counts, policy, includeDrafts, excludeBundled, bundled, importedOverrides);
 }
 
 const SYNC_STATUS_TTL_MS = 5_000;

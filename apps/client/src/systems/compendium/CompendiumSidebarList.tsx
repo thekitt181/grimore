@@ -152,8 +152,27 @@ export function CompendiumSidebarList() {
   const inBookView = browseMode === 'sources' && Boolean(selectedSource);
 
   const sourcesQ = useQuery({
-    queryKey: ['compendium', 'sources', tab, isAdmin, 'books'],
-    queryFn: () => fetchSources(tab, { books: true }),
+    queryKey: ['compendium', 'sources', 'books', isAdmin],
+    queryFn: async () => {
+      const [monsters, items, spells] = await Promise.all([
+        fetchSources('monsters', { books: true }),
+        fetchSources('items', { books: true }),
+        fetchSources('spells', { books: true }),
+      ]);
+      const merged = new Map<string, CompendiumSource>();
+      for (const list of [monsters, items, spells]) {
+        for (const source of list) {
+          const prev = merged.get(source.id);
+          merged.set(
+            source.id,
+            prev
+              ? { ...source, count: prev.count + source.count }
+              : source,
+          );
+        }
+      }
+      return [...merged.values()].sort((a, b) => a.label.localeCompare(b.label));
+    },
     enabled: compendiumReady && (showSourcePicker || (isAdmin && browseMode === 'sources')),
     staleTime: 5_000,
   });
