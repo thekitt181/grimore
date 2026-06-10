@@ -32,6 +32,7 @@ import {
 import { enrichEntitiesWithFullDefinitions } from './ddbDefinitionFetch';
 import {
   fetchMonstersForImport,
+  monsterHasFullStatBlock,
   monsterHasImportableStatBlock,
 } from './ddbMonsterFetch';
 
@@ -535,7 +536,12 @@ async function importMonsterIds(
           continue;
         }
         if (!monsterHasImportableStatBlock(raw) && !ddbMonsterHasUsableDescription(raw, catalog)) {
-          errors.push({ id, message: 'No stat block text returned from D&D Beyond' });
+          errors.push({
+            id,
+            message: monsterHasFullStatBlock(raw)
+              ? 'Stat block text too short from D&D Beyond'
+              : 'No stat block text returned from D&D Beyond',
+          });
           continue;
         }
         const withSource = normalizeDdbMonsterToCompendium(raw, catalog, sourceId);

@@ -339,7 +339,7 @@ async function enrichMonsterRecord(
   return merged;
 }
 
-/** Batch-fetch monsters for import. Skips full detail unless batch data is not importable. */
+/** Batch-fetch monsters for import; detail-fetches entries missing full stat blocks. */
 export async function fetchMonstersForImport(
   ctx: DdbAuthContext,
   ids: number[],
@@ -349,7 +349,7 @@ export async function fetchMonstersForImport(
 
   const needsDetail = unique.filter((id) => {
     const raw = out.get(id);
-    return !raw || !monsterHasImportableStatBlock(raw);
+    return !raw || monsterNeedsDetailFetch(raw);
   });
 
   if (needsDetail.length > 0) {
@@ -361,6 +361,24 @@ export async function fetchMonstersForImport(
         out.set(id, existing ? mergeMonsterDetail(existing, detail) : detail);
       } catch (err) {
         console.warn(`[DDB] monster ${id} detail fetch:`, err instanceof Error ? err.message : err);
+      }
+    });
+  }
+
+  // Retry detail once for anything still thin after merge.
+  const stillThin = unique.filter((id) => {
+    const raw = out.get(id);
+    return raw && monsterNeedsDetailFetch(raw);
+  });
+  if (stillThin.length > 0) {
+    await runWithConcurrency(stillThin, 2, async (id) => {
+      try {
+        const detail = await fetchDdbMonsterDetailOnly(ctx, id);
+        if (!detail) return;
+        const existing = out.get(id);
+        out.set(id, existing ? mergeMonsterDetail(existing, detail) : detail);
+      } catch {
+        /* best effort */
       }
     });
   }

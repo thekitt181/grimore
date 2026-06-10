@@ -6,6 +6,7 @@ import type {
 import type { OwlbearItem, OwlbearMonster, OwlbearSpell } from '@grimoire/shared';
 import { normalizeAbilityName } from '@grimoire/shared';
 import { joinSections, stripDdbHtml } from './ddbHtml';
+import { monsterHasFullStatBlock } from './ddbMonsterFetch';
 import {
   formatChallengeRatingValue,
   resolveMonsterSourceLabel,
@@ -684,7 +685,8 @@ function looksLikeDdbFullStatBlock(text: string): boolean {
   const hasCombat = /armor class|hit points|challenge/i.test(lower);
   const hasDepth =
     text.length >= 240
-    || /actions|traits|legendary|spellcasting|multiattack|reactions|bonus actions/i.test(lower);
+    || /actions|traits|legendary|multiattack|spellcasting|reactions|bonus actions/i.test(lower)
+    || (/str\s*\d+|strength\s*\d+/i.test(lower) && /dex\s*\d+|dexterity\s*\d+/i.test(lower));
   return hasCombat && hasDepth;
 }
 
@@ -912,17 +914,16 @@ export function ddbMonsterHasUsableDescription(
   raw: Record<string, unknown>,
   catalog?: DdbCatalog,
 ): boolean {
+  if (monsterHasFullStatBlock(raw)) return true;
   const desc = buildMonsterDescription(raw, catalog).trim();
-  if (desc.length >= 24) return true;
-  const name = String(raw.name ?? '').trim();
-  if (!name) return false;
-  if (monsterHasCombatFields(raw)) return true;
-  const characteristics = stripDdbHtml(raw.characteristicsDescription);
-  if (characteristics.length >= 40) return true;
-  const cr = catalog
-    ? resolveMonsterCr(raw, catalog.challengeRatingById)
-    : resolveMonsterCr(raw, new Map());
-  return cr !== '?' && monsterTypeLine(raw, catalog).length > 8;
+  if (desc.length >= 200) return true;
+  const lower = desc.toLowerCase();
+  if (desc.length >= 80 && /actions|traits|multiattack|legendary/i.test(lower)) return true;
+  if (desc.length >= 60 && /armor class \d+/i.test(lower) && /hit points \d+/i.test(lower)
+    && /str \d+|dex \d+|con \d+/i.test(lower)) {
+    return true;
+  }
+  return false;
 }
 
 function buildMonsterDescription(raw: Record<string, unknown>, catalog?: DdbCatalog): string {
@@ -936,7 +937,9 @@ function buildMonsterDescription(raw: Record<string, unknown>, catalog?: DdbCata
 
   const structured = buildStructuredMonsterDescription(raw, catalog);
   if (structured.length > ddbPrimary.length + 60) return structured;
-  if (ddbPrimary) return appendSectionsIfMissing(ddbPrimary, [structured]);
+  if (ddbPrimary && ddbPrimary.length >= 80) {
+    return appendSectionsIfMissing(ddbPrimary, [structured]);
+  }
   if (structured) return structured;
   if (ddbPrimary) return ddbPrimary;
 
