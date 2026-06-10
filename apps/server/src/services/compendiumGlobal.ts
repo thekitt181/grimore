@@ -5,7 +5,6 @@ import {
   clearGlobalFallbackCache,
   globalFallbackFileRevision,
   loadGlobalFallback,
-  loadRawGlobalFallback,
   saveGlobalFallback,
 } from './compendiumGlobalFallback';
 import { fetchExtensionGlobalDoc, invalidateExtensionGlobalCache } from './compendiumExtensionBridge';
@@ -525,7 +524,7 @@ export async function saveGlobal(partial: Partial<CompendiumGlobalDoc>): Promise
   return mutateGlobal(() => partial);
 }
 
-/** On startup, mirror MongoDB into local data.json (Mongo is source of truth). */
+/** On startup, promote newer local fallback into MongoDB, then mirror Mongo → file. */
 export async function syncCompendiumStorageOnStartup(): Promise<void> {
   try {
     const mongoOnly = process.env['COMPENDIUM_MONGO_ONLY'] === '1';
@@ -538,6 +537,9 @@ export async function syncCompendiumStorageOnStartup(): Promise<void> {
     invalidateExtensionGlobalCache();
     clearGlobalFallbackCache();
 
+    const { promoteFallbackToMongo } = await import('./compendiumFallbackMongoSync');
+    await promoteFallbackToMongo('startup');
+
     if (mongoOnly) {
       const version = await readMongoGlobalVersion();
       console.log(
@@ -549,19 +551,8 @@ export async function syncCompendiumStorageOnStartup(): Promise<void> {
     }
 
     const mongo = await readMongoGlobalDoc();
-    if (!mongo) {
-      const fallbackRaw = loadRawGlobalFallback();
-      if (fallbackRaw) {
-        const payload = { ...fallbackRaw, _id: 'global' as const, lastUpdated: new Date().toISOString() };
-        await withMongoTimeout(col.updateOne({ _id: 'global' }, { $set: payload }, { upsert: true }));
-        saveGlobalFallback(normalizeOwlbearGlobalDoc(payload), payload);
-        console.log('[Compendium] Seeded MongoDB from local data.json');
-      }
-      return;
-    }
-
     const raw = await withMongoTimeout(col.findOne({ _id: 'global' }), MONGO_FULL_READ_MS);
-    if (raw) {
+    if (mongo && raw) {
       saveGlobalFallback(mongo, raw);
     }
     console.log('[Compendium] MongoDB compendium is up to date');

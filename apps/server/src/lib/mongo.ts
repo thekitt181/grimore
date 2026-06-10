@@ -40,8 +40,14 @@ function openMongoCircuit(reason: string): void {
 }
 
 function recordMongoSuccess(): void {
+  const recovering = Date.now() < circuitOpenUntil;
   consecutiveFailures = 0;
   circuitOpenUntil = 0;
+  if (recovering) {
+    void import('../services/compendiumFallbackMongoSync')
+      .then(({ scheduleFallbackMongoSync }) => scheduleFallbackMongoSync('mongo-circuit-recovered'))
+      .catch(() => undefined);
+  }
 }
 
 function recordMongoFailure(err: unknown): void {

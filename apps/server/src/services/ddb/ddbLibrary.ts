@@ -869,6 +869,9 @@ export async function finishDdbLibraryImport(
     unlockAllImportedSources?: boolean;
   },
 ): Promise<{ catalogRev: string | null; sourcesUnlocked?: string[] }> {
+  const { promoteFallbackToMongo } = await import('../compendiumFallbackMongoSync');
+  await promoteFallbackToMongo('ddb-finish-import');
+
   const catalog = await loadDdbCatalog(ctx);
   const unlocked: string[] = [];
   if (opts?.sourceIds?.length) {

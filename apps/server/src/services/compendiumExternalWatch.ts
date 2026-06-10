@@ -13,6 +13,7 @@ const POLL_MS = 30_000;
 
 let lastMongoVersion = '';
 let lastExtVersion = '';
+let circuitWasOpen = false;
 let started = false;
 
 /** Backup poll for extension HTTP when Mongo change stream misses an update. */
@@ -22,7 +23,16 @@ export function startCompendiumExternalWatch(): void {
 
   const tick = async () => {
     try {
-      if (isMongoCircuitOpen()) return;
+      if (isMongoCircuitOpen()) {
+        circuitWasOpen = true;
+        return;
+      }
+      if (circuitWasOpen) {
+        circuitWasOpen = false;
+        const { scheduleFallbackMongoSync } = await import('./compendiumFallbackMongoSync');
+        scheduleFallbackMongoSync('mongo-poll-recovered');
+      }
+
       const mongoVersion = await readMongoGlobalVersion();
       const extVersion = await fetchExtensionVersion();
 
