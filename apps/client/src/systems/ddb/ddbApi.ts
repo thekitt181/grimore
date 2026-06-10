@@ -301,8 +301,14 @@ async function importChunkWithRetry(
   }
 }
 
-export async function finishDdbLibraryImport(): Promise<{ catalogRev: string | null }> {
-  const { data } = await api.post<{ catalogRev: string | null }>('/ddb/library/finish-import');
+export async function finishDdbLibraryImport(opts?: {
+  sourceIds?: number[];
+  sourceLabels?: string[];
+}): Promise<{ catalogRev: string | null; sourcesUnlocked?: string[] }> {
+  const { data } = await api.post<{ catalogRev: string | null; sourcesUnlocked?: string[] }>(
+    '/ddb/library/finish-import',
+    opts ?? {},
+  );
   return data;
 }
 
@@ -394,8 +400,17 @@ export async function importDdbLibraryEntries(
 
   if (!opts?.skipFinish && merged.imported.length > 0) {
     try {
-      const fin = await finishDdbLibraryImport();
+      const sourceLabels = [
+        ...new Set(merged.imported.map((e) => e.source).filter((s): s is string => Boolean(s))),
+      ];
+      const fin = await finishDdbLibraryImport({
+        ...(body.sourceId != null ? { sourceIds: [body.sourceId] } : {}),
+        ...(sourceLabels.length > 0 ? { sourceLabels } : {}),
+      });
       if (fin.catalogRev) merged.catalogRev = fin.catalogRev;
+      if (fin.sourcesUnlocked?.length) {
+        merged.sourcesUnlocked = [...new Set([...(merged.sourcesUnlocked ?? []), ...fin.sourcesUnlocked])];
+      }
     } catch (err) {
       console.warn('[DDB] finish-import failed:', err);
     }
@@ -504,8 +519,17 @@ export async function importAllDdbLibraryFromSource(
 
   if (merged.imported.length > 0) {
     try {
-      const fin = await finishDdbLibraryImport();
+      const sourceLabels = [
+        ...new Set(merged.imported.map((e) => e.source).filter((s): s is string => Boolean(s))),
+      ];
+      const fin = await finishDdbLibraryImport({
+        sourceIds,
+        ...(sourceLabels.length > 0 ? { sourceLabels } : {}),
+      });
       if (fin.catalogRev) merged.catalogRev = fin.catalogRev;
+      if (fin.sourcesUnlocked?.length) {
+        merged.sourcesUnlocked = [...new Set([...(merged.sourcesUnlocked ?? []), ...fin.sourcesUnlocked])];
+      }
     } catch (err) {
       console.warn('[DDB] finish-import failed:', err);
     }

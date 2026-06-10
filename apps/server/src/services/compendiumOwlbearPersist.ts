@@ -505,6 +505,70 @@ export async function saveOwlbearEntriesBulk(
   });
 }
 
+/** Fast Mongo patches for bulk import — no full global doc read/write. */
+export async function patchOwlbearEntriesBulk(
+  kind: CompendiumKind,
+  entries: Array<{ entry: OwlbearMonster | OwlbearItem | OwlbearSpell; opts: OwlbearSaveOptions }>,
+): Promise<{ mongoPersisted: boolean; lastUpdated: string }> {
+  if (entries.length === 0) {
+    return { mongoPersisted: true, lastUpdated: new Date().toISOString() };
+  }
+
+  return enqueueCompendiumWrite(async () => {
+    const col = await getCollection<OwlbearRawGlobalDoc>('data');
+    const lastUpdated = new Date().toISOString();
+    if (!col || isMongoCircuitOpen()) {
+      return { mongoPersisted: false, lastUpdated };
+    }
+
+    const fields = KIND_FIELDS[kind];
+    markCompendiumWritePending();
+    const ops: import('mongodb').AnyBulkWriteOperation<OwlbearRawGlobalDoc>[] = [];
+
+    for (const { entry, opts } of entries) {
+      const prepared = normalizeEntryImageField({ ...entry } as OwlbearEntry);
+      const name = prepared.name;
+      const targetField = opts.saveAs === 'replace' ? fields.override : fields.custom;
+      const stored = opts.saveAs === 'replace'
+        ? prepared
+        : { ...prepared, source: 'Custom' };
+
+      ops.push({
+        updateOne: {
+          filter: { _id: 'global' },
+          update: {
+            $pull: {
+              [fields.override]: { name },
+              [fields.custom]: { name },
+            },
+          },
+        },
+      });
+      ops.push({
+        updateOne: {
+          filter: { _id: 'global' },
+          update: {
+            $push: { [targetField]: stored },
+            $set: { lastUpdated },
+          },
+          upsert: true,
+        },
+      });
+    }
+
+    try {
+      await withMongoTimeout(col.bulkWrite(ops, { ordered: true }), 20_000);
+      return { mongoPersisted: true, lastUpdated };
+    } catch (err) {
+      console.warn(
+        '[Compendium] patchOwlbearEntriesBulk failed:',
+        err instanceof Error ? err.message : err,
+      );
+      return { mongoPersisted: false, lastUpdated };
+    }
+  });
+}
+
 export async function saveOwlbearEntry(
   kind: CompendiumKind,
   entry: OwlbearMonster | OwlbearItem | OwlbearSpell,

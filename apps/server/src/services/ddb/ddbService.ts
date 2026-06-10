@@ -371,8 +371,12 @@ export async function importAllFromDdbLibrarySource(
   });
 }
 
-export async function finishDdbLibraryImportSession(): Promise<{ catalogRev: string | null }> {
-  return finishDdbLibraryImport();
+export async function finishDdbLibraryImportSession(
+  userId: string,
+  opts?: { sourceIds?: number[]; sourceLabels?: string[] },
+): Promise<{ catalogRev: string | null; sourcesUnlocked?: string[] }> {
+  const ctx = await requireDdbAuth(userId);
+  return finishDdbLibraryImport(ctx, opts);
 }
 
 export { fetchDdbCampaigns, fetchDdbCharacterList, fetchDdbEncounters };

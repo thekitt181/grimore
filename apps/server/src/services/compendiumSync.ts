@@ -32,6 +32,7 @@ import {
   deleteOwlbearEntry,
   readRawGlobalDoc,
   saveOwlbearEntriesBulk,
+  clearRawGlobalDocInflight,
   type CompendiumKind,
   type PersistRawGlobalDocResult,
 } from './compendiumOwlbearPersist';
@@ -1131,9 +1132,130 @@ export interface CompendiumBulkSaveOptions {
 }
 
 export async function finishBulkCompendiumImport(): Promise<{ catalogRev: string | null }> {
+  clearRawGlobalDocInflight();
   const { notifyCompendiumCatalogRebuilt } = await import('./compendiumChangeNotify');
   await notifyCompendiumCatalogRebuilt(new Date().toISOString());
   return { catalogRev: getCatalogRevision() };
+}
+
+async function saveEntriesBulkForImport<T extends OwlbearMonster | OwlbearItem | OwlbearSpell, R>(
+  kind: CompendiumKind,
+  entries: Array<{ entry: T; opts?: CompendiumSaveOptions }>,
+  upsertCollection: (prepared: Array<{ entry: T; isCustom: boolean }>) => Promise<void>,
+  toResult: (payload: T, saveAs: CompendiumSaveAs) => R,
+): Promise<CompendiumBulkSaveResult<R>> {
+  if (entries.length === 0) {
+    const lastUpdated = new Date().toISOString();
+    return {
+      entries: [],
+      persist: {
+        doc: normalizeOwlbearGlobalDoc({
+          _id: 'global',
+          monsters: [],
+          items: [],
+          spells: [],
+          overrideMonsters: [],
+          overrideItems: [],
+          overrideSpells: [],
+          deleted: [],
+          images: {},
+          imagesData: {},
+          entryImages: {},
+          lockedSources: [],
+          publishedEntryKeys: [],
+          lastUpdated,
+        }),
+        lastUpdated,
+        mongoPersisted: true,
+      },
+    };
+  }
+
+  const { patchOwlbearEntriesBulk } = await import('./compendiumOwlbearPersist');
+  const prepared = entries.map(({ entry, opts }) => {
+    const saveAs = resolveSaveAs(entry, opts);
+    const payload = prepareSavePayload({ ...entry, source: entry.source || 'Custom' }, saveAs);
+    return { payload, saveAs, opts };
+  });
+
+  const patch = await patchOwlbearEntriesBulk(
+    kind,
+    prepared.map(({ payload, saveAs, opts }) => ({
+      entry: payload,
+      opts: {
+        saveAs,
+        previousName: opts?.previousName,
+        hidePrevious: opts?.hidePrevious,
+      },
+    })),
+  );
+
+  await upsertCollection(
+    prepared.map(({ payload, saveAs }) => ({ entry: payload, isCustom: saveAs === 'homebrew' })),
+  );
+
+  return {
+    entries: prepared.map(({ payload, saveAs }) => toResult(payload, saveAs)),
+    persist: {
+      doc: normalizeOwlbearGlobalDoc({
+        _id: 'global',
+        monsters: [],
+        items: [],
+        spells: [],
+        overrideMonsters: [],
+        overrideItems: [],
+        overrideSpells: [],
+        deleted: [],
+        images: {},
+        imagesData: {},
+        entryImages: {},
+        lockedSources: [],
+        publishedEntryKeys: [],
+        lastUpdated: patch.lastUpdated,
+      }),
+      lastUpdated: patch.lastUpdated,
+      mongoPersisted: patch.mongoPersisted,
+    },
+  };
+}
+
+export async function saveMonstersBulkForImport(
+  entries: Array<{ entry: OwlbearMonster; opts?: CompendiumSaveOptions }>,
+): Promise<CompendiumBulkSaveResult<CompendiumMonster>> {
+  return saveEntriesBulkForImport(
+    'monster',
+    entries,
+    async (rows) => {
+      await upsertCollectionMonstersBulk(rows);
+    },
+    (payload, saveAs) => monsterPayloadFromSave(payload, saveAs),
+  );
+}
+
+export async function saveItemsBulkForImport(
+  entries: Array<{ entry: OwlbearItem; opts?: CompendiumSaveOptions }>,
+): Promise<CompendiumBulkSaveResult<CompendiumItem>> {
+  return saveEntriesBulkForImport(
+    'item',
+    entries,
+    async (rows) => {
+      await upsertCollectionItemsBulk(rows);
+    },
+    (payload, saveAs) => itemPayloadFromSave(payload, saveAs),
+  );
+}
+
+export async function saveSpellsBulkForImport(
+  entries: Array<{ entry: OwlbearSpell; opts?: CompendiumSaveOptions }>,
+): Promise<CompendiumBulkSaveResult<CompendiumSpell>> {
+  return saveEntriesBulkForImport(
+    'spell',
+    entries,
+    async (rows) => {
+      await upsertCollectionSpellsBulk(rows);
+    },
+    (payload, saveAs) => spellPayloadFromSave(payload, saveAs),
+  );
 }
 
 export async function saveMonstersBulk(

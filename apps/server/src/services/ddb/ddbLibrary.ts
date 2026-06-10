@@ -20,7 +20,7 @@ import {
   normalizeDdbSpellSummary,
   normalizeDdbSpellToCompendium,
 } from './ddbContentNormalize';
-import { getCatalogRevision, saveItemsBulk, saveMonstersBulk, saveSpellsBulk } from '../compendiumSync';
+import { getCatalogRevision, saveItemsBulkForImport, saveMonstersBulkForImport, saveSpellsBulkForImport } from '../compendiumSync';
 import { unlockCompendiumSource } from '../compendiumSourcePolicy';
 import { splitCompendiumSources } from '@grimoire/shared';
 import { redis } from '../../lib/redis';
@@ -41,9 +41,8 @@ const SPELL_CACHE_TTL = 60 * 60;
 const ITEM_CACHE_TTL = 60 * 30;
 const FETCH_BATCH = 100;
 const MONSTER_IMPORT_BATCH = 3;
-/** Smaller Mongo writes — full global doc RMW times out on large batches from Render→Atlas. */
+/** Smaller Mongo writes — patch global doc arrays instead of full RMW. */
 const SAVE_BATCH = 5;
-const DDB_IMPORT_SAVE_OPTS = { deferCatalogRebuild: true } as const;
 const CATALOG_CACHE_TTL = 60 * 60;
 
 async function loadDdbCatalog(ctx: DdbAuthContext): Promise<DdbCatalog> {
@@ -493,15 +492,16 @@ async function finalizeDdbImportResult(
   catalog: DdbCatalog,
   meta: ImportBatchMeta,
   sourceIds?: number[],
+  opts?: { skipSourceUnlock?: boolean },
 ): Promise<DdbLibraryImportResult> {
   if (result.imported.length === 0) return result;
 
-  const unlockedFromIds = sourceIds?.length
+  const unlockedFromIds = !opts?.skipSourceUnlock && sourceIds?.length
     ? await unlockImportedBookSources(catalog, sourceIds)
     : [];
-  const unlockedFromLabels = await unlockImportedBookSourceLabels(
-    sourceLabelsFromEntries(meta.savedEntries),
-  );
+  const unlockedFromLabels = !opts?.skipSourceUnlock
+    ? await unlockImportedBookSourceLabels(sourceLabelsFromEntries(meta.savedEntries))
+    : [];
 
   return {
     ...result,
@@ -557,7 +557,7 @@ async function importMonsterIds(
     await saveImportBatch(
       'monster',
       pending,
-      (entries) => saveMonstersBulk(entries, DDB_IMPORT_SAVE_OPTS),
+      (entries) => saveMonstersBulkForImport(entries),
       imported,
       errors,
       meta,
@@ -568,6 +568,7 @@ async function importMonsterIds(
     catalog,
     { mongoPersisted: meta.mongoPersisted, savedEntries: meta.savedEntries },
     sourceId != null ? [sourceId] : undefined,
+    { skipSourceUnlock: true },
   );
 }
 
@@ -617,7 +618,7 @@ async function importSpellIds(
     await saveImportBatch(
       'spell',
       pending,
-      (entries) => saveSpellsBulk(entries, DDB_IMPORT_SAVE_OPTS),
+      (entries) => saveSpellsBulkForImport(entries),
       imported,
       errors,
       meta,
@@ -628,6 +629,7 @@ async function importSpellIds(
     catalog,
     { mongoPersisted: meta.mongoPersisted, savedEntries: meta.savedEntries },
     sourceId != null ? [sourceId] : undefined,
+    { skipSourceUnlock: true },
   );
 }
 
@@ -677,7 +679,7 @@ async function importItemIds(
     await saveImportBatch(
       'item',
       pending,
-      (entries) => saveItemsBulk(entries, DDB_IMPORT_SAVE_OPTS),
+      (entries) => saveItemsBulkForImport(entries),
       imported,
       errors,
       meta,
@@ -688,6 +690,7 @@ async function importItemIds(
     catalog,
     { mongoPersisted: meta.mongoPersisted, savedEntries: meta.savedEntries },
     sourceId != null ? [sourceId] : undefined,
+    { skipSourceUnlock: true },
   );
 }
 
@@ -796,7 +799,22 @@ export async function importAllDdbLibraryFromSources(
   return merged;
 }
 
-export async function finishDdbLibraryImport(): Promise<{ catalogRev: string | null }> {
+export async function finishDdbLibraryImport(
+  ctx: DdbAuthContext,
+  opts?: { sourceIds?: number[]; sourceLabels?: string[] },
+): Promise<{ catalogRev: string | null; sourcesUnlocked?: string[] }> {
+  const catalog = await loadDdbCatalog(ctx);
+  const unlocked: string[] = [];
+  if (opts?.sourceIds?.length) {
+    unlocked.push(...await unlockImportedBookSources(catalog, opts.sourceIds));
+  }
+  if (opts?.sourceLabels?.length) {
+    unlocked.push(...await unlockImportedBookSourceLabels(opts.sourceLabels));
+  }
   const { finishBulkCompendiumImport } = await import('../compendiumSync');
-  return finishBulkCompendiumImport();
+  const result = await finishBulkCompendiumImport();
+  return {
+    ...result,
+    sourcesUnlocked: [...new Set(unlocked)],
+  };
 }
