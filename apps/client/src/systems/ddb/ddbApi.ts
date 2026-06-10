@@ -245,7 +245,29 @@ export async function searchDdbLibraryItems(params: {
   return data.items ?? [];
 }
 
-const IMPORT_CHUNK_SIZE = 50;
+const IMPORT_CHUNK_SIZE = 25;
+
+function chunkIds(ids: number[], size: number): number[][] {
+  const chunks: number[][] = [];
+  for (let i = 0; i < ids.length; i += size) {
+    chunks.push(ids.slice(i, i + size));
+  }
+  return chunks;
+}
+
+async function collectMonsterIdsForSource(sourceId: number): Promise<number[]> {
+  const ids: number[] = [];
+  let skip = 0;
+  const take = 100;
+  while (true) {
+    const { items } = await searchDdbLibraryMonsters({ sourceId, skip, take });
+    if (items.length === 0) break;
+    ids.push(...items.map((m) => m.ddbId));
+    skip += items.length;
+    if (items.length < take) break;
+  }
+  return ids;
+}
 
 function mergeImportResults(a: DdbLibraryImportResult, b: DdbLibraryImportResult): DdbLibraryImportResult {
   const catalogRev = b.catalogRev ?? a.catalogRev;
@@ -281,9 +303,16 @@ export async function importDdbLibraryEntries(body: {
       merged = mergeImportResults(merged, data);
     } catch (err) {
       if (axios.isAxiosError(err)) {
+        const status = err.response?.status;
         const msg = (err.response?.data as { error?: string } | undefined)?.error;
+        const detail = msg
+          ?? (status === 504 || status === 502 || status === 503
+            ? 'Server timed out — try importing fewer entries at a time'
+            : undefined)
+          ?? err.message
+          ?? 'Import failed';
         for (const id of chunkIds) {
-          merged.errors.push({ id, message: msg ?? 'Import failed' });
+          merged.errors.push({ id, message: detail });
         }
         continue;
       }
@@ -294,34 +323,94 @@ export async function importDdbLibraryEntries(body: {
   return merged;
 }
 
-export async function importAllDdbLibraryFromSource(body: {
-  sourceId?: number;
-  sourceIds?: number[];
-  campaignId?: number;
-}): Promise<DdbLibraryImportResult> {
-  try {
-    const sourceIds = [
-      ...new Set(
-        (body.sourceIds?.length ? body.sourceIds : body.sourceId != null ? [body.sourceId] : [])
-          .map((id) => Number(id))
-          .filter((id) => Number.isFinite(id) && id > 0),
-      ),
-    ];
-    if (sourceIds.length === 0) {
-      throw new Error('Select at least one source book');
-    }
-    const { data } = await api.post<DdbLibraryImportResult>('/ddb/library/import-all', {
-      sourceIds,
-      ...(body.campaignId != null && Number(body.campaignId) > 0
-        ? { campaignId: Number(body.campaignId) }
-        : {}),
-    });
-    return data;
-  } catch (err) {
-    if (axios.isAxiosError(err)) {
-      const msg = (err.response?.data as { error?: string } | undefined)?.error;
-      throw new Error(msg ?? 'Import all failed');
-    }
-    throw err;
+export type DdbImportAllProgress = {
+  phase: 'monsters' | 'spells' | 'items';
+  sourceId: number;
+  done: number;
+  total: number;
+};
+
+export async function importAllDdbLibraryFromSource(
+  body: {
+    sourceId?: number;
+    sourceIds?: number[];
+    campaignId?: number;
+  },
+  onProgress?: (progress: DdbImportAllProgress) => void,
+): Promise<DdbLibraryImportResult> {
+  const sourceIds = [
+    ...new Set(
+      (body.sourceIds?.length ? body.sourceIds : body.sourceId != null ? [body.sourceId] : [])
+        .map((id) => Number(id))
+        .filter((id) => Number.isFinite(id) && id > 0),
+    ),
+  ];
+  if (sourceIds.length === 0) {
+    throw new Error('Select at least one source book');
   }
+
+  let merged: DdbLibraryImportResult = { imported: [], errors: [] };
+  const importOpts = {
+    ...(body.campaignId != null && Number(body.campaignId) > 0
+      ? { campaignId: Number(body.campaignId) }
+      : {}),
+  };
+
+  for (const sourceId of sourceIds) {
+    const monsterIds = await collectMonsterIdsForSource(sourceId);
+    for (const [i, chunk] of chunkIds(monsterIds, IMPORT_CHUNK_SIZE).entries()) {
+      onProgress?.({
+        phase: 'monsters',
+        sourceId,
+        done: Math.min((i + 1) * IMPORT_CHUNK_SIZE, monsterIds.length),
+        total: monsterIds.length,
+      });
+      merged = mergeImportResults(
+        merged,
+        await importDdbLibraryEntries({ kind: 'monster', ids: chunk, sourceId, ...importOpts }),
+      );
+    }
+
+    const spells = await searchDdbLibrarySpells({
+      sourceId,
+      sourceIds: [sourceId],
+      limit: 5000,
+      ...importOpts,
+    });
+    const spellIds = spells.map((s) => s.ddbId).filter((id) => Number.isFinite(id) && id > 0);
+    for (const [i, chunk] of chunkIds(spellIds, IMPORT_CHUNK_SIZE).entries()) {
+      onProgress?.({
+        phase: 'spells',
+        sourceId,
+        done: Math.min((i + 1) * IMPORT_CHUNK_SIZE, spellIds.length),
+        total: spellIds.length,
+      });
+      merged = mergeImportResults(
+        merged,
+        await importDdbLibraryEntries({ kind: 'spell', ids: chunk, sourceId, ...importOpts }),
+      );
+    }
+
+    const items = await searchDdbLibraryItems({
+      sourceId,
+      sourceIds: [sourceId],
+      limit: 5000,
+      ...importOpts,
+    });
+    const itemIds = items.map((item) => item.ddbId).filter((id) => Number.isFinite(id) && id > 0);
+    for (const [i, chunk] of chunkIds(itemIds, IMPORT_CHUNK_SIZE).entries()) {
+      onProgress?.({
+        phase: 'items',
+        sourceId,
+        done: Math.min((i + 1) * IMPORT_CHUNK_SIZE, itemIds.length),
+        total: itemIds.length,
+      });
+      merged = mergeImportResults(
+        merged,
+        await importDdbLibraryEntries({ kind: 'item', ids: chunk, sourceId, ...importOpts }),
+      );
+    }
+  }
+
+  return merged;
 }

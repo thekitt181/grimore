@@ -40,6 +40,7 @@ export { fetchDdbMonsterDetail } from './ddbMonsterFetch';
 const SPELL_CACHE_TTL = 60 * 60;
 const ITEM_CACHE_TTL = 60 * 30;
 const FETCH_BATCH = 100;
+const MONSTER_IMPORT_BATCH = 40;
 /** Smaller Mongo writes — full global doc RMW times out on large batches from Render→Atlas. */
 const SAVE_BATCH = 15;
 const CATALOG_CACHE_TTL = 60 * 60;
@@ -519,8 +520,8 @@ async function importMonsterIds(
   const errors: DdbLibraryImportResult['errors'] = [];
   const meta: ImportBatchMeta = { mongoPersisted: true, savedEntries: [] };
 
-  for (let i = 0; i < ids.length; i += FETCH_BATCH) {
-    const batchIds = ids.slice(i, i + FETCH_BATCH);
+  for (let i = 0; i < ids.length; i += MONSTER_IMPORT_BATCH) {
+    const batchIds = ids.slice(i, i + MONSTER_IMPORT_BATCH);
     const rawById = await fetchMonstersForImport(ctx, batchIds);
 
     const pending: Array<{ entry: OwlbearMonster; ddbId: number }> = [];

@@ -494,6 +494,7 @@ router.post('/library/import', requireAuth, async (req: AuthenticatedRequest, re
     const result = await importFromDdbLibrary(req.userId!, parsed.data);
     res.json(result);
   } catch (err) {
+    console.error('[DDB] library import failed:', err);
     res.status(400).json({ error: err instanceof Error ? err.message : 'Import failed' });
   }
 });

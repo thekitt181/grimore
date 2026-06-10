@@ -60,7 +60,7 @@ function unwrapMonsterPayload(json: unknown): Record<string, unknown> | null {
 /** Flatten nested DDB monster payloads (batch/detail wrappers). */
 export function normalizeDdbMonsterRaw(entry: Record<string, unknown>): Record<string, unknown> {
   let merged = { ...entry };
-  for (const key of ['monster', 'definition', 'data']) {
+  for (const key of ['monster', 'definition']) {
     const nested = merged[key];
     if (nested && typeof nested === 'object' && !Array.isArray(nested)) {
       merged = mergeMonsterDetail(merged, nested as Record<string, unknown>);
@@ -349,7 +349,9 @@ export async function fetchMonstersForImport(
 
   const needsDetail = unique.filter((id) => {
     const raw = out.get(id);
-    return !raw || monsterNeedsDetailFetch(raw);
+    if (!raw) return true;
+    if (!monsterHasImportableStatBlock(raw)) return true;
+    return monsterNeedsDetailFetch(raw);
   });
 
   await runWithConcurrency(needsDetail, MONSTER_DETAIL_CONCURRENCY, async (id) => {

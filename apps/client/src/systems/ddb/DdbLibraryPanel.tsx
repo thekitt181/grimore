@@ -241,10 +241,17 @@ export function DdbLibraryPanel({ onClose }: { onClose: () => void }) {
   const importAllMut = useMutation({
     mutationFn: () => {
       if (selectedSourceIds.size === 0) throw new Error('Select at least one source book');
-      return importAllDdbLibraryFromSource({
-        sourceIds: [...selectedSourceIds].map((id) => Number(id)),
-        ...(ddbCampaignId != null && ddbCampaignId > 0 ? { campaignId: ddbCampaignId } : {}),
-      });
+      return importAllDdbLibraryFromSource(
+        {
+          sourceIds: [...selectedSourceIds].map((id) => Number(id)),
+          ...(ddbCampaignId != null && ddbCampaignId > 0 ? { campaignId: ddbCampaignId } : {}),
+        },
+        (progress) => {
+          setMessage(
+            `Importing ${progress.phase}… ${progress.done}/${progress.total || '?'}`,
+          );
+        },
+      );
     },
     onSuccess: async (result) => {
       const ok = result.imported.length;
@@ -274,7 +281,9 @@ export function DdbLibraryPanel({ onClose }: { onClose: () => void }) {
       setSelected(new Set());
       await afterCompendiumImport(qc, result);
     },
-    onError: (err: Error) => setMessage(err.message),
+    onError: (err: Error) => {
+      setMessage(err.message || 'Import failed — check D&D Beyond link and try again');
+    },
   });
 
   function toggleSourceId(id: number) {
