@@ -22,6 +22,7 @@ import {
 } from './ddbContentNormalize';
 import { getCatalogRevision, saveItemsBulkForImport, saveMonstersBulkForImport, saveSpellsBulkForImport } from '../compendiumSync';
 import { unlockCompendiumSource } from '../compendiumSourcePolicy';
+import { sourceMatchesLocked } from '../compendiumVisibility';
 import { splitCompendiumSources } from '@grimoire/shared';
 import { redis } from '../../lib/redis';
 import {
@@ -830,7 +831,24 @@ export async function importAllDdbLibraryFromSources(
     }
   }
   const merged = mergeImportResults(...results);
-  return merged;
+  if (merged.imported.length === 0) return merged;
+  const sourceLabels = sourceLabelsFromEntries(
+    merged.imported.map((e) => ({ source: e.source })),
+  );
+  try {
+    const fin = await finishDdbLibraryImport(ctx, {
+      sourceIds: unique,
+      ...(sourceLabels.length > 0 ? { sourceLabels } : {}),
+    });
+    return {
+      ...merged,
+      catalogRev: fin.catalogRev ?? merged.catalogRev,
+      sourcesUnlocked: [...new Set([...(merged.sourcesUnlocked ?? []), ...(fin.sourcesUnlocked ?? [])])],
+    };
+  } catch (err) {
+    console.warn('[DDB] finish-import after import-all failed:', err);
+    return merged;
+  }
 }
 
 async function collectSourceLabelsFromCompendium(): Promise<string[]> {
@@ -860,6 +878,20 @@ async function collectSourceLabelsFromCompendium(): Promise<string[]> {
   return [...labels];
 }
 
+function compendiumLabelsForSourceIds(
+  catalog: DdbCatalog,
+  sourceIds: number[],
+  compendiumLabels: string[],
+): string[] {
+  const targetNames = sourceIds
+    .map((id) => catalog.sourceNames.get(id))
+    .filter((name): name is string => Boolean(name && name !== 'D&D Beyond'));
+  if (targetNames.length === 0) return [];
+  return compendiumLabels.filter((label) =>
+    targetNames.some((name) => sourceMatchesLocked(name, label) || name === label),
+  );
+}
+
 export async function finishDdbLibraryImport(
   ctx: DdbAuthContext,
   opts?: {
@@ -872,16 +904,24 @@ export async function finishDdbLibraryImport(
   const { promoteFallbackToMongo } = await import('../compendiumFallbackMongoSync');
   await promoteFallbackToMongo('ddb-finish-import');
 
+  const { clearRawGlobalDocInflight } = await import('../compendiumOwlbearPersist');
+  clearRawGlobalDocInflight();
+
   const catalog = await loadDdbCatalog(ctx);
+  const compendiumLabels = await collectSourceLabelsFromCompendium();
   const unlocked: string[] = [];
   if (opts?.sourceIds?.length) {
     unlocked.push(...await unlockImportedBookSources(catalog, opts.sourceIds));
+    const matched = compendiumLabelsForSourceIds(catalog, opts.sourceIds, compendiumLabels);
+    if (matched.length > 0) {
+      unlocked.push(...await unlockImportedBookSourceLabels(matched));
+    }
   }
   if (opts?.sourceLabels?.length) {
     unlocked.push(...await unlockImportedBookSourceLabels(opts.sourceLabels));
   }
   if (opts?.unlockAllImportedSources) {
-    unlocked.push(...await unlockImportedBookSourceLabels(await collectSourceLabelsFromCompendium()));
+    unlocked.push(...await unlockImportedBookSourceLabels(compendiumLabels));
   }
   const { finishBulkCompendiumImport } = await import('../compendiumSync');
   const result = await finishBulkCompendiumImport();

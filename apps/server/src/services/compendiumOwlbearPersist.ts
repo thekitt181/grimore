@@ -572,6 +572,7 @@ export async function patchOwlbearEntriesBulk(
 
     try {
       await withMongoTimeout(col.bulkWrite(ops, { ordered: true }), 30_000);
+      clearRawGlobalDocInflight();
       return { mongoPersisted: true, lastUpdated };
     } catch (err) {
       console.warn(

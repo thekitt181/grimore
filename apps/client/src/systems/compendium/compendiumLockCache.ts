@@ -120,18 +120,20 @@ export async function refetchCompendiumAfterImport(
   qc: QueryClient,
   opts?: { catalogRev?: string },
 ): Promise<void> {
+  await qc.invalidateQueries({
+    predicate: (query) => query.queryKey[0] === 'compendium',
+  });
   await qc.refetchQueries({
     predicate: (query) => query.queryKey[0] === 'compendium',
-    type: 'active',
   });
 
   if (!opts?.catalogRev) return;
 
-  const deadline = Date.now() + 8_000;
+  const deadline = Date.now() + 12_000;
   while (Date.now() < deadline) {
     const status = qc.getQueryData<{ catalogRev?: string }>(['compendium', 'sync-status']);
     if (status?.catalogRev === opts.catalogRev) return;
-    await qc.refetchQueries({ queryKey: ['compendium', 'sync-status'], type: 'active' });
+    await qc.refetchQueries({ queryKey: ['compendium', 'sync-status'] });
     await new Promise((r) => setTimeout(r, 400));
   }
 }

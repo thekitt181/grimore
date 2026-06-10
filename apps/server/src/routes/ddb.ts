@@ -483,6 +483,7 @@ const importSchema = z.object({
   ids: z.array(z.coerce.number().int().positive()).min(1).max(200),
   campaignId: z.coerce.number().int().positive().optional(),
   sourceId: z.coerce.number().int().positive().optional(),
+  deferCatalogFinish: z.boolean().optional(),
 });
 
 router.post('/library/import', requireAuth, async (req: AuthenticatedRequest, res) => {

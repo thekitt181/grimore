@@ -272,6 +272,7 @@ async function postImportChunk(
     ids: number[];
     campaignId?: number;
     sourceId?: number;
+    deferCatalogFinish?: boolean;
   },
 ): Promise<DdbLibraryImportResult> {
   const payload = {
@@ -283,6 +284,7 @@ async function postImportChunk(
     ...(body.sourceId != null && Number(body.sourceId) > 0
       ? { sourceId: Number(body.sourceId) }
       : {}),
+    ...(body.deferCatalogFinish ? { deferCatalogFinish: true } : {}),
   };
   try {
     const { data } = await api.post<DdbLibraryImportResult>('/ddb/library/import', payload);
@@ -298,6 +300,7 @@ async function importChunkWithRetry(
     ids: number[];
     campaignId?: number;
     sourceId?: number;
+    deferCatalogFinish?: boolean;
   },
 ): Promise<DdbLibraryImportResult> {
   try {
@@ -463,6 +466,8 @@ export async function importDdbLibraryEntries(
 
   for (let i = 0; i < ids.length; i += chunkSize) {
     const chunkIds = ids.slice(i, i + chunkSize);
+    const isLastChunk = i + chunkSize >= ids.length;
+    const deferFinish = opts?.skipFinish || !isLastChunk;
     try {
       merged = mergeImportResults(
         merged,
@@ -470,6 +475,7 @@ export async function importDdbLibraryEntries(
           kind: body.kind,
           ids: chunkIds,
           ...importOpts,
+          ...(deferFinish ? { deferCatalogFinish: true } : {}),
         }),
       );
     } catch (err) {

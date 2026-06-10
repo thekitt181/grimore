@@ -349,10 +349,37 @@ export async function browseDdbLibraryItems(
 
 export async function importFromDdbLibrary(
   userId: string,
-  opts: { kind: 'monster' | 'item' | 'spell'; ids: number[]; campaignId?: number; sourceId?: number },
+  opts: {
+    kind: 'monster' | 'item' | 'spell';
+    ids: number[];
+    campaignId?: number;
+    sourceId?: number;
+    deferCatalogFinish?: boolean;
+  },
 ) {
   const ctx = await requireDdbAuth(userId);
-  return importDdbLibraryEntries(ctx, opts);
+  const result = await importDdbLibraryEntries(ctx, opts);
+  if (result.imported.length === 0 || opts.deferCatalogFinish) {
+    return result;
+  }
+  const sourceIds = opts.sourceId != null ? [opts.sourceId] : [];
+  const sourceLabels = [
+    ...new Set(result.imported.map((e) => e.source).filter((s): s is string => Boolean(s))),
+  ];
+  try {
+    const fin = await finishDdbLibraryImport(ctx, {
+      sourceIds,
+      ...(sourceLabels.length > 0 ? { sourceLabels } : {}),
+    });
+    return {
+      ...result,
+      catalogRev: fin.catalogRev ?? result.catalogRev,
+      sourcesUnlocked: [...new Set([...(result.sourcesUnlocked ?? []), ...(fin.sourcesUnlocked ?? [])])],
+    };
+  } catch (err) {
+    console.warn('[DDB] server-side finish-import after chunk failed:', err);
+    return result;
+  }
 }
 
 export async function importAllFromDdbLibrarySource(

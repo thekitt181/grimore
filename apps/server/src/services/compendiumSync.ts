@@ -42,6 +42,7 @@ import {
   filterCustomEntries,
   isHiddenBuiltIn,
   namesMatch,
+  normalizeOwlbearRawDoc,
 } from './compendiumMerge';
 import {
   registerCompendiumCacheInvalidator,
@@ -353,6 +354,7 @@ type CatalogCache = {
 
 let catalogCache: CatalogCache | null = null;
 let catalogBuildPromise: Promise<CatalogCache> | null = null;
+let syncStatusCache: { at: number; value: CompendiumSyncStatus } | null = null;
 
 function catalogEntryCount(cache: CatalogCache): number {
   return cache.monsters.length + cache.items.length + cache.spells.length;
@@ -363,35 +365,79 @@ function invalidateCatalogCache(): void {
   catalogBuildPromise = null;
 }
 
+function invalidateSyncStatusCache(): void {
+  syncStatusCache = null;
+}
+
+function rawOverrideCount(raw: {
+  overrideMonsters?: unknown[];
+  overrideItems?: unknown[];
+  overrideSpells?: unknown[];
+}): number {
+  return (raw.overrideMonsters?.length ?? 0)
+    + (raw.overrideItems?.length ?? 0)
+    + (raw.overrideSpells?.length ?? 0);
+}
+
+async function buildCatalogCacheFromRaw(
+  raw: Awaited<ReturnType<typeof readRawGlobalDoc>>,
+  revSuffix?: string,
+): Promise<CatalogCache> {
+  const global = normalizeOwlbearGlobalDoc({
+    ...raw,
+    images: {},
+    imagesData: {},
+    entryImages: {},
+  });
+  setCachedGlobalLite(global);
+  const effectiveRev = isoTimestamp(global.lastUpdated);
+  const deleted = raw.deleted ?? [];
+  const policy = policyFromRaw(raw);
+  const [monsters, items, spells] = await Promise.all([
+    mergeMonsters(await loadBaseMonsters(), raw.overrideMonsters ?? [], raw.monsters ?? [], deleted, global, true),
+    mergeItems(await loadBaseItems(), raw.overrideItems ?? [], raw.items ?? [], deleted, global, true),
+    mergeSpells(await loadBaseSpells(), raw.overrideSpells ?? [], raw.spells ?? [], deleted, global, true),
+  ]);
+  monsters.sort((a, b) => a.name.localeCompare(b.name));
+  items.sort((a, b) => a.name.localeCompare(b.name));
+  spells.sort((a, b) => a.name.localeCompare(b.name));
+  const suffix = revSuffix ? `:${revSuffix}` : '';
+  return {
+    rev: `${effectiveRev}:${policyCacheRev(policy)}${suffix}`,
+    policy,
+    monsters,
+    items,
+    spells,
+  };
+}
+
 async function executeCatalogBuild(previousCache: CatalogCache | null): Promise<CatalogCache> {
   try {
     const raw = await readRawGlobalDoc({ includeImageData: false });
-    const global = normalizeOwlbearGlobalDoc({
-      ...raw,
-      images: {},
-      imagesData: {},
-      entryImages: {},
-    });
-    setCachedGlobalLite(global);
-    const effectiveRev = isoTimestamp(global.lastUpdated);
-    const deleted = raw.deleted ?? [];
+    let built = await buildCatalogCacheFromRaw(raw);
 
-    const policy = policyFromRaw(raw);
-    const [monsters, items, spells] = await Promise.all([
-      mergeMonsters(await loadBaseMonsters(), raw.overrideMonsters ?? [], raw.monsters ?? [], deleted, global, true),
-      mergeItems(await loadBaseItems(), raw.overrideItems ?? [], raw.items ?? [], deleted, global, true),
-      mergeSpells(await loadBaseSpells(), raw.overrideSpells ?? [], raw.spells ?? [], deleted, global, true),
-    ]);
-    monsters.sort((a, b) => a.name.localeCompare(b.name));
-    items.sort((a, b) => a.name.localeCompare(b.name));
-    spells.sort((a, b) => a.name.localeCompare(b.name));
-    const built: CatalogCache = {
-      rev: `${effectiveRev}:${policyCacheRev(policy)}`,
-      policy,
-      monsters,
-      items,
-      spells,
-    };
+    const rawFallback = loadRawGlobalFallback();
+    if (rawFallback) {
+      const normalizedFallback = normalizeOwlbearRawDoc(rawFallback);
+      if (rawOverrideCount(normalizedFallback) > rawOverrideCount(raw)) {
+        const { mergeRawGlobalDocs } = await import('./compendiumFallbackMongoSync');
+        const merged = mergeRawGlobalDocs(raw, normalizedFallback);
+        const mergedBuilt = await buildCatalogCacheFromRaw(merged, 'merged-fallback');
+        if (catalogEntryCount(mergedBuilt) >= catalogEntryCount(built)) {
+          built = mergedBuilt;
+        }
+      } else if (
+        catalogEntryCount(built) === 0
+        && rawOverrideCount(normalizedFallback) > 0
+      ) {
+        const fallbackBuilt = await buildCatalogCacheFromRaw(normalizedFallback, 'raw-fallback');
+        if (catalogEntryCount(fallbackBuilt) > 0) {
+          console.warn('[Compendium] Primary rebuild empty — using local fallback file');
+          built = fallbackBuilt;
+        }
+      }
+    }
+
     if (
       catalogEntryCount(built) === 0
       && previousCache
@@ -408,38 +454,16 @@ async function executeCatalogBuild(previousCache: CatalogCache | null): Promise<
     );
     const rawFallback = loadRawGlobalFallback();
     if (rawFallback) {
-      const policy = policyFromRaw(rawFallback);
-      const deleted = rawFallback.deleted ?? [];
-      const global = normalizeOwlbearGlobalDoc({
-        ...rawFallback,
-        images: {},
-        imagesData: {},
-        entryImages: {},
-      });
-      const [monsters, items, spells] = await Promise.all([
-        mergeMonsters(await loadBaseMonsters(), rawFallback.overrideMonsters ?? [], rawFallback.monsters ?? [], deleted, global, true),
-        mergeItems(await loadBaseItems(), rawFallback.overrideItems ?? [], rawFallback.items ?? [], deleted, global, true),
-        mergeSpells(await loadBaseSpells(), rawFallback.overrideSpells ?? [], rawFallback.spells ?? [], deleted, global, true),
-      ]);
-      monsters.sort((a, b) => a.name.localeCompare(b.name));
-      items.sort((a, b) => a.name.localeCompare(b.name));
-      spells.sort((a, b) => a.name.localeCompare(b.name));
-      const built: CatalogCache = {
-        rev: `${isoTimestamp(global.lastUpdated)}:${policyCacheRev(policy)}:raw-fallback`,
-        policy,
-        monsters,
-        items,
-        spells,
-      };
+      const fallbackBuilt = await buildCatalogCacheFromRaw(rawFallback, 'raw-fallback');
       if (
-        catalogEntryCount(built) === 0
+        catalogEntryCount(fallbackBuilt) === 0
         && previousCache
         && catalogEntryCount(previousCache) > 0
       ) {
         console.warn('[Compendium] Raw fallback rebuild empty — keeping previous cache');
         return previousCache;
       }
-      return built;
+      if (catalogEntryCount(fallbackBuilt) > 0) return fallbackBuilt;
     }
 
     const fallback = loadGlobalFallback(true);
@@ -489,6 +513,7 @@ export async function rebuildCatalogCacheAtomic(): Promise<CatalogCache> {
   catalogBuildPromise = null;
   const built = await executeCatalogBuild(previousCache);
   catalogCache = built;
+  invalidateSyncStatusCache();
   return built;
 }
 
@@ -744,7 +769,6 @@ export async function listSources(
     .sort((a, b) => a.label.localeCompare(b.label));
 }
 
-let syncStatusCache: { at: number; value: CompendiumSyncStatus } | null = null;
 const SYNC_STATUS_TTL_MS = 5_000;
 
 export async function getSyncStatus(): Promise<CompendiumSyncStatus> {
@@ -1135,6 +1159,7 @@ export async function finishBulkCompendiumImport(): Promise<{ catalogRev: string
   clearRawGlobalDocInflight();
   const { notifyCompendiumCatalogRebuilt } = await import('./compendiumChangeNotify');
   await notifyCompendiumCatalogRebuilt(new Date().toISOString());
+  invalidateSyncStatusCache();
   return { catalogRev: getCatalogRevision() };
 }
 

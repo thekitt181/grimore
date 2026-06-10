@@ -78,7 +78,7 @@ async function afterCompendiumImport(
   result: DdbLibraryImportResult,
 ): Promise<void> {
   if (result.imported.length === 0) return;
-  useCompendiumUiStore.getState().setBrowseMode('all');
+  useCompendiumUiStore.getState().setBrowseMode('sources');
   useCompendiumUiStore.getState().setPanelOpen(true);
   await refetchCompendiumAfterImport(
     qc,
