@@ -895,6 +895,16 @@ function buildStructuredMonsterDescription(
   return structured || htmlBlock || '';
 }
 
+export function ddbMonsterHasUsableDescription(
+  raw: Record<string, unknown>,
+  catalog?: DdbCatalog,
+): boolean {
+  const desc = buildMonsterDescription(raw, catalog).trim();
+  if (desc.length >= 60) return true;
+  const name = String(raw.name ?? '').trim();
+  return desc.length > name.length + 20;
+}
+
 function buildMonsterDescription(raw: Record<string, unknown>, catalog?: DdbCatalog): string {
   const ddbPrimary = ddbPrimaryStatBlockText(raw);
 

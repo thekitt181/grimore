@@ -11,6 +11,7 @@ import { DDB_SPELL_CLASS_IDS, DDB_URLS } from './config';
 import { authHeaders, type DdbAuthContext } from './ddbAuthContext';
 import {
   ddbEntityId,
+  ddbMonsterHasUsableDescription,
   entryHasSourceId,
   normalizeDdbItemSummary,
   normalizeDdbItemToCompendium,
@@ -31,7 +32,6 @@ import {
 import { enrichEntitiesWithFullDefinitions } from './ddbDefinitionFetch';
 import {
   fetchMonstersForImport,
-  monsterHasImportableStatBlock,
 } from './ddbMonsterFetch';
 
 export { fetchDdbMonsterDetail } from './ddbMonsterFetch';
@@ -531,7 +531,7 @@ async function importMonsterIds(
           errors.push({ id, message: 'Monster not found on D&D Beyond (check account access)' });
           continue;
         }
-        if (!monsterHasImportableStatBlock(raw)) {
+        if (!ddbMonsterHasUsableDescription(raw, catalog)) {
           errors.push({ id, message: 'No stat block text returned from D&D Beyond' });
           continue;
         }

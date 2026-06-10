@@ -34,8 +34,26 @@ function monsterAuthHeaders(ctx: DdbAuthContext, ddbId?: number): Record<string,
 function unwrapMonsterPayload(json: unknown): Record<string, unknown> | null {
   if (!json || typeof json !== 'object') return null;
   const root = json as Record<string, unknown>;
-  const data = root.data ?? root;
-  return data && typeof data === 'object' ? (data as Record<string, unknown>) : null;
+  let data: unknown = root.data ?? root;
+  if (!data || typeof data !== 'object') return null;
+
+  const pick = (obj: Record<string, unknown>): Record<string, unknown> | null => {
+    const nested = obj.monster;
+    if (nested && typeof nested === 'object') return nested as Record<string, unknown>;
+    if (obj.id != null || obj.name != null) return obj;
+    return null;
+  };
+
+  let picked = pick(data as Record<string, unknown>);
+  if (picked) return picked;
+
+  const inner = (data as Record<string, unknown>).data;
+  if (inner && typeof inner === 'object') {
+    picked = pick(inner as Record<string, unknown>);
+    if (picked) return picked;
+  }
+
+  return null;
 }
 
 function pickRicherField(
@@ -194,7 +212,7 @@ function hasRichNarrativeContent(raw: Record<string, unknown>): boolean {
     'specialTraitsDescription',
     'statBlockHtml',
   ]) {
-    if (stripDdbHtml(raw[key]).length >= 60) return true;
+    if (stripDdbHtml(raw[key]).length >= 40) return true;
   }
   const actions = raw.actions ?? raw.monsterActions;
   if (Array.isArray(actions) && actions.length > 0) return true;
@@ -214,12 +232,17 @@ export function monsterHasFullStatBlock(raw: Record<string, unknown>): boolean {
   return false;
 }
 
-/** Accept import when full stat block OR substantial narrative content exists (third-party books). */
+/** Accept import when we have enough to render a stat block (permissive — detail fetch uses monsterHasFullStatBlock). */
 export function monsterHasImportableStatBlock(raw: Record<string, unknown>): boolean {
-  if (monsterHasFullStatBlock(raw)) return true;
   const name = String(raw.name ?? '').trim();
   if (!name) return false;
-  return hasRichNarrativeContent(raw);
+  if (hasRichNarrativeContent(raw)) return true;
+  if (hasMeaningfulCombatStats(raw) && hasNonZeroAbilityScores(raw)) return true;
+  if (hasMeaningfulCombatStats(raw)) return true;
+  if (hasStructuredActionOrTraitArrays(raw)) return true;
+  const characteristics = stripDdbHtml(raw.characteristicsDescription);
+  if (characteristics.length > 80 && /hit points\s+\d+/i.test(characteristics)) return true;
+  return false;
 }
 
 export async function fetchDdbMonstersByIds(
