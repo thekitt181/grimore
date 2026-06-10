@@ -358,22 +358,38 @@ export async function fetchMonstersForImport(
   ids: number[],
 ): Promise<Map<number, Record<string, unknown>>> {
   const unique = [...new Set(ids.filter((id) => Number.isFinite(id) && id > 0))];
-  const out = await fetchDdbMonstersByIds(ctx, unique);
+  const out = new Map<number, Record<string, unknown>>();
+  if (unique.length === 0) return out;
+
+  try {
+    const seeded = await fetchDdbMonstersByIds(ctx, unique);
+    for (const [id, raw] of seeded) out.set(id, raw);
+  } catch (err) {
+    console.warn('[DDB] monster batch seed failed:', err instanceof Error ? err.message : err);
+  }
 
   await runWithConcurrency(unique, 2, async (id) => {
-    let merged: Record<string, unknown> | null = out.get(id) ?? null;
-    const detail = await fetchDdbMonsterDetailOnly(ctx, id);
-    if (detail) {
-      merged = merged ? mergeMonsterDetail(merged, detail) : detail;
-    }
-    if (!merged || monsterNeedsDetailFetch(merged)) {
-      const batch = await fetchDdbMonstersByIds(ctx, [id]);
-      const richer = batch.get(id);
-      if (richer) {
-        merged = merged ? mergeMonsterDetail(merged, richer) : richer;
+    try {
+      let merged: Record<string, unknown> | null = out.get(id) ?? null;
+      const detail = await fetchDdbMonsterDetailOnly(ctx, id);
+      if (detail) {
+        merged = merged ? mergeMonsterDetail(merged, detail) : detail;
       }
+      if (!merged || monsterNeedsDetailFetch(merged)) {
+        try {
+          const batch = await fetchDdbMonstersByIds(ctx, [id]);
+          const richer = batch.get(id);
+          if (richer) {
+            merged = merged ? mergeMonsterDetail(merged, richer) : richer;
+          }
+        } catch (err) {
+          console.warn(`[DDB] monster ${id} batch fallback:`, err instanceof Error ? err.message : err);
+        }
+      }
+      if (merged) out.set(id, merged);
+    } catch (err) {
+      console.warn(`[DDB] monster ${id} enrich failed:`, err instanceof Error ? err.message : err);
     }
-    if (merged) out.set(id, merged);
   });
 
   return out;

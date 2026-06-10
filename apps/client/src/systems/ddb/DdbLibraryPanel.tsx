@@ -23,6 +23,7 @@ import {
 import type { DdbLibraryImportResult } from '@grimoire/shared';
 import { useCompendiumEditor } from '@/systems/compendium/useCompendiumEditor';
 import { useCompendiumUiStore } from '@/systems/compendium/compendiumStore';
+import { extractApiError } from '@/lib/apiError';
 
 const GOLD = 'var(--color-accent-gold)';
 const BD = 'var(--color-border)';
@@ -235,7 +236,7 @@ export function DdbLibraryPanel({ onClose }: { onClose: () => void }) {
       setSelected(new Set());
       await afterCompendiumImport(qc, result);
     },
-    onError: (err: Error) => setMessage(err.message),
+    onError: (err: unknown) => setMessage(extractApiError(err, 'Import failed')),
   });
 
   const importAllMut = useMutation({
@@ -281,8 +282,8 @@ export function DdbLibraryPanel({ onClose }: { onClose: () => void }) {
       setSelected(new Set());
       await afterCompendiumImport(qc, result);
     },
-    onError: (err: Error) => {
-      setMessage(err.message || 'Import failed — check D&D Beyond link and try again');
+    onError: (err: unknown) => {
+      setMessage(extractApiError(err, 'Import failed — check D&D Beyond link and try again'));
     },
   });
 

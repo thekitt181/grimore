@@ -480,16 +480,17 @@ router.get('/library/items', requireAuth, async (req: AuthenticatedRequest, res)
 
 const importSchema = z.object({
   kind: z.enum(['monster', 'item', 'spell']),
-  ids: z.array(z.number().int().positive()).min(1).max(200),
-  campaignId: z.number().int().positive().optional(),
-  sourceId: z.number().int().positive().optional(),
+  ids: z.array(z.coerce.number().int().positive()).min(1).max(200),
+  campaignId: z.coerce.number().int().positive().optional(),
+  sourceId: z.coerce.number().int().positive().optional(),
 });
 
 router.post('/library/import', requireAuth, async (req: AuthenticatedRequest, res) => {
   try {
     const parsed = importSchema.safeParse(req.body);
     if (!parsed.success) {
-      res.status(400).json({ error: 'Invalid import payload' });
+      const detail = parsed.error.issues.map((issue) => issue.message).join('; ');
+      res.status(400).json({ error: detail || 'Invalid import payload' });
       return;
     }
     const result = await importFromDdbLibrary(req.userId!, parsed.data);

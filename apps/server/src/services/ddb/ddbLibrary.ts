@@ -700,6 +700,13 @@ async function importItemIds(
 }
 
 
+function importFailureForIds(ids: number[], message: string): DdbLibraryImportResult {
+  return {
+    imported: [],
+    errors: ids.map((id) => ({ id, message })),
+  };
+}
+
 export async function importDdbLibraryEntries(
   ctx: DdbAuthContext,
   opts: {
@@ -709,12 +716,24 @@ export async function importDdbLibraryEntries(
     sourceId?: number;
   },
 ): Promise<DdbLibraryImportResult> {
-  const catalog = await loadDdbCatalog(ctx);
-  if (opts.kind === 'monster') return importMonsterIds(ctx, opts.ids, catalog, opts.sourceId);
-  if (opts.kind === 'spell') {
-    return importSpellIds(ctx, opts.ids, catalog, opts.campaignId, opts.sourceId);
+  const ids = [...new Set(opts.ids.filter((id) => Number.isFinite(id) && id > 0))];
+  if (ids.length === 0) {
+    return { imported: [], errors: [{ id: 0, message: 'No entries selected' }] };
   }
-  return importItemIds(ctx, opts.ids, catalog, opts.campaignId, opts.sourceId);
+
+  let catalog: DdbCatalog;
+  try {
+    catalog = await loadDdbCatalog(ctx);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Failed to load D&D Beyond catalog';
+    return importFailureForIds(ids, message);
+  }
+
+  if (opts.kind === 'monster') return importMonsterIds(ctx, ids, catalog, opts.sourceId);
+  if (opts.kind === 'spell') {
+    return importSpellIds(ctx, ids, catalog, opts.campaignId, opts.sourceId);
+  }
+  return importItemIds(ctx, ids, catalog, opts.campaignId, opts.sourceId);
 }
 
 export async function importAllDdbLibraryFromSource(

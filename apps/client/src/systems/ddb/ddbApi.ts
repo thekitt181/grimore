@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { api } from '@/lib/axios';
+import { extractApiError } from '@/lib/apiError';
 import {
   coerceGrimoireCharacter,
   type DdbCampaignSummary,
@@ -198,17 +199,26 @@ export async function searchDdbLibraryMonsters(params: {
   skip?: number;
   take?: number;
 }): Promise<{ items: DdbLibraryMonsterSummary[]; total: number }> {
-  const { sourceIds, ...rest } = params;
-  const { data } = await api.get<{ items: DdbLibraryMonsterSummary[]; total: number }>(
-    '/ddb/library/monsters',
-    {
-      params: {
-        ...rest,
-        ...(sourceIds?.length ? { sourceIds: sourceIds.join(',') } : {}),
+  const { sourceIds, sourceId, ...rest } = params;
+  const resolvedSourceIds = sourceIds?.length
+    ? sourceIds
+    : sourceId != null && sourceId > 0
+      ? [sourceId]
+      : undefined;
+  try {
+    const { data } = await api.get<{ items: DdbLibraryMonsterSummary[]; total: number }>(
+      '/ddb/library/monsters',
+      {
+        params: {
+          ...rest,
+          ...(resolvedSourceIds?.length ? { sourceIds: resolvedSourceIds.join(',') } : {}),
+        },
       },
-    },
-  );
-  return data;
+    );
+    return data;
+  } catch (err) {
+    throw new Error(extractApiError(err, 'Monster search failed'));
+  }
 }
 
 export async function searchDdbLibrarySpells(params: {
@@ -264,8 +274,22 @@ async function postImportChunk(
     sourceId?: number;
   },
 ): Promise<DdbLibraryImportResult> {
-  const { data } = await api.post<DdbLibraryImportResult>('/ddb/library/import', body);
-  return data;
+  const payload = {
+    kind: body.kind,
+    ids: body.ids.map((id) => Number(id)).filter((id) => Number.isFinite(id) && id > 0),
+    ...(body.campaignId != null && Number(body.campaignId) > 0
+      ? { campaignId: Number(body.campaignId) }
+      : {}),
+    ...(body.sourceId != null && Number(body.sourceId) > 0
+      ? { sourceId: Number(body.sourceId) }
+      : {}),
+  };
+  try {
+    const { data } = await api.post<DdbLibraryImportResult>('/ddb/library/import', payload);
+    return data;
+  } catch (err) {
+    throw new Error(extractApiError(err, 'Import failed'));
+  }
 }
 
 async function importChunkWithRetry(
@@ -289,9 +313,10 @@ async function importChunkWithRetry(
         merged = mergeImportResults(merged, await postImportChunk({ ...body, ids: [id] }));
       } catch (singleErr) {
         if (axios.isAxiosError(singleErr)) {
-          const msg = (singleErr.response?.data as { error?: string } | undefined)?.error
-            ?? 'Server timed out — try again later';
-          merged.errors.push({ id, message: msg });
+          merged.errors.push({
+            id,
+            message: extractApiError(singleErr, 'Server timed out — try again later'),
+          });
           continue;
         }
         throw singleErr;
@@ -380,21 +405,11 @@ export async function importDdbLibraryEntries(
         }),
       );
     } catch (err) {
-      if (axios.isAxiosError(err)) {
-        const status = err.response?.status;
-        const msg = (err.response?.data as { error?: string } | undefined)?.error;
-        const detail = msg
-          ?? (isTimeoutStatus(status)
-            ? 'Server timed out — try importing fewer entries at a time'
-            : undefined)
-          ?? err.message
-          ?? 'Import failed';
-        for (const id of chunkIds) {
-          merged.errors.push({ id, message: detail });
-        }
-        continue;
+      const detail = extractApiError(err, 'Import failed');
+      for (const id of chunkIds) {
+        merged.errors.push({ id, message: detail });
       }
-      throw err;
+      continue;
     }
   }
 
