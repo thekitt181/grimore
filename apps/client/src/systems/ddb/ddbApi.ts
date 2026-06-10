@@ -245,7 +245,12 @@ export async function searchDdbLibraryItems(params: {
   return data.items ?? [];
 }
 
-const IMPORT_CHUNK_SIZE = 25;
+const MONSTER_IMPORT_CHUNK = 8;
+const DEFAULT_IMPORT_CHUNK = 15;
+
+function importChunkSize(kind: 'monster' | 'item' | 'spell'): number {
+  return kind === 'monster' ? MONSTER_IMPORT_CHUNK : DEFAULT_IMPORT_CHUNK;
+}
 
 function chunkIds(ids: number[], size: number): number[][] {
   const chunks: number[][] = [];
@@ -292,9 +297,10 @@ export async function importDdbLibraryEntries(body: {
   }
 
   let merged: DdbLibraryImportResult = { imported: [], errors: [] };
+  const chunkSize = importChunkSize(body.kind);
 
-  for (let i = 0; i < ids.length; i += IMPORT_CHUNK_SIZE) {
-    const chunkIds = ids.slice(i, i + IMPORT_CHUNK_SIZE);
+  for (let i = 0; i < ids.length; i += chunkSize) {
+    const chunkIds = ids.slice(i, i + chunkSize);
     try {
       const { data } = await api.post<DdbLibraryImportResult>('/ddb/library/import', {
         ...body,
@@ -358,11 +364,11 @@ export async function importAllDdbLibraryFromSource(
 
   for (const sourceId of sourceIds) {
     const monsterIds = await collectMonsterIdsForSource(sourceId);
-    for (const [i, chunk] of chunkIds(monsterIds, IMPORT_CHUNK_SIZE).entries()) {
+    for (const [i, chunk] of chunkIds(monsterIds, MONSTER_IMPORT_CHUNK).entries()) {
       onProgress?.({
         phase: 'monsters',
         sourceId,
-        done: Math.min((i + 1) * IMPORT_CHUNK_SIZE, monsterIds.length),
+        done: Math.min((i + 1) * MONSTER_IMPORT_CHUNK, monsterIds.length),
         total: monsterIds.length,
       });
       merged = mergeImportResults(
@@ -378,11 +384,11 @@ export async function importAllDdbLibraryFromSource(
       ...importOpts,
     });
     const spellIds = spells.map((s) => s.ddbId).filter((id) => Number.isFinite(id) && id > 0);
-    for (const [i, chunk] of chunkIds(spellIds, IMPORT_CHUNK_SIZE).entries()) {
+    for (const [i, chunk] of chunkIds(spellIds, DEFAULT_IMPORT_CHUNK).entries()) {
       onProgress?.({
         phase: 'spells',
         sourceId,
-        done: Math.min((i + 1) * IMPORT_CHUNK_SIZE, spellIds.length),
+        done: Math.min((i + 1) * DEFAULT_IMPORT_CHUNK, spellIds.length),
         total: spellIds.length,
       });
       merged = mergeImportResults(
@@ -398,11 +404,11 @@ export async function importAllDdbLibraryFromSource(
       ...importOpts,
     });
     const itemIds = items.map((item) => item.ddbId).filter((id) => Number.isFinite(id) && id > 0);
-    for (const [i, chunk] of chunkIds(itemIds, IMPORT_CHUNK_SIZE).entries()) {
+    for (const [i, chunk] of chunkIds(itemIds, DEFAULT_IMPORT_CHUNK).entries()) {
       onProgress?.({
         phase: 'items',
         sourceId,
-        done: Math.min((i + 1) * IMPORT_CHUNK_SIZE, itemIds.length),
+        done: Math.min((i + 1) * DEFAULT_IMPORT_CHUNK, itemIds.length),
         total: itemIds.length,
       });
       merged = mergeImportResults(

@@ -40,7 +40,7 @@ export { fetchDdbMonsterDetail } from './ddbMonsterFetch';
 const SPELL_CACHE_TTL = 60 * 60;
 const ITEM_CACHE_TTL = 60 * 30;
 const FETCH_BATCH = 100;
-const MONSTER_IMPORT_BATCH = 40;
+const MONSTER_IMPORT_BATCH = 8;
 /** Smaller Mongo writes — full global doc RMW times out on large batches from Render→Atlas. */
 const SAVE_BATCH = 15;
 const CATALOG_CACHE_TTL = 60 * 60;

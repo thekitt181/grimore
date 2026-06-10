@@ -339,7 +339,7 @@ async function enrichMonsterRecord(
   return merged;
 }
 
-/** Batch-fetch monsters for import; detail-fetches entries missing full stat blocks. */
+/** Batch-fetch monsters for import. Skips full detail unless batch data is not importable. */
 export async function fetchMonstersForImport(
   ctx: DdbAuthContext,
   ids: number[],
@@ -349,44 +349,18 @@ export async function fetchMonstersForImport(
 
   const needsDetail = unique.filter((id) => {
     const raw = out.get(id);
-    if (!raw) return true;
-    if (!monsterHasImportableStatBlock(raw)) return true;
-    return monsterNeedsDetailFetch(raw);
-  });
-
-  await runWithConcurrency(needsDetail, MONSTER_DETAIL_CONCURRENCY, async (id) => {
-    const enriched = await enrichMonsterRecord(ctx, id, out.get(id));
-    if (enriched) out.set(id, enriched);
-  });
-
-  // IDs missing from batch response entirely — detail-only fetch.
-  const neverFetched = unique.filter((id) => !out.has(id));
-  if (neverFetched.length > 0) {
-    await runWithConcurrency(neverFetched, 2, async (id) => {
-      try {
-        const detail = await fetchDdbMonsterDetailOnly(ctx, id);
-        if (detail) out.set(id, detail);
-      } catch (err) {
-        console.warn(`[DDB] monster ${id} missing from batch:`, err instanceof Error ? err.message : err);
-      }
-    });
-  }
-
-  // Last resort: retry detail for anything still missing (rate-limit recovery).
-  const stillMissing = unique.filter((id) => {
-    const raw = out.get(id);
     return !raw || !monsterHasImportableStatBlock(raw);
   });
-  if (stillMissing.length > 0) {
-    await runWithConcurrency(stillMissing, 2, async (id) => {
+
+  if (needsDetail.length > 0) {
+    await runWithConcurrency(needsDetail, 3, async (id) => {
       try {
         const detail = await fetchDdbMonsterDetailOnly(ctx, id);
-        if (detail) {
-          const merged = out.has(id) ? mergeMonsterDetail(out.get(id)!, detail) : detail;
-          out.set(id, merged);
-        }
+        if (!detail) return;
+        const existing = out.get(id);
+        out.set(id, existing ? mergeMonsterDetail(existing, detail) : detail);
       } catch (err) {
-        console.warn(`[DDB] monster ${id} detail retry failed:`, err instanceof Error ? err.message : err);
+        console.warn(`[DDB] monster ${id} detail fetch:`, err instanceof Error ? err.message : err);
       }
     });
   }
