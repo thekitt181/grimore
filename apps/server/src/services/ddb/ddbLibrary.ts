@@ -23,7 +23,7 @@ import {
 import { getCatalogRevision, saveItemsBulkForImport, saveMonstersBulkForImport, saveSpellsBulkForImport } from '../compendiumSync';
 import { unlockCompendiumSource } from '../compendiumSourcePolicy';
 import { sourceMatchesLocked } from '../compendiumVisibility';
-import { collectOverrideOnlySourceLabels, ensureBundledSourcesLocked } from '../compendiumBundledLock';
+import { collectOverrideOnlySourceLabels, ensureBundledSourcesLocked, ensureImportedSourcesUnlocked } from '../compendiumBundledLock';
 import { splitCompendiumSources } from '@grimoire/shared';
 import { redis } from '../../lib/redis';
 import {
@@ -905,6 +905,7 @@ export async function finishDdbLibraryImport(
   const { promoteFallbackToMongo } = await import('../compendiumFallbackMongoSync');
   await promoteFallbackToMongo('ddb-finish-import');
   await ensureBundledSourcesLocked('ddb-finish-import');
+  await ensureImportedSourcesUnlocked('ddb-finish-import');
 
   const { clearRawGlobalDocInflight } = await import('../compendiumOwlbearPersist');
   clearRawGlobalDocInflight();

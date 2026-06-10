@@ -57,7 +57,12 @@ import {
   type CompendiumVisibilityPolicy,
 } from './compendiumVisibility';
 import { getCompendiumVisibilityPolicy } from './compendiumSourcePolicy';
-import { bundledSourceLabelSet, ensureBundledSourcesLocked } from './compendiumBundledLock';
+import {
+  bundledSourceLabelSet,
+  ensureBundledSourcesLocked,
+  ensureImportedSourcesUnlocked,
+  importedSourceLabelSet,
+} from './compendiumBundledLock';
 import {
   readVisibilityPolicyFast,
   registerCatalogPolicySink,
@@ -679,9 +684,18 @@ function sourceListFilter(
   includeDrafts: boolean,
   excludeBundled: boolean,
   bundled: Set<string> | null,
+  importedOverrides: Set<string> | null,
 ): boolean {
-  if (excludeBundled && bundled?.has(normalizeSourceLabel(id))) return false;
-  if (!includeDrafts && sourceIsLocked(id, policy)) return false;
+  const normId = normalizeSourceLabel(id);
+  const isImported = Boolean(importedOverrides?.has(normId));
+
+  if (excludeBundled && bundled?.has(normId) && !isImported) return false;
+
+  if (!includeDrafts && sourceIsLocked(id, policy)) {
+    // Imported DDB books must stay visible even if a stale lock slipped through.
+    if (isImported) return c.total > 0;
+    return false;
+  }
   if (includeDrafts) return c.total > 0;
   return c.public > 0;
 }
@@ -694,8 +708,13 @@ export async function listSources(
 
   const includeDrafts = opts?.includeDrafts ?? false;
   const excludeBundled = opts?.excludeBundled ?? false;
+  if (excludeBundled) {
+    await ensureImportedSourcesUnlocked('listSources-books');
+  }
+
   const bundled = excludeBundled ? bundledSourceLabelSet() : null;
-  const policy = await getCatalogPolicy();
+  const importedOverrides = excludeBundled ? await importedSourceLabelSet() : null;
+  const policy = await readVisibilityPolicyFast();
 
   if (kind === 'monsters') {
     const merged = await getCachedMonsters();
@@ -713,7 +732,7 @@ export async function listSources(
       }
     }
     return Array.from(counts.entries())
-      .filter(([id, c]) => sourceListFilter(id, c, policy, includeDrafts, excludeBundled, bundled))
+      .filter(([id, c]) => sourceListFilter(id, c, policy, includeDrafts, excludeBundled, bundled, importedOverrides))
       .map(([id, c]) => ({
         id,
         label: formatSourceLabel(id),
@@ -740,7 +759,7 @@ export async function listSources(
       }
     }
     return Array.from(counts.entries())
-      .filter(([id, c]) => sourceListFilter(id, c, policy, includeDrafts, excludeBundled, bundled))
+      .filter(([id, c]) => sourceListFilter(id, c, policy, includeDrafts, excludeBundled, bundled, importedOverrides))
       .map(([id, c]) => ({
         id,
         label: formatSourceLabel(id),
@@ -766,7 +785,7 @@ export async function listSources(
     }
   }
   return Array.from(counts.entries())
-    .filter(([id, c]) => sourceListFilter(id, c, policy, includeDrafts, excludeBundled, bundled))
+    .filter(([id, c]) => sourceListFilter(id, c, policy, includeDrafts, excludeBundled, bundled, importedOverrides))
     .map(([id, c]) => ({
       id,
       label: formatSourceLabel(id),

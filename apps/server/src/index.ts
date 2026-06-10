@@ -93,6 +93,8 @@ async function startCompendiumBackground(): Promise<void> {
     await syncCompendiumStorageOnStartup();
     const { ensureBundledSourcesLocked } = await import('./services/compendiumBundledLock');
     await ensureBundledSourcesLocked('startup');
+    const { ensureImportedSourcesUnlocked } = await import('./services/compendiumBundledLock');
+    await ensureImportedSourcesUnlocked('startup');
     await warmCompendiumCatalog();
     startCompendiumMongoWatch();
     if (process.env['COMPENDIUM_MONGO_ONLY'] !== '1') {
