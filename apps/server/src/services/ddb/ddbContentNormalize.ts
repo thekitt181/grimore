@@ -673,7 +673,7 @@ function ddbPrimaryStatBlockText(raw: Record<string, unknown>): string {
     'fullDescription',
   ]) {
     const text = stripDdbHtml(raw[key]);
-    if (text.length >= 80) return text;
+    if (text.length >= 40) return text;
   }
   return '';
 }
@@ -768,9 +768,18 @@ function buildStructuredMonsterDescription(
   const characteristicsIsStatBlock = characteristics
     && (looksLikeDdbFullStatBlock(characteristics)
       || /armor class|hit points/i.test(characteristics));
-  if (characteristics && !characteristicsIsStatBlock && !monsterHasCombatFields(raw)) {
-    parts.push(characteristics);
+  const hasCombatNumbers = monsterHasCombatFields(raw);
+
+  if (characteristics) {
+    if (characteristicsIsStatBlock && !hasCombatNumbers) {
+      parts.push(characteristics);
+    } else if (!characteristicsIsStatBlock && !hasCombatNumbers) {
+      parts.push(characteristics);
+    }
   }
+
+  const typeLine = monsterTypeLine(raw, catalog);
+  if (typeLine && !characteristicsIsStatBlock) parts.push(typeLine);
 
   const ac = pickNumber(raw.armorClass, raw.ac);
   const acDesc = stripDdbHtml(raw.armorClassDescription);
@@ -879,6 +888,10 @@ function buildStructuredMonsterDescription(
   const structured = parts.join('\n').trim();
   if (structured.length >= 120) return structured;
 
+  if (structured.length < 40 && characteristics && !structured.includes(characteristics.slice(0, 32))) {
+    return characteristics + (structured ? `\n\n${structured}` : '');
+  }
+
   const htmlBlock = pickRichText(raw, [
     'statBlockDescription',
     'fullDescription',
@@ -900,9 +913,16 @@ export function ddbMonsterHasUsableDescription(
   catalog?: DdbCatalog,
 ): boolean {
   const desc = buildMonsterDescription(raw, catalog).trim();
-  if (desc.length >= 60) return true;
+  if (desc.length >= 24) return true;
   const name = String(raw.name ?? '').trim();
-  return desc.length > name.length + 20;
+  if (!name) return false;
+  if (monsterHasCombatFields(raw)) return true;
+  const characteristics = stripDdbHtml(raw.characteristicsDescription);
+  if (characteristics.length >= 40) return true;
+  const cr = catalog
+    ? resolveMonsterCr(raw, catalog.challengeRatingById)
+    : resolveMonsterCr(raw, new Map());
+  return cr !== '?' && monsterTypeLine(raw, catalog).length > 8;
 }
 
 function buildMonsterDescription(raw: Record<string, unknown>, catalog?: DdbCatalog): string {
@@ -917,7 +937,19 @@ function buildMonsterDescription(raw: Record<string, unknown>, catalog?: DdbCata
   const structured = buildStructuredMonsterDescription(raw, catalog);
   if (structured.length > ddbPrimary.length + 60) return structured;
   if (ddbPrimary) return appendSectionsIfMissing(ddbPrimary, [structured]);
-  return structured || ddbPrimary || '';
+  if (structured) return structured;
+  if (ddbPrimary) return ddbPrimary;
+
+  const fallback = pickRichText(raw, [
+    'statBlockDescription',
+    'statBlockHtml',
+    'fullDescription',
+    'description',
+    'actionsDescription',
+    'specialTraitsDescription',
+    'characteristicsDescription',
+  ]);
+  return fallback || '';
 }
 
 export function resolveMonsterCr(

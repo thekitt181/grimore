@@ -32,6 +32,7 @@ import {
 import { enrichEntitiesWithFullDefinitions } from './ddbDefinitionFetch';
 import {
   fetchMonstersForImport,
+  monsterHasImportableStatBlock,
 } from './ddbMonsterFetch';
 
 export { fetchDdbMonsterDetail } from './ddbMonsterFetch';
@@ -531,7 +532,7 @@ async function importMonsterIds(
           errors.push({ id, message: 'Monster not found on D&D Beyond (check account access)' });
           continue;
         }
-        if (!ddbMonsterHasUsableDescription(raw, catalog)) {
+        if (!monsterHasImportableStatBlock(raw) && !ddbMonsterHasUsableDescription(raw, catalog)) {
           errors.push({ id, message: 'No stat block text returned from D&D Beyond' });
           continue;
         }

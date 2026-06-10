@@ -5,7 +5,8 @@ import { stripDdbHtml } from './ddbHtml';
 
 const MONSTER_BATCH_SIZE = 40;
 const MONSTER_BATCH_CONCURRENCY = 3;
-const MONSTER_DETAIL_CONCURRENCY = 6;
+const MONSTER_DETAIL_CONCURRENCY = 4;
+const MONSTER_DETAIL_RETRY_ATTEMPTS = 5;
 
 export async function runWithConcurrency<T>(
   items: T[],
@@ -54,6 +55,18 @@ function unwrapMonsterPayload(json: unknown): Record<string, unknown> | null {
   }
 
   return null;
+}
+
+/** Flatten nested DDB monster payloads (batch/detail wrappers). */
+export function normalizeDdbMonsterRaw(entry: Record<string, unknown>): Record<string, unknown> {
+  let merged = { ...entry };
+  for (const key of ['monster', 'definition', 'data']) {
+    const nested = merged[key];
+    if (nested && typeof nested === 'object' && !Array.isArray(nested)) {
+      merged = mergeMonsterDetail(merged, nested as Record<string, unknown>);
+    }
+  }
+  return merged;
 }
 
 function pickRicherField(
@@ -270,7 +283,7 @@ export async function fetchDdbMonstersByIds(
     const list = Array.isArray(json.data) ? json.data : [];
     for (const entry of list) {
       if (!entry || typeof entry !== 'object') continue;
-      const monster = entry as Record<string, unknown>;
+      const monster = normalizeDdbMonsterRaw(entry as Record<string, unknown>);
       const id = Number(monster.id);
       if (Number.isFinite(id) && id > 0) out.set(id, monster);
     }
@@ -285,10 +298,11 @@ async function fetchDdbMonsterDetailOnly(
 ): Promise<Record<string, unknown> | null> {
   const res = await fetchWithRetry(DDB_URLS.monsterById(ddbId), {
     headers: monsterAuthHeaders(ctx, ddbId),
-  }, { label: `monster ${ddbId}` });
+  }, { label: `monster ${ddbId}`, attempts: MONSTER_DETAIL_RETRY_ATTEMPTS });
   if (res.status === 404) return null;
   if (!res.ok) throw new Error(`DDB monster fetch failed (${res.status})`);
-  return unwrapMonsterPayload(await res.json());
+  const payload = unwrapMonsterPayload(await res.json());
+  return payload ? normalizeDdbMonsterRaw(payload) : null;
 }
 
 /** True when batch payload is enough — otherwise fetch per-monster detail for full stat blocks. */
@@ -342,6 +356,19 @@ export async function fetchMonstersForImport(
     const enriched = await enrichMonsterRecord(ctx, id, out.get(id));
     if (enriched) out.set(id, enriched);
   });
+
+  // IDs missing from batch response entirely — detail-only fetch.
+  const neverFetched = unique.filter((id) => !out.has(id));
+  if (neverFetched.length > 0) {
+    await runWithConcurrency(neverFetched, 2, async (id) => {
+      try {
+        const detail = await fetchDdbMonsterDetailOnly(ctx, id);
+        if (detail) out.set(id, detail);
+      } catch (err) {
+        console.warn(`[DDB] monster ${id} missing from batch:`, err instanceof Error ? err.message : err);
+      }
+    });
+  }
 
   // Last resort: retry detail for anything still missing (rate-limit recovery).
   const stillMissing = unique.filter((id) => {
