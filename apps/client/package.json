@@ -11,6 +11,7 @@
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
+    "@better-auth/infra": "^0.2.14",
     "@grimoire/dice-engine": "workspace:*",
     "@grimoire/fog-engine": "workspace:*",
     "@grimoire/monster-dex": "workspace:^",

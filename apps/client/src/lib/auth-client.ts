@@ -1,4 +1,5 @@
 import { createAuthClient } from 'better-auth/react';
+import { dashClient } from '@better-auth/infra/client';
 import { getServerOrigin } from './appUrls';
 
 const BEARER_TOKEN_KEY = 'grimoire_bearer_token';
@@ -16,6 +17,7 @@ export function setBearerToken(token: string | null): void {
 
 export const authClient = createAuthClient({
   baseURL: getServerOrigin(),
+  plugins: [dashClient()] as never[],
   fetchOptions: {
     onSuccess: (ctx) => {
       const authToken = ctx.response.headers.get('set-auth-token');

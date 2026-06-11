@@ -1,11 +1,13 @@
 import { betterAuth } from 'better-auth';
 import { prismaAdapter } from 'better-auth/adapters/prisma';
+import { dash } from '@better-auth/infra';
 import { bearer } from 'better-auth/plugins';
 import { prisma } from './prisma';
 import { getClientOrigins, getPrimaryClientUrl } from './clientOrigins';
 
 const googleClientId = process.env['GOOGLE_CLIENT_ID']?.trim();
 const googleClientSecret = process.env['GOOGLE_CLIENT_SECRET']?.trim();
+const betterAuthApiKey = process.env['BETTER_AUTH_API_KEY']?.trim();
 
 export function isGoogleOAuthEnabled(): boolean {
   return Boolean(googleClientId && googleClientSecret);
@@ -13,6 +15,10 @@ export function isGoogleOAuthEnabled(): boolean {
 
 export function getAuthBaseUrl(): string {
   return process.env['BETTER_AUTH_URL']?.trim() ?? getPrimaryClientUrl();
+}
+
+export function isBetterAuthDashboardEnabled(): boolean {
+  return Boolean(betterAuthApiKey);
 }
 
 export const auth = betterAuth({
@@ -49,5 +55,15 @@ export const auth = betterAuth({
   verification: {
     modelName: 'AuthVerification',
   },
-  plugins: [bearer()],
+  plugins: [
+    bearer(),
+    ...(betterAuthApiKey
+      ? [
+          dash({
+            apiKey: betterAuthApiKey,
+            activityTracking: { enabled: true },
+          }),
+        ]
+      : []),
+  ],
 });

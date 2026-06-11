@@ -17,7 +17,7 @@ import ddbRoutes from './routes/ddb';
 import { closeMongo } from './lib/mongo';
 import { getClientOrigins, getPrimaryClientUrl } from './lib/clientOrigins';
 import { toNodeHandler } from 'better-auth/node';
-import { auth, getAuthBaseUrl, isGoogleOAuthEnabled } from './lib/auth';
+import { auth, getAuthBaseUrl, isBetterAuthDashboardEnabled, isGoogleOAuthEnabled } from './lib/auth';
 import { startCompendiumMongoWatch } from './services/compendiumMongoWatch';
 import { syncCompendiumStorageOnStartup } from './services/compendiumGlobal';
 import { reconcileRawGlobalStorage } from './services/compendiumOwlbearPersist';
@@ -71,6 +71,7 @@ app.get('/health', (_req, res) => {
       baseUrl: getAuthBaseUrl(),
       googleOAuth: isGoogleOAuthEnabled(),
       googleCallback: `${getAuthBaseUrl()}/api/auth/callback/google`,
+      dashboard: isBetterAuthDashboardEnabled(),
     },
     timestamp: new Date().toISOString(),
   });
