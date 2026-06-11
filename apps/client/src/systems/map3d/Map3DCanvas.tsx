@@ -9,6 +9,7 @@ import { useSessionStore } from '@/store/sessionStore';
 import type { DrawItem, MapItem, TextItem, TokenItem } from '@/systems/scene/types';
 import { itemCenterXZ } from './coords';
 import { Map3DGround } from './Map3DGround';
+import { Map3DImageWalls } from './Map3DImageWalls';
 import { Map3DWalls } from './Map3DWalls';
 import { Map3DTokens } from './Map3DTokens';
 import { Map3DDrawings } from './Map3DDrawings';
@@ -76,6 +77,7 @@ function Map3DSceneContent() {
     return (items.find((i) => i.type === 'map') as MapItem | undefined) ?? null;
   }, [items, activeMapId]);
   const autoExtrudeWalls = useMapStore((s) => s.autoExtrudeWalls);
+  const scanImageWalls = useMapStore((s) => s.scanImageWalls);
   const wallHeightCells = useMapStore((s) => s.wallHeightCells);
   const myRole = useSessionStore((s) => s.myRole);
   const activeTurnItemId = useInitiativeStore((s) =>
@@ -109,7 +111,10 @@ function Map3DSceneContent() {
       {maps.map((map) => (
         <group key={map.id}>
           <Map3DGround map={map} />
-          {autoExtrudeWalls && map.walls.length > 0 && (
+          {autoExtrudeWalls && scanImageWalls && (
+            <Map3DImageWalls map={map} wallHeight={wallHeight} />
+          )}
+          {autoExtrudeWalls && !scanImageWalls && map.walls.length > 0 && (
             <Map3DWalls map={map} wallHeight={wallHeight} wallThickness={wallThickness} />
           )}
         </group>

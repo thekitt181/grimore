@@ -79,10 +79,17 @@ interface SceneState extends ActiveGrid {
   setDrawStroke: (stroke: number) => void;
   setTextFontSize: (size: number) => void;
 
+  /** Auto-detect walls from map image darkness for 3D extrusion. */
+  scanImageWalls: boolean;
+  /** Luminance threshold for image wall scan (lower = more walls). */
+  wallScanThreshold: number;
+
   setViewMode: (mode: MapViewMode) => void;
   toggleViewMode: () => void;
   setAutoExtrudeWalls: (enabled: boolean) => void;
   setWallHeightCells: (cells: number) => void;
+  setScanImageWalls: (enabled: boolean) => void;
+  setWallScanThreshold: (threshold: number) => void;
 
   setActiveGrid: (grid: Partial<ActiveGrid>) => void;
 
@@ -128,6 +135,8 @@ export const useMapStore = create<SceneState>((set) => ({
   viewMode:     '2d',
   autoExtrudeWalls: true,
   wallHeightCells: 2.5,
+  scanImageWalls: true,
+  wallScanThreshold: 98,
   revealedCells: new Set<string>(),
   fogBrushSize: 2,
   fogEnabled: false,
@@ -160,6 +169,9 @@ export const useMapStore = create<SceneState>((set) => ({
   setAutoExtrudeWalls: (autoExtrudeWalls) => set({ autoExtrudeWalls }),
   setWallHeightCells: (wallHeightCells) =>
     set({ wallHeightCells: Math.max(0.5, Math.min(8, wallHeightCells)) }),
+  setScanImageWalls: (scanImageWalls) => set({ scanImageWalls }),
+  setWallScanThreshold: (wallScanThreshold) =>
+    set({ wallScanThreshold: Math.max(50, Math.min(180, wallScanThreshold)) }),
 
   setActiveGrid:  (grid) => set((s) => ({ ...s, ...grid })),
 
@@ -227,6 +239,8 @@ export const useMapStore = create<SceneState>((set) => ({
       viewMode: '2d',
       autoExtrudeWalls: true,
       wallHeightCells: 2.5,
+      scanImageWalls: true,
+      wallScanThreshold: 98,
       revealedCells: new Set<string>(),
       fogEnabled: false,
       sessionFogActive: false,

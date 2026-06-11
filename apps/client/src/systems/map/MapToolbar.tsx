@@ -9,6 +9,7 @@ import { clsx } from 'clsx';
 import { setFogVisibleForSession } from '@/systems/scene/fogActiveSync';
 import { DRAW_COLOR_PRESETS, DEFAULT_TEXT_FONT_SIZE, MAX_TEXT_FONT_SIZE, MIN_TEXT_FONT_SIZE } from './drawColors';
 import { MapViewModeToggle } from './MapViewModeToggle';
+import { useImageWallScan } from '@/systems/map3d/useImageWallScan';
 
 type ToolDef = { id: MapTool; label: string; icon: string; title: string };
 
@@ -56,6 +57,10 @@ export function MapToolbar() {
   const wallHeightCells = useMapStore((s) => s.wallHeightCells);
   const setAutoExtrudeWalls = useMapStore((s) => s.setAutoExtrudeWalls);
   const setWallHeightCells = useMapStore((s) => s.setWallHeightCells);
+  const scanImageWalls = useMapStore((s) => s.scanImageWalls);
+  const wallScanThreshold = useMapStore((s) => s.wallScanThreshold);
+  const setScanImageWalls = useMapStore((s) => s.setScanImageWalls);
+  const setWallScanThreshold = useMapStore((s) => s.setWallScanThreshold);
   const viewMode = useMapStore((s) => s.viewMode);
   const snapToGrid = useItemStore((s) => s.snapToGrid);
   const setSnap = useItemStore((s) => s.setSnap);
@@ -70,6 +75,9 @@ export function MapToolbar() {
   const activeMap = getActiveMap();
   const showGrid = activeMap?.showGrid ?? true;
   const wallCount = activeMap?.walls.length ?? 0;
+  const { result: scanResult, status: scanStatus, rescan } = useImageWallScan(
+    viewMode === '3d' ? activeMap ?? null : null,
+  );
 
   function handleFit() {
     const app = mapLayerRefs.app.current;
@@ -189,11 +197,57 @@ export function MapToolbar() {
       {viewMode === '3d' && isGM && (
         <div
           className="flex flex-col gap-2 p-2 rounded-lg shadow-panel ml-1"
-          style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)', width: 120 }}
+          style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)', width: 148 }}
         >
           <span className="font-ui text-[10px] tracking-wide" style={{ color: 'var(--color-accent-gold)' }}>
             3D MAP
           </span>
+          <label className="flex items-center gap-1.5 font-ui text-[10px] cursor-pointer" style={{ color: 'var(--color-text-secondary)' }}>
+            <input
+              type="checkbox"
+              checked={scanImageWalls}
+              onChange={(e) => setScanImageWalls(e.target.checked)}
+              className="accent-[#c9a84c]"
+            />
+            Scan walls from image
+          </label>
+          {scanImageWalls && (
+            <>
+              <label className="font-ui text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
+                Wall sensitivity ({wallScanThreshold})
+                <input
+                  type="range"
+                  min={60}
+                  max={150}
+                  step={2}
+                  value={wallScanThreshold}
+                  onChange={(e) => setWallScanThreshold(Number(e.target.value))}
+                  className="w-full accent-[#c9a84c] mt-1"
+                  title="Lower = detect more dark areas as walls"
+                />
+              </label>
+              <button
+                type="button"
+                className="btn-ghost text-[10px] py-1 px-2 w-full"
+                onClick={() => rescan()}
+                disabled={scanStatus === 'scanning'}
+              >
+                {scanStatus === 'scanning' ? 'Scanning…' : 'Rescan map'}
+              </button>
+              {scanStatus === 'ready' && scanResult && (
+                <span className="font-ui text-[9px]" style={{ color: 'var(--color-text-secondary)' }}>
+                  {scanResult.wallCellCount > 0
+                    ? `${scanResult.wallCellCount} wall cells extruded`
+                    : 'No walls detected — lower sensitivity or rescan'}
+                </span>
+              )}
+              {scanStatus === 'error' && (
+                <span className="font-ui text-[9px]" style={{ color: 'var(--color-accent-red-hot)' }}>
+                  Could not scan map image
+                </span>
+              )}
+            </>
+          )}
           <label className="flex items-center gap-1.5 font-ui text-[10px] cursor-pointer" style={{ color: 'var(--color-text-secondary)' }}>
             <input
               type="checkbox"
@@ -219,9 +273,9 @@ export function MapToolbar() {
           <span className="font-ui text-[9px] leading-snug" style={{ color: 'var(--color-text-secondary)' }}>
             Drag to orbit · scroll to zoom
           </span>
-          {wallCount === 0 && (
+          {!scanImageWalls && wallCount === 0 && (
             <span className="font-ui text-[9px] leading-snug" style={{ color: 'var(--color-accent-gold)' }}>
-              Use the Wall tool (🧱) on the 2D map to draw lines of sight — those segments extrude here.
+              Enable image scan, or draw walls with 🧱 on the 2D map.
             </span>
           )}
         </div>
