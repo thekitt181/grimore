@@ -224,6 +224,8 @@ export interface DdbLibraryImportJobProgress {
   total: number;
   bookImported?: number;
   bookErrors?: number;
+  /** Source books fully imported (used to resume after server restart). */
+  completedSourceIds?: number[];
 }
 
 export interface DdbLibraryImportJob {

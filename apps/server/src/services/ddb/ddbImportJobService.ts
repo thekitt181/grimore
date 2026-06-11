@@ -6,6 +6,7 @@ import type {
   DdbLibraryImportResult,
 } from '@grimoire/shared';
 import { prisma } from '../../lib/prisma';
+import { sanitizeForPostgres, stripNullBytes } from '../../lib/sanitizePostgresText';
 import { getCobaltForUser } from './ddbService';
 import { getDdbAuthContext } from './ddbAuthContext';
 import { filterAccessibleSourceIds } from './ddbAccessibleSources';
@@ -90,11 +91,57 @@ async function isJobCancelled(jobId: string): Promise<boolean> {
   return row?.status === 'CANCELLED';
 }
 
-async function updateJobProgress(jobId: string, progress: DdbLibraryImportJobProgress): Promise<void> {
+function parseCompletedSourceIds(progress: unknown): Set<number> {
+  const ids = new Set<number>();
+  if (!progress || typeof progress !== 'object') return ids;
+  const raw = progress as DdbLibraryImportJobProgress;
+  for (const id of raw.completedSourceIds ?? []) {
+    if (Number.isFinite(id)) ids.add(id);
+  }
+  if (raw.phase === 'complete' && Number.isFinite(raw.sourceId)) {
+    ids.add(raw.sourceId);
+  }
+  return ids;
+}
+
+function parsePartialResult(raw: unknown): DdbLibraryImportResult {
+  if (!raw || typeof raw !== 'object') return { imported: [], errors: [] };
+  const r = raw as DdbLibraryImportResult;
+  return {
+    imported: Array.isArray(r.imported) ? r.imported : [],
+    errors: Array.isArray(r.errors) ? r.errors : [],
+    ...(r.catalogRev ? { catalogRev: r.catalogRev } : {}),
+    ...(r.sourcesUnlocked ? { sourcesUnlocked: r.sourcesUnlocked } : {}),
+    ...(r.mongoPersisted !== undefined ? { mongoPersisted: r.mongoPersisted } : {}),
+    ...(r.skipped !== undefined ? { skipped: r.skipped } : {}),
+  };
+}
+
+async function persistJobPatch(
+  jobId: string,
+  data: Prisma.DdbLibraryImportJobUpdateInput,
+): Promise<void> {
+  const sanitized = sanitizeForPostgres(data);
   await prisma.ddbLibraryImportJob.update({
     where: { id: jobId },
-    data: { progress: progress as unknown as Prisma.InputJsonValue },
+    data: sanitized,
   });
+}
+
+async function updateJobProgress(jobId: string, progress: DdbLibraryImportJobProgress): Promise<void> {
+  await persistJobPatch(jobId, {
+    progress: progress as unknown as Prisma.InputJsonValue,
+  });
+}
+
+async function persistPartialResult(jobId: string, result: DdbLibraryImportResult): Promise<void> {
+  try {
+    await persistJobPatch(jobId, {
+      result: result as unknown as Prisma.InputJsonValue,
+    });
+  } catch (err) {
+    console.warn(`[DDB] Could not persist partial import result for job ${jobId}:`, err);
+  }
 }
 
 async function finishJob(
@@ -106,16 +153,29 @@ async function finishJob(
     progress?: DdbLibraryImportJobProgress;
   },
 ): Promise<void> {
-  await prisma.ddbLibraryImportJob.update({
-    where: { id: jobId },
-    data: {
-      status,
-      completedAt: new Date(),
-      ...(data.result ? { result: data.result as unknown as Prisma.InputJsonValue } : {}),
-      ...(data.errorMessage ? { errorMessage: data.errorMessage } : {}),
-      ...(data.progress ? { progress: data.progress as unknown as Prisma.InputJsonValue } : {}),
-    },
-  });
+  const payload: Prisma.DdbLibraryImportJobUpdateInput = {
+    status,
+    completedAt: new Date(),
+    ...(data.result ? { result: data.result as unknown as Prisma.InputJsonValue } : {}),
+    ...(data.errorMessage ? { errorMessage: data.errorMessage } : {}),
+    ...(data.progress ? { progress: data.progress as unknown as Prisma.InputJsonValue } : {}),
+  };
+
+  try {
+    await persistJobPatch(jobId, payload);
+  } catch (err) {
+    console.error(`[DDB] finishJob ${jobId} failed — saving status only:`, err);
+    await prisma.ddbLibraryImportJob.update({
+      where: { id: jobId },
+      data: {
+        status,
+        completedAt: new Date(),
+        errorMessage: stripNullBytes(
+          data.errorMessage ?? 'Import finished but job record could not store full details',
+        ),
+      },
+    });
+  }
 }
 
 async function requireDdbAuthForUser(userId: string) {
@@ -129,6 +189,7 @@ async function requireDdbAuthForUser(userId: string) {
 async function runDdbLibraryImportJob(jobId: string): Promise<void> {
   if (runningJobs.has(jobId)) return;
   runningJobs.add(jobId);
+  let merged: DdbLibraryImportResult = { imported: [], errors: [] };
   try {
     const job = await prisma.ddbLibraryImportJob.findUnique({ where: { id: jobId } });
     if (!job || job.status !== 'RUNNING') return;
@@ -140,19 +201,40 @@ async function runDdbLibraryImportJob(jobId: string): Promise<void> {
       campaignId: job.campaignId ?? undefined,
     });
 
-    let merged: DdbLibraryImportResult = { imported: [], errors: [] };
-    if (inaccessible.length > 0) {
+    const completedSourceIds = parseCompletedSourceIds(job.progress);
+    const pendingAccessible = accessible.filter((id) => !completedSourceIds.has(id));
+
+    merged = parsePartialResult(job.result);
+    if (inaccessible.length > 0 && merged.errors.length === 0) {
       merged.errors.push({
         id: 0,
         message: `Skipped ${inaccessible.length} book(s) you don't own or have shared access to`,
       });
+    } else if (inaccessible.length > 0) {
+      const msg = `Skipped ${inaccessible.length} book(s) you don't own or have shared access to`;
+      if (!merged.errors.some((e) => e.message === msg)) {
+        merged.errors.push({ id: 0, message: msg });
+      }
+    }
+
+    if (pendingAccessible.length === 0) {
+      await finishJob(jobId, 'COMPLETED', { result: merged });
+      return;
+    }
+
+    if (completedSourceIds.size > 0) {
+      console.log(
+        `[DDB] Resuming import job ${jobId}: ${completedSourceIds.size} book(s) done, ${pendingAccessible.length} remaining`,
+      );
     }
 
     const bookTotal = accessible.length;
-    for (const [bookIdx, sourceId] of accessible.entries()) {
+    const completedCount = completedSourceIds.size;
+
+    for (const [pendingIdx, sourceId] of pendingAccessible.entries()) {
       if (await isJobCancelled(jobId)) return;
 
-      const bookIndex = bookIdx + 1;
+      const bookIndex = completedCount + pendingIdx + 1;
       const sourceName = sourceNames[sourceId];
       let bookMerged: DdbLibraryImportResult = { imported: [], errors: [] };
 
@@ -160,6 +242,7 @@ async function runDdbLibraryImportJob(jobId: string): Promise<void> {
         sourceId,
         bookIndex,
         bookTotal,
+        completedSourceIds: [...completedSourceIds, ...pendingAccessible.slice(0, pendingIdx)],
         ...(sourceName ? { sourceName } : {}),
       };
 
@@ -215,6 +298,7 @@ async function runDdbLibraryImportJob(jobId: string): Promise<void> {
         }
       }
 
+      const doneIds = [...completedSourceIds, ...pendingAccessible.slice(0, pendingIdx + 1)];
       await updateJobProgress(jobId, {
         ...progressBase,
         phase: 'complete',
@@ -222,7 +306,10 @@ async function runDdbLibraryImportJob(jobId: string): Promise<void> {
         total: bookTotal,
         bookImported: bookMerged.imported.length,
         bookErrors: bookMerged.errors.length,
+        completedSourceIds: doneIds,
       });
+      completedSourceIds.add(sourceId);
+      await persistPartialResult(jobId, merged);
     }
 
     if (await isJobCancelled(jobId)) return;
@@ -236,9 +323,9 @@ async function runDdbLibraryImportJob(jobId: string): Promise<void> {
 
     await finishJob(jobId, 'COMPLETED', { result: merged });
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Import failed';
+    const message = stripNullBytes(err instanceof Error ? err.message : 'Import failed');
     console.error(`[DDB] import job ${jobId} failed:`, err);
-    await finishJob(jobId, 'FAILED', { errorMessage: message });
+    await finishJob(jobId, 'FAILED', { errorMessage: message, result: merged });
   } finally {
     runningJobs.delete(jobId);
   }
@@ -279,7 +366,7 @@ export async function startDdbLibraryImportJob(
   });
 
   const row = await prisma.ddbLibraryImportJob.create({
-    data: {
+    data: sanitizeForPostgres({
       userId,
       skipExisting: Boolean(opts.skipExisting),
       campaignId: opts.campaignId ?? null,
@@ -292,8 +379,9 @@ export async function startDdbLibraryImportJob(
         bookTotal: unique.length,
         done: 0,
         total: 0,
+        completedSourceIds: [],
       } as unknown as Prisma.InputJsonValue,
-    },
+    }),
   });
 
   void runDdbLibraryImportJob(row.id);
