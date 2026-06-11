@@ -214,7 +214,7 @@ export function MapToolbar() {
           {scanImageWalls && (
             <>
               <span className="font-ui text-[9px] leading-snug" style={{ color: 'var(--color-text-secondary)' }}>
-                Detects walls, water, fountains, stairs, tables, chairs &amp; props from map art.
+                Detects walls and door openings from map art.
               </span>
               <label className="font-ui text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
                 Wall sensitivity ({wallScanThreshold})
@@ -240,7 +240,7 @@ export function MapToolbar() {
               {scanStatus === 'ready' && scanResult && (
                 <span className="font-ui text-[9px]" style={{ color: 'var(--color-text-secondary)' }}>
                   {scanResult.featureCount > 0
-                    ? `${scanResult.wallSegments.length} wall runs · ${scanResult.props.length} props · ${scanResult.pits.length} pits · ${scanResult.waters.length} water · ${scanResult.stairs.length} stairs`
+                    ? `${scanResult.wallSegments.length} walls · ${scanResult.doors.length} doors`
                     : 'Nothing detected — lower sensitivity or rescan'}
                 </span>
               )}
