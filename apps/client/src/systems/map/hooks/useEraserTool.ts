@@ -5,35 +5,7 @@ import { useItemStore, getActiveMap } from '@/systems/scene/store/itemStore';
 import { useSessionStore } from '@/store/sessionStore';
 import { emitItemRemove, emitItemUpdate } from '@/systems/scene/sceneSync';
 import { hitTest } from '@/systems/scene/hitTest';
-import type { MapItem, WallSegment } from '@/systems/scene/types';
-
-const WALL_ERASE_RADIUS = 14;
-
-function distToSegment(px: number, py: number, seg: WallSegment): number {
-  const { a, b } = seg;
-  const dx = b.x - a.x;
-  const dy = b.y - a.y;
-  const lenSq = dx * dx + dy * dy;
-  if (lenSq < 1e-6) return Math.hypot(px - a.x, py - a.y);
-  const t = Math.max(0, Math.min(1, ((px - a.x) * dx + (py - a.y) * dy) / lenSq));
-  return Math.hypot(px - a.x - t * dx, py - a.y - t * dy);
-}
-
-function eraseNearestWall(map: MapItem, localX: number, localY: number): boolean {
-  const walls = map.walls ?? [];
-  let bestIdx = -1;
-  let bestD = WALL_ERASE_RADIUS;
-  walls.forEach((seg, i) => {
-    const d = distToSegment(localX, localY, seg);
-    if (d < bestD) { bestD = d; bestIdx = i; }
-  });
-  if (bestIdx < 0) return false;
-  const next = walls.filter((_, i) => i !== bestIdx);
-  const patch: Partial<MapItem> = { walls: next };
-  useItemStore.getState().updateItem(map.id, patch);
-  emitItemUpdate([{ id: map.id, patch }]);
-  return true;
-}
+import { nearestWallIndex, removeWallIndices, toMapLocal } from '../wallUtils';
 
 function canEraseItem(
   item: { type: string; ownerId?: string },
@@ -88,9 +60,14 @@ export function useEraserTool(appReady = false) {
 
       if (isGM) {
         const map = getActiveMap();
-        if (map) {
-          eraseNearestWall(map, wp.x - map.x, wp.y - map.y);
-        }
+        if (!map) return;
+        const local = toMapLocal(wp.x, wp.y, map);
+        const idx = nearestWallIndex(local.x, local.y, map.walls ?? []);
+        if (idx < 0) return;
+        const next = removeWallIndices(map, [idx]);
+        const patch = { walls: next };
+        useItemStore.getState().updateItem(map.id, patch);
+        emitItemUpdate([{ id: map.id, patch }]);
       }
     }
 

@@ -24,6 +24,8 @@ export type MapTool =
 
 export type MapViewMode = '2d' | '3d';
 
+export type WallMode = 'freehand' | 'rect' | 'circle' | 'eraser';
+
 export interface MapViewport {
   x: number;
   y: number;
@@ -69,8 +71,12 @@ interface SceneState extends ActiveGrid {
   drawStroke: number;
   textFontSize: number;
 
+  /** Sub-mode when activeTool is wall. */
+  wallMode: WallMode;
+
   // ── Actions ────────────────────────────────────────────────────────────────
   setTool: (tool: MapTool) => void;
+  setWallMode: (mode: WallMode) => void;
   setViewport: (vp: MapViewport) => void;
   setFogBrushSize: (size: number) => void;
   setFogEnabled: (enabled: boolean) => void;
@@ -131,6 +137,7 @@ export const useMapStore = create<SceneState>((set) => ({
   ...DEFAULT_GRID,
 
   activeTool:   'select',
+  wallMode:     'freehand',
   viewport:     { x: 0, y: 0, scale: 1 },
   viewMode:     '2d',
   autoExtrudeWalls: true,
@@ -155,6 +162,7 @@ export const useMapStore = create<SceneState>((set) => ({
         sessionFogActive: fogTool ? true : s.sessionFogActive,
       };
     }),
+  setWallMode: (wallMode) => set({ wallMode }),
   setViewport:    (viewport) => set({ viewport }),
   setFogBrushSize:(fogBrushSize) => set({ fogBrushSize }),
   setFogEnabled:  (fogEnabled) => set({ fogEnabled }),
@@ -235,6 +243,7 @@ export const useMapStore = create<SceneState>((set) => ({
     set({
       ...DEFAULT_GRID,
       activeTool: 'select',
+      wallMode: 'freehand',
       viewport: { x: 0, y: 0, scale: 1 },
       viewMode: '2d',
       autoExtrudeWalls: true,

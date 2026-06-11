@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useMapStore, type MapTool } from './store/mapStore';
+import { useMapStore, type MapTool, type WallMode } from './store/mapStore';
 import { useItemStore, getActiveMap } from '@/systems/scene/store/itemStore';
 import { useSessionStore } from '@/store/sessionStore';
 import { fitMapToScreen } from './hooks/useMapViewport';
@@ -18,7 +18,7 @@ const GM_TOOLS: ToolDef[] = [
   { id: 'pan',       label: 'Pan',     icon: '✋',  title: 'Pan the map (middle-mouse or this tool)' },
   { id: 'fog-reveal',label: 'Reveal',  icon: '☀',  title: 'Reveal fog cells' },
   { id: 'fog-hide',  label: 'Hide',    icon: '🌑', title: 'Hide fog cells' },
-  { id: 'wall',      label: 'Wall',    icon: '🧱', title: 'Draw LOS walls (GM). Use Eraser to remove wall segments.' },
+  { id: 'wall',      label: 'Wall',    icon: '🧱', title: 'Draw & erase LOS walls (freehand, shapes)' },
   { id: 'measure',   label: 'Measure', icon: '📏', title: 'Measure distance' },
   { id: 'calibrate', label: 'Calibrate', icon: '⊹', title: 'Calibrate grid — drag a rectangle over one cell' },
 ];
@@ -27,6 +27,13 @@ const PLAYER_TOOLS: ToolDef[] = [
   { id: 'select',  label: 'Select',  icon: '↖',  title: 'Select & move your token' },
   { id: 'pan',     label: 'Pan',     icon: '✋',  title: 'Pan the map (pinch to zoom)' },
   { id: 'measure', label: 'Measure', icon: '📏', title: 'Measure distance' },
+];
+
+const WALL_TOOLS: Array<{ id: WallMode; label: string; icon: string; title: string }> = [
+  { id: 'freehand', label: 'Free',   icon: '✏', title: 'Freehand wall' },
+  { id: 'rect',     label: 'Rect',   icon: '▭', title: 'Rectangle wall outline' },
+  { id: 'circle',   label: 'Circle', icon: '○', title: 'Circle / ellipse wall outline' },
+  { id: 'eraser',   label: 'Erase',  icon: '⌫', title: 'Erase wall segments' },
 ];
 
 const DRAW_TOOLS: ToolDef[] = [
@@ -43,7 +50,9 @@ const ACTIVE_BTN = 'bg-[#c9a84c22] text-[#c9a84c] ring-1 ring-[#c9a84c66]';
 
 export function MapToolbar() {
   const activeTool = useMapStore((s) => s.activeTool);
+  const wallMode = useMapStore((s) => s.wallMode);
   const setTool = useMapStore((s) => s.setTool);
+  const setWallMode = useMapStore((s) => s.setWallMode);
   const drawColor = useMapStore((s) => s.drawColor);
   const drawStroke = useMapStore((s) => s.drawStroke);
   const textFontSize = useMapStore((s) => s.textFontSize);
@@ -70,7 +79,9 @@ export function MapToolbar() {
   const tools = isGM ? GM_TOOLS : PLAYER_TOOLS;
 
   const [showDrawPanel, setShowDrawPanel] = useState(false);
+  const [showWallPanel, setShowWallPanel] = useState(false);
   const isDrawTool = DRAW_TOOLS.some((t) => t.id === activeTool);
+  const isWallTool = activeTool === 'wall';
 
   const activeMap = getActiveMap();
   const showGrid = activeMap?.showGrid ?? true;
@@ -113,9 +124,14 @@ export function MapToolbar() {
           <button
             key={tool.id}
             title={tool.title}
-            onClick={() => { setTool(tool.id); setShowDrawPanel(false); }}
+            onClick={() => {
+              setTool(tool.id);
+              setShowDrawPanel(false);
+              if (tool.id === 'wall') setShowWallPanel((p) => !p);
+              else setShowWallPanel(false);
+            }}
             className={clsx('w-9 h-9 rounded flex items-center justify-center text-base font-ui transition-all',
-              activeTool === tool.id ? ACTIVE_BTN : 'text-[#8a8075] hover:text-[#e8e0d0] hover:bg-[#1c1c28]'
+              (activeTool === tool.id || (tool.id === 'wall' && showWallPanel)) ? ACTIVE_BTN : 'text-[#8a8075] hover:text-[#e8e0d0] hover:bg-[#1c1c28]'
             )}
           >
             {tool.icon}
@@ -128,7 +144,7 @@ export function MapToolbar() {
         <div className="gold-divider my-1" />
         <button
           title="Drawing tools"
-          onClick={() => setShowDrawPanel((p) => !p)}
+          onClick={() => { setShowDrawPanel((p) => !p); setShowWallPanel(false); }}
           className={clsx(BTN, (showDrawPanel || isDrawTool) && ACTIVE_BTN)}
         >
           ✏
@@ -281,6 +297,31 @@ export function MapToolbar() {
               Enable auto-scan, or draw walls with 🧱 on the 2D map.
             </span>
           )}
+        </div>
+      )}
+
+      {/* Wall sub-panel */}
+      {showWallPanel && isGM && (
+        <div
+          className="flex flex-col gap-1 p-2 rounded-lg shadow-panel"
+          style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)', width: 52 }}
+        >
+          {WALL_TOOLS.map((tool) => (
+            <button
+              key={tool.id}
+              title={tool.title}
+              onClick={() => { setTool('wall'); setWallMode(tool.id); }}
+              className={clsx('w-9 h-9 rounded flex items-center justify-center text-sm font-ui transition-all',
+                isWallTool && wallMode === tool.id ? ACTIVE_BTN : 'text-[#8a8075] hover:text-[#e8e0d0] hover:bg-[#1c1c28]'
+              )}
+            >
+              {tool.icon}
+            </button>
+          ))}
+          <div className="gold-divider my-1" />
+          <span className="font-ui text-[9px] text-center px-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+            {wallCount} segs
+          </span>
         </div>
       )}
 

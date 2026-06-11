@@ -33,6 +33,7 @@ export function useItemRenderer(
 ) {
   const items   = useItemStore((s) => s.items);
   const selectedIds = useItemStore((s) => s.selectedIds);
+  const selectedWallIndices = useItemStore((s) => s.selectedWallIndices);
   const myRole  = useSessionStore((s) => s.myRole);
   const myUserId = useSessionStore((s) => s.myUserId);
   const revealedCells = useMapStore((s) => s.revealedCells);
@@ -173,9 +174,11 @@ export function useItemRenderer(
           layer.addChild(wc);
           wallContainers.current.set(map.id, wc);
         }
-        const wallSig = wallVisualSignature(map.id, map.walls ?? []);
+        const isActiveMap = activeMap?.id === map.id;
+        const wallSel = isActiveMap ? selectedWallIndices : [];
+        const wallSig = wallVisualSignature(map.id, map.walls ?? [], wallSel);
         if (wallSignatures.current.get(map.id) !== wallSig) {
-          renderMapWalls(wc, map.walls ?? []);
+          renderMapWalls(wc, map.walls ?? [], new Set(wallSel));
           wallSignatures.current.set(map.id, wallSig);
         }
         wc.scale.set(1, 1);
@@ -195,6 +198,7 @@ export function useItemRenderer(
   }, [
     items,
     selectedIds,
+    selectedWallIndices,
     myRole,
     myUserId,
     revealedCells,

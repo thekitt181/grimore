@@ -22,6 +22,7 @@ import { useHandoutViewerStore } from '@/systems/compendium/handoutViewerStore';
 import { isMobileClient } from '@/lib/socket';
 import { isDdbPcToken } from '@/systems/ddb/ddbTokenUtils';
 import { useDdbStore } from '@/systems/ddb/ddbStore';
+import { nearestWallIndex, wallIndicesInWorldRect } from '@/systems/map/wallUtils';
 import type { TokenItem } from '../types';
 
 interface MoveState {
@@ -124,7 +125,10 @@ export function useSelectionTool(appReady: boolean) {
         const additive = e.shiftKey;
         const alreadySelected = store.selectedIds.includes(hit.id);
         if (additive) store.select([hit.id], 'toggle');
-        else if (!alreadySelected) store.select([hit.id], 'set');
+        else if (!alreadySelected) {
+          store.select([hit.id], 'set');
+          store.clearWallSelection();
+        }
 
         const ids = useItemStore.getState().selectedIds.filter((id) => {
           const it = store.items[id];
@@ -132,6 +136,21 @@ export function useSelectionTool(appReady: boolean) {
         });
         if (ids.length) beginMove(ids);
         return;
+      }
+
+      if (gm) {
+        const map = getActiveMap();
+        if (map) {
+          const wallIdx = nearestWallIndex(wx - map.x, wy - map.y, map.walls ?? []);
+          if (wallIdx >= 0) {
+            if (e.shiftKey) store.selectWalls([wallIdx], 'toggle');
+            else {
+              store.selectWalls([wallIdx], 'set');
+              store.select([], 'set');
+            }
+            return;
+          }
+        }
       }
 
       // No token/drawing/text under the cursor. If a *selected* map sits here,
@@ -255,7 +274,16 @@ export function useSelectionTool(appReady: boolean) {
             .filter((it) => it.type !== 'map')
             .filter((it) => itemIntersectsRect(it, x, y, w, h))
             .map((it) => it.id);
-          useItemStore.getState().select(hits, e.shiftKey ? 'add' : 'set');
+          const mode = e.shiftKey ? 'add' : 'set';
+          const itemStore = useItemStore.getState();
+          itemStore.select(hits, mode);
+          if (gm) {
+            const map = getActiveMap();
+            if (map) {
+              const wallHits = wallIndicesInWorldRect(map.walls ?? [], map, x, y, w, h);
+              itemStore.selectWalls(wallHits, mode);
+            }
+          }
         }
         marquee = null;
       }

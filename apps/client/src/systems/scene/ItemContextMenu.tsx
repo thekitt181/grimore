@@ -4,7 +4,8 @@ import { useMapStore } from '@/systems/map/store/mapStore';
 import { useSessionStore } from '@/store/sessionStore';
 import { clientToWorld } from './sceneRefs';
 import { hitTest, hitTestMap, isMapGroundHit, isCanvasContextEvent, isCanvasPointerEvent } from './hitTest';
-import { emitItemAdd, emitItemUpdate, emitItemRemove } from './sceneSync';
+import { emitItemAdd, emitItemUpdate } from './sceneSync';
+import { deleteCurrentSelection } from './deleteSelection';
 import { syncGridToMap } from './syncGridToMap';
 import type { SessionUser } from '@grimoire/shared';
 import type { Item, MapItem, TokenItem, HandoutItem } from './types';
@@ -124,6 +125,7 @@ export function ItemContextMenu() {
   const ref = useRef<HTMLDivElement>(null);
 
   const selectedIds = useItemStore((s) => s.selectedIds);
+  const selectedWallIndices = useItemStore((s) => s.selectedWallIndices);
   const items = useItemStore((s) => s.items);
   const myRole = useSessionStore((s) => s.myRole);
   const connectedUsers = useSessionStore((s) => s.connectedUsers);
@@ -415,8 +417,7 @@ export function ItemContextMenu() {
     close();
   }
   function del() {
-    useItemStore.getState().removeItems(ids);
-    emitItemRemove(ids);
+    deleteCurrentSelection();
     close();
   }
 
@@ -459,7 +460,13 @@ export function ItemContextMenu() {
       }}
     >
       <div className="px-3 py-1 font-display text-xs tracking-wider uppercase" style={{ color: 'var(--color-accent-gold)' }}>
-        {selected.length > 1 ? `${selected.length} items` : single?.type}
+        {selectedWallIndices.length > 0 && selected.length === 0
+          ? `${selectedWallIndices.length} walls`
+          : selectedWallIndices.length > 0
+            ? `${selected.length} items · ${selectedWallIndices.length} walls`
+            : selected.length > 1
+              ? `${selected.length} items`
+              : single?.type}
       </div>
       <div className="gold-divider my-1" />
 

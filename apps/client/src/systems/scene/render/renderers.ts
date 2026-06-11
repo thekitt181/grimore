@@ -100,22 +100,31 @@ function renderMap(c: Container, item: MapItem) {
   c.addChild(border);
 }
 
-export function wallVisualSignature(mapId: string, walls: WallSegment[]): string {
-  return `walls|${mapId}|${walls.map((w) => `${w.a.x},${w.a.y},${w.b.x},${w.b.y}`).join(';')}`;
+export function wallVisualSignature(mapId: string, walls: WallSegment[], selectedWallIndices?: number[]): string {
+  const sel = selectedWallIndices?.length ? `|sel:${[...selectedWallIndices].sort((a, b) => a - b).join(',')}` : '';
+  return `walls|${mapId}|${walls.map((w) => `${w.a.x},${w.a.y},${w.b.x},${w.b.y}`).join(';')}${sel}`;
 }
 
 /** LOS walls — GM-only overlay above the map image/grid. */
-export function renderMapWalls(c: Container, walls: WallSegment[]) {
+export function renderMapWalls(c: Container, walls: WallSegment[], selectedIndices?: ReadonlySet<number>) {
   c.removeChildren();
   if (walls.length === 0) return;
   const wallGfx = new Graphics();
   wallGfx.label = 'walls';
-  wallGfx.setStrokeStyle({ width: 3, color: 0xef4444, alpha: 0.85, cap: 'round', join: 'round' });
-  for (const w of walls) {
+  for (let i = 0; i < walls.length; i++) {
+    const w = walls[i]!;
+    const selected = selectedIndices?.has(i) ?? false;
+    wallGfx.setStrokeStyle({
+      width: selected ? 4 : 3,
+      color: selected ? 0xc9a84c : 0xef4444,
+      alpha: selected ? 1 : 0.85,
+      cap: 'round',
+      join: 'round',
+    });
     wallGfx.moveTo(w.a.x, w.a.y);
     wallGfx.lineTo(w.b.x, w.b.y);
+    wallGfx.stroke();
   }
-  wallGfx.stroke();
   c.addChild(wallGfx);
 }
 

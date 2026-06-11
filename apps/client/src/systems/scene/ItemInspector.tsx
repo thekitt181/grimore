@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useItemStore } from './store/itemStore';
 import { useMapStore } from '@/systems/map/store/mapStore';
 import { useSessionStore } from '@/store/sessionStore';
-import { emitItemUpdate, emitItemRemove } from './sceneSync';
+import { emitItemUpdate } from './sceneSync';
 import { syncGridToMap } from './syncGridToMap';
 import type { Item, MapItem, TokenItem, TextItem, DrawItem } from './types';
 import { isHpHiddenFromPlayers } from './types';
@@ -10,18 +10,20 @@ import { visionFeet, visionRadiusFromFeet } from '@/systems/map/fogLos';
 import { VisionFtInput } from '@/systems/map/VisionFtInput';
 import { applyTokenHpToCombatants } from '@/systems/initiative/initiativeTokenSync';
 import { applyDamage, applyHeal, readTempHp } from '@/systems/initiative/hpUtils';
+import { deleteCurrentSelection } from './deleteSelection';
 
 function numHex(n: number): string { return '#' + n.toString(16).padStart(6, '0'); }
 function hexNum(s: string): number { return parseInt(s.replace('#', ''), 16); }
 
 export function ItemInspector() {
   const selectedIds = useItemStore((s) => s.selectedIds);
+  const selectedWallIndices = useItemStore((s) => s.selectedWallIndices);
   const items = useItemStore((s) => s.items);
   const myRole = useSessionStore((s) => s.myRole);
   const isGM = myRole === 'GM';
 
   const selected = selectedIds.map((id) => items[id]).filter(Boolean) as Item[];
-  if (!isGM || selected.length === 0) return null;
+  if (!isGM || (selected.length === 0 && selectedWallIndices.length === 0)) return null;
 
   function update(id: string, patch: Partial<Item>) {
     useItemStore.getState().updateItem(id, patch);
@@ -33,9 +35,7 @@ export function ItemInspector() {
     emitItemUpdate(updates);
   }
   function del() {
-    const ids = selected.map((i) => i.id);
-    useItemStore.getState().removeItems(ids);
-    emitItemRemove(ids);
+    deleteCurrentSelection();
   }
 
   const single = selected.length === 1 ? selected[0]! : null;
@@ -48,7 +48,13 @@ export function ItemInspector() {
       style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border-gold)' }}
     >
       <span className="font-display text-xs tracking-wider uppercase" style={{ color: 'var(--color-accent-gold)' }}>
-        {single ? (single.type === 'handout' ? 'handout' : single.type) : `${selected.length} items`}
+        {selectedWallIndices.length > 0 && selected.length === 0
+          ? `${selectedWallIndices.length} walls`
+          : selectedWallIndices.length > 0 && selected.length > 0
+            ? `${selected.length} items · ${selectedWallIndices.length} walls`
+            : single
+              ? (single.type === 'handout' ? 'handout' : single.type)
+              : `${selected.length} items`}
       </span>
 
       {/* Type-specific */}
@@ -72,22 +78,28 @@ export function ItemInspector() {
       {single?.type === 'text' && <TextControls t={single as TextItem} update={(p) => update(single.id, p)} />}
       {single?.type === 'drawing' && <DrawControls d={single as DrawItem} update={(p) => update(single.id, p)} />}
 
-      <div className="w-px h-6" style={{ background: 'var(--color-border)' }} />
+      {(single || selected.length > 1) && (
+        <div className="w-px h-6" style={{ background: 'var(--color-border)' }} />
+      )}
 
       {/* Common actions */}
-      <button title="Lock" className="text-sm px-1.5 py-0.5 rounded transition-colors"
-        style={{ color: allLocked ? 'var(--color-accent-gold)' : 'var(--color-text-secondary)' }}
-        onClick={() => patchAll({ locked: !allLocked } as Partial<Item>)}>
-        {allLocked ? '🔒' : '🔓'}
-      </button>
-      {isGM && (
-        <button title="Hide from players" className="text-sm px-1.5 py-0.5 rounded transition-colors"
-          style={{ color: allHidden ? 'var(--color-accent-gold)' : 'var(--color-text-secondary)' }}
-          onClick={() => patchAll({ visible: allHidden } as Partial<Item>)}>
-          {allHidden ? '🙈' : '👁'}
-        </button>
+      {selected.length > 0 && (
+        <>
+          <button title="Lock" className="text-sm px-1.5 py-0.5 rounded transition-colors"
+            style={{ color: allLocked ? 'var(--color-accent-gold)' : 'var(--color-text-secondary)' }}
+            onClick={() => patchAll({ locked: !allLocked } as Partial<Item>)}>
+            {allLocked ? '🔒' : '🔓'}
+          </button>
+          {isGM && (
+            <button title="Hide from players" className="text-sm px-1.5 py-0.5 rounded transition-colors"
+              style={{ color: allHidden ? 'var(--color-accent-gold)' : 'var(--color-text-secondary)' }}
+              onClick={() => patchAll({ visible: allHidden } as Partial<Item>)}>
+              {allHidden ? '🙈' : '👁'}
+            </button>
+          )}
+        </>
       )}
-      <button title="Delete" className="text-sm px-1.5 py-0.5 rounded" style={{ color: 'var(--color-accent-red-hot)' }} onClick={del}>🗑</button>
+      <button title="Delete (Del)" className="text-sm px-1.5 py-0.5 rounded" style={{ color: 'var(--color-accent-red-hot)' }} onClick={del}>🗑</button>
     </div>
   );
 }

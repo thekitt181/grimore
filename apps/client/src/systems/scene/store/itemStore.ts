@@ -8,6 +8,8 @@ interface ItemState {
   items: Record<string, Item>;
   /** Insertion / z order is tracked by item.zIndex; this is selection only. */
   selectedIds: string[];
+  /** Indices into the active map's walls[] — GM wall selection. */
+  selectedWallIndices: number[];
   /** The map whose grid drives snapping + fog. */
   activeMapId: string | null;
   snapToGrid: boolean;
@@ -24,7 +26,9 @@ interface ItemState {
 
   // ── Selection ──────────────────────────────────────────────────────────────
   select: (ids: string[], mode?: SelectMode) => void;
+  selectWalls: (indices: number[], mode?: SelectMode) => void;
   clearSelection: () => void;
+  clearWallSelection: () => void;
 
   // ── Flags ────────────────────────────────────────────────────────────────--
   setLocked: (ids: string[], locked: boolean) => void;
@@ -76,6 +80,7 @@ function defaultZForType(items: Record<string, Item>, type: Item['type']): numbe
 export const useItemStore = create<ItemState>((set, get) => ({
   items: {},
   selectedIds: [],
+  selectedWallIndices: [],
   activeMapId: null,
   snapToGrid: true,
   clipboard: [],
@@ -132,7 +137,7 @@ export const useItemStore = create<ItemState>((set, get) => ({
       const rec: Record<string, Item> = {};
       for (const it of items) rec[it.id] = it;
       const firstMap = items.find((i) => i.type === 'map');
-      return { items: rec, activeMapId: firstMap?.id ?? null, selectedIds: [] };
+      return { items: rec, activeMapId: firstMap?.id ?? null, selectedIds: [], selectedWallIndices: [] };
     }),
 
   // ── Selection ──────────────────────────────────────────────────────────────
@@ -140,13 +145,24 @@ export const useItemStore = create<ItemState>((set, get) => ({
     set((s) => {
       if (mode === 'set') return { selectedIds: [...new Set(ids)] };
       if (mode === 'add') return { selectedIds: [...new Set([...s.selectedIds, ...ids])] };
-      // toggle
       const cur = new Set(s.selectedIds);
       for (const id of ids) { if (cur.has(id)) cur.delete(id); else cur.add(id); }
       return { selectedIds: [...cur] };
     }),
 
-  clearSelection: () => set({ selectedIds: [] }),
+  selectWalls: (indices, mode = 'set') =>
+    set((s) => {
+      const uniq = [...new Set(indices.filter((i) => i >= 0))];
+      if (mode === 'set') return { selectedWallIndices: uniq };
+      if (mode === 'add') return { selectedWallIndices: [...new Set([...s.selectedWallIndices, ...uniq])] };
+      const cur = new Set(s.selectedWallIndices);
+      for (const i of uniq) { if (cur.has(i)) cur.delete(i); else cur.add(i); }
+      return { selectedWallIndices: [...cur] };
+    }),
+
+  clearSelection: () => set({ selectedIds: [], selectedWallIndices: [] }),
+
+  clearWallSelection: () => set({ selectedWallIndices: [] }),
 
   // ── Flags ────────────────────────────────────────────────────────────────--
   setLocked: (ids, locked) =>
@@ -236,7 +252,7 @@ export const useItemStore = create<ItemState>((set, get) => ({
   setActiveMap: (activeMapId) => set({ activeMapId }),
   setSnap: (snapToGrid) => set({ snapToGrid }),
 
-  reset: () => set({ items: {}, selectedIds: [], activeMapId: null, clipboard: [] }),
+  reset: () => set({ items: {}, selectedIds: [], selectedWallIndices: [], activeMapId: null, clipboard: [] }),
 }));
 
 // ─── Selectors ──────────────────────────────────────────────────────────────--
