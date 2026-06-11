@@ -220,8 +220,8 @@ export function MapToolbar() {
                 Wall sensitivity ({wallScanThreshold})
                 <input
                   type="range"
-                  min={60}
-                  max={150}
+                min={55}
+                max={130}
                   step={2}
                   value={wallScanThreshold}
                   onChange={(e) => setWallScanThreshold(Number(e.target.value))}
@@ -240,7 +240,7 @@ export function MapToolbar() {
               {scanStatus === 'ready' && scanResult && (
                 <span className="font-ui text-[9px]" style={{ color: 'var(--color-text-secondary)' }}>
                   {scanResult.featureCount > 0
-                    ? `${scanResult.wallCellCount} walls · ${scanResult.props.length} props · ${scanResult.pits.length} pits · ${scanResult.waters.length} water · ${scanResult.stairs.length} stairs`
+                    ? `${scanResult.wallSegments.length} wall runs · ${scanResult.props.length} props · ${scanResult.pits.length} pits · ${scanResult.waters.length} water · ${scanResult.stairs.length} stairs`
                     : 'Nothing detected — lower sensitivity or rescan'}
                 </span>
               )}
