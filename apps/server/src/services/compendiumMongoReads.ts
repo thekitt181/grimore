@@ -1,6 +1,8 @@
 import type { OwlbearItem, OwlbearMonster, OwlbearRawGlobalDoc, OwlbearSpell } from '@grimoire/shared';
 import { splitCompendiumSources } from '@grimoire/shared';
+import { slugify } from '@grimoire/monster-dex';
 import { getCollection, isMongoCircuitOpen, withMongoTimeout } from '../lib/mongo';
+import { namesMatch } from './compendiumMerge';
 import type { CompendiumKind } from './compendiumOwlbearPersist';
 import type { BookSourceLabelBuckets } from './compendiumOwlbearPersist';
 import { entryMatchesSource } from './compendiumVisibility';
@@ -160,6 +162,102 @@ export async function collectImportedSourceLabelsFromMongo(): Promise<string[]> 
     add(buckets.spellSources);
   }
   return [...labels];
+}
+
+/** Names only — tiny payload for id → name resolution. */
+async function readOverrideEntryNamesFromMongo(kind: CompendiumKind): Promise<string[]> {
+  if (isMongoCircuitOpen()) return [];
+  const field = OVERRIDE_FIELD[kind];
+  try {
+    const col = await getCollection<OwlbearRawGlobalDoc>('data');
+    if (!col) return [];
+    const rows = await withMongoTimeout(
+      col.aggregate([
+        { $match: { _id: 'global' } },
+        {
+          $project: {
+            names: {
+              $map: {
+                input: { $ifNull: [`$${field}`, []] },
+                as: 'e',
+                in: '$$e.name',
+              },
+            },
+          },
+        },
+      ]).toArray(),
+      20_000,
+    );
+    const names = (rows[0] as { names?: string[] } | undefined)?.names ?? [];
+    return names.filter((n): n is string => Boolean(n?.trim()));
+  } catch {
+    return [];
+  }
+}
+
+/** Fetch a single override entry by exact name (one stat block, not the full array). */
+export async function readOverrideEntryByNameFromMongo<K extends CompendiumKind>(
+  kind: K,
+  name: string,
+): Promise<OverrideEntryMap[K] | null> {
+  if (isMongoCircuitOpen() || !name.trim()) return null;
+  const field = OVERRIDE_FIELD[kind];
+  try {
+    const col = await getCollection<OwlbearRawGlobalDoc>('data');
+    if (!col) return null;
+    const rows = await withMongoTimeout(
+      col.aggregate([
+        { $match: { _id: 'global' } },
+        {
+          $project: {
+            entry: {
+              $arrayElemAt: [
+                {
+                  $filter: {
+                    input: { $ifNull: [`$${field}`, []] },
+                    as: 'e',
+                    cond: { $eq: ['$$e.name', name] },
+                  },
+                },
+                0,
+              ],
+            },
+          },
+        },
+      ]).toArray(),
+      MONGO_OVERRIDE_READ_MS,
+    );
+    const entry = (rows[0] as { entry?: OverrideEntryMap[K] } | undefined)?.entry;
+    return entry ?? null;
+  } catch (err) {
+    console.warn(
+      `[Compendium] Mongo override entry read (${kind}, ${name}) failed:`,
+      err instanceof Error ? err.message : err,
+    );
+    return null;
+  }
+}
+
+/** Resolve compendium id (slug) to one Mongo override entry without loading all overrides. */
+export async function readOverrideEntryByIdFromMongo<K extends CompendiumKind>(
+  kind: K,
+  id: string,
+): Promise<OverrideEntryMap[K] | null> {
+  const slug = id.trim().toLowerCase();
+  if (!slug) return null;
+
+  const names = await readOverrideEntryNamesFromMongo(kind);
+  const matched = names.find((name) => slugify(name) === slug || namesMatch(name, id));
+  if (!matched) return null;
+
+  let entry = await readOverrideEntryByNameFromMongo(kind, matched);
+  if (entry) return entry;
+
+  const alt = names.find((name) => slugify(name) === slug);
+  if (alt && alt !== matched) {
+    entry = await readOverrideEntryByNameFromMongo(kind, alt);
+  }
+  return entry ?? null;
 }
 
 /** Count override entries per kind without loading stat blocks (for sync status / cache checks). */

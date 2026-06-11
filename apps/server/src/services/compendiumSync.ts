@@ -62,6 +62,7 @@ import {
   readBookSourceLabelBucketsWithFallback,
   readOverrideCountsFromMongo,
   readOverrideEntriesFromMongo,
+  readOverrideEntryByIdFromMongo,
 } from './compendiumMongoReads';
 import { getCompendiumVisibilityPolicy } from './compendiumSourcePolicy';
 import {
@@ -840,6 +841,70 @@ export async function listAllBookSources(): Promise<
   return results;
 }
 
+function compendiumMonsterFromOverride(
+  m: OwlbearMonster,
+  policy?: CompendiumVisibilityPolicy,
+): CompendiumMonster | null {
+  if (isHomebrewEntry(true, m.source)) return null;
+  const bundled = bundledSourceLabelSet();
+  const parts = splitSources(m.source);
+  if (parts.some((p) => bundled.has(normalizeSourceLabel(p)))) return null;
+  if (policy && parts.some((p) => policyIsSourceLocked(p, policy))) return null;
+  return toMonster(
+    { ...m, _id: slugify(m.name) } as StoredMonster,
+    true,
+    undefined,
+    true,
+  );
+}
+
+function compendiumItemFromOverride(
+  i: OwlbearItem,
+  policy?: CompendiumVisibilityPolicy,
+): CompendiumItem | null {
+  if (isHomebrewEntry(true, i.source)) return null;
+  const bundled = bundledSourceLabelSet();
+  const parts = splitSources(i.source);
+  if (parts.some((p) => bundled.has(normalizeSourceLabel(p)))) return null;
+  if (policy && parts.some((p) => policyIsSourceLocked(p, policy))) return null;
+  return {
+    id: slugify(i.name),
+    name: i.name,
+    type: i.type,
+    source: i.source,
+    description: i.description,
+    isCustom: true,
+    ...(i.rarity ? { rarity: i.rarity } : {}),
+    ...(i.flavor ? { flavor: i.flavor } : {}),
+    ...(i.details ? { details: i.details } : {}),
+  };
+}
+
+function compendiumSpellFromOverride(
+  s: OwlbearSpell,
+  policy?: CompendiumVisibilityPolicy,
+): CompendiumSpell | null {
+  if (isHomebrewEntry(true, s.source)) return null;
+  const bundled = bundledSourceLabelSet();
+  const parts = splitSources(s.source);
+  if (parts.some((p) => bundled.has(normalizeSourceLabel(p)))) return null;
+  if (policy && parts.some((p) => policyIsSourceLocked(p, policy))) return null;
+  return {
+    id: slugify(s.name),
+    name: s.name,
+    level: s.level,
+    ...(s.damage ? { damage: s.damage } : {}),
+    ...(s.type ? { type: s.type } : {}),
+    ...(s.save ? { save: s.save } : {}),
+    ...(s.aoe ? { aoe: s.aoe } : {}),
+    ...(s.attack !== undefined ? { attack: s.attack } : {}),
+    ...(s.secondary ? { secondary: s.secondary } : {}),
+    ...(s.description ? { description: s.description } : {}),
+    source: s.source,
+    isCustom: true,
+  };
+}
+
 async function monstersFromRawOverrides(
   source?: string,
   policy?: CompendiumVisibilityPolicy,
@@ -848,20 +913,10 @@ async function monstersFromRawOverrides(
     'monster',
     source?.trim() ? { source: source.trim() } : undefined,
   );
-  const bundled = bundledSourceLabelSet();
   const out: CompendiumMonster[] = [];
   for (const m of list) {
-    if (isHomebrewEntry(true, m.source)) continue;
-    const parts = splitSources(m.source);
-    if (parts.some((p) => bundled.has(normalizeSourceLabel(p)))) continue;
-    if (policy && parts.some((p) => policyIsSourceLocked(p, policy))) continue;
-    const monster = toMonster(
-      { ...m, _id: slugify(m.name) } as StoredMonster,
-      true,
-      undefined,
-      true,
-    );
-    out.push({ ...monster, isDraft: false });
+    const monster = compendiumMonsterFromOverride(m, policy);
+    if (monster) out.push({ ...monster, isDraft: false });
   }
   out.sort((a, b) => a.name.localeCompare(b.name));
   return out;
@@ -875,25 +930,10 @@ async function itemsFromRawOverrides(
     'item',
     source?.trim() ? { source: source.trim() } : undefined,
   );
-  const bundled = bundledSourceLabelSet();
   const out: CompendiumItem[] = [];
   for (const i of list) {
-    if (isHomebrewEntry(true, i.source)) continue;
-    const parts = splitSources(i.source);
-    if (parts.some((p) => bundled.has(normalizeSourceLabel(p)))) continue;
-    if (policy && parts.some((p) => policyIsSourceLocked(p, policy))) continue;
-    const item: CompendiumItem = {
-      id: slugify(i.name),
-      name: i.name,
-      type: i.type,
-      source: i.source,
-      description: i.description,
-      isCustom: true,
-      ...(i.rarity ? { rarity: i.rarity } : {}),
-      ...(i.flavor ? { flavor: i.flavor } : {}),
-      ...(i.details ? { details: i.details } : {}),
-    };
-    out.push({ ...item, isDraft: false });
+    const item = compendiumItemFromOverride(i, policy);
+    if (item) out.push({ ...item, isDraft: false });
   }
   out.sort((a, b) => a.name.localeCompare(b.name));
   return out;
@@ -907,28 +947,10 @@ async function spellsFromRawOverrides(
     'spell',
     source?.trim() ? { source: source.trim() } : undefined,
   );
-  const bundled = bundledSourceLabelSet();
   const out: CompendiumSpell[] = [];
   for (const s of list) {
-    if (isHomebrewEntry(true, s.source)) continue;
-    const parts = splitSources(s.source);
-    if (parts.some((p) => bundled.has(normalizeSourceLabel(p)))) continue;
-    if (policy && parts.some((p) => policyIsSourceLocked(p, policy))) continue;
-    const spell: CompendiumSpell = {
-      id: slugify(s.name),
-      name: s.name,
-      level: s.level,
-      ...(s.damage ? { damage: s.damage } : {}),
-      ...(s.type ? { type: s.type } : {}),
-      ...(s.save ? { save: s.save } : {}),
-      ...(s.aoe ? { aoe: s.aoe } : {}),
-      ...(s.attack !== undefined ? { attack: s.attack } : {}),
-      ...(s.secondary ? { secondary: s.secondary } : {}),
-      ...(s.description ? { description: s.description } : {}),
-      ...(s.source ? { source: s.source } : {}),
-      isCustom: true,
-    };
-    out.push({ ...spell, isDraft: false });
+    const spell = compendiumSpellFromOverride(s, policy);
+    if (spell) out.push({ ...spell, isDraft: false });
   }
   out.sort((a, b) => a.name.localeCompare(b.name));
   return out;
@@ -1129,7 +1151,20 @@ export async function getMonsterById(id: string, opts?: { includeDrafts?: boolea
   const policy = await getCatalogPolicy();
   let hit = (await getCachedMonsters()).find((m) => m.id === id);
   if (!hit) {
-    hit = (await monstersFromRawOverrides(undefined, policy)).find((m) => m.id === id);
+    const raw = await readOverrideEntryByIdFromMongo('monster', id);
+    if (raw) hit = compendiumMonsterFromOverride(raw, policy) ?? undefined;
+  }
+  if (!hit) {
+    const base = await loadBaseMonsters();
+    const raw = base.find((b) => b._id === id || slugify(b.name) === id);
+    if (raw) {
+      hit = toMonster(
+        { ...raw, _id: raw._id ?? slugify(raw.name) } as StoredMonster,
+        false,
+        undefined,
+        true,
+      );
+    }
   }
   if (!hit) {
     await ensureCatalogIncludesOverrides();
@@ -1196,7 +1231,25 @@ export async function getItemById(id: string, opts?: { includeDrafts?: boolean }
   const policy = await getCatalogPolicy();
   let hit = (await getCachedItems()).find((i) => i.id === id);
   if (!hit) {
-    hit = (await itemsFromRawOverrides(undefined, policy)).find((i) => i.id === id);
+    const raw = await readOverrideEntryByIdFromMongo('item', id);
+    if (raw) hit = compendiumItemFromOverride(raw, policy) ?? undefined;
+  }
+  if (!hit) {
+    const base = await loadBaseItems();
+    const raw = base.find((b) => b._id === id || slugify(b.name) === id);
+    if (raw) {
+      hit = {
+        id: slugify(raw.name),
+        name: raw.name,
+        type: raw.type,
+        source: raw.source,
+        description: raw.description,
+        isCustom: false,
+        ...(raw.rarity ? { rarity: raw.rarity } : {}),
+        ...(raw.flavor ? { flavor: raw.flavor } : {}),
+        ...(raw.details ? { details: raw.details } : {}),
+      };
+    }
   }
   if (!hit) {
     await ensureCatalogIncludesOverrides();
@@ -1262,7 +1315,28 @@ export async function getSpellById(id: string, opts?: { includeDrafts?: boolean 
   const policy = await getCatalogPolicy();
   let hit = (await getCachedSpells()).find((s) => s.id === id);
   if (!hit) {
-    hit = (await spellsFromRawOverrides(undefined, policy)).find((s) => s.id === id);
+    const raw = await readOverrideEntryByIdFromMongo('spell', id);
+    if (raw) hit = compendiumSpellFromOverride(raw, policy) ?? undefined;
+  }
+  if (!hit) {
+    const base = await loadBaseSpells();
+    const raw = base.find((b) => b._id === id || slugify(b.name) === id);
+    if (raw) {
+      hit = {
+        id: slugify(raw.name),
+        name: raw.name,
+        level: raw.level,
+        ...(raw.damage ? { damage: raw.damage } : {}),
+        ...(raw.type ? { type: raw.type } : {}),
+        ...(raw.save ? { save: raw.save } : {}),
+        ...(raw.aoe ? { aoe: raw.aoe } : {}),
+        ...(raw.attack !== undefined ? { attack: raw.attack } : {}),
+        ...(raw.secondary ? { secondary: raw.secondary } : {}),
+        ...(raw.description ? { description: raw.description } : {}),
+        source: raw.source,
+        isCustom: false,
+      };
+    }
   }
   if (!hit) {
     await ensureCatalogIncludesOverrides();
