@@ -70,6 +70,8 @@ export interface BaseItem {
 export interface MapItem extends BaseItem {
   type: 'map';
   backgroundUrl: string | null;
+  /** GLB/GLTF/STL terrain or scene mesh (shown in 3D view). */
+  modelUrl?: string | null;
   gridSize: number;
   gridType: GridType;
   gridColor: number;   // PixiJS hex
@@ -85,6 +87,8 @@ export interface TokenItem extends BaseItem {
   type: 'token';
   name: string;
   imageUrl?: string;
+  /** GLB/GLTF/STL mini (shown in 3D view; 2D shows a placeholder). */
+  modelUrl?: string;
   /** Size in grid cells (0.5, 1, 2, 3, 4). width/height derive from this. */
   sizeCells: number;
   hp: number;

@@ -13,6 +13,7 @@ import { Map3DScannedScene } from './Map3DScannedScene';
 import { Map3DWalls } from './Map3DWalls';
 import { Map3DTokens } from './Map3DTokens';
 import { Map3DDrawings } from './Map3DDrawings';
+import { Map3DMapModel } from './Map3DMapModel';
 
 function SceneBounds({ maps }: { maps: MapItem[] }) {
   const targetRef = useRef(new THREE.Vector3());
@@ -112,6 +113,7 @@ function Map3DSceneContent() {
           {autoExtrudeWalls && !scanImageWalls && map.walls.length > 0 && (
             <Map3DWalls map={map} wallHeight={wallHeight} wallThickness={wallThickness} />
           )}
+          <Map3DMapModel map={map} />
         </group>
       ))}
 

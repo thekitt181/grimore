@@ -14,6 +14,7 @@ import { VisionFtDraftInput, parseVisionFt } from '@/systems/map/VisionFtInput';
 import { useMapStore } from './store/mapStore';
 import { useSessionStore } from '@/store/sessionStore';
 import { fileToDataUrl } from '@/lib/imagePersistence';
+import { MAP_ASSET_ACCEPT, isModelUrl } from '@/lib/modelFormats';
 import { CompendiumSidebarList } from '@/systems/compendium/CompendiumSidebarList';
 import { useDdbStore } from '@/systems/ddb/ddbStore';
 
@@ -102,16 +103,25 @@ function GMSidebarContent() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   function applyBackground(url: string, w: number, h: number) {
+    applyMapAsset({ backgroundUrl: url, width: w, height: h });
+  }
+
+  function applyModel(url: string, w = DEFAULT_MAP_WIDTH, h = DEFAULT_MAP_HEIGHT) {
+    applyMapAsset({ modelUrl: url, width: w, height: h });
+  }
+
+  function applyMapAsset(patch: Partial<MapItem> & { width: number; height: number }) {
     const map = getActiveMap();
-    const gridDefaults = defaultMapGrid(w, h);
+    const gridDefaults = defaultMapGrid(patch.width, patch.height);
     if (map) {
-      const patch: Partial<MapItem> = { backgroundUrl: url, width: w, height: h, ...gridDefaults };
-      useItemStore.getState().updateItem(map.id, patch);
-      emitItemUpdate([{ id: map.id, patch }]);
+      const fullPatch: Partial<MapItem> = { ...patch, ...gridDefaults };
+      useItemStore.getState().updateItem(map.id, fullPatch);
+      emitItemUpdate([{ id: map.id, patch: fullPatch }]);
     } else {
       const m: MapItem = {
-        id: uuidv4(), type: 'map', x: 0, y: 0, rotation: 0, width: w, height: h,
-        zIndex: 0, locked: false, visible: true, backgroundUrl: url,
+        id: uuidv4(), type: 'map', x: 0, y: 0, rotation: 0, width: patch.width, height: patch.height,
+        zIndex: 0, locked: false, visible: true, backgroundUrl: patch.backgroundUrl ?? null,
+        modelUrl: patch.modelUrl ?? null,
         ...gridDefaults, gridType: 'square', gridColor: 0x2a2a3a, gridOpacity: 0.8,
         showGrid: true, walls: [],
       };
@@ -144,6 +154,11 @@ function GMSidebarContent() {
   function loadMapFromUrl() {
     const url = mapUrl.trim();
     if (!url) return;
+    if (isModelUrl(url)) {
+      applyModel(url);
+      setMapUrl('');
+      return;
+    }
     setIsLoading(true);
     const tryLoad = (withCors: boolean) => {
       const img = new Image();
@@ -166,11 +181,15 @@ function GMSidebarContent() {
     if (!file) return;
     try {
       const url = await fileToDataUrl(file);
-      const img = new Image();
-      img.onload = () => applyBackground(url, img.naturalWidth, img.naturalHeight);
-      img.src = url;
+      if (isModelUrl(url) || isModelUrl(file.name)) {
+        applyModel(url);
+      } else {
+        const img = new Image();
+        img.onload = () => applyBackground(url, img.naturalWidth, img.naturalHeight);
+        img.src = url;
+      }
     } catch {
-      alert('Could not read that image file.');
+      alert('Could not read that file.');
     }
     e.target.value = '';
   }
@@ -205,15 +224,15 @@ function GMSidebarContent() {
       {/* Map Upload */}
       <div className="panel space-y-2">
         <h3 className="font-display text-xs font-semibold tracking-wider uppercase" style={{ color: 'var(--color-accent-gold)' }}>Map</h3>
-        <input type="file" accept="image/*" ref={fileInputRef} className="hidden" onChange={loadMapFromFile} />
-        <button className="btn-ghost w-full text-xs py-1.5" onClick={() => fileInputRef.current?.click()}>Upload Image</button>
+        <input type="file" accept={MAP_ASSET_ACCEPT} ref={fileInputRef} className="hidden" onChange={loadMapFromFile} />
+        <button className="btn-ghost w-full text-xs py-1.5" onClick={() => fileInputRef.current?.click()}>Upload Image / 3D</button>
         <div className="flex gap-1">
-          <input className="input-dark flex-1 text-xs py-1" placeholder="Image URL..." value={mapUrl}
+          <input className="input-dark flex-1 text-xs py-1" placeholder="Image or GLB/STL URL..." value={mapUrl}
             onChange={(e) => setMapUrl(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && loadMapFromUrl()} />
           <button className="btn-primary px-2 py-1 text-xs" onClick={loadMapFromUrl} disabled={isLoading}>{isLoading ? '...' : 'Load'}</button>
         </div>
         <p className="font-ui text-xs leading-snug" style={{ color: 'var(--color-text-secondary)' }}>
-          Select a map, then drag its handles to resize/rotate. Drop images on the canvas to add maps or tokens.
+          Select a map, then drag its handles to resize/rotate. Drop images or GLB/STL models on the canvas.
         </p>
       </div>
 
@@ -268,7 +287,7 @@ function GMSidebarContent() {
               }}>
               <span style={{ fontSize: 13 }}>🗺️</span>
               <span className="font-ui text-xs flex-1 truncate" style={{ color: 'var(--color-text-primary)' }}>
-                {m.backgroundUrl ? 'Map' : 'Empty map'}
+                {m.backgroundUrl ? 'Map' : m.modelUrl ? '3D map' : 'Empty map'}
               </span>
               {maps.length > 1 && (
                 <button onClick={(e) => { e.stopPropagation(); removeMap(m.id); }}
@@ -351,10 +370,13 @@ function AddTokenForm() {
     const py = originY + row * grid;
 
     const trimmed = imageUrl.trim();
+    const assetPatch = trimmed
+      ? (isModelUrl(trimmed) ? { modelUrl: trimmed } : { imageUrl: trimmed })
+      : {};
     const token: TokenItem = {
       id: uuidv4(), type: 'token', x: px, y: py, rotation: 0,
       width: grid, height: grid, zIndex: 0, locked: false, visible: true,
-      name: name.trim(), ...(trimmed ? { imageUrl: trimmed } : {}),
+      name: name.trim(), ...assetPatch,
       sizeCells: 1, hp, maxHp: hp, tempHp: 0, ac,
       visionRadius: visionRadiusFromFeet(parseVisionFt(visionDraft, DEFAULT_VISION_FT)),
       conditions: [],
@@ -368,7 +390,7 @@ function AddTokenForm() {
     <div className="panel space-y-2">
       <h3 className="font-display text-xs font-semibold tracking-wider uppercase" style={{ color: 'var(--color-accent-gold)' }}>Add Token</h3>
       <input className="input-dark text-xs py-1" placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
-      <input className="input-dark text-xs py-1" placeholder="Image URL (optional)" value={imageUrl} onChange={(e) => setImageUrl(e.target.value)} />
+      <input className="input-dark text-xs py-1" placeholder="Image or GLB/STL URL (optional)" value={imageUrl} onChange={(e) => setImageUrl(e.target.value)} />
       <div className="flex items-center gap-3">
         <label className="flex items-center gap-1.5 font-ui text-xs" style={{ color: 'var(--color-text-secondary)' }}>
           HP

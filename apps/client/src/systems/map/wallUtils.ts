@@ -1,7 +1,17 @@
 import type { MapItem, WallSegment } from '@/systems/scene/types';
 
-export const WALL_ERASE_RADIUS = 14;
+/** Fine brush — splits segments instead of deleting whole lines. */
+export const WALL_ERASE_RADIUS = 7;
 export const MIN_WALL_SEGMENT_LEN = 4;
+export const WALL_ENDPOINT_HIT_PX = 10;
+export const WALL_ENDPOINT_JOIN_PX = 3;
+
+export type WallEndpoint = 'a' | 'b';
+
+export type WallHandleHit = {
+  wallIndex: number;
+  end: WallEndpoint;
+};
 
 export function distToSegment(px: number, py: number, seg: WallSegment): number {
   const { a, b } = seg;
@@ -161,4 +171,151 @@ export function eraseNearestWallSegment(map: MapItem, localX: number, localY: nu
   if (idx < 0) return false;
   const next = walls.filter((_, i) => i !== idx);
   return next.length !== walls.length;
+}
+
+/** Split one segment, removing the portion within `radius` of (px, py). */
+export function splitSegmentAtErase(
+  seg: WallSegment,
+  px: number,
+  py: number,
+  radius = WALL_ERASE_RADIUS,
+): WallSegment[] {
+  const ax = seg.a.x;
+  const ay = seg.a.y;
+  const bx = seg.b.x;
+  const by = seg.b.y;
+  const dx = bx - ax;
+  const dy = by - ay;
+  const lenSq = dx * dx + dy * dy;
+  if (lenSq < 1e-6) {
+    return Math.hypot(px - ax, py - ay) <= radius ? [] : [seg];
+  }
+  const len = Math.sqrt(lenSq);
+
+  let t = ((px - ax) * dx + (py - ay) * dy) / lenSq;
+  const qx = ax + t * dx;
+  const qy = ay + t * dy;
+  const dist = Math.hypot(px - qx, py - qy);
+  if (dist > radius) return [seg];
+
+  const halfChord = Math.sqrt(Math.max(0, radius * radius - dist * dist)) / len;
+  let t1 = Math.max(0, t - halfChord);
+  let t2 = Math.min(1, t + halfChord);
+  if (t2 - t1 >= 0.999) return [];
+
+  const parts: WallSegment[] = [];
+  if (t1 > 1e-4) {
+    const p2 = { x: ax + t1 * dx, y: ay + t1 * dy };
+    if (Math.hypot(p2.x - ax, p2.y - ay) >= MIN_WALL_SEGMENT_LEN) parts.push({ a: { x: ax, y: ay }, b: p2 });
+  }
+  if (t2 < 1 - 1e-4) {
+    const p1 = { x: ax + t2 * dx, y: ay + t2 * dy };
+    if (Math.hypot(bx - p1.x, by - p1.y) >= MIN_WALL_SEGMENT_LEN) parts.push({ a: p1, b: { x: bx, y: by } });
+  }
+  return parts;
+}
+
+/** Erase a fine brush stroke at map-local coordinates. */
+export function eraseWallsAtPoint(
+  walls: WallSegment[],
+  localX: number,
+  localY: number,
+  radius = WALL_ERASE_RADIUS,
+): WallSegment[] {
+  const out: WallSegment[] = [];
+  for (const seg of walls) {
+    out.push(...splitSegmentAtErase(seg, localX, localY, radius));
+  }
+  return out;
+}
+
+export function translateWallIndices(
+  walls: WallSegment[],
+  indices: ReadonlySet<number> | number[],
+  dx: number,
+  dy: number,
+): WallSegment[] {
+  const set = indices instanceof Set ? indices : new Set(indices);
+  return walls.map((w, i) => {
+    if (!set.has(i)) return w;
+    return {
+      a: { x: w.a.x + dx, y: w.a.y + dy },
+      b: { x: w.b.x + dx, y: w.b.y + dy },
+    };
+  });
+}
+
+export function moveWallEndpoint(
+  walls: WallSegment[],
+  wallIndex: number,
+  end: WallEndpoint,
+  newLocal: { x: number; y: number },
+  selectedIndices: ReadonlySet<number> | number[],
+  joinPx = WALL_ENDPOINT_JOIN_PX,
+): WallSegment[] {
+  const sel = selectedIndices instanceof Set ? selectedIndices : new Set(selectedIndices);
+  const anchor = walls[wallIndex]?.[end];
+  if (!anchor) return walls;
+
+  return walls.map((w, i) => {
+    if (!sel.has(i) && i !== wallIndex) return w;
+    const next = { a: { ...w.a }, b: { ...w.b } };
+    if (Math.hypot(w.a.x - anchor.x, w.a.y - anchor.y) <= joinPx) {
+      next.a.x = newLocal.x;
+      next.a.y = newLocal.y;
+    }
+    if (Math.hypot(w.b.x - anchor.x, w.b.y - anchor.y) <= joinPx) {
+      next.b.x = newLocal.x;
+      next.b.y = newLocal.y;
+    }
+    const len = Math.hypot(next.b.x - next.a.x, next.b.y - next.a.y);
+    if (len < MIN_WALL_SEGMENT_LEN) return w;
+    return next;
+  });
+}
+
+export function wallHandleWorldPoints(
+  map: MapItem,
+  selectedIndices: number[],
+): Array<WallHandleHit & { wx: number; wy: number }> {
+  const handles: Array<WallHandleHit & { wx: number; wy: number }> = [];
+  const walls = map.walls ?? [];
+  for (const i of selectedIndices) {
+    const seg = walls[i];
+    if (!seg) continue;
+    handles.push(
+      { wallIndex: i, end: 'a', wx: map.x + seg.a.x, wy: map.y + seg.a.y },
+      { wallIndex: i, end: 'b', wx: map.x + seg.b.x, wy: map.y + seg.b.y },
+    );
+  }
+  return handles;
+}
+
+export function pickWallHandle(
+  wx: number,
+  wy: number,
+  handles: Array<WallHandleHit & { wx: number; wy: number }>,
+  scale: number,
+): WallHandleHit | null {
+  const tol = WALL_ENDPOINT_HIT_PX / Math.max(scale, 0.05);
+  let best: WallHandleHit | null = null;
+  let bestD = tol * tol;
+  for (const h of handles) {
+    const d = (wx - h.wx) ** 2 + (wy - h.wy) ** 2;
+    if (d <= bestD) {
+      bestD = d;
+      best = { wallIndex: h.wallIndex, end: h.end };
+    }
+  }
+  return best;
+}
+
+export function wallsChanged(a: WallSegment[], b: WallSegment[]): boolean {
+  if (a.length !== b.length) return true;
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i]!;
+    const y = b[i]!;
+    if (x.a.x !== y.a.x || x.a.y !== y.a.y || x.b.x !== y.b.x || x.b.y !== y.b.y) return true;
+  }
+  return false;
 }

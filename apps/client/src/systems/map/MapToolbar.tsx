@@ -14,7 +14,7 @@ import { useImageWallScan } from '@/systems/map3d/useImageWallScan';
 type ToolDef = { id: MapTool; label: string; icon: string; title: string };
 
 const GM_TOOLS: ToolDef[] = [
-  { id: 'select',    label: 'Select',  icon: '↖',  title: 'Select, move, resize & rotate' },
+  { id: 'select',    label: 'Select',  icon: '↖',  title: 'Select & move items; drag marquee for walls; drag gold dots to extend walls' },
   { id: 'pan',       label: 'Pan',     icon: '✋',  title: 'Pan the map (middle-mouse or this tool)' },
   { id: 'fog-reveal',label: 'Reveal',  icon: '☀',  title: 'Reveal fog cells' },
   { id: 'fog-hide',  label: 'Hide',    icon: '🌑', title: 'Hide fog cells' },
@@ -33,7 +33,7 @@ const WALL_TOOLS: Array<{ id: WallMode; label: string; icon: string; title: stri
   { id: 'freehand', label: 'Free',   icon: '✏', title: 'Freehand wall' },
   { id: 'rect',     label: 'Rect',   icon: '▭', title: 'Rectangle wall outline' },
   { id: 'circle',   label: 'Circle', icon: '○', title: 'Circle / ellipse wall outline' },
-  { id: 'eraser',   label: 'Erase',  icon: '⌫', title: 'Erase wall segments' },
+  { id: 'eraser',   label: 'Erase',  icon: '⌫', title: 'Drag to erase parts of walls (splits segments)' },
 ];
 
 const DRAW_TOOLS: ToolDef[] = [

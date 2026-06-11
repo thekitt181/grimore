@@ -11,6 +11,7 @@ function mergeMapItem(server: MapItem, local: MapItem): MapItem {
   return {
     ...server,
     backgroundUrl: pickBackgroundUrl(server.backgroundUrl, local.backgroundUrl),
+    modelUrl: pickBackgroundUrl(server.modelUrl ?? null, local.modelUrl ?? null),
     walls: (server.walls?.length ? server.walls : local.walls) ?? [],
     width: server.width || local.width,
     height: server.height || local.height,
@@ -38,11 +39,13 @@ export function mergeSceneItems(
       merged.push(mergeMapItem(item, loc));
     } else if (item.type === 'token' && loc?.type === 'token') {
       const imageUrl = pickBackgroundUrl(item.imageUrl ?? null, loc.imageUrl ?? null);
-      if (imageUrl) merged.push({ ...item, imageUrl });
-      else {
-        const { imageUrl: _drop, ...rest } = item;
-        merged.push(rest);
-      }
+      const modelUrl = pickBackgroundUrl(item.modelUrl ?? null, loc.modelUrl ?? null);
+      const mergedToken = { ...item } as typeof item;
+      if (imageUrl) mergedToken.imageUrl = imageUrl;
+      else delete mergedToken.imageUrl;
+      if (modelUrl) mergedToken.modelUrl = modelUrl;
+      else delete mergedToken.modelUrl;
+      merged.push(mergedToken);
     } else if (item.type === 'handout' && loc?.type === 'handout') {
       const imageUrl = pickBackgroundUrl(item.imageUrl ?? null, loc.imageUrl ?? null);
       if (imageUrl) merged.push({ ...item, imageUrl });
@@ -75,9 +78,18 @@ export function sanitizePersistedItems(items: Item[]): Item[] {
   return items.map((item) => {
     if (item.type === 'map') {
       const m = item as MapItem;
+      let next = m;
       if (m.backgroundUrl && !isPersistableImageUrl(m.backgroundUrl)) {
-        return { ...m, backgroundUrl: null };
+        next = { ...next, backgroundUrl: null };
       }
+      if (m.modelUrl && !isPersistableImageUrl(m.modelUrl)) {
+        next = { ...next, modelUrl: null };
+      }
+      if (next !== m) return next;
+    }
+    if (item.type === 'token' && item.modelUrl && !isPersistableImageUrl(item.modelUrl)) {
+      const { modelUrl: _dead, ...rest } = item;
+      return rest;
     }
     if (item.type === 'token' && item.imageUrl && !isPersistableImageUrl(item.imageUrl)) {
       const { imageUrl: _dead, ...rest } = item;

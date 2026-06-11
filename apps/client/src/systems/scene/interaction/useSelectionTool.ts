@@ -17,13 +17,14 @@ import { emitItemUpdate } from '../sceneSync';
 import { getItemContainer } from '../render/useItemRenderer';
 import { useLiveTransformStore } from '../store/liveTransformStore';
 import { pickHandle } from './useTransformControls';
-import type { Item, HandoutItem } from '../types';
+import type { Item, HandoutItem, MapItem } from '../types';
 import { useHandoutViewerStore } from '@/systems/compendium/handoutViewerStore';
 import { isMobileClient } from '@/lib/socket';
 import { isDdbPcToken } from '@/systems/ddb/ddbTokenUtils';
 import { useDdbStore } from '@/systems/ddb/ddbStore';
-import { nearestWallIndex, wallIndicesInWorldRect } from '@/systems/map/wallUtils';
-import type { TokenItem } from '../types';
+import { nearestWallIndex, wallIndicesInWorldRect, wallHandleWorldPoints, pickWallHandle, translateWallIndices, moveWallEndpoint, wallsChanged } from '@/systems/map/wallUtils';
+import type { WallEndpoint } from '@/systems/map/wallUtils';
+import type { TokenItem, WallSegment } from '../types';
 
 interface MoveState {
   ids: string[];
@@ -35,6 +36,22 @@ interface MoveState {
 interface MarqueeState {
   startWX: number;
   startWY: number;
+}
+
+interface WallMoveState {
+  mapId: string;
+  indices: number[];
+  startWX: number;
+  startWY: number;
+  originWalls: WallSegment[];
+}
+
+interface WallEndpointDrag {
+  mapId: string;
+  wallIndex: number;
+  end: WallEndpoint;
+  selectedIndices: number[];
+  originWalls: WallSegment[];
 }
 
 /**
@@ -58,8 +75,38 @@ export function useSelectionTool(appReady: boolean) {
     const gm = myRole === 'GM';
 
     let move: MoveState | null = null;
+    let wallMove: WallMoveState | null = null;
+    let wallEndpoint: WallEndpointDrag | null = null;
     let marquee: MarqueeState | null = null;
     let marqueeGfx: Graphics | null = null;
+    let wallHandleGfx: Graphics | null = null;
+
+    function redrawWallHandles() {
+      if (!wallHandleGfx) return;
+      wallHandleGfx.clear();
+      const map = getActiveMap();
+      const indices = useItemStore.getState().selectedWallIndices;
+      if (!map || indices.length === 0) return;
+      const scale = sceneRefs.world.current?.scale.x ?? 1;
+      const r = Math.max(4, 6 / scale);
+      for (const h of wallHandleWorldPoints(map, indices)) {
+        wallHandleGfx.circle(h.wx, h.wy, r);
+        wallHandleGfx.fill({ color: 0xc9a84c, alpha: 1 });
+        wallHandleGfx.setStrokeStyle({ width: 1.5, color: 0xffffff, alpha: 0.95 });
+        wallHandleGfx.stroke();
+      }
+    }
+
+    let cleanupHandleSub: (() => void) | undefined;
+    if (gm) {
+      wallHandleGfx = new Graphics();
+      wallHandleGfx.label = 'wall-handles';
+      overlay.addChild(wallHandleGfx);
+      redrawWallHandles();
+      cleanupHandleSub = useItemStore.subscribe((state, prev) => {
+        if (state.selectedWallIndices !== prev.selectedWallIndices) redrawWallHandles();
+      });
+    }
 
     function selectableItems(): Item[] {
       const all = Object.values(useItemStore.getState().items) as Item[];
@@ -121,6 +168,28 @@ export function useSelectionTool(appReady: boolean) {
         canvas.setPointerCapture(e.pointerId);
       }
 
+      function beginWallMove(map: MapItem, indices: number[]) {
+        wallMove = {
+          mapId: map.id,
+          indices: [...indices],
+          startWX: wx,
+          startWY: wy,
+          originWalls: (map.walls ?? []).map((w) => ({ a: { ...w.a }, b: { ...w.b } })),
+        };
+        canvas.setPointerCapture(e.pointerId);
+      }
+
+      function beginWallEndpoint(map: MapItem, hit: { wallIndex: number; end: WallEndpoint }, indices: number[]) {
+        wallEndpoint = {
+          mapId: map.id,
+          wallIndex: hit.wallIndex,
+          end: hit.end,
+          selectedIndices: [...indices],
+          originWalls: (map.walls ?? []).map((w) => ({ a: { ...w.a }, b: { ...w.b } })),
+        };
+        canvas.setPointerCapture(e.pointerId);
+      }
+
       if (hit) {
         const additive = e.shiftKey;
         const alreadySelected = store.selectedIds.includes(hit.id);
@@ -141,14 +210,33 @@ export function useSelectionTool(appReady: boolean) {
       if (gm) {
         const map = getActiveMap();
         if (map) {
+          const scale = sceneRefs.world.current?.scale.x ?? 1;
+          const handles = wallHandleWorldPoints(map, store.selectedWallIndices);
+          const handleHit = pickWallHandle(wx, wy, handles, scale);
+          if (handleHit && store.selectedWallIndices.includes(handleHit.wallIndex)) {
+            beginWallEndpoint(map, handleHit, store.selectedWallIndices);
+            return;
+          }
+
           const wallIdx = nearestWallIndex(wx - map.x, wy - map.y, map.walls ?? []);
           if (wallIdx >= 0) {
-            if (e.shiftKey) store.selectWalls([wallIdx], 'toggle');
-            else {
+            const alreadySelected = store.selectedWallIndices.includes(wallIdx);
+            if (e.shiftKey) {
+              store.selectWalls([wallIdx], 'toggle');
+              redrawWallHandles();
+              return;
+            }
+            if (!alreadySelected) {
               store.selectWalls([wallIdx], 'set');
               store.select([], 'set');
+              redrawWallHandles();
+              beginWallMove(map, [wallIdx]);
+              return;
             }
-            return;
+            if (store.selectedWallIndices.length > 0) {
+              beginWallMove(map, store.selectedWallIndices);
+              return;
+            }
           }
         }
       }
@@ -190,6 +278,48 @@ export function useSelectionTool(appReady: boolean) {
 
     function onMove(e: PointerEvent) {
       const { x: wx, y: wy } = clientToWorld(e.clientX, e.clientY);
+
+      if (wallMove) {
+        const map = useItemStore.getState().items[wallMove.mapId] as MapItem | undefined;
+        if (!map) return;
+        let dx = wx - wallMove.startWX;
+        let dy = wy - wallMove.startWY;
+        if (useItemStore.getState().snapToGrid && wallMove.indices.length > 0) {
+          const leadIdx = wallMove.indices[0]!;
+          const o = wallMove.originWalls[leadIdx]?.a;
+          if (o) {
+            const snapped = snapPoint(map.x + o.x + dx, map.y + o.y + dy);
+            dx = snapped.x - map.x - o.x;
+            dy = snapped.y - map.y - o.y;
+          }
+        }
+        const next = translateWallIndices(wallMove.originWalls, wallMove.indices, dx, dy);
+        useItemStore.getState().updateItem(map.id, { walls: next });
+        redrawWallHandles();
+        return;
+      }
+
+      if (wallEndpoint) {
+        const map = useItemStore.getState().items[wallEndpoint.mapId] as MapItem | undefined;
+        if (!map) return;
+        let lx = wx - map.x;
+        let ly = wy - map.y;
+        if (useItemStore.getState().snapToGrid) {
+          const snapped = snapPoint(wx, wy);
+          lx = snapped.x - map.x;
+          ly = snapped.y - map.y;
+        }
+        const next = moveWallEndpoint(
+          wallEndpoint.originWalls,
+          wallEndpoint.wallIndex,
+          wallEndpoint.end,
+          { x: lx, y: ly },
+          wallEndpoint.selectedIndices,
+        );
+        useItemStore.getState().updateItem(map.id, { walls: next });
+        redrawWallHandles();
+        return;
+      }
 
       if (move) {
         const snap = useItemStore.getState().snapToGrid;
@@ -238,6 +368,24 @@ export function useSelectionTool(appReady: boolean) {
     function onUp(e: PointerEvent) {
       const { x: wx, y: wy } = clientToWorld(e.clientX, e.clientY);
 
+      if (wallMove) {
+        const wm = wallMove;
+        const map = useItemStore.getState().items[wm.mapId] as MapItem | undefined;
+        if (map && wallsChanged(wm.originWalls, map.walls ?? [])) {
+          emitItemUpdate([{ id: map.id, patch: { walls: map.walls } }]);
+        }
+        wallMove = null;
+      }
+
+      if (wallEndpoint) {
+        const we = wallEndpoint;
+        const map = useItemStore.getState().items[we.mapId] as MapItem | undefined;
+        if (map && wallsChanged(we.originWalls, map.walls ?? [])) {
+          emitItemUpdate([{ id: map.id, patch: { walls: map.walls } }]);
+        }
+        wallEndpoint = null;
+      }
+
       if (move) {
         const m = move;
         const snap = useItemStore.getState().snapToGrid;
@@ -282,6 +430,7 @@ export function useSelectionTool(appReady: boolean) {
             if (map) {
               const wallHits = wallIndicesInWorldRect(map.walls ?? [], map, x, y, w, h);
               itemStore.selectWalls(wallHits, mode);
+              redrawWallHandles();
             }
           }
         }
@@ -340,6 +489,9 @@ export function useSelectionTool(appReady: boolean) {
       canvas.removeEventListener('pointercancel', onUp);
       marqueeGfx?.destroy();
       marqueeGfx = null;
+      wallHandleGfx?.destroy();
+      wallHandleGfx = null;
+      cleanupHandleSub?.();
     };
   }, [appReady, activeTool, myRole]);
 }

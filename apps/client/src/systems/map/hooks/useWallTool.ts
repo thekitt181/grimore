@@ -6,9 +6,9 @@ import { useItemStore, getActiveMap } from '@/systems/scene/store/itemStore';
 import { emitItemUpdate } from '@/systems/scene/sceneSync';
 import type { MapItem, WallSegment } from '@/systems/scene/types';
 import {
-  nearestWallIndex,
-  removeWallIndices,
+  eraseWallsAtPoint,
   toMapLocal,
+  wallsChanged,
   worldEllipseToWallSegments,
   worldPointsToWallSegments,
   worldRectToWallSegments,
@@ -46,14 +46,23 @@ function appendSegments(map: MapItem, segs: WallSegment[]) {
   emitItemUpdate([{ id: map.id, patch }]);
 }
 
-function eraseAt(map: MapItem, localX: number, localY: number) {
+function eraseAt(map: MapItem, localX: number, localY: number): boolean {
   const walls = map.walls ?? [];
-  const idx = nearestWallIndex(localX, localY, walls);
-  if (idx < 0) return;
-  const next = removeWallIndices(map, [idx]);
+  const next = eraseWallsAtPoint(walls, localX, localY);
+  if (!wallsChanged(walls, next)) return false;
+  useItemStore.getState().clearWallSelection();
   const patch: Partial<MapItem> = { walls: next };
   useItemStore.getState().updateItem(map.id, patch);
   emitItemUpdate([{ id: map.id, patch }]);
+  return true;
+}
+
+function drawEraserPreview(g: Graphics, wx: number, wy: number, radius: number) {
+  g.clear();
+  g.circle(wx, wy, radius);
+  g.fill({ color: 0xef4444, alpha: 0.15 });
+  g.setStrokeStyle({ width: 1, color: 0xef4444, alpha: 0.85 });
+  g.stroke();
 }
 
 /**
@@ -106,6 +115,7 @@ export function useWallTool(appReady = false) {
 
       if (wallMode === 'eraser') {
         eraseAt(map, wp.x - map.x, wp.y - map.y);
+        drawEraserPreview(overlay, wp.x, wp.y, 7);
         canvas.setPointerCapture(e.pointerId);
         return;
       }
@@ -119,8 +129,9 @@ export function useWallTool(appReady = false) {
     function onMove(e: PointerEvent) {
       const map = getActiveMap();
       if (wallMode === 'eraser') {
-        if (e.buttons !== 1 || !map) return;
         const wp = toWorld(e.clientX, e.clientY);
+        drawEraserPreview(overlay, wp.x, wp.y, 7);
+        if (e.buttons !== 1 || !map) return;
         eraseAt(map, wp.x - map.x, wp.y - map.y);
         return;
       }
@@ -139,7 +150,10 @@ export function useWallTool(appReady = false) {
     }
 
     function onUp(e: PointerEvent) {
-      if (wallMode === 'eraser') return;
+      if (wallMode === 'eraser') {
+        overlay.clear();
+        return;
+      }
 
       if (!drawing) return;
       drawing = false;

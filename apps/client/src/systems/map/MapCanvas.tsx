@@ -33,6 +33,7 @@ import {
 } from '@/systems/scene/sessionPersistence';
 import { mergeSceneItems, sameSceneItemSnapshot, sanitizePersistedItems } from '@/systems/scene/mergeSceneItems';
 import { fileToDataUrl } from '@/lib/imagePersistence';
+import { isMapAssetFile, isModelUrl } from '@/lib/modelFormats';
 import { useWallTool } from './hooks/useWallTool';
 import { useEraserTool } from './hooks/useEraserTool';
 import { useDeleteKey } from './hooks/useDeleteKey';
@@ -411,15 +412,15 @@ export function MapCanvas() {
     setIsDragOver(false);
     const { x: worldX, y: worldY } = getWorldPos(e.clientX, e.clientY);
     const file = e.dataTransfer.files[0];
-    if (file?.type.startsWith('image/')) {
+    if (file && isMapAssetFile(file)) {
       void fileToDataUrl(file).then((url) => {
         setPendingDrop({ screenX: e.clientX, screenY: e.clientY, worldX, worldY, url });
       });
       return;
     }
-    const imageUrl = e.dataTransfer.getData('text/uri-list') || e.dataTransfer.getData('text/plain');
-    if (imageUrl && /^https?:\/\//.test(imageUrl)) {
-      setPendingDrop({ screenX: e.clientX, screenY: e.clientY, worldX, worldY, url: imageUrl });
+    const droppedUrl = e.dataTransfer.getData('text/uri-list') || e.dataTransfer.getData('text/plain');
+    if (droppedUrl && (/^https?:\/\//.test(droppedUrl) || isModelUrl(droppedUrl))) {
+      setPendingDrop({ screenX: e.clientX, screenY: e.clientY, worldX, worldY, url: droppedUrl });
     }
   }
   function handleCategorySelect(category: ImageCategory) {
@@ -430,7 +431,14 @@ export function MapCanvas() {
   }
 
   return (
-    <div className="w-full h-full relative" style={{ background: '#0a0a0f' }}>
+    <div
+      className="w-full h-full relative"
+      style={{ background: '#0a0a0f' }}
+      onDragOver={handleDragOver}
+      onDragEnter={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
       {viewMode === '3d' && <Map3DCanvas />}
 
       <div
@@ -440,20 +448,16 @@ export function MapCanvas() {
           visibility: viewMode === '3d' ? 'hidden' : 'visible',
           pointerEvents: viewMode === '3d' ? 'none' : 'auto',
         }}
-        onDragOver={viewMode === '2d' ? handleDragOver : undefined}
-        onDragEnter={viewMode === '2d' ? handleDragOver : undefined}
-        onDragLeave={viewMode === '2d' ? handleDragLeave : undefined}
-        onDrop={viewMode === '2d' ? handleDrop : undefined}
       />
 
-      {viewMode === '2d' && isDragOver && (
+      {(viewMode === '2d' || viewMode === '3d') && isDragOver && (
         <div
           className="absolute inset-0 z-50 flex flex-col items-center justify-center pointer-events-none"
           style={{ background: 'rgba(10,10,15,0.75)', border: '3px dashed var(--color-accent-gold)', borderRadius: 4 }}
         >
           <span style={{ fontSize: 48 }}>🗺️</span>
           <p className="font-display text-lg mt-3 tracking-widest" style={{ color: 'var(--color-accent-gold)' }}>
-            Drop image to place
+            Drop image or 3D model
           </p>
         </div>
       )}
@@ -475,10 +479,14 @@ function placeByCategory(category: ImageCategory, url: string, worldX: number, w
   const store = useItemStore.getState();
 
   if (category === 'map') {
+    if (isModelUrl(url)) {
+      addMapModel(url, worldX, worldY);
+      return;
+    }
     const img = new Image();
     img.crossOrigin = 'anonymous';
-    img.onload = () => addMapItem(url, img.naturalWidth || 2560, img.naturalHeight || 1920, worldX, worldY);
-    img.onerror = () => addMapItem(url, 2560, 1920, worldX, worldY);
+    img.onload = () => addMapItem(url, null, img.naturalWidth || 2560, img.naturalHeight || 1920, worldX, worldY);
+    img.onerror = () => addMapItem(url, null, 2560, 1920, worldX, worldY);
     img.src = url;
     return;
   }
@@ -488,19 +496,31 @@ function placeByCategory(category: ImageCategory, url: string, worldX: number, w
   const token: TokenItem = {
     id: uuidv4(), type: 'token', x: worldX - grid / 2, y: worldY - grid / 2, rotation: 0,
     width: grid, height: grid, zIndex: 0, locked: false, visible: true,
-    name: nameMap[category] ?? 'Token', imageUrl: url, sizeCells: 1,
+    name: nameMap[category] ?? 'Token',
+    ...(isModelUrl(url) ? { modelUrl: url } : { imageUrl: url }),
+    sizeCells: 1,
     hp: 10, maxHp: 10, tempHp: 0, ac: 10, visionRadius: 12, conditions: [],
   };
   store.addItem(token);
   emitItemAdd(token);
 }
 
-function addMapItem(url: string, w: number, h: number, worldX: number, worldY: number) {
+function addMapModel(url: string, worldX: number, worldY: number) {
+  addMapItem(null, url, 2560, 1920, worldX, worldY);
+}
+
+function addMapItem(backgroundUrl: string | null, modelUrl: string | null, w: number, h: number, worldX: number, worldY: number) {
   const store = useItemStore.getState();
   const active = getActiveMap();
   // First map with no background → fill it in; otherwise create a new map item.
-  if (active && !active.backgroundUrl) {
-    const patch: Partial<MapItem> = { backgroundUrl: url, width: w, height: h, ...defaultMapGrid(w, h) };
+  if (active && !active.backgroundUrl && !active.modelUrl) {
+    const patch: Partial<MapItem> = {
+      backgroundUrl,
+      ...(modelUrl ? { modelUrl } : {}),
+      width: w,
+      height: h,
+      ...defaultMapGrid(w, h),
+    };
     store.updateItem(active.id, patch);
     emitItemUpdate([{ id: active.id, patch }]);
     return;
@@ -508,7 +528,7 @@ function addMapItem(url: string, w: number, h: number, worldX: number, worldY: n
   const map: MapItem = {
     id: uuidv4(), type: 'map', x: worldX, y: worldY, rotation: 0,
     width: w, height: h, zIndex: 0, locked: false, visible: true,
-    backgroundUrl: url, ...defaultMapGrid(w, h), gridType: 'square',
+    backgroundUrl, ...(modelUrl ? { modelUrl } : {}), ...defaultMapGrid(w, h), gridType: 'square',
     gridColor: 0x2a2a3a, gridOpacity: 0.8, gridOffsetX: 0, gridOffsetY: 0, showGrid: true,
     walls: [],
   };

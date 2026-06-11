@@ -23,7 +23,7 @@ function cssHex(hex: string): number { return parseInt(hex.replace('#', ''), 16)
 
 /** Base token visuals (image, aura, name) — stable during combat HP changes. */
 export function tokenBaseVisualSignature(item: TokenItem): string {
-  return `${item.name}|${item.imageUrl ?? ''}|${item.sizeCells}|${item.auraRadius ?? 0}|${item.auraColor ?? ''}`;
+  return `${item.name}|${item.imageUrl ?? ''}|${item.modelUrl ?? ''}|${item.sizeCells}|${item.auraRadius ?? 0}|${item.auraColor ?? ''}`;
 }
 
 /** HP, conditions, and turn ring — cheap to patch without rebuilding the whole token. */
@@ -36,7 +36,7 @@ export function itemVisualSignature(item: Item, ctx: RenderContext): string {
   const base = `${item.type}|${item.width}|${item.height}`;
   switch (item.type) {
     case 'map':
-      return `${base}|${item.backgroundUrl}|${item.gridSize}|${item.gridType}|${item.gridColor}|${item.gridOpacity}|${item.gridOffsetX}|${item.gridOffsetY}|${item.showGrid}`;
+      return `${base}|${item.backgroundUrl}|${item.modelUrl ?? ''}|${item.gridSize}|${item.gridType}|${item.gridColor}|${item.gridOpacity}|${item.gridOffsetX}|${item.gridOffsetY}|${item.showGrid}`;
     case 'token':
       return `${base}|${tokenBaseVisualSignature(item)}`;
     case 'drawing':
@@ -79,6 +79,31 @@ function renderMap(c: Container, item: MapItem) {
       sprite.height = item.height;
       c.addChildAt(sprite, 1);
     }).catch(() => {});
+  } else if (item.modelUrl) {
+    const modelBadge = new Graphics();
+    modelBadge.label = 'model-badge';
+    modelBadge.rect(item.width * 0.25, item.height * 0.3, item.width * 0.5, item.height * 0.4);
+    modelBadge.fill({ color: 0x1a1a28, alpha: 0.92 });
+    modelBadge.setStrokeStyle({ width: 2, color: 0xc9a84c, alpha: 0.7 });
+    modelBadge.stroke();
+    c.addChildAt(modelBadge, 1);
+
+    const label = new Text({
+      text: '3D map\n(switch to 3D view)',
+      style: new TextStyle({
+        fontFamily: 'Inter',
+        fontSize: Math.max(12, Math.min(item.width, item.height) * 0.04),
+        fill: 0xc9a84c,
+        align: 'center',
+        wordWrap: true,
+        wordWrapWidth: item.width * 0.45,
+      }),
+    });
+    label.label = 'model-label';
+    label.anchor.set(0.5);
+    label.x = item.width / 2;
+    label.y = item.height / 2;
+    c.addChild(label);
   }
 
   // Grid
@@ -189,6 +214,29 @@ function renderTokenBase(c: Container, item: TokenItem) {
       c.addChildAt(sprite, Math.min(2, c.children.length));
       c.addChild(mask);
     }).catch(() => {});
+  } else if (item.modelUrl) {
+    const badge = new Graphics();
+    badge.label = 'model-badge';
+    badge.circle(cx, cy, radius - 6);
+    badge.fill({ color: 0x252532, alpha: 0.95 });
+    badge.setStrokeStyle({ width: 2, color: 0xc9a84c, alpha: 0.85 });
+    badge.stroke();
+    c.addChild(badge);
+
+    const cube = new Text({
+      text: '3D',
+      style: new TextStyle({
+        fontFamily: 'Inter',
+        fontSize: Math.max(10, radius * 0.45),
+        fill: 0xc9a84c,
+        fontWeight: '700',
+      }),
+    });
+    cube.label = 'model-label';
+    cube.anchor.set(0.5);
+    cube.x = cx;
+    cube.y = cy;
+    c.addChild(cube);
   }
 
   const nameText = new Text({
