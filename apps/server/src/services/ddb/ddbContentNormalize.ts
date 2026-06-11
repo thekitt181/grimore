@@ -59,6 +59,26 @@ export function entryHasSourceId(raw: Record<string, unknown>, sourceId: number)
   return false;
 }
 
+/** Collect all source book ids referenced on DDB entities (spells, items, monsters). */
+export function collectSourceIdsFromEntities(entries: Record<string, unknown>[]): Set<number> {
+  const ids = new Set<number>();
+  for (const raw of entries) {
+    const def = (raw.definition ?? raw) as Record<string, unknown>;
+    for (const bucket of [raw.sources, def.sources, raw.sourceIds, def.sourceIds]) {
+      if (!Array.isArray(bucket)) continue;
+      for (const entry of bucket) {
+        if (!entry || typeof entry !== 'object') continue;
+        const o = entry as Record<string, unknown>;
+        const id = Number(o.sourceId ?? o.id);
+        if (Number.isFinite(id) && id > 0) ids.add(id);
+      }
+    }
+    const top = Number(raw.sourceId ?? def.sourceId);
+    if (Number.isFinite(top) && top > 0) ids.add(top);
+  }
+  return ids;
+}
+
 function entityId(raw: Record<string, unknown>): number | undefined {
   const def = (raw.definition ?? raw) as Record<string, unknown>;
   return pickNumber(
@@ -135,6 +155,52 @@ function formatActivation(activation: unknown): string {
   const type = String(a.activationTypeName ?? a.activationType ?? a.type ?? '').trim();
   if (time != null && type) return `${time} ${type}`.trim();
   return type || (time != null ? String(time) : '');
+}
+
+/** Turn DDB duration objects into readable text (avoids "[object Object]"). */
+function formatDuration(duration: unknown): string {
+  if (duration == null) return '';
+  if (typeof duration === 'string') return stripDdbHtml(duration);
+  if (typeof duration !== 'object') return stripDdbHtml(duration);
+
+  const d = duration as Record<string, unknown>;
+  if (d.duration && typeof d.duration === 'object') {
+    return formatDuration(d.duration);
+  }
+
+  const typeName = String(
+    d.durationTypeDescription ?? d.durationTypeName ?? d.typeName ?? d.type ?? '',
+  ).trim();
+  const unit = String(
+    d.durationUnitDescription ?? d.durationUnitName ?? d.durationUnit ?? d.unit ?? '',
+  ).trim();
+  const value = pickNumber(
+    d.durationValue,
+    d.durationInterval,
+    d.value,
+    d.time,
+    d.duration,
+  );
+
+  const instant = /instant/i.test(typeName);
+  if (instant) return typeName || 'Instantaneous';
+
+  const parts: string[] = [];
+  if (typeName && !/^time$/i.test(typeName)) parts.push(typeName);
+  if (value != null && unit) {
+    parts.push(`${value} ${unit}`.trim());
+  } else if (value != null) {
+    parts.push(String(value));
+  } else if (unit && !/^time$/i.test(unit)) {
+    parts.push(unit);
+  }
+
+  const joined = parts.join(', ').replace(/\s+/g, ' ').trim();
+  if (joined) return joined;
+
+  return stripDdbHtml(
+    d.description ?? d.durationDescription ?? d.name ?? d.label ?? '',
+  );
 }
 
 function formatComponents(def: Record<string, unknown>): string {
@@ -430,7 +496,7 @@ function buildSpellDescription(def: Record<string, unknown>): string {
   if (casting) meta.push(`Casting Time: ${casting}`);
   const range = formatRange(def.range);
   if (range) meta.push(`Range: ${range}`);
-  const duration = stripDdbHtml(def.duration ?? def.durationDescription);
+  const duration = formatDuration(def.duration ?? def.durationDescription);
   if (duration) meta.push(`Duration: ${duration}`);
   const components = formatComponents(def);
   if (components) meta.push(`Components: ${components}`);

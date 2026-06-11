@@ -6,7 +6,8 @@ import { extractCharacter } from './characterExtract';
 import { fetchDdbCampaigns, fetchDdbCharacterList } from './campaigns';
 import { pushHpToDdb, pushDeathSavesToDdb, type DdbDeathSavesPayload } from './characterUpdate';
 import { fetchDdbEncounters } from './encounters';
-import { fetchDdbCatalog, fetchDdbSources } from './ddbSources';
+import { fetchDdbCatalog } from './ddbSources';
+import { filterAccessibleSourceIds, listAccessibleDdbSources } from './ddbAccessibleSources';
 import {
   fetchDdbMonsterDetail,
   importDdbLibraryEntries,
@@ -307,9 +308,12 @@ async function requireDdbAuth(userId: string) {
   return ctx;
 }
 
-export async function listDdbLibrarySources(userId: string) {
+export async function listDdbLibrarySources(
+  userId: string,
+  opts?: { campaignId?: number },
+) {
   const ctx = await requireDdbAuth(userId);
-  return fetchDdbSources(ctx);
+  return listAccessibleDdbSources(ctx, opts);
 }
 
 export async function browseDdbLibraryMonsters(
@@ -355,6 +359,8 @@ export async function importFromDdbLibrary(
     campaignId?: number;
     sourceId?: number;
     deferCatalogFinish?: boolean;
+    skipExisting?: boolean;
+    namesById?: Record<number, string>;
   },
 ) {
   const ctx = await requireDdbAuth(userId);
@@ -384,7 +390,7 @@ export async function importFromDdbLibrary(
 
 export async function importAllFromDdbLibrarySource(
   userId: string,
-  opts: { sourceId?: number; sourceIds?: number[]; campaignId?: number },
+  opts: { sourceId?: number; sourceIds?: number[]; campaignId?: number; skipExisting?: boolean },
 ) {
   const ctx = await requireDdbAuth(userId);
   const sourceIds = opts.sourceIds?.length
@@ -392,10 +398,26 @@ export async function importAllFromDdbLibrarySource(
     : opts.sourceId
       ? [opts.sourceId]
       : [];
-  return importAllDdbLibraryFromSources(ctx, {
-    sourceIds,
+  const unique = [...new Set(sourceIds.filter((id) => Number.isFinite(id) && id > 0))];
+  const { accessible, inaccessible } = await filterAccessibleSourceIds(ctx, unique, {
     campaignId: opts.campaignId,
   });
+  const result = await importAllDdbLibraryFromSources(ctx, {
+    sourceIds: accessible,
+    campaignId: opts.campaignId,
+    ...(opts.skipExisting ? { skipExisting: true } : {}),
+  });
+  if (inaccessible.length === 0) return result;
+  return {
+    ...result,
+    errors: [
+      {
+        id: 0,
+        message: `Skipped ${inaccessible.length} book(s) you don't own or have shared access to`,
+      },
+      ...result.errors,
+    ],
+  };
 }
 
 export async function finishDdbLibraryImportSession(

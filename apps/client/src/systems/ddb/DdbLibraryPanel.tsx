@@ -55,6 +55,9 @@ function tabToKind(tab: LibraryTab): 'monster' | 'item' | 'spell' {
 
 function formatImportResultMessage(result: DdbLibraryImportResult, base: string): string {
   let msg = base;
+  if (result.skipped && result.skipped > 0) {
+    msg += ` Skipped ${result.skipped} already in compendium.`;
+  }
   if (result.errors.length > 0) {
     const byMessage = new Map<string, number>();
     for (const err of result.errors) {
@@ -160,8 +163,11 @@ export function DdbLibraryPanel({ onClose }: { onClose: () => void }) {
   const ddbCampaignId = link?.ddbCampaignId;
 
   const { data: sources = [], isLoading: sourcesLoading } = useQuery({
-    queryKey: ['ddb', 'library', 'sources'],
-    queryFn: fetchDdbLibrarySources,
+    queryKey: ['ddb', 'library', 'sources', ddbCampaignId ?? null],
+    queryFn: () =>
+      fetchDdbLibrarySources(
+        ddbCampaignId != null && ddbCampaignId > 0 ? { campaignId: ddbCampaignId } : undefined,
+      ),
     enabled: Boolean(ddbStatus?.linked),
     staleTime: 5 * 60_000,
   });
@@ -308,6 +314,60 @@ export function DdbLibraryPanel({ onClose }: { onClose: () => void }) {
     },
   });
 
+  const reimportMissingMut = useMutation({
+    mutationFn: () => {
+      if (selectedSourceIds.size === 0) throw new Error('Select at least one source book');
+      const sourceNames = Object.fromEntries(sources.map((s) => [s.id, s.name]));
+      return importAllDdbLibraryFromSource(
+        {
+          sourceIds: [...selectedSourceIds].map((id) => Number(id)),
+          sourceNames,
+          skipExisting: true,
+          ...(ddbCampaignId != null && ddbCampaignId > 0 ? { campaignId: ddbCampaignId } : {}),
+        },
+        (progress) => {
+          const book = progress.sourceName ? `${progress.sourceName}: ` : '';
+          if (progress.phase === 'complete') {
+            const ok = progress.bookImported ?? 0;
+            const fail = progress.bookErrors ?? 0;
+            setMessage(`${book}reimport complete (${ok} new${fail ? `, ${fail} failed` : ''}).`);
+            return;
+          }
+          setMessage(`${book}checking ${progress.phase}… ${progress.done}/${progress.total || '?'}`);
+        },
+        async (info) => {
+          if (info.result.imported.length > 0) {
+            useCompendiumUiStore.getState().setBrowseMode('sources');
+            useCompendiumUiStore.getState().setPanelOpen(true);
+            await refetchCompendiumAfterImport(
+              qc,
+              info.catalogRev ? { catalogRev: info.catalogRev } : undefined,
+            );
+          }
+        },
+      );
+    },
+    onSuccess: async (result) => {
+      const ok = result.imported.length;
+      const skipped = result.skipped ?? 0;
+      const fail = result.errors.length;
+      setMessage(
+        ok || skipped
+          ? formatImportResultMessage(
+              result,
+              ok
+                ? `Reimported ${ok} missing entries${fail ? ` (${fail} failed)` : ''}.`
+                : `All entries already in compendium${fail ? ` (${fail} failed)` : ''}.`,
+            )
+          : fail
+            ? result.errors.map((e) => e.message).join('; ')
+            : 'Nothing to reimport from the selected books.',
+      );
+      if (ok > 0) await afterCompendiumImport(qc, result);
+    },
+    onError: (err: unknown) => setMessage(extractApiError(err, 'Reimport failed')),
+  });
+
   const syncCatalogMut = useMutation({
     mutationFn: () =>
       syncCompendiumAfterImport({
@@ -341,6 +401,9 @@ export function DdbLibraryPanel({ onClose }: { onClose: () => void }) {
   function selectAllSources() {
     setSelectedSourceIds(new Set(sources.map((s) => s.id)));
     setSelected(new Set());
+    if (sources.length > 0) {
+      setMessage(`Selected all ${sources.length} accessible book${sources.length === 1 ? '' : 's'}.`);
+    }
   }
 
   function clearSourceSelection() {
@@ -473,7 +536,11 @@ export function DdbLibraryPanel({ onClose }: { onClose: () => void }) {
               </span>
             </div>
             {sourcesLoading ? (
-              <p className="font-ui text-[10px] opacity-60">Loading books…</p>
+              <p className="font-ui text-[10px] opacity-60">Loading your books…</p>
+            ) : sources.length === 0 ? (
+              <p className="font-ui text-[10px] opacity-60">
+                No accessible books found. Sync entitlements on D&amp;D Beyond or link a campaign for shared content.
+              </p>
             ) : (
               <div className="space-y-0.5">
                 {sources.map((s) => (
@@ -509,9 +576,6 @@ export function DdbLibraryPanel({ onClose }: { onClose: () => void }) {
                   </div>
                 ))}
               </div>
-            )}
-            {!sourcesLoading && sources.length === 0 && (
-              <p className="font-ui text-[10px] opacity-60">No source books found.</p>
             )}
           </div>
 
@@ -620,7 +684,7 @@ export function DdbLibraryPanel({ onClose }: { onClose: () => void }) {
           <div className="flex gap-2 shrink-0 flex-wrap">
             <button
               type="button"
-              disabled={selected.size === 0 || importMut.isPending || importAllMut.isPending || syncCatalogMut.isPending}
+              disabled={selected.size === 0 || importMut.isPending || importAllMut.isPending || reimportMissingMut.isPending || syncCatalogMut.isPending}
               onClick={() => importMut.mutate()}
               className="font-ui text-xs flex-1 py-2 rounded font-semibold disabled:opacity-40"
               style={{
@@ -635,7 +699,7 @@ export function DdbLibraryPanel({ onClose }: { onClose: () => void }) {
             </button>
             <button
               type="button"
-              disabled={selectedSourceIds.size === 0 || importMut.isPending || importAllMut.isPending || syncCatalogMut.isPending}
+              disabled={selectedSourceIds.size === 0 || importMut.isPending || importAllMut.isPending || reimportMissingMut.isPending || syncCatalogMut.isPending}
               onClick={() => importAllMut.mutate()}
               className="font-ui text-xs flex-1 py-2 rounded font-semibold disabled:opacity-40 min-w-[8rem]"
               style={{
@@ -657,7 +721,25 @@ export function DdbLibraryPanel({ onClose }: { onClose: () => void }) {
             </button>
             <button
               type="button"
-              disabled={importMut.isPending || importAllMut.isPending || syncCatalogMut.isPending}
+              disabled={selectedSourceIds.size === 0 || importMut.isPending || importAllMut.isPending || reimportMissingMut.isPending || syncCatalogMut.isPending}
+              onClick={() => reimportMissingMut.mutate()}
+              className="font-ui text-xs flex-1 py-2 rounded font-semibold disabled:opacity-40 min-w-[8rem]"
+              style={{
+                background: 'rgba(255,255,255,0.04)',
+                border: `1px solid ${BD}`,
+                color: GOLD,
+              }}
+              title="Fast reimport: skips entries already in Mongo; re-fetches spells with broken duration text"
+            >
+              {reimportMissingMut.isPending
+                ? 'Reimporting…'
+                : selectedSourceIds.size > 0
+                  ? `Reimport missing (${selectedSourceIds.size} book${selectedSourceIds.size === 1 ? '' : 's'})`
+                  : 'Reimport missing'}
+            </button>
+            <button
+              type="button"
+              disabled={importMut.isPending || importAllMut.isPending || reimportMissingMut.isPending || syncCatalogMut.isPending}
               onClick={() => syncCatalogMut.mutate()}
               className="font-ui text-xs w-full py-2 rounded font-semibold disabled:opacity-40"
               style={{

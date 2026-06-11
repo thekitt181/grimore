@@ -403,7 +403,12 @@ router.get('/sessions/:sessionId/rolls/poll', requireAuth, requireSessionMember,
 
 router.get('/library/sources', requireAuth, async (req: AuthenticatedRequest, res) => {
   try {
-    const sources = await listDdbLibrarySources(req.userId!);
+    const campaignIdRaw = req.query['campaignId'];
+    const campaignId =
+      typeof campaignIdRaw === 'string' && Number(campaignIdRaw) > 0
+        ? Number(campaignIdRaw)
+        : undefined;
+    const sources = await listDdbLibrarySources(req.userId!, { ...(campaignId ? { campaignId } : {}) });
     res.json({ sources });
   } catch (err) {
     res.status(400).json({ error: err instanceof Error ? err.message : 'Failed to load sources' });
@@ -484,6 +489,8 @@ const importSchema = z.object({
   campaignId: z.coerce.number().int().positive().optional(),
   sourceId: z.coerce.number().int().positive().optional(),
   deferCatalogFinish: z.boolean().optional(),
+  skipExisting: z.boolean().optional(),
+  namesById: z.record(z.string(), z.string()).optional(),
 });
 
 router.post('/library/import', requireAuth, async (req: AuthenticatedRequest, res) => {
@@ -507,6 +514,7 @@ const importAllSchema = z
     sourceIds: z.array(z.coerce.number().int().positive()).optional(),
     sourceId: z.coerce.number().int().positive().optional(),
     campaignId: z.coerce.number().int().positive().optional(),
+    skipExisting: z.boolean().optional(),
   })
   .transform((data) => {
     const sourceIds = [...new Set([...(data.sourceIds ?? []), ...(data.sourceId != null ? [data.sourceId] : [])])];

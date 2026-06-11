@@ -1,6 +1,7 @@
 /** Strip DDB HTML snippets to plain text for compendium stat blocks. */
 export function stripDdbHtml(html: unknown): string {
   if (html == null) return '';
+  if (typeof html === 'object') return '';
   const raw = String(html);
   return raw
     .replace(/<br\s*\/?>/gi, '\n')

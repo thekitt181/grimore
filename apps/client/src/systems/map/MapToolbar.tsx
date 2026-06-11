@@ -7,6 +7,7 @@ import { mapLayerRefs } from './MapCanvas';
 import { emitItemUpdate, emitItemRemove } from '@/systems/scene/sceneSync';
 import { clsx } from 'clsx';
 import { setFogVisibleForSession } from '@/systems/scene/fogActiveSync';
+import { DRAW_COLOR_PRESETS, DEFAULT_TEXT_FONT_SIZE, MAX_TEXT_FONT_SIZE, MIN_TEXT_FONT_SIZE } from './drawColors';
 
 type ToolDef = { id: MapTool; label: string; icon: string; title: string };
 
@@ -15,7 +16,7 @@ const GM_TOOLS: ToolDef[] = [
   { id: 'pan',       label: 'Pan',     icon: '✋',  title: 'Pan the map (middle-mouse or this tool)' },
   { id: 'fog-reveal',label: 'Reveal',  icon: '☀',  title: 'Reveal fog cells' },
   { id: 'fog-hide',  label: 'Hide',    icon: '🌑', title: 'Hide fog cells' },
-  { id: 'wall',      label: 'Wall',    icon: '🧱', title: 'Freehand draw LOS walls — GM only (right-click to erase)' },
+  { id: 'wall',      label: 'Wall',    icon: '🧱', title: 'Draw LOS walls (GM). Use Eraser to remove wall segments.' },
   { id: 'measure',   label: 'Measure', icon: '📏', title: 'Measure distance' },
   { id: 'calibrate', label: 'Calibrate', icon: '⊹', title: 'Calibrate grid — drag a rectangle over one cell' },
 ];
@@ -31,7 +32,8 @@ const DRAW_TOOLS: ToolDef[] = [
   { id: 'draw-rect',     label: 'Rect',   icon: '▭', title: 'Draw rectangle' },
   { id: 'draw-circle',   label: 'Circle', icon: '○', title: 'Draw circle' },
   { id: 'draw-arrow',    label: 'Arrow',  icon: '→', title: 'Draw arrow' },
-  { id: 'text',          label: 'Text',   icon: 'T', title: 'Place text' },
+  { id: 'text',          label: 'Text',   icon: 'T', title: 'Place text label (DM & players)' },
+  { id: 'eraser',        label: 'Eraser', icon: '⌫', title: 'Erase drawings, text, and walls (GM: all; players: own marks)' },
 ];
 
 const BTN = 'w-9 h-9 rounded flex items-center justify-center text-sm font-ui transition-all text-[#8a8075] hover:text-[#e8e0d0] hover:bg-[#1c1c28]';
@@ -42,8 +44,10 @@ export function MapToolbar() {
   const setTool = useMapStore((s) => s.setTool);
   const drawColor = useMapStore((s) => s.drawColor);
   const drawStroke = useMapStore((s) => s.drawStroke);
+  const textFontSize = useMapStore((s) => s.textFontSize);
   const setDrawColor = useMapStore((s) => s.setDrawColor);
   const setDrawStroke = useMapStore((s) => s.setDrawStroke);
+  const setTextFontSize = useMapStore((s) => s.setTextFontSize);
   const fogEnabled = useMapStore((s) => s.fogEnabled);
   const sessionFogActive = useMapStore((s) => s.sessionFogActive);
   const fogOverlayOn = fogEnabled || sessionFogActive;
@@ -193,13 +197,46 @@ export function MapToolbar() {
 
           <div className="gold-divider my-1" />
 
-          <div title="Draw colour" className="flex items-center justify-center">
+          <div className="grid grid-cols-3 gap-0.5 px-0.5" title="Colour palette">
+            {DRAW_COLOR_PRESETS.map((c) => (
+              <button
+                key={c}
+                type="button"
+                title={c}
+                onClick={() => setDrawColor(c)}
+                className="w-4 h-4 rounded border"
+                style={{
+                  background: c,
+                  borderColor: drawColor === c ? '#c9a84c' : 'var(--color-border)',
+                  boxShadow: drawColor === c ? '0 0 0 1px #c9a84c' : undefined,
+                }}
+              />
+            ))}
+          </div>
+
+          <div title="Custom colour" className="flex items-center justify-center mt-0.5">
             <input
               type="color"
               value={drawColor}
               onChange={(e) => setDrawColor(e.target.value)}
               className="w-7 h-7 rounded cursor-pointer border-0 p-0"
               style={{ background: 'transparent' }}
+            />
+          </div>
+
+          <div className="flex flex-col items-center gap-0.5 px-1 mt-0.5">
+            <span className="font-ui text-xs" style={{ color: 'var(--color-text-secondary)', fontSize: 9 }}>
+              Text {textFontSize}px
+            </span>
+            <input
+              type="range"
+              min={MIN_TEXT_FONT_SIZE}
+              max={MAX_TEXT_FONT_SIZE}
+              step={1}
+              value={textFontSize}
+              onChange={(e) => setTextFontSize(Number(e.target.value))}
+              className="w-full accent-[#c9a84c]"
+              title="Text size for new labels"
             />
           </div>
 

@@ -187,8 +187,14 @@ export async function fetchDdbRollPoll(sessionId: string): Promise<DdbRollBridge
   return data.rolls ?? [];
 }
 
-export async function fetchDdbLibrarySources(): Promise<DdbSourceSummary[]> {
-  const { data } = await api.get<{ sources: DdbSourceSummary[] }>('/ddb/library/sources');
+export async function fetchDdbLibrarySources(params?: {
+  campaignId?: number;
+}): Promise<DdbSourceSummary[]> {
+  const { data } = await api.get<{ sources: DdbSourceSummary[] }>('/ddb/library/sources', {
+    ...(params?.campaignId != null && params.campaignId > 0
+      ? { params: { campaignId: params.campaignId } }
+      : {}),
+  });
   return data.sources ?? [];
 }
 
@@ -432,11 +438,13 @@ async function collectMonsterIdsForSource(sourceId: number): Promise<number[]> {
 
 function mergeImportResults(a: DdbLibraryImportResult, b: DdbLibraryImportResult): DdbLibraryImportResult {
   const catalogRev = b.catalogRev ?? a.catalogRev;
+  const skipped = (a.skipped ?? 0) + (b.skipped ?? 0);
   return {
     imported: [...a.imported, ...b.imported],
     errors: [...a.errors, ...b.errors],
     sourcesUnlocked: [...new Set([...(a.sourcesUnlocked ?? []), ...(b.sourcesUnlocked ?? [])])],
     mongoPersisted: a.mongoPersisted !== false && b.mongoPersisted !== false,
+    ...(skipped > 0 ? { skipped } : {}),
     ...(catalogRev ? { catalogRev } : {}),
   };
 }
@@ -447,6 +455,8 @@ export async function importDdbLibraryEntries(
     ids: number[];
     campaignId?: number;
     sourceId?: number;
+    skipExisting?: boolean;
+    namesById?: Record<number, string>;
   },
   opts?: { skipFinish?: boolean },
 ): Promise<DdbLibraryImportResult> {
@@ -462,6 +472,8 @@ export async function importDdbLibraryEntries(
       ? { campaignId: Number(body.campaignId) }
       : {}),
     ...(body.sourceId != null ? { sourceId: body.sourceId } : {}),
+    ...(body.skipExisting ? { skipExisting: true } : {}),
+    ...(body.namesById ? { namesById: body.namesById } : {}),
   };
 
   for (let i = 0; i < ids.length; i += chunkSize) {
@@ -518,6 +530,7 @@ export async function importAllDdbLibraryFromSource(
     sourceIds?: number[];
     campaignId?: number;
     sourceNames?: Record<number, string>;
+    skipExisting?: boolean;
   },
   onProgress?: (progress: DdbImportAllProgress) => void,
   onBookComplete?: (info: DdbImportAllBookComplete) => void | Promise<void>,
@@ -531,6 +544,34 @@ export async function importAllDdbLibraryFromSource(
   ];
   if (sourceIds.length === 0) {
     throw new Error('Select at least one source book');
+  }
+
+  if (body.skipExisting) {
+    const { data } = await api.post<DdbLibraryImportResult>('/ddb/library/import-all', {
+      sourceIds,
+      ...(body.campaignId != null && Number(body.campaignId) > 0
+        ? { campaignId: Number(body.campaignId) }
+        : {}),
+      skipExisting: true,
+    });
+    for (const sourceId of sourceIds) {
+      onProgress?.({
+        phase: 'complete',
+        sourceId,
+        ...(body.sourceNames?.[sourceId] ? { sourceName: body.sourceNames[sourceId] } : {}),
+        done: 1,
+        total: 1,
+        bookImported: data.imported.length,
+        bookErrors: data.errors.length,
+      });
+      await onBookComplete?.({
+        sourceId,
+        ...(body.sourceNames?.[sourceId] ? { sourceName: body.sourceNames[sourceId] } : {}),
+        result: data,
+        catalogRev: data.catalogRev ?? null,
+      });
+    }
+    return data;
   }
 
   let merged: DdbLibraryImportResult = { imported: [], errors: [] };

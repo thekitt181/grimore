@@ -702,6 +702,8 @@ export async function patchOwlbearEntriesBulk(
     try {
       await withMongoTimeout(col.bulkWrite(ops, { ordered: true }), 30_000);
       clearRawGlobalDocInflight();
+      const { invalidateImportSkipIndex } = await import('./compendiumImportIndex');
+      invalidateImportSkipIndex();
       return { mongoPersisted: true, lastUpdated };
     } catch (err) {
       console.warn(

@@ -20,7 +20,7 @@ export type MapTool =
   | 'wall'
   | 'measure'
   | 'calibrate'
-  | 'draw-freehand' | 'draw-rect' | 'draw-circle' | 'draw-arrow' | 'text';
+  | 'draw-freehand' | 'draw-rect' | 'draw-circle' | 'draw-arrow' | 'text' | 'eraser';
 
 export interface MapViewport {
   x: number;
@@ -58,6 +58,7 @@ interface SceneState extends ActiveGrid {
   // Drawing tool settings
   drawColor: string;
   drawStroke: number;
+  textFontSize: number;
 
   // ── Actions ────────────────────────────────────────────────────────────────
   setTool: (tool: MapTool) => void;
@@ -67,6 +68,7 @@ interface SceneState extends ActiveGrid {
   setSessionFogActive: (active: boolean) => void;
   setDrawColor: (color: string) => void;
   setDrawStroke: (stroke: number) => void;
+  setTextFontSize: (size: number) => void;
 
   setActiveGrid: (grid: Partial<ActiveGrid>) => void;
 
@@ -115,6 +117,7 @@ export const useMapStore = create<SceneState>((set) => ({
   sessionFogActive: false,
   drawColor:    '#c9a84c',
   drawStroke:   3,
+  textFontSize: 18,
 
   setTool: (activeTool) =>
     set((s) => {
@@ -132,6 +135,7 @@ export const useMapStore = create<SceneState>((set) => ({
   setSessionFogActive: (sessionFogActive) => set({ sessionFogActive }),
   setDrawColor:   (drawColor) => set({ drawColor }),
   setDrawStroke:  (drawStroke) => set({ drawStroke }),
+  setTextFontSize:(textFontSize) => set({ textFontSize }),
 
   setActiveGrid:  (grid) => set((s) => ({ ...s, ...grid })),
 

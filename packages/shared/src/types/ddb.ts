@@ -194,6 +194,8 @@ export interface DdbLibraryImportResult {
   sourcesUnlocked?: string[];
   /** True when Mongo acknowledged the global doc write. */
   mongoPersisted?: boolean;
+  /** Entries skipped because they already exist in Mongo (reimport mode). */
+  skipped?: number;
 }
 
 export interface DdbRollBridgePayload {

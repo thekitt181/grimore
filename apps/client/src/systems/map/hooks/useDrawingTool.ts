@@ -7,6 +7,9 @@ import { useItemStore } from '@/systems/scene/store/itemStore';
 import { emitItemAdd } from '@/systems/scene/sceneSync';
 import type { DrawItem, TextItem, DrawShape } from '@/systems/scene/types';
 
+import { useSessionStore } from '@/store/sessionStore';
+import { DEFAULT_TEXT_FONT_SIZE } from '../drawColors';
+
 const DRAW_TOOLS = new Set(['draw-freehand', 'draw-rect', 'draw-circle', 'draw-arrow', 'text']);
 
 // ── Text placement callback — set by DrawingTextInput overlay ────────────────
@@ -15,13 +18,15 @@ let _setPendingText: ((p: PendingText | null) => void) | null = null;
 export function registerTextSetter(fn: (p: PendingText | null) => void) { _setPendingText = fn; }
 
 export function commitTextDrawing(worldX: number, worldY: number, text: string) {
-  const { drawColor } = useMapStore.getState();
-  const fontSize = 18;
+  const { drawColor, textFontSize } = useMapStore.getState();
+  const myUserId = useSessionStore.getState().myUserId;
+  const fontSize = textFontSize || DEFAULT_TEXT_FONT_SIZE;
   const item: TextItem = {
     id: uuidv4(), type: 'text', x: worldX, y: worldY, rotation: 0,
-    width: Math.max(40, text.length * fontSize * 0.6), height: fontSize * 1.4,
+    width: Math.max(40, text.length * fontSize * 0.55), height: fontSize * 1.6,
     zIndex: 0, locked: false, visible: true,
     text, color: drawColor, fontSize,
+    ...(myUserId ? { ownerId: myUserId } : {}),
   };
   useItemStore.getState().addItem(item);
   emitItemAdd(item);
@@ -113,6 +118,7 @@ export function useDrawingTool(appReady = false) {
     }
 
     function commitDrawing(shape: DrawShape, worldPts: number[]) {
+      const myUserId = useSessionStore.getState().myUserId;
       // Compute bounding box and convert points to item-local space
       let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
       for (let i = 0; i < worldPts.length; i += 2) {
@@ -130,6 +136,7 @@ export function useDrawingTool(appReady = false) {
         width: Math.max(1, maxX - minX), height: Math.max(1, maxY - minY),
         zIndex: 0, locked: false, visible: true,
         shape, points: local, color: drawColor, stroke: drawStroke,
+        ...(myUserId ? { ownerId: myUserId } : {}),
       };
       useItemStore.getState().addItem(item);
       emitItemAdd(item);

@@ -34,6 +34,7 @@ import {
 import { mergeSceneItems, sameSceneItemSnapshot, sanitizePersistedItems } from '@/systems/scene/mergeSceneItems';
 import { fileToDataUrl } from '@/lib/imagePersistence';
 import { useWallTool } from './hooks/useWallTool';
+import { useEraserTool } from './hooks/useEraserTool';
 import type { Item, MapItem, TokenItem } from '@/systems/scene/types';
 import { MapCategoryWheel, type ImageCategory } from './MapCategoryWheel';
 import { useSessionStore } from '@/store/sessionStore';
@@ -332,6 +333,7 @@ export function MapCanvas() {
   useDrawingTool(appReady);
   useCalibrateGrid(appReady);
   useWallTool(appReady);
+  useEraserTool(appReady);
 
   // ── Fix maps that still use 96px after an image changed their dimensions ─
   const gridFixed = useRef(false);
