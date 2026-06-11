@@ -31,9 +31,8 @@ import {
   saveOwlbearEntry,
   deleteOwlbearEntry,
   readRawGlobalDoc,
-  readBookSourceLabelsFromMongo,
-  readOverrideSlicesForBookList,
   saveOwlbearEntriesBulk,
+  type BookSourceLabelBuckets,
   clearRawGlobalDocInflight,
   type CompendiumKind,
   type PersistRawGlobalDocResult,
@@ -59,7 +58,11 @@ import {
   policyIsSourceLocked,
   type CompendiumVisibilityPolicy,
 } from './compendiumVisibility';
-import { readOverrideCountsFromMongo, readOverrideEntriesFromMongo } from './compendiumMongoReads';
+import {
+  readBookSourceLabelBucketsWithFallback,
+  readOverrideCountsFromMongo,
+  readOverrideEntriesFromMongo,
+} from './compendiumMongoReads';
 import { getCompendiumVisibilityPolicy } from './compendiumSourcePolicy';
 import {
   bundledSourceLabelSet,
@@ -750,8 +753,8 @@ function tallyBooksSourceCounts(
 }
 
 function tallyBooksFromSourceLabels(
-  buckets: Awaited<ReturnType<typeof readBookSourceLabelsFromMongo>>,
-  policy: CompendiumVisibilityPolicy,
+  buckets: BookSourceLabelBuckets | null,
+  _policy: CompendiumVisibilityPolicy,
 ): SourceCountMap {
   if (!buckets) return new Map();
   const bundled = bundledSourceLabelSet();
@@ -764,7 +767,6 @@ function tallyBooksFromSourceLabels(
         if (part.toLowerCase() === 'custom') continue;
         const norm = normalizeSourceLabel(part);
         if (bundled.has(norm)) continue;
-        if (policyIsSourceLocked(part, policy)) continue;
         const cur = counts.get(part) ?? { total: 0, public: 0, draft: 0 };
         cur.total += 1;
         cur.public += 1;
@@ -780,7 +782,7 @@ function tallyBooksFromSourceLabels(
 }
 
 function bookSourcesFromLabelBuckets(
-  buckets: Awaited<ReturnType<typeof readBookSourceLabelsFromMongo>>,
+  buckets: BookSourceLabelBuckets | null,
   policy: CompendiumVisibilityPolicy,
 ): Array<{ id: string; label: string; count: number }> {
   const bundled = bundledSourceLabelSet();
@@ -790,93 +792,52 @@ function bookSourcesFromLabelBuckets(
   );
 }
 
-function bookSourcesFromOverrideSlices(
-  slices: Awaited<ReturnType<typeof readOverrideSlicesForBookList>>,
-  policy: CompendiumVisibilityPolicy,
-): Array<{ id: string; label: string; count: number }> {
-  const bundled = bundledSourceLabelSet();
-  const counts = tallyBooksSourceCounts(
-    {
-      _id: 'global',
-      monsters: [],
-      items: [],
-      spells: [],
-      overrideMonsters: slices.overrideMonsters,
-      overrideItems: slices.overrideItems,
-      overrideSpells: slices.overrideSpells,
-      deleted: [],
-      images: {},
-      imagesData: {},
-      entryImages: {},
-      lastUpdated: new Date(0).toISOString(),
-    },
-    policy,
-  );
-  return mapSourceListResults(counts, policy, false, true, bundled).map(
-    ({ id, label, count }) => ({ id, label, count }),
-  );
-}
-
 /** Merged DDB-imported book list (monsters + items + spells) for Compendium → Books. */
 export async function listAllBookSources(): Promise<
   Array<{ id: string; label: string; count: number }>
 > {
+  const mongoCounts = await readOverrideCountsFromMongo();
+  const overrideTotal = mongoCounts
+    ? mongoCounts.monsters + mongoCounts.items + mongoCounts.spells
+    : 0;
+
+  await ensureImportedSourcesUnlocked('listBooks');
   let policy = await readVisibilityPolicyFast();
-  let labelBuckets = await readBookSourceLabelsFromMongo();
+  let labelBuckets = await readBookSourceLabelBucketsWithFallback();
   let results = bookSourcesFromLabelBuckets(labelBuckets, policy);
 
-  if (results.length === 0) {
-    let slices = await readOverrideSlicesForBookList();
-    const sliceCount = overrideSliceCount(slices);
-    if (sliceCount > 0) {
-      results = bookSourcesFromOverrideSlices(slices, policy);
-    }
+  if (results.length === 0 && overrideTotal > 0) {
+    await ensureImportedSourcesUnlocked('listBooks-recovery');
+    policy = await readVisibilityPolicyFast();
+    labelBuckets = await readBookSourceLabelBucketsWithFallback();
+    results = bookSourcesFromLabelBuckets(labelBuckets, policy);
+  }
 
-    if (results.length === 0 && (sliceCount > 0 || labelBuckets)) {
+  if (results.length === 0 && overrideTotal === 0) {
+    const { promoteFallbackToMongo } = await import('./compendiumFallbackMongoSync');
+    await promoteFallbackToMongo('listBooks');
+    clearRawGlobalDocInflight();
+    labelBuckets = await readBookSourceLabelBucketsWithFallback();
+    policy = await readVisibilityPolicyFast();
+    results = bookSourcesFromLabelBuckets(labelBuckets, policy);
+    if (results.length === 0 && labelBuckets) {
       await ensureImportedSourcesUnlocked('listBooks-recovery');
       policy = await readVisibilityPolicyFast();
-      results = labelBuckets
-        ? bookSourcesFromLabelBuckets(labelBuckets, policy)
-        : bookSourcesFromOverrideSlices(slices, policy);
-    }
-
-    if (results.length === 0 && sliceCount === 0 && !labelBuckets) {
-      const { promoteFallbackToMongo } = await import('./compendiumFallbackMongoSync');
-      await promoteFallbackToMongo('listBooks');
-      clearRawGlobalDocInflight();
-      labelBuckets = await readBookSourceLabelsFromMongo();
-      slices = await readOverrideSlicesForBookList();
-      policy = await readVisibilityPolicyFast();
-      results = labelBuckets
-        ? bookSourcesFromLabelBuckets(labelBuckets, policy)
-        : bookSourcesFromOverrideSlices(slices, policy);
-      if (results.length === 0 && (overrideSliceCount(slices) > 0 || labelBuckets)) {
-        await ensureImportedSourcesUnlocked('listBooks-recovery');
-        policy = await readVisibilityPolicyFast();
-        results = labelBuckets
-          ? bookSourcesFromLabelBuckets(labelBuckets, policy)
-          : bookSourcesFromOverrideSlices(slices, policy);
-      }
+      results = bookSourcesFromLabelBuckets(labelBuckets, policy);
     }
   }
 
   if (results.length > 0) {
     console.log(`[Compendium] Books list: ${results.length} imported source(s)`);
+  } else if (overrideTotal > 0) {
+    console.warn(
+      `[Compendium] Books list empty but Mongo has ${overrideTotal} override entries — check bundled/lock filters`,
+    );
   } else {
-    console.warn('[Compendium] Books list empty — no imported override sources visible');
+    console.warn('[Compendium] Books list empty — no imported override sources in Mongo');
   }
 
   return results;
-}
-
-function overrideSliceCount(slices: {
-  overrideMonsters?: unknown[];
-  overrideItems?: unknown[];
-  overrideSpells?: unknown[];
-}): number {
-  return (slices.overrideMonsters?.length ?? 0)
-    + (slices.overrideItems?.length ?? 0)
-    + (slices.overrideSpells?.length ?? 0);
 }
 
 async function monstersFromRawOverrides(
@@ -1035,10 +996,9 @@ function sourceListFilter(
 ): boolean {
   const normId = normalizeSourceLabel(id);
 
-  // Books tab: never show bundled PDFs or admin-locked sources.
+  // Books tab: hide bundled PDFs only — imported DDB books stay listed (unlock runs on list).
   if (excludeBundled) {
     if (bundled?.has(normId)) return false;
-    if (sourceIsLocked(id, policy)) return false;
     return c.total > 0;
   }
 

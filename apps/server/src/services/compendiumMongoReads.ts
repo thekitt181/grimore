@@ -1,6 +1,8 @@
 import type { OwlbearItem, OwlbearMonster, OwlbearRawGlobalDoc, OwlbearSpell } from '@grimoire/shared';
+import { splitCompendiumSources } from '@grimoire/shared';
 import { getCollection, isMongoCircuitOpen, withMongoTimeout } from '../lib/mongo';
 import type { CompendiumKind } from './compendiumOwlbearPersist';
+import type { BookSourceLabelBuckets } from './compendiumOwlbearPersist';
 import { entryMatchesSource } from './compendiumVisibility';
 
 const OVERRIDE_FIELD: Record<CompendiumKind, keyof OwlbearRawGlobalDoc> = {
@@ -79,6 +81,85 @@ export async function readOverrideEntriesFromMongo<K extends CompendiumKind>(
     );
     return [];
   }
+}
+
+function labelBucketCount(buckets: BookSourceLabelBuckets): number {
+  return buckets.monsterSources.length + buckets.itemSources.length + buckets.spellSources.length;
+}
+
+/** Per-kind source label read — smaller aggregation than all three arrays at once. */
+async function readKindSourceLabelsFromMongo(
+  kind: CompendiumKind,
+): Promise<Array<string | undefined>> {
+  if (isMongoCircuitOpen()) return [];
+  const field = OVERRIDE_FIELD[kind];
+  try {
+    const col = await getCollection<OwlbearRawGlobalDoc>('data');
+    if (!col) return [];
+    const rows = await withMongoTimeout(
+      col.aggregate([
+        { $match: { _id: 'global' } },
+        {
+          $project: {
+            sources: {
+              $map: {
+                input: { $ifNull: [`$${field}`, []] },
+                as: 'e',
+                in: '$$e.source',
+              },
+            },
+          },
+        },
+      ]).toArray(),
+      45_000,
+    );
+    return (rows[0] as { sources?: Array<string | undefined> } | undefined)?.sources ?? [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Book source labels for Compendium → Books.
+ * Tries full aggregation first, then per-kind reads if the combined pipeline fails.
+ */
+export async function readBookSourceLabelBucketsWithFallback(): Promise<BookSourceLabelBuckets | null> {
+  const { readBookSourceLabelsFromMongo } = await import('./compendiumOwlbearPersist');
+  const combined = await readBookSourceLabelsFromMongo();
+  if (combined && labelBucketCount(combined) > 0) return combined;
+
+  const counts = await readOverrideCountsFromMongo();
+  if (!counts || counts.monsters + counts.items + counts.spells === 0) return combined;
+
+  console.warn('[Compendium] Combined book-label aggregation empty — trying per-kind source reads');
+  const monsterSources = await readKindSourceLabelsFromMongo('monster');
+  const itemSources = await readKindSourceLabelsFromMongo('item');
+  const spellSources = await readKindSourceLabelsFromMongo('spell');
+  const buckets: BookSourceLabelBuckets = { monsterSources, itemSources, spellSources };
+  if (labelBucketCount(buckets) === 0) return combined;
+  return buckets;
+}
+
+/** Unique imported source labels from Mongo override arrays (no full global doc read). */
+export async function collectImportedSourceLabelsFromMongo(): Promise<string[]> {
+  const buckets = await readBookSourceLabelBucketsWithFallback();
+  const labels = new Set<string>();
+  const add = (sources: Array<string | undefined>) => {
+    for (const source of sources) {
+      for (const part of splitCompendiumSources(source)) {
+        const trimmed = part.trim();
+        if (trimmed && trimmed.toLowerCase() !== 'custom' && trimmed !== 'D&D Beyond') {
+          labels.add(trimmed);
+        }
+      }
+    }
+  };
+  if (buckets) {
+    add(buckets.monsterSources);
+    add(buckets.itemSources);
+    add(buckets.spellSources);
+  }
+  return [...labels];
 }
 
 /** Count override entries per kind without loading stat blocks (for sync status / cache checks). */
