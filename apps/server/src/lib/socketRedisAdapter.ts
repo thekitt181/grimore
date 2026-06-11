@@ -4,8 +4,9 @@ import { createAdapter } from '@socket.io/redis-adapter';
 import {
   bindRedisClientGuards,
   disableRedisDueToQuota,
+  getRedis,
+  hasRedisConfigured,
   isRedisOperational,
-  redis,
 } from './redis';
 
 let attached = false;
@@ -48,17 +49,18 @@ export async function attachRedisSocketAdapter(io: Server): Promise<boolean> {
     console.log('[Socket] Single-instance mode (SOCKET_REDIS_ADAPTER not set to 1)');
     return false;
   }
-  if (!process.env['REDIS_URL']) return false;
+  if (!hasRedisConfigured()) return false;
   if (!isRedisOperational()) return false;
 
   let pubClient: Redis | null = null;
   let subClient: Redis | null = null;
 
   try {
-    await redis.ping();
+    const active = getRedis();
+    await active.ping();
 
-    pubClient = redis.duplicate();
-    subClient = redis.duplicate();
+    pubClient = active.duplicate();
+    subClient = active.duplicate();
 
     const [pubOk, subOk] = await Promise.all([
       connectDuplicateClient(pubClient, 'pub'),

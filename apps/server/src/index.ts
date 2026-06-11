@@ -5,7 +5,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
 import { prisma } from './lib/prisma';
-import { connectRedisOptional, isRedisOperational, redis } from './lib/redis';
+import { connectRedisOptional, disconnectAllRedis, isRedisOperational } from './lib/redis';
 import { attachRedisSocketAdapter, isSocketRedisAdapterEnabled } from './lib/socketRedisAdapter';
 import { getMongoCircuitStatus, isMongoConfigured } from './lib/mongo';
 import { initSocket } from './socket';
@@ -164,6 +164,6 @@ process.on('SIGTERM', async () => {
   servicesReady = false;
   await prisma.$disconnect();
   await closeMongo();
-  redis.disconnect();
+  disconnectAllRedis();
   process.exit(0);
 });

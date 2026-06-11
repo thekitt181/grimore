@@ -2,7 +2,7 @@ import WebSocket from 'ws';
 import type { Server } from 'socket.io';
 import type { DdbRollBridgePayload } from '@grimoire/shared';
 import { prisma } from '../../lib/prisma';
-import { redis, safeRedis } from '../../lib/redis';
+import { safeRedis } from '../../lib/redis';
 import {
   cobaltCacheId,
   getBearerToken,
@@ -153,10 +153,10 @@ function emitRollPayload(io: Server, payload: DdbRollBridgePayload): void {
 async function claimDdbRollMessage(sessionId: string, messageId: string | null): Promise<boolean> {
   if (!messageId) return true;
   const seenKey = `ddb:roll-seen:${sessionId}`;
-  const isNew = await safeRedis<number | null>(null, () => redis.sadd(seenKey, messageId));
+  const isNew = await safeRedis<number | null>(null, (client) => client.sadd(seenKey, messageId));
   if (isNew === null) return true;
   if (isNew === 0) return false;
-  await safeRedis(undefined, () => redis.expire(seenKey, SEEN_TTL));
+  await safeRedis(undefined, (client) => client.expire(seenKey, SEEN_TTL));
   return true;
 }
 
@@ -172,8 +172,8 @@ async function claimDdbRollFingerprint(sessionId: string, parsed: ParsedDdbRoll)
     parsed.diceResults.join(','),
   ].join('|');
   const key = `ddb:roll-fp:${sessionId}:${fp}`;
-  const ok = await safeRedis<string | null>(null, () =>
-    redis.set(key, '1', 'EX', ROLL_FP_TTL_SEC, 'NX'),
+  const ok = await safeRedis<string | null>(null, (client) =>
+    client.set(key, '1', 'EX', ROLL_FP_TTL_SEC, 'NX'),
   );
   return ok === null ? true : ok === 'OK';
 }
@@ -567,16 +567,16 @@ export async function fetchNewDdbRollsForSession(sessionId: string): Promise<Ddb
 
   const seenKey = `ddb:roll-seen:${sessionId}`;
   const initKey = `ddb:roll-seeded:${sessionId}`;
-  const seeded = await safeRedis<string | null>(null, () => redis.get(initKey));
+  const seeded = await safeRedis<string | null>(null, (client) => client.get(initKey));
 
   if (!seeded) {
-    await safeRedis(undefined, async () => {
+    await safeRedis(undefined, async (client) => {
       for (const msg of msgs) {
         const id = (msg as Record<string, unknown>).id;
-        if (typeof id === 'string') await redis.sadd(seenKey, id);
+        if (typeof id === 'string') await client.sadd(seenKey, id);
       }
-      await redis.setex(initKey, SEEN_TTL, '1');
-      await redis.expire(seenKey, SEEN_TTL);
+      await client.setex(initKey, SEEN_TTL, '1');
+      await client.expire(seenKey, SEEN_TTL);
     });
     console.log(`[DDB] roll poll seeded session=${sessionId} (${msgs.length} messages)`);
     return [];
