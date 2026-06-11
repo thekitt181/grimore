@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import { redis } from '../../lib/redis';
+import { redis, safeRedis } from '../../lib/redis';
 import { DDB_URLS } from './config';
 
 const BEARER_TTL = 60 * 60 * 4; // 4 hours
@@ -25,11 +25,7 @@ export function normalizeCobaltToken(raw: string): string {
 }
 
 export async function invalidateBearer(cacheId: string): Promise<void> {
-  try {
-    await redis.del(`ddb:bearer:${cacheId}`);
-  } catch {
-    /* ignore */
-  }
+  await safeRedis(undefined, () => redis.del(`ddb:bearer:${cacheId}`));
 }
 
 /** Headers DDB expects for character-service + site API calls. */
@@ -64,12 +60,8 @@ export async function getBearerToken(
   const token = normalizeCobaltToken(cobalt);
   if (!token) return null;
 
-  try {
-    const cached = await redis.get(`ddb:bearer:${cacheId}`);
-    if (cached) return cached;
-  } catch (err) {
-    console.warn('[DDB] Redis cache read failed, fetching bearer directly:', err);
-  }
+  const cached = await safeRedis<string | null>(null, () => redis.get(`ddb:bearer:${cacheId}`));
+  if (cached) return cached;
 
   const cookieParts = [`CobaltSession=${token}`];
   if (ddbUserId) cookieParts.push(`User.ID=${ddbUserId}`);
@@ -89,14 +81,11 @@ export async function getBearerToken(
   }
 
   const data = (await res.json()) as { token?: string };
-  if (!data.token) return null;
+  const bearer = data.token;
+  if (!bearer) return null;
 
-  try {
-    await redis.setex(`ddb:bearer:${cacheId}`, BEARER_TTL, data.token);
-  } catch (err) {
-    console.warn('[DDB] Redis cache write failed:', err);
-  }
-  return data.token;
+  await safeRedis(undefined, () => redis.setex(`ddb:bearer:${cacheId}`, BEARER_TTL, bearer));
+  return bearer;
 }
 
 export async function validateCobalt(cobalt: string): Promise<boolean> {

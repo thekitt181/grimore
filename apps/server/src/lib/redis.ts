@@ -8,12 +8,21 @@ function isQuotaError(message: string): boolean {
   return message.includes('max requests limit') || message.includes('limit exceeded');
 }
 
-/** Disable Redis for this process (Upstash quota, repeated failures). Never throws. */
-export function disableRedisDueToQuota(reason?: string): void {
+function isRedisDeadError(message: string): boolean {
+  return (
+    message.includes('Connection is closed')
+    || message.includes('ECONNREFUSED')
+    || message.includes('ENOTFOUND')
+    || message.includes('Stream isn\'t writeable')
+  );
+}
+
+/** Disable Redis for this process (quota, disconnect, repeated failures). Never throws. */
+export function disableRedis(reason?: string): void {
   if (!redisEnabled) return;
   redisEnabled = false;
   console.warn(
-    '[Redis] Quota or limit hit - disabling Redis for this server instance',
+    '[Redis] Disabled for this server instance',
     reason ? `(${reason})` : '',
   );
   try {
@@ -21,6 +30,11 @@ export function disableRedisDueToQuota(reason?: string): void {
   } catch {
     /* ignore */
   }
+}
+
+/** @deprecated Use disableRedis */
+export function disableRedisDueToQuota(reason?: string): void {
+  disableRedis(reason ?? 'quota');
 }
 
 /** Prevent uncaught ReplyError crashes on pub/sub or duplicate clients. */
@@ -55,7 +69,9 @@ redis.on('error', (err) => {
 });
 
 export function isRedisOperational(): boolean {
-  return redisEnabled && (redis.status === 'ready' || redis.status === 'connect');
+  if (!redisEnabled) return false;
+  const status = redis.status;
+  return status === 'ready' || status === 'connect' || status === 'connecting';
 }
 
 export async function connectRedisOptional(): Promise<boolean> {
@@ -83,16 +99,17 @@ export async function connectRedisOptional(): Promise<boolean> {
   }
 }
 
-async function safeRedis<T>(fallback: T, op: () => Promise<T>): Promise<T> {
-  if (!redisEnabled) return fallback;
+/** Run a Redis op when connected; return fallback silently when Redis is off or dead. */
+export async function safeRedis<T>(fallback: T, op: () => Promise<T>): Promise<T> {
+  if (!isRedisOperational()) return fallback;
   try {
-    if (redis.status === 'end') return fallback;
     return await op();
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.warn('[Redis] Operation failed:', msg);
-    if (isQuotaError(msg)) {
-      disableRedisDueToQuota('operation');
+    if (isQuotaError(msg) || isRedisDeadError(msg)) {
+      disableRedis(msg);
+    } else {
+      console.warn('[Redis] Operation failed:', msg);
     }
     return fallback;
   }

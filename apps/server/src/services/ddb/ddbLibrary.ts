@@ -25,7 +25,7 @@ import { unlockCompendiumSource } from '../compendiumSourcePolicy';
 import { sourceMatchesLocked } from '../compendiumVisibility';
 import { collectOverrideOnlySourceLabels, ensureBundledSourcesLocked, ensureImportedSourcesUnlocked } from '../compendiumBundledLock';
 import { splitCompendiumSources } from '@grimoire/shared';
-import { redis } from '../../lib/redis';
+import { redis, safeRedis } from '../../lib/redis';
 import {
   fetchDdbCatalog,
   resolveDdbSourceLabel,
@@ -48,29 +48,27 @@ const CATALOG_CACHE_TTL = 60 * 60;
 
 async function loadDdbCatalog(ctx: DdbAuthContext): Promise<DdbCatalog> {
   const cacheKey = `ddb:catalog:v4:${ctx.cacheId}`;
-  try {
-    const cached = await redis.get(cacheKey);
-    if (cached) {
-      const parsed = JSON.parse(cached) as {
-        sourceNames: [number, string][];
-        challengeRatingById: [number, number][];
-        challengeRatingXpById: [number, number][];
-        monsterTypes: [number, string][];
-        alignments: [number, string][];
-        senses: [number, string][];
-        movements: [number, string][];
-      };
-      return {
-        sourceNames: new Map(parsed.sourceNames),
-        challengeRatingById: new Map(parsed.challengeRatingById),
-        challengeRatingXpById: new Map(parsed.challengeRatingXpById),
-        monsterTypes: new Map(parsed.monsterTypes),
-        alignments: new Map(parsed.alignments),
-        senses: new Map(parsed.senses),
-        movements: new Map(parsed.movements),
-      };
-    }
-  } catch { /* ignore */ }
+  const cached = await safeRedis<string | null>(null, () => redis.get(cacheKey));
+  if (cached) {
+    const parsed = JSON.parse(cached) as {
+      sourceNames: [number, string][];
+      challengeRatingById: [number, number][];
+      challengeRatingXpById: [number, number][];
+      monsterTypes: [number, string][];
+      alignments: [number, string][];
+      senses: [number, string][];
+      movements: [number, string][];
+    };
+    return {
+      sourceNames: new Map(parsed.sourceNames),
+      challengeRatingById: new Map(parsed.challengeRatingById),
+      challengeRatingXpById: new Map(parsed.challengeRatingXpById),
+      monsterTypes: new Map(parsed.monsterTypes),
+      alignments: new Map(parsed.alignments),
+      senses: new Map(parsed.senses),
+      movements: new Map(parsed.movements),
+    };
+  }
 
   const fetched = await fetchDdbCatalog(ctx);
   const catalog: DdbCatalog = {
@@ -83,8 +81,8 @@ async function loadDdbCatalog(ctx: DdbAuthContext): Promise<DdbCatalog> {
     movements: fetched.movements,
   };
   if (catalog.sourceNames.size > 0) {
-    try {
-      await redis.setex(
+    await safeRedis(undefined, () =>
+      redis.setex(
         cacheKey,
         CATALOG_CACHE_TTL,
         JSON.stringify({
@@ -96,8 +94,8 @@ async function loadDdbCatalog(ctx: DdbAuthContext): Promise<DdbCatalog> {
           senses: [...catalog.senses.entries()],
           movements: [...catalog.movements.entries()],
         }),
-      );
-    } catch { /* ignore */ }
+      ),
+    );
   }
   return catalog;
 }
@@ -218,19 +216,17 @@ async function fetchSpellPoolOnce(
 
 async function loadSpellPool(ctx: DdbAuthContext, campaignId?: number): Promise<Record<string, unknown>[]> {
   const cacheKey = `ddb:spells:v3:${ctx.cacheId}:${campaignId ?? 'none'}`;
-  try {
-    const cached = await redis.get(cacheKey);
-    if (cached) return JSON.parse(cached) as Record<string, unknown>[];
-  } catch { /* ignore */ }
+  const cached = await safeRedis<string | null>(null, () => redis.get(cacheKey));
+  if (cached) return JSON.parse(cached) as Record<string, unknown>[];
 
   const base = await fetchSpellPoolOnce(ctx);
   const shared = campaignId ? await fetchSpellPoolOnce(ctx, campaignId) : [];
   const pool = mergeByEntityId([...base, ...shared]);
 
   if (pool.length > 0) {
-    try {
-      await redis.setex(cacheKey, SPELL_CACHE_TTL, JSON.stringify(pool));
-    } catch { /* ignore */ }
+    await safeRedis(undefined, () =>
+      redis.setex(cacheKey, SPELL_CACHE_TTL, JSON.stringify(pool)),
+    );
   } else {
     console.warn('[DDB] spell pool empty — check Cobalt token and campaign link', {
       campaignId,
@@ -304,19 +300,17 @@ async function fetchItemPoolOnce(
 
 async function loadItemPool(ctx: DdbAuthContext, campaignId?: number): Promise<Record<string, unknown>[]> {
   const cacheKey = `ddb:items:v2:${ctx.cacheId}:${campaignId ?? 'none'}`;
-  try {
-    const cached = await redis.get(cacheKey);
-    if (cached) return JSON.parse(cached) as Record<string, unknown>[];
-  } catch { /* ignore */ }
+  const cached = await safeRedis<string | null>(null, () => redis.get(cacheKey));
+  if (cached) return JSON.parse(cached) as Record<string, unknown>[];
 
   const base = await fetchItemPoolOnce(ctx);
   const shared = campaignId ? await fetchItemPoolOnce(ctx, campaignId) : [];
   const pool = mergeByEntityId([...base, ...shared]);
 
   if (pool.length > 0) {
-    try {
-      await redis.setex(cacheKey, ITEM_CACHE_TTL, JSON.stringify(pool));
-    } catch { /* ignore */ }
+    await safeRedis(undefined, () =>
+      redis.setex(cacheKey, ITEM_CACHE_TTL, JSON.stringify(pool)),
+    );
   } else {
     console.warn('[DDB] item pool empty — check Cobalt token and campaign link', {
       campaignId,
