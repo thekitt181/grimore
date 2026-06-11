@@ -14,7 +14,7 @@ import { VisionFtDraftInput, parseVisionFt } from '@/systems/map/VisionFtInput';
 import { useMapStore } from './store/mapStore';
 import { useSessionStore } from '@/store/sessionStore';
 import { fileToDataUrl } from '@/lib/imagePersistence';
-import { MAP_ASSET_ACCEPT, isModelUrl } from '@/lib/modelFormats';
+import { MAP_ASSET_ACCEPT, fileToAssetDataUrl, isModelFile, isModelUrl } from '@/lib/modelFormats';
 import { CompendiumSidebarList } from '@/systems/compendium/CompendiumSidebarList';
 import { useDdbStore } from '@/systems/ddb/ddbStore';
 
@@ -180,10 +180,11 @@ function GMSidebarContent() {
     const file = e.target.files?.[0];
     if (!file) return;
     try {
-      const url = await fileToDataUrl(file);
-      if (isModelUrl(url) || isModelUrl(file.name)) {
+      if (isModelFile(file)) {
+        const { url } = await fileToAssetDataUrl(file);
         applyModel(url);
       } else {
+        const url = await fileToDataUrl(file);
         const img = new Image();
         img.onload = () => applyBackground(url, img.naturalWidth, img.naturalHeight);
         img.src = url;

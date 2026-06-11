@@ -42,7 +42,7 @@ const DRAW_TOOLS: ToolDef[] = [
   { id: 'draw-circle',   label: 'Circle', icon: '○', title: 'Draw circle' },
   { id: 'draw-arrow',    label: 'Arrow',  icon: '→', title: 'Draw arrow' },
   { id: 'text',          label: 'Text',   icon: 'T', title: 'Place text label (DM & players)' },
-  { id: 'eraser',        label: 'Eraser', icon: '⌫', title: 'Erase drawings, text, and walls (GM: all; players: own marks)' },
+  { id: 'eraser',        label: 'Eraser', icon: '⌫', title: 'Erase drawings/text; GM: drag to erase parts of walls' },
 ];
 
 const BTN = 'w-9 h-9 rounded flex items-center justify-center text-sm font-ui transition-all text-[#8a8075] hover:text-[#e8e0d0] hover:bg-[#1c1c28]';

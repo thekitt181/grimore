@@ -32,8 +32,7 @@ import {
   persistItemsLocal,
 } from '@/systems/scene/sessionPersistence';
 import { mergeSceneItems, sameSceneItemSnapshot, sanitizePersistedItems } from '@/systems/scene/mergeSceneItems';
-import { fileToDataUrl } from '@/lib/imagePersistence';
-import { isMapAssetFile, isModelUrl } from '@/lib/modelFormats';
+import { fileToAssetDataUrl, isMapAssetFile, isModelUrl, modelFormatFromUrl, type ModelFormat } from '@/lib/modelFormats';
 import { useWallTool } from './hooks/useWallTool';
 import { useEraserTool } from './hooks/useEraserTool';
 import { useDeleteKey } from './hooks/useDeleteKey';
@@ -50,6 +49,7 @@ interface PendingDrop {
   screenX: number; screenY: number;
   worldX:  number; worldY:  number;
   url: string;
+  modelFormat?: ModelFormat | null;
 }
 
 function createDefaultMap(): MapItem {
@@ -64,6 +64,7 @@ function createDefaultMap(): MapItem {
 
 export function MapCanvas() {
   const containerRef = useRef<HTMLDivElement>(null);
+  const dropZoneRef = useRef<HTMLDivElement>(null);
   const [appReady, setAppReady] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
   const [pendingDrop, setPendingDrop] = useState<PendingDrop | null>(null);
@@ -399,47 +400,106 @@ export function MapCanvas() {
     };
   }
 
-  function handleDragOver(e: React.DragEvent) {
+  function acceptDrop(e: { preventDefault(): void; dataTransfer: DataTransfer | null; clientX: number; clientY: number }) {
     e.preventDefault();
-    e.dataTransfer.dropEffect = 'copy';
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
     setIsDragOver(true);
   }
-  function handleDragLeave(e: React.DragEvent) {
-    if (!containerRef.current?.contains(e.relatedTarget as Node)) setIsDragOver(false);
-  }
-  function handleDrop(e: React.DragEvent) {
-    e.preventDefault();
-    setIsDragOver(false);
-    const { x: worldX, y: worldY } = getWorldPos(e.clientX, e.clientY);
-    const file = e.dataTransfer.files[0];
-    if (file && isMapAssetFile(file)) {
-      void fileToDataUrl(file).then((url) => {
-        setPendingDrop({ screenX: e.clientX, screenY: e.clientY, worldX, worldY, url });
-      });
+
+  function processDroppedFile(file: File, clientX: number, clientY: number) {
+    if (!isMapAssetFile(file)) {
+      alert('Unsupported file. Drop an image, GLB, GLTF, or STL file.');
       return;
     }
-    const droppedUrl = e.dataTransfer.getData('text/uri-list') || e.dataTransfer.getData('text/plain');
-    if (droppedUrl && (/^https?:\/\//.test(droppedUrl) || isModelUrl(droppedUrl))) {
-      setPendingDrop({ screenX: e.clientX, screenY: e.clientY, worldX, worldY, url: droppedUrl });
-    }
+    const { x: worldX, y: worldY } = getWorldPos(clientX, clientY);
+    void fileToAssetDataUrl(file)
+      .then(({ url, format }) => {
+        setPendingDrop({
+          screenX: clientX,
+          screenY: clientY,
+          worldX,
+          worldY,
+          url,
+          modelFormat: format,
+        });
+      })
+      .catch(() => {
+        alert('Could not read that file. Very large GLB models may exceed browser memory limits.');
+      });
   }
+
+  function handleDragOver(e: React.DragEvent) {
+    acceptDrop(e);
+  }
+  function handleDragLeave(e: React.DragEvent) {
+    if (!dropZoneRef.current?.contains(e.relatedTarget as Node)) setIsDragOver(false);
+  }
+
+  // Native capture listeners — WebGL / Pixi canvases otherwise block file drops.
+  useEffect(() => {
+    const el = dropZoneRef.current;
+    if (!el) return;
+
+    const onDragOver = (e: DragEvent) => {
+      if (!e.dataTransfer?.types.length) return;
+      acceptDrop(e);
+    };
+    const onDragLeave = (e: DragEvent) => {
+      if (!el.contains(e.relatedTarget as Node)) setIsDragOver(false);
+    };
+    const onDrop = (e: DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setIsDragOver(false);
+      const file = e.dataTransfer?.files?.[0];
+      if (file) {
+        processDroppedFile(file, e.clientX, e.clientY);
+        return;
+      }
+      const droppedUrl = e.dataTransfer?.getData('text/uri-list') || e.dataTransfer?.getData('text/plain');
+      if (droppedUrl && (/^https?:\/\//.test(droppedUrl) || isModelUrl(droppedUrl))) {
+        const { x: worldX, y: worldY } = getWorldPos(e.clientX, e.clientY);
+        setPendingDrop({
+          screenX: e.clientX,
+          screenY: e.clientY,
+          worldX,
+          worldY,
+          url: droppedUrl.trim(),
+          modelFormat: isModelUrl(droppedUrl) ? modelFormatFromUrl(droppedUrl) : null,
+        });
+      }
+    };
+
+    el.addEventListener('dragover', onDragOver, true);
+    el.addEventListener('dragleave', onDragLeave);
+    el.addEventListener('drop', onDrop, true);
+    return () => {
+      el.removeEventListener('dragover', onDragOver, true);
+      el.removeEventListener('dragleave', onDragLeave);
+      el.removeEventListener('drop', onDrop, true);
+    };
+  }, []);
   function handleCategorySelect(category: ImageCategory) {
     if (!pendingDrop) return;
-    const { url, worldX, worldY } = pendingDrop;
+    const { url, worldX, worldY, modelFormat } = pendingDrop;
     setPendingDrop(null);
-    placeByCategory(category, url, worldX, worldY);
+    placeByCategory(category, url, worldX, worldY, modelFormat);
   }
 
   return (
     <div
+      ref={dropZoneRef}
       className="w-full h-full relative"
       style={{ background: '#0a0a0f' }}
       onDragOver={handleDragOver}
       onDragEnter={handleDragOver}
       onDragLeave={handleDragLeave}
-      onDrop={handleDrop}
     >
-      {viewMode === '3d' && <Map3DCanvas />}
+      {viewMode === '3d' && (
+        <div className="absolute inset-0" style={{ pointerEvents: isDragOver ? 'none' : 'auto' }}>
+          <Map3DCanvas />
+        </div>
+      )}
 
       <div
         ref={containerRef}
@@ -475,11 +535,18 @@ export function MapCanvas() {
 
 // ─── Drop placement ───────────────────────────────────────────────────────────
 
-function placeByCategory(category: ImageCategory, url: string, worldX: number, worldY: number) {
+function placeByCategory(
+  category: ImageCategory,
+  url: string,
+  worldX: number,
+  worldY: number,
+  modelFormat?: ModelFormat | null,
+) {
   const store = useItemStore.getState();
+  const asModel = modelFormat != null || isModelUrl(url, modelFormat);
 
   if (category === 'map') {
-    if (isModelUrl(url)) {
+    if (asModel) {
       addMapModel(url, worldX, worldY);
       return;
     }
@@ -497,7 +564,7 @@ function placeByCategory(category: ImageCategory, url: string, worldX: number, w
     id: uuidv4(), type: 'token', x: worldX - grid / 2, y: worldY - grid / 2, rotation: 0,
     width: grid, height: grid, zIndex: 0, locked: false, visible: true,
     name: nameMap[category] ?? 'Token',
-    ...(isModelUrl(url) ? { modelUrl: url } : { imageUrl: url }),
+    ...(asModel ? { modelUrl: url } : { imageUrl: url }),
     sizeCells: 1,
     hp: 10, maxHp: 10, tempHp: 0, ac: 10, visionRadius: 12, conditions: [],
   };

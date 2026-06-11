@@ -2,6 +2,8 @@ import type { MapItem, WallSegment } from '@/systems/scene/types';
 
 /** Fine brush — splits segments instead of deleting whole lines. */
 export const WALL_ERASE_RADIUS = 7;
+/** Easier to click/drag walls in select mode (world px, map-local geometry). */
+export const WALL_PICK_RADIUS = 18;
 export const MIN_WALL_SEGMENT_LEN = 4;
 export const WALL_ENDPOINT_HIT_PX = 10;
 export const WALL_ENDPOINT_JOIN_PX = 3;
@@ -24,14 +26,43 @@ export function distToSegment(px: number, py: number, seg: WallSegment): number 
 }
 
 export function toMapLocal(wx: number, wy: number, map: MapItem) {
-  return { x: wx - map.x, y: wy - map.y };
+  return worldToMapLocal(wx, wy, map);
+}
+
+/** Convert world coords to map-local (accounts for map rotation). */
+export function worldToMapLocal(wx: number, wy: number, map: MapItem): { x: number; y: number } {
+  const cx = map.x + map.width / 2;
+  const cy = map.y + map.height / 2;
+  const rad = (-map.rotation * Math.PI) / 180;
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  const dx = wx - cx;
+  const dy = wy - cy;
+  return {
+    x: dx * cos - dy * sin + map.width / 2,
+    y: dx * sin + dy * cos + map.height / 2,
+  };
+}
+
+export function mapLocalToWorld(lx: number, ly: number, map: MapItem): { x: number; y: number } {
+  const cx = map.x + map.width / 2;
+  const cy = map.y + map.height / 2;
+  const rad = (map.rotation * Math.PI) / 180;
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  const dx = lx - map.width / 2;
+  const dy = ly - map.height / 2;
+  return {
+    x: cx + dx * cos - dy * sin,
+    y: cy + dx * sin + dy * cos,
+  };
 }
 
 export function nearestWallIndex(
   localX: number,
   localY: number,
   walls: WallSegment[],
-  radius = WALL_ERASE_RADIUS,
+  radius = WALL_PICK_RADIUS,
 ): number {
   let bestIdx = -1;
   let bestD = radius;
@@ -198,24 +229,28 @@ export function splitSegmentAtErase(
   const dist = Math.hypot(px - qx, py - qy);
   if (dist > radius) return [seg];
 
-  const halfChord = Math.sqrt(Math.max(0, radius * radius - dist * dist)) / len;
+  // Cap gap length so one dab never eats an entire long wall.
+  let halfChord = Math.sqrt(Math.max(0, radius * radius - dist * dist)) / len;
+  halfChord = Math.min(halfChord, radius / len, 0.35);
+
   let t1 = Math.max(0, t - halfChord);
   let t2 = Math.min(1, t + halfChord);
-  if (t2 - t1 >= 0.999) return [];
+  if (t2 - t1 >= 0.995) return [];
 
+  const minKeep = Math.min(MIN_WALL_SEGMENT_LEN, 2);
   const parts: WallSegment[] = [];
   if (t1 > 1e-4) {
     const p2 = { x: ax + t1 * dx, y: ay + t1 * dy };
-    if (Math.hypot(p2.x - ax, p2.y - ay) >= MIN_WALL_SEGMENT_LEN) parts.push({ a: { x: ax, y: ay }, b: p2 });
+    if (Math.hypot(p2.x - ax, p2.y - ay) >= minKeep) parts.push({ a: { x: ax, y: ay }, b: p2 });
   }
   if (t2 < 1 - 1e-4) {
     const p1 = { x: ax + t2 * dx, y: ay + t2 * dy };
-    if (Math.hypot(bx - p1.x, by - p1.y) >= MIN_WALL_SEGMENT_LEN) parts.push({ a: p1, b: { x: bx, y: by } });
+    if (Math.hypot(bx - p1.x, by - p1.y) >= minKeep) parts.push({ a: p1, b: { x: bx, y: by } });
   }
   return parts;
 }
 
-/** Erase a fine brush stroke at map-local coordinates. */
+/** Erase a fine brush stroke at map-local coordinates (only segments near the point). */
 export function eraseWallsAtPoint(
   walls: WallSegment[],
   localX: number,
@@ -224,6 +259,10 @@ export function eraseWallsAtPoint(
 ): WallSegment[] {
   const out: WallSegment[] = [];
   for (const seg of walls) {
+    if (distToSegment(localX, localY, seg) > radius) {
+      out.push(seg);
+      continue;
+    }
     out.push(...splitSegmentAtErase(seg, localX, localY, radius));
   }
   return out;
@@ -283,9 +322,11 @@ export function wallHandleWorldPoints(
   for (const i of selectedIndices) {
     const seg = walls[i];
     if (!seg) continue;
+    const aw = mapLocalToWorld(seg.a.x, seg.a.y, map);
+    const bw = mapLocalToWorld(seg.b.x, seg.b.y, map);
     handles.push(
-      { wallIndex: i, end: 'a', wx: map.x + seg.a.x, wy: map.y + seg.a.y },
-      { wallIndex: i, end: 'b', wx: map.x + seg.b.x, wy: map.y + seg.b.y },
+      { wallIndex: i, end: 'a', wx: aw.x, wy: aw.y },
+      { wallIndex: i, end: 'b', wx: bw.x, wy: bw.y },
     );
   }
   return handles;

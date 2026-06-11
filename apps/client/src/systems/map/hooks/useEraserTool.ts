@@ -5,7 +5,7 @@ import { useItemStore, getActiveMap } from '@/systems/scene/store/itemStore';
 import { useSessionStore } from '@/store/sessionStore';
 import { emitItemRemove, emitItemUpdate } from '@/systems/scene/sceneSync';
 import { hitTest } from '@/systems/scene/hitTest';
-import { nearestWallIndex, removeWallIndices, toMapLocal } from '../wallUtils';
+import { eraseWallsAtPoint, toMapLocal, wallsChanged, WALL_ERASE_RADIUS } from '../wallUtils';
 
 function canEraseItem(
   item: { type: string; ownerId?: string },
@@ -62,9 +62,10 @@ export function useEraserTool(appReady = false) {
         const map = getActiveMap();
         if (!map) return;
         const local = toMapLocal(wp.x, wp.y, map);
-        const idx = nearestWallIndex(local.x, local.y, map.walls ?? []);
-        if (idx < 0) return;
-        const next = removeWallIndices(map, [idx]);
+        const walls = map.walls ?? [];
+        const next = eraseWallsAtPoint(walls, local.x, local.y, WALL_ERASE_RADIUS);
+        if (!wallsChanged(walls, next)) return;
+        useItemStore.getState().clearWallSelection();
         const patch = { walls: next };
         useItemStore.getState().updateItem(map.id, patch);
         emitItemUpdate([{ id: map.id, patch }]);

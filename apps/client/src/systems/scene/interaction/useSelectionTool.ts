@@ -22,7 +22,7 @@ import { useHandoutViewerStore } from '@/systems/compendium/handoutViewerStore';
 import { isMobileClient } from '@/lib/socket';
 import { isDdbPcToken } from '@/systems/ddb/ddbTokenUtils';
 import { useDdbStore } from '@/systems/ddb/ddbStore';
-import { nearestWallIndex, wallIndicesInWorldRect, wallHandleWorldPoints, pickWallHandle, translateWallIndices, moveWallEndpoint, wallsChanged } from '@/systems/map/wallUtils';
+import { nearestWallIndex, wallIndicesInWorldRect, wallHandleWorldPoints, pickWallHandle, translateWallIndices, moveWallEndpoint, wallsChanged, worldToMapLocal, mapLocalToWorld, WALL_PICK_RADIUS } from '@/systems/map/wallUtils';
 import type { WallEndpoint } from '@/systems/map/wallUtils';
 import type { TokenItem, WallSegment } from '../types';
 
@@ -218,7 +218,8 @@ export function useSelectionTool(appReady: boolean) {
             return;
           }
 
-          const wallIdx = nearestWallIndex(wx - map.x, wy - map.y, map.walls ?? []);
+          const local = worldToMapLocal(wx, wy, map);
+          const wallIdx = nearestWallIndex(local.x, local.y, map.walls ?? [], WALL_PICK_RADIUS);
           if (wallIdx >= 0) {
             const alreadySelected = store.selectedWallIndices.includes(wallIdx);
             if (e.shiftKey) {
@@ -230,13 +231,13 @@ export function useSelectionTool(appReady: boolean) {
               store.selectWalls([wallIdx], 'set');
               store.select([], 'set');
               redrawWallHandles();
-              beginWallMove(map, [wallIdx]);
-              return;
             }
-            if (store.selectedWallIndices.length > 0) {
-              beginWallMove(map, store.selectedWallIndices);
-              return;
+            const indices = useItemStore.getState().selectedWallIndices;
+            if (indices.length > 0) {
+              e.preventDefault();
+              beginWallMove(map, indices);
             }
+            return;
           }
         }
       }
@@ -288,9 +289,11 @@ export function useSelectionTool(appReady: boolean) {
           const leadIdx = wallMove.indices[0]!;
           const o = wallMove.originWalls[leadIdx]?.a;
           if (o) {
-            const snapped = snapPoint(map.x + o.x + dx, map.y + o.y + dy);
-            dx = snapped.x - map.x - o.x;
-            dy = snapped.y - map.y - o.y;
+            const originWorld = mapLocalToWorld(o.x, o.y, map);
+            const snapped = snapPoint(originWorld.x + dx, originWorld.y + dy);
+            const snappedLocal = worldToMapLocal(snapped.x, snapped.y, map);
+            dx = snappedLocal.x - o.x;
+            dy = snappedLocal.y - o.y;
           }
         }
         const next = translateWallIndices(wallMove.originWalls, wallMove.indices, dx, dy);
@@ -302,18 +305,16 @@ export function useSelectionTool(appReady: boolean) {
       if (wallEndpoint) {
         const map = useItemStore.getState().items[wallEndpoint.mapId] as MapItem | undefined;
         if (!map) return;
-        let lx = wx - map.x;
-        let ly = wy - map.y;
+        let localEnd = worldToMapLocal(wx, wy, map);
         if (useItemStore.getState().snapToGrid) {
           const snapped = snapPoint(wx, wy);
-          lx = snapped.x - map.x;
-          ly = snapped.y - map.y;
+          localEnd = worldToMapLocal(snapped.x, snapped.y, map);
         }
         const next = moveWallEndpoint(
           wallEndpoint.originWalls,
           wallEndpoint.wallIndex,
           wallEndpoint.end,
-          { x: lx, y: ly },
+          localEnd,
           wallEndpoint.selectedIndices,
         );
         useItemStore.getState().updateItem(map.id, { walls: next });

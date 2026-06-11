@@ -9,6 +9,7 @@ import {
   eraseWallsAtPoint,
   toMapLocal,
   wallsChanged,
+  WALL_ERASE_RADIUS,
   worldEllipseToWallSegments,
   worldPointsToWallSegments,
   worldRectToWallSegments,
@@ -114,8 +115,9 @@ export function useWallTool(appReady = false) {
       if (!map) return;
 
       if (wallMode === 'eraser') {
-        eraseAt(map, wp.x - map.x, wp.y - map.y);
-        drawEraserPreview(overlay, wp.x, wp.y, 7);
+        const local = toMapLocal(wp.x, wp.y, map);
+        eraseAt(map, local.x, local.y);
+        drawEraserPreview(overlay, wp.x, wp.y, WALL_ERASE_RADIUS);
         canvas.setPointerCapture(e.pointerId);
         return;
       }
@@ -130,9 +132,10 @@ export function useWallTool(appReady = false) {
       const map = getActiveMap();
       if (wallMode === 'eraser') {
         const wp = toWorld(e.clientX, e.clientY);
-        drawEraserPreview(overlay, wp.x, wp.y, 7);
+        drawEraserPreview(overlay, wp.x, wp.y, WALL_ERASE_RADIUS);
         if (e.buttons !== 1 || !map) return;
-        eraseAt(map, wp.x - map.x, wp.y - map.y);
+        const local = toMapLocal(wp.x, wp.y, map);
+        eraseAt(map, local.x, local.y);
         return;
       }
 
