@@ -52,12 +52,14 @@ import {
 } from './compendiumCache';
 import { registerCatalogRebuild } from './compendiumChangeNotify';
 import {
+  entryMatchesSource,
   isEntryDraft,
   normalizeSourceLabel,
   policyFromRaw,
   policyIsSourceLocked,
   type CompendiumVisibilityPolicy,
 } from './compendiumVisibility';
+import { readOverrideCountsFromMongo, readOverrideEntriesFromMongo } from './compendiumMongoReads';
 import { getCompendiumVisibilityPolicy } from './compendiumSourcePolicy';
 import {
   bundledSourceLabelSet,
@@ -567,13 +569,13 @@ registerCatalogPolicySink({
 async function catalogIsMissingOverrides(): Promise<boolean> {
   if (!catalogCache) return true;
   try {
-    clearRawGlobalDocInflight();
-    const raw = await readRawGlobalDoc({ includeImageData: false });
-    const overrideCount = rawOverrideCount(raw);
+    const counts = await readOverrideCountsFromMongo();
+    if (!counts) return catalogEntryCount(catalogCache) === 0;
+    const overrideCount = counts.monsters + counts.items + counts.spells;
     if (overrideCount === 0) return false;
     return catalogEntryCount(catalogCache) < Math.min(overrideCount, 200);
   } catch {
-    return false;
+    return true;
   }
 }
 
@@ -700,15 +702,9 @@ async function loadEntriesForSourceList(
     return getCachedSpells();
   }
 
-  // Books tab: list imported override sources straight from Mongo — not the merged catalog cache.
-  const raw = await readRawGlobalDoc({ includeImageData: false });
-  const overrides =
-    kind === 'monsters'
-      ? raw.overrideMonsters
-      : kind === 'items'
-        ? raw.overrideItems
-        : raw.overrideSpells;
-  return (overrides ?? []).map((entry) => ({ ...entry, isCustom: true }));
+  const compendiumKind = kindToCompendiumKind(kind);
+  const overrides = await readOverrideEntriesFromMongo(compendiumKind);
+  return overrides.map((entry) => ({ ...entry, isCustom: true }));
 }
 
 function kindToCompendiumKind(kind: 'monsters' | 'items' | 'spells'): CompendiumKind {
@@ -887,18 +883,11 @@ async function monstersFromRawOverrides(
   source?: string,
   policy?: CompendiumVisibilityPolicy,
 ): Promise<CompendiumMonster[]> {
-  const raw = await readRawGlobalDoc({ includeImageData: false });
-  const global = normalizeOwlbearGlobalDoc({
-    ...raw,
-    images: {},
-    imagesData: {},
-    entryImages: {},
-  });
+  const list = await readOverrideEntriesFromMongo(
+    'monster',
+    source?.trim() ? { source: source.trim() } : undefined,
+  );
   const bundled = bundledSourceLabelSet();
-  let list = raw.overrideMonsters ?? [];
-  if (source) {
-    list = list.filter((m) => entryMatchesSource(m.source, source));
-  }
   const out: CompendiumMonster[] = [];
   for (const m of list) {
     if (isHomebrewEntry(true, m.source)) continue;
@@ -908,7 +897,7 @@ async function monstersFromRawOverrides(
     const monster = toMonster(
       { ...m, _id: slugify(m.name) } as StoredMonster,
       true,
-      global,
+      undefined,
       true,
     );
     out.push({ ...monster, isDraft: false });
@@ -921,12 +910,11 @@ async function itemsFromRawOverrides(
   source?: string,
   policy?: CompendiumVisibilityPolicy,
 ): Promise<CompendiumItem[]> {
-  const raw = await readRawGlobalDoc({ includeImageData: false });
+  const list = await readOverrideEntriesFromMongo(
+    'item',
+    source?.trim() ? { source: source.trim() } : undefined,
+  );
   const bundled = bundledSourceLabelSet();
-  let list = raw.overrideItems ?? [];
-  if (source) {
-    list = list.filter((i) => entryMatchesSource(i.source, source));
-  }
   const out: CompendiumItem[] = [];
   for (const i of list) {
     if (isHomebrewEntry(true, i.source)) continue;
@@ -954,12 +942,11 @@ async function spellsFromRawOverrides(
   source?: string,
   policy?: CompendiumVisibilityPolicy,
 ): Promise<CompendiumSpell[]> {
-  const raw = await readRawGlobalDoc({ includeImageData: false });
+  const list = await readOverrideEntriesFromMongo(
+    'spell',
+    source?.trim() ? { source: source.trim() } : undefined,
+  );
   const bundled = bundledSourceLabelSet();
-  let list = raw.overrideSpells ?? [];
-  if (source) {
-    list = list.filter((s) => entryMatchesSource(s.source, source));
-  }
   const out: CompendiumSpell[] = [];
   for (const s of list) {
     if (isHomebrewEntry(true, s.source)) continue;
@@ -1014,13 +1001,6 @@ export function formatSourceLabel(raw: string): string {
 
 function splitSources(source: string | undefined): string[] {
   return splitCompendiumSources(source);
-}
-
-function entryMatchesSource(source: string | undefined, filterSource: string): boolean {
-  const normFilter = normalizeSourceLabel(filterSource);
-  return splitSources(source).some(
-    (p) => p === filterSource || normalizeSourceLabel(p) === normFilter,
-  );
 }
 
 export interface CompendiumSaveOptions {
@@ -1128,12 +1108,20 @@ export async function getSyncStatus(): Promise<CompendiumSyncStatus> {
   const hasLocal = isLocalCatalogAvailable() || Boolean(file);
   const hasExtension = Boolean(extVersion);
 
+  let entryCounts = getCatalogEntryCounts() ?? undefined;
+  if (mongoConnected && (!entryCounts || entryCounts.monsters + entryCounts.items + entryCounts.spells === 0)) {
+    const mongoCounts = await readOverrideCountsFromMongo();
+    if (mongoCounts && mongoCounts.monsters + mongoCounts.items + mongoCounts.spells > 0) {
+      entryCounts = mongoCounts;
+    }
+  }
+
   const value: CompendiumSyncStatus = {
     lastUpdated: stamps.length ? newestIso(...stamps) : new Date(0).toISOString(),
     storage: mongoConnected ? 'mongodb' : hasLocal || hasExtension ? 'local' : 'unavailable',
     mongoConnected,
     catalogRev: getCatalogRevision() ?? undefined,
-    entryCounts: getCatalogEntryCounts() ?? undefined,
+    entryCounts,
   };
   syncStatusCache = { at: Date.now(), value };
   return value;
@@ -1152,6 +1140,20 @@ export async function searchMonsters(opts: {
   const page = opts.page ?? 1;
   const limit = Math.min(opts.limit ?? 50, 100);
   const policy = await getCatalogPolicy();
+  const sourceFilter = opts.source?.trim();
+
+  if (sourceFilter) {
+    let fromMongo = await monstersFromRawOverrides(sourceFilter, policy);
+    fromMongo = filterVisible('monster', fromMongo, policy, opts.includeDrafts ?? false);
+    let filtered = filterMonsters(fromMongo, opts.q ?? '', opts.crMin, opts.crMax);
+    if (opts.isCustom === true) {
+      filtered = filtered.filter((m) => isHomebrewEntry(m.isCustom, m.source));
+    } else if (opts.isCustom === false) {
+      filtered = filtered.filter((m) => !isHomebrewEntry(m.isCustom, m.source));
+    }
+    return paginate(filtered, page, limit);
+  }
+
   await ensureCatalogIncludesOverrides();
   let merged = filterVisible('monster', await getCachedMonsters(), policy, opts.includeDrafts ?? false);
   let filtered = filterMonsters(merged, opts.q ?? '', opts.crMin, opts.crMax);
@@ -1160,22 +1162,18 @@ export async function searchMonsters(opts: {
   } else if (opts.isCustom === false) {
     filtered = filtered.filter((m) => !isHomebrewEntry(m.isCustom, m.source));
   }
-  if (opts.source) {
-    filtered = filtered.filter((m) => entryMatchesSource(m.source, opts.source!));
-    if (filtered.length === 0) {
-      const fromOverrides = await monstersFromRawOverrides(opts.source, policy);
-      filtered = filterMonsters(fromOverrides, opts.q ?? '', opts.crMin, opts.crMax);
-    }
-  }
   return paginate(filtered, page, limit);
 }
 
 export async function getMonsterById(id: string, opts?: { includeDrafts?: boolean }): Promise<CompendiumMonster | null> {
   const policy = await getCatalogPolicy();
-  await ensureCatalogIncludesOverrides();
   let hit = (await getCachedMonsters()).find((m) => m.id === id);
   if (!hit) {
     hit = (await monstersFromRawOverrides(undefined, policy)).find((m) => m.id === id);
+  }
+  if (!hit) {
+    await ensureCatalogIncludesOverrides();
+    hit = (await getCachedMonsters()).find((m) => m.id === id);
   }
   if (!hit) return null;
   const marked = markDraft('monster', hit, policy);
@@ -1200,9 +1198,27 @@ export async function searchItems(opts: {
   const page = opts.page ?? 1;
   const limit = Math.min(opts.limit ?? 50, 100);
   const policy = await getCatalogPolicy();
+  const sourceFilter = opts.source?.trim();
+  const lower = (opts.q ?? '').trim().toLowerCase();
+
+  if (sourceFilter) {
+    let fromMongo = await itemsFromRawOverrides(sourceFilter, policy);
+    fromMongo = filterVisible('item', fromMongo, policy, opts.includeDrafts ?? false);
+    let filtered = fromMongo.filter((i) => {
+      if (!lower) return true;
+      return i.name.toLowerCase().includes(lower) || i.description.toLowerCase().includes(lower);
+    });
+    if (opts.isCustom === true) {
+      filtered = filtered.filter((i) => isHomebrewEntry(i.isCustom, i.source));
+    } else if (opts.isCustom === false) {
+      filtered = filtered.filter((i) => !isHomebrewEntry(i.isCustom, i.source));
+    }
+    filtered.sort((a, b) => a.name.localeCompare(b.name));
+    return paginate(filtered, page, limit);
+  }
+
   await ensureCatalogIncludesOverrides();
   const merged = filterVisible('item', await getCachedItems(), policy, opts.includeDrafts ?? false);
-  const lower = (opts.q ?? '').trim().toLowerCase();
   let filtered = merged.filter((i) => {
     if (!lower) return true;
     return i.name.toLowerCase().includes(lower) || i.description.toLowerCase().includes(lower);
@@ -1212,23 +1228,20 @@ export async function searchItems(opts: {
   } else if (opts.isCustom === false) {
     filtered = filtered.filter((i) => !isHomebrewEntry(i.isCustom, i.source));
   }
-  if (opts.source) {
-    filtered = filtered.filter((i) => entryMatchesSource(i.source, opts.source!));
-    if (filtered.length === 0) {
-      const fromOverrides = await itemsFromRawOverrides(opts.source, policy);
-      filtered = fromOverrides.filter((i) => {
-        if (!lower) return true;
-        return i.name.toLowerCase().includes(lower) || i.description.toLowerCase().includes(lower);
-      });
-    }
-  }
   filtered.sort((a, b) => a.name.localeCompare(b.name));
   return paginate(filtered, page, limit);
 }
 
 export async function getItemById(id: string, opts?: { includeDrafts?: boolean }): Promise<CompendiumItem | null> {
   const policy = await getCatalogPolicy();
-  const hit = (await getCachedItems()).find((i) => i.id === id);
+  let hit = (await getCachedItems()).find((i) => i.id === id);
+  if (!hit) {
+    hit = (await itemsFromRawOverrides(undefined, policy)).find((i) => i.id === id);
+  }
+  if (!hit) {
+    await ensureCatalogIncludesOverrides();
+    hit = (await getCachedItems()).find((i) => i.id === id);
+  }
   if (!hit) return null;
   const marked = markDraft('item', hit, policy);
   if (marked.isDraft && !opts?.includeDrafts) return null;
@@ -1251,9 +1264,27 @@ export async function searchSpells(opts: {
   const page = opts.page ?? 1;
   const limit = Math.min(opts.limit ?? 50, 100);
   const policy = await getCatalogPolicy();
+  const sourceFilter = opts.source?.trim();
+  const lower = (opts.q ?? '').trim().toLowerCase();
+
+  if (sourceFilter) {
+    let fromMongo = await spellsFromRawOverrides(sourceFilter, policy);
+    fromMongo = filterVisible('spell', fromMongo, policy, opts.includeDrafts ?? false);
+    let filtered = fromMongo.filter((s) => {
+      if (!lower) return true;
+      return s.name.toLowerCase().includes(lower);
+    });
+    if (opts.isCustom === true) {
+      filtered = filtered.filter((s) => isHomebrewEntry(s.isCustom, s.source));
+    } else if (opts.isCustom === false) {
+      filtered = filtered.filter((s) => !isHomebrewEntry(s.isCustom, s.source));
+    }
+    filtered.sort((a, b) => a.name.localeCompare(b.name));
+    return paginate(filtered, page, limit);
+  }
+
   await ensureCatalogIncludesOverrides();
   const merged = filterVisible('spell', await getCachedSpells(), policy, opts.includeDrafts ?? false);
-  const lower = (opts.q ?? '').trim().toLowerCase();
   let filtered = merged.filter((s) => {
     if (!lower) return true;
     return s.name.toLowerCase().includes(lower);
@@ -1263,23 +1294,20 @@ export async function searchSpells(opts: {
   } else if (opts.isCustom === false) {
     filtered = filtered.filter((s) => !isHomebrewEntry(s.isCustom, s.source));
   }
-  if (opts.source) {
-    filtered = filtered.filter((s) => entryMatchesSource(s.source, opts.source!));
-    if (filtered.length === 0) {
-      const fromOverrides = await spellsFromRawOverrides(opts.source, policy);
-      filtered = fromOverrides.filter((s) => {
-        if (!lower) return true;
-        return s.name.toLowerCase().includes(lower);
-      });
-    }
-  }
   filtered.sort((a, b) => a.name.localeCompare(b.name));
   return paginate(filtered, page, limit);
 }
 
 export async function getSpellById(id: string, opts?: { includeDrafts?: boolean }): Promise<CompendiumSpell | null> {
   const policy = await getCatalogPolicy();
-  const hit = (await getCachedSpells()).find((s) => s.id === id);
+  let hit = (await getCachedSpells()).find((s) => s.id === id);
+  if (!hit) {
+    hit = (await spellsFromRawOverrides(undefined, policy)).find((s) => s.id === id);
+  }
+  if (!hit) {
+    await ensureCatalogIncludesOverrides();
+    hit = (await getCachedSpells()).find((s) => s.id === id);
+  }
   if (!hit) return null;
   const marked = markDraft('spell', hit, policy);
   if (marked.isDraft && !opts?.includeDrafts) return null;

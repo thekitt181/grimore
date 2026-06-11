@@ -847,27 +847,38 @@ export async function importAllDdbLibraryFromSources(
 }
 
 async function collectSourceLabelsFromCompendium(): Promise<string[]> {
+  const { readBookSourceLabelsFromMongo } = await import('../compendiumOwlbearPersist');
+  const buckets = await readBookSourceLabelsFromMongo();
+  const labels = new Set<string>();
+  const addSources = (sources: Array<string | undefined>) => {
+    for (const source of sources) {
+      for (const part of splitCompendiumSources(source)) {
+        if (part && part !== 'D&D Beyond' && part.toLowerCase() !== 'custom') {
+          labels.add(part);
+        }
+      }
+    }
+  };
+  if (buckets) {
+    addSources(buckets.monsterSources);
+    addSources(buckets.itemSources);
+    addSources(buckets.spellSources);
+    return [...labels];
+  }
   const { readRawGlobalDoc } = await import('../compendiumOwlbearPersist');
   const raw = await readRawGlobalDoc({ includeImageData: false });
-  const labels = new Set<string>();
-  const arrays = [
+  for (const list of [
     raw.monsters,
     raw.overrideMonsters,
     raw.items,
     raw.overrideItems,
     raw.spells,
     raw.overrideSpells,
-  ];
-  for (const list of arrays) {
+  ]) {
     if (!Array.isArray(list)) continue;
     for (const entry of list) {
       if (!entry || typeof entry !== 'object') continue;
-      const source = String(entry.source ?? '').trim();
-      for (const part of splitCompendiumSources(source)) {
-        if (part && part !== 'D&D Beyond' && part.toLowerCase() !== 'custom') {
-          labels.add(part);
-        }
-      }
+      addSources([String(entry.source ?? '').trim()]);
     }
   }
   return [...labels];

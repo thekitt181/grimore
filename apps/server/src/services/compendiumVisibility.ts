@@ -24,6 +24,14 @@ export function normalizeSourceLabel(label: string): string {
   return s.toLowerCase();
 }
 
+/** True when a compendium entry source matches a browse filter (book id / label). */
+export function entryMatchesSource(source: string | undefined, filterSource: string): boolean {
+  const normFilter = normalizeSourceLabel(filterSource);
+  return splitCompendiumSources(source).some(
+    (p) => p === filterSource || normalizeSourceLabel(p) === normFilter,
+  );
+}
+
 /** True when a locked book label matches a compendium source part. */
 export function sourceMatchesLocked(locked: string, sourcePart: string): boolean {
   if (!locked || !sourcePart) return false;
