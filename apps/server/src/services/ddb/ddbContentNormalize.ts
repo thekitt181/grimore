@@ -59,6 +59,18 @@ export function entryHasSourceId(raw: Record<string, unknown>, sourceId: number)
   return false;
 }
 
+/** True when a DDB spell/item/monster entry is user homebrew. */
+export function isDdbHomebrewEntity(raw: Record<string, unknown>): boolean {
+  const def = (raw.definition ?? raw) as Record<string, unknown>;
+  if (raw.isHomebrew === true || def.isHomebrew === true) return true;
+  const source = String(
+    raw.sourceName ?? def.sourceName ?? raw.source ?? def.source ?? '',
+  )
+    .trim()
+    .toLowerCase();
+  return source.includes('homebrew') || source === 'custom';
+}
+
 /** Collect all source book ids referenced on DDB entities (spells, items, monsters). */
 export function collectSourceIdsFromEntities(entries: Record<string, unknown>[]): Set<number> {
   const ids = new Set<number>();

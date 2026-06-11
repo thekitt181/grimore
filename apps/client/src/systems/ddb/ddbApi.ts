@@ -3,6 +3,7 @@ import { api } from '@/lib/axios';
 import { extractApiError } from '@/lib/apiError';
 import {
   coerceGrimoireCharacter,
+  DDB_HOMEBREW_SOURCE_ID,
   type DdbCampaignSummary,
   type DdbCharacterSummary,
   type DdbEncounter,
@@ -189,11 +190,15 @@ export async function fetchDdbRollPoll(sessionId: string): Promise<DdbRollBridge
 
 export async function fetchDdbLibrarySources(params?: {
   campaignId?: number;
+  refresh?: boolean;
 }): Promise<DdbSourceSummary[]> {
   const { data } = await api.get<{ sources: DdbSourceSummary[] }>('/ddb/library/sources', {
-    ...(params?.campaignId != null && params.campaignId > 0
-      ? { params: { campaignId: params.campaignId } }
-      : {}),
+    params: {
+      ...(params?.campaignId != null && params.campaignId > 0
+        ? { campaignId: params.campaignId }
+        : {}),
+      ...(params?.refresh ? { refresh: '1' } : {}),
+    },
   });
   return data.sources ?? [];
 }
@@ -208,7 +213,7 @@ export async function searchDdbLibraryMonsters(params: {
   const { sourceIds, sourceId, ...rest } = params;
   const resolvedSourceIds = sourceIds?.length
     ? sourceIds
-    : sourceId != null && sourceId > 0
+    : sourceId != null && (sourceId > 0 || sourceId === DDB_HOMEBREW_SOURCE_ID)
       ? [sourceId]
       : undefined;
   try {
@@ -539,7 +544,7 @@ export async function importAllDdbLibraryFromSource(
     ...new Set(
       (body.sourceIds?.length ? body.sourceIds : body.sourceId != null ? [body.sourceId] : [])
         .map((id) => Number(id))
-        .filter((id) => Number.isFinite(id) && id > 0),
+        .filter((id) => Number.isFinite(id) && (id > 0 || id === DDB_HOMEBREW_SOURCE_ID)),
     ),
   ];
   if (sourceIds.length === 0) {

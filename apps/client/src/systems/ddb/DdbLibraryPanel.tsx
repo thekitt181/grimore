@@ -22,6 +22,7 @@ import {
   sourceIdsMatch,
 } from '@/systems/compendium/compendiumLockCache';
 import type { DdbLibraryImportResult } from '@grimoire/shared';
+import { DDB_HOMEBREW_SOURCE_ID } from '@grimoire/shared';
 import { useCompendiumEditor } from '@/systems/compendium/useCompendiumEditor';
 import { useCompendiumUiStore } from '@/systems/compendium/compendiumStore';
 import { extractApiError } from '@/lib/apiError';
@@ -40,7 +41,9 @@ function loadSavedSourceIds(): Set<number> {
     const parsed = JSON.parse(raw) as unknown;
     if (!Array.isArray(parsed)) return new Set();
     return new Set(
-      parsed.map((id) => Number(id)).filter((id) => Number.isFinite(id) && id > 0),
+      parsed
+        .map((id) => Number(id))
+        .filter((id) => Number.isFinite(id) && (id > 0 || id === DDB_HOMEBREW_SOURCE_ID)),
     );
   } catch {
     return new Set();
@@ -172,6 +175,20 @@ export function DdbLibraryPanel({ onClose }: { onClose: () => void }) {
     staleTime: 5 * 60_000,
   });
 
+  async function refreshSourceBooks() {
+    setMessage('Refreshing your D&D Beyond library…');
+    try {
+      const fresh = await fetchDdbLibrarySources({
+        refresh: true,
+        ...(ddbCampaignId != null && ddbCampaignId > 0 ? { campaignId: ddbCampaignId } : {}),
+      });
+      qc.setQueryData(['ddb', 'library', 'sources', ddbCampaignId ?? null], fresh);
+      setMessage(`Refreshed — ${fresh.length} accessible source${fresh.length === 1 ? '' : 's'}.`);
+    } catch (err: unknown) {
+      setMessage(extractApiError(err, 'Could not refresh source books'));
+    }
+  }
+
   useEffect(() => {
     if (sources.length === 0) return;
     const valid = new Set(sources.map((s) => s.id));
@@ -224,7 +241,7 @@ export function DdbLibraryPanel({ onClose }: { onClose: () => void }) {
       importDdbLibraryEntries({
         kind: tabToKind(tab),
         ids: [...selected],
-        ...(selectedSourceIds.size === 1 ? { sourceId: [...selectedSourceIds][0] } : {}),
+        ...(selectedSourceIds.size === 1 ? { sourceId: [...selectedSourceIds][0]! } : {}),
         ...(ddbCampaignId ? { campaignId: ddbCampaignId } : {}),
       }),
     onSuccess: async (result) => {
@@ -511,6 +528,15 @@ export function DdbLibraryPanel({ onClose }: { onClose: () => void }) {
                 <button
                   type="button"
                   className="font-ui text-[9px] opacity-60 hover:opacity-100"
+                  onClick={() => void refreshSourceBooks()}
+                  disabled={sourcesLoading}
+                  title="Re-fetch owned/shared books from D&D Beyond"
+                >
+                  Refresh
+                </button>
+                <button
+                  type="button"
+                  className="font-ui text-[9px] opacity-60 hover:opacity-100"
                   onClick={saveSourceSelection}
                   disabled={selectedSourceIds.size === 0}
                   title="Remember selected books for next time"
@@ -553,12 +579,15 @@ export function DdbLibraryPanel({ onClose }: { onClose: () => void }) {
                       />
                       <span className="truncate">
                         {s.name}
-                        {isEditor && compendiumSourceLocked(s.name) && (
+                        {s.id === DDB_HOMEBREW_SOURCE_ID && (
+                          <span style={{ color: '#60a5fa', fontSize: 9 }}> · homebrew</span>
+                        )}
+                        {isEditor && s.id !== DDB_HOMEBREW_SOURCE_ID && compendiumSourceLocked(s.name) && (
                           <span style={{ color: '#fbbf24', fontSize: 9 }}> · locked</span>
                         )}
                       </span>
                     </label>
-                    {isEditor && (
+                    {isEditor && s.id !== DDB_HOMEBREW_SOURCE_ID && (
                       <button
                         type="button"
                         title={compendiumSourceLocked(s.name) ? 'Unlock in compendium' : 'Lock in compendium (admin only)'}
@@ -610,6 +639,7 @@ export function DdbLibraryPanel({ onClose }: { onClose: () => void }) {
                   <span className="font-semibold">{m.name}</span>
                   <span className="opacity-60 ml-1">
                     CR {m.cr}
+                    {m.isHomebrew && <span style={{ color: '#60a5fa' }}> · homebrew</span>}
                     {m.source ? ` · ${m.source}` : ''}
                   </span>
                 </span>

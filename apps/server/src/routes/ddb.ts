@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
+import { DDB_HOMEBREW_SOURCE_ID } from '@grimoire/shared';
 import { prisma } from '../lib/prisma';
 import { requireAuth, type AuthenticatedRequest } from '../middleware/auth';
 import { requireSessionMember } from '../middleware/requireSessionMember';
@@ -26,23 +27,26 @@ import {
 import { fetchDdbImage, isAllowedDdbImageUrl } from '../services/ddb/imageProxy';
 
 function parseSourceIds(query: Record<string, unknown>): number[] | undefined {
+  const acceptId = (id: number) =>
+    Number.isFinite(id) && (id > 0 || id === DDB_HOMEBREW_SOURCE_ID);
+
   const raw = query['sourceIds'];
   if (typeof raw === 'string' && raw.trim()) {
     const ids = raw
       .split(',')
       .map((part) => parseInt(part.trim(), 10))
-      .filter((id) => Number.isFinite(id) && id > 0);
+      .filter(acceptId);
     return ids.length > 0 ? [...new Set(ids)] : undefined;
   }
   if (Array.isArray(raw)) {
     const ids = raw
       .flatMap((part) => String(part).split(','))
       .map((part) => parseInt(part.trim(), 10))
-      .filter((id) => Number.isFinite(id) && id > 0);
+      .filter(acceptId);
     return ids.length > 0 ? [...new Set(ids)] : undefined;
   }
   const single = parseInt(String(query['sourceId'] ?? ''), 10);
-  return Number.isFinite(single) && single > 0 ? [single] : undefined;
+  return acceptId(single) ? [single] : undefined;
 }
 import { getRollBridgeDebug, fetchNewDdbRollsForSession } from '../services/ddb/ddbRollBridge';
 const router = Router();
@@ -408,7 +412,11 @@ router.get('/library/sources', requireAuth, async (req: AuthenticatedRequest, re
       typeof campaignIdRaw === 'string' && Number(campaignIdRaw) > 0
         ? Number(campaignIdRaw)
         : undefined;
-    const sources = await listDdbLibrarySources(req.userId!, { ...(campaignId ? { campaignId } : {}) });
+    const force = req.query['refresh'] === '1' || req.query['refresh'] === 'true';
+    const sources = await listDdbLibrarySources(req.userId!, {
+      ...(campaignId ? { campaignId } : {}),
+      ...(force ? { force: true } : {}),
+    });
     res.json({ sources });
   } catch (err) {
     res.status(400).json({ error: err instanceof Error ? err.message : 'Failed to load sources' });
@@ -487,11 +495,14 @@ const importSchema = z.object({
   kind: z.enum(['monster', 'item', 'spell']),
   ids: z.array(z.coerce.number().int().positive()).min(1).max(200),
   campaignId: z.coerce.number().int().positive().optional(),
-  sourceId: z.coerce.number().int().positive().optional(),
+  sourceId: z.coerce.number().int().optional(),
   deferCatalogFinish: z.boolean().optional(),
   skipExisting: z.boolean().optional(),
   namesById: z.record(z.string(), z.string()).optional(),
-});
+}).refine(
+  (data) => data.sourceId == null || data.sourceId > 0 || data.sourceId === DDB_HOMEBREW_SOURCE_ID,
+  { message: 'Invalid source id' },
+);
 
 router.post('/library/import', requireAuth, async (req: AuthenticatedRequest, res) => {
   try {
@@ -511,16 +522,18 @@ router.post('/library/import', requireAuth, async (req: AuthenticatedRequest, re
 
 const importAllSchema = z
   .object({
-    sourceIds: z.array(z.coerce.number().int().positive()).optional(),
-    sourceId: z.coerce.number().int().positive().optional(),
+    sourceIds: z.array(z.coerce.number().int()).optional(),
+    sourceId: z.coerce.number().int().optional(),
     campaignId: z.coerce.number().int().positive().optional(),
     skipExisting: z.boolean().optional(),
   })
   .transform((data) => {
-    const sourceIds = [...new Set([...(data.sourceIds ?? []), ...(data.sourceId != null ? [data.sourceId] : [])])];
+    const sourceIds = [...new Set([...(data.sourceIds ?? []), ...(data.sourceId != null ? [data.sourceId] : [])])]
+      .filter((id) => Number.isFinite(id) && (id > 0 || id === DDB_HOMEBREW_SOURCE_ID));
     return {
       sourceIds,
       ...(data.campaignId != null ? { campaignId: data.campaignId } : {}),
+      ...(data.skipExisting ? { skipExisting: true } : {}),
     };
   })
   .refine((data) => data.sourceIds.length > 0, {

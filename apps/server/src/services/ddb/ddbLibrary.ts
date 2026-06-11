@@ -7,12 +7,14 @@ import type {
   OwlbearMonster,
   OwlbearSpell,
 } from '@grimoire/shared';
+import { DDB_HOMEBREW_SOURCE_ID, DDB_HOMEBREW_SOURCE_LABEL } from '@grimoire/shared';
 import { DDB_SPELL_CLASS_IDS, DDB_URLS } from './config';
 import { authHeaders, type DdbAuthContext } from './ddbAuthContext';
 import {
   ddbEntityId,
   ddbMonsterCanImport,
   entryHasSourceId,
+  isDdbHomebrewEntity,
   normalizeDdbItemSummary,
   normalizeDdbItemToCompendium,
   normalizeDdbMonsterSummary,
@@ -163,6 +165,25 @@ function mergeByEntityId(entries: Record<string, unknown>[]): Record<string, unk
   return [...byId.values()];
 }
 
+function splitSourceFilter(sourceIds?: number[]): {
+  bookSourceIds: number[];
+  includeHomebrew: boolean;
+  homebrewOnly: boolean;
+} {
+  const unique = [...new Set(sourceIds ?? [])];
+  const includeHomebrew = unique.includes(DDB_HOMEBREW_SOURCE_ID);
+  const bookSourceIds = unique.filter((id) => id > 0);
+  return {
+    bookSourceIds,
+    includeHomebrew,
+    homebrewOnly: includeHomebrew && bookSourceIds.length === 0,
+  };
+}
+
+function filterPoolByHomebrew(pool: Record<string, unknown>[]): Record<string, unknown>[] {
+  return pool.filter((raw) => isDdbHomebrewEntity(raw));
+}
+
 export async function searchDdbMonsters(
   ctx: DdbAuthContext,
   opts: { q?: string; sourceId?: number; sourceIds?: number[]; skip?: number; take?: number },
@@ -176,18 +197,28 @@ export async function searchDdbMonsters(
     : opts.sourceId
       ? [opts.sourceId]
       : undefined;
-  const preferredSourceId = sourceIds?.length === 1 ? sourceIds[0] : opts.sourceId;
+  const { bookSourceIds, includeHomebrew, homebrewOnly } = splitSourceFilter(sourceIds);
+  const preferredSourceId = bookSourceIds.length === 1 ? bookSourceIds[0] : opts.sourceId;
   const url = DDB_URLS.monstersSearch(skip, take, search, {
-    homebrew: true,
-    sourceIds,
+    homebrewOnly,
+    homebrew: includeHomebrew || bookSourceIds.length === 0,
+    sourceIds: bookSourceIds.length > 0 ? bookSourceIds : undefined,
   });
 
   const res = await fetch(url, { headers: authHeaders(ctx) });
   if (!res.ok) throw new Error(`DDB monster search failed (${res.status})`);
   const json = (await res.json()) as Record<string, unknown>;
-  const items = unwrapList(json, (raw) =>
+  let items = unwrapList(json, (raw) =>
     normalizeDdbMonsterSummary(raw, catalog, preferredSourceId),
   );
+  if (includeHomebrew && bookSourceIds.length > 0) {
+    items = items.filter((item) => item.isHomebrew || bookSourceIds.some((id) => {
+      const label = catalog.sourceNames.get(id);
+      return label && item.source?.includes(label);
+    }));
+  } else if (homebrewOnly) {
+    items = items.filter((item) => item.isHomebrew);
+  }
   const total = Number((json.pagination as Record<string, unknown> | undefined)?.total ?? items.length);
   return { items, total: Number.isFinite(total) ? total : items.length };
 }
@@ -282,10 +313,17 @@ export async function searchDdbSpells(
     : opts.sourceId
       ? [opts.sourceId]
       : undefined;
-  const preferredSourceId = sourceIds?.length === 1 ? sourceIds[0] : opts.sourceId;
-  const pool = sourceIds?.length
-    ? filterPoolBySources(await loadSpellPool(ctx, opts.campaignId), sourceIds)
-    : await loadSpellPool(ctx, opts.campaignId);
+  const { bookSourceIds, includeHomebrew, homebrewOnly } = splitSourceFilter(sourceIds);
+  const preferredSourceId = bookSourceIds.length === 1 ? bookSourceIds[0] : opts.sourceId;
+  let pool = await loadSpellPool(ctx, opts.campaignId);
+  if (homebrewOnly) {
+    pool = filterPoolByHomebrew(pool);
+  } else if (bookSourceIds.length > 0) {
+    pool = filterPoolBySources(pool, bookSourceIds);
+    if (includeHomebrew) {
+      pool = mergeByEntityId([...pool, ...filterPoolByHomebrew(await loadSpellPool(ctx, opts.campaignId))]);
+    }
+  }
 
   let items = pool
     .map((entry) => {
@@ -350,10 +388,17 @@ export async function searchDdbItems(
     : opts.sourceId
       ? [opts.sourceId]
       : undefined;
-  const preferredSourceId = sourceIds?.length === 1 ? sourceIds[0] : opts.sourceId;
-  const pool = sourceIds?.length
-    ? filterPoolBySources(await loadItemPool(ctx, opts.campaignId), sourceIds)
-    : await loadItemPool(ctx, opts.campaignId);
+  const { bookSourceIds, includeHomebrew, homebrewOnly } = splitSourceFilter(sourceIds);
+  const preferredSourceId = bookSourceIds.length === 1 ? bookSourceIds[0] : opts.sourceId;
+  let pool = await loadItemPool(ctx, opts.campaignId);
+  if (homebrewOnly) {
+    pool = filterPoolByHomebrew(pool);
+  } else if (bookSourceIds.length > 0) {
+    pool = filterPoolBySources(pool, bookSourceIds);
+    if (includeHomebrew) {
+      pool = mergeByEntityId([...pool, ...filterPoolByHomebrew(await loadItemPool(ctx, opts.campaignId))]);
+    }
+  }
 
   let items = pool
     .map((entry) => {
@@ -384,12 +429,19 @@ function poolById(pool: Record<string, unknown>[]): Map<number, Record<string, u
 }
 
 function resolveImportSaveOpts(entry: { source?: string }, importSourceId?: number) {
+  if (importSourceId === DDB_HOMEBREW_SOURCE_ID) {
+    return { saveAs: 'homebrew' as const };
+  }
   if (importSourceId != null && importSourceId > 0) {
     return { saveAs: 'replace' as const };
   }
   return entry.source && entry.source !== 'D&D Beyond' && entry.source !== 'Custom'
     ? { saveAs: 'replace' as const }
     : { saveAs: 'homebrew' as const };
+}
+
+function applyHomebrewSource<T extends { source?: string }>(entry: T): T {
+  return { ...entry, source: DDB_HOMEBREW_SOURCE_LABEL };
 }
 
 async function unlockImportedBookSources(catalog: DdbCatalog, sourceIds: number[]): Promise<string[]> {
@@ -456,6 +508,7 @@ export type DdbImportRunOptions = {
 };
 
 function sourceLabelForBook(catalog: DdbCatalog, sourceId?: number): string {
+  if (sourceId === DDB_HOMEBREW_SOURCE_ID) return DDB_HOMEBREW_SOURCE_LABEL;
   if (sourceId == null) return '';
   return catalog.sourceNames.get(sourceId) ?? '';
 }
@@ -622,7 +675,9 @@ async function importMonsterIds(
           continue;
         }
         pending.push({
-          entry: applyBookSource(withSource, raw, catalog, sourceId),
+          entry: sourceId === DDB_HOMEBREW_SOURCE_ID
+            ? applyHomebrewSource(withSource)
+            : applyBookSource(withSource, raw, catalog, sourceId),
           ddbId: id,
         });
       } catch (err) {
@@ -704,7 +759,12 @@ async function importSpellIds(
           errors.push({ id, message: 'Could not parse spell' });
           continue;
         }
-        pending.push({ entry: applyBookSource(entry, raw, catalog, sourceId), ddbId: id });
+        pending.push({
+          entry: sourceId === DDB_HOMEBREW_SOURCE_ID
+            ? applyHomebrewSource(applyBookSource(entry, raw, catalog, sourceId))
+            : applyBookSource(entry, raw, catalog, sourceId),
+          ddbId: id,
+        });
       } catch (err) {
         errors.push({ id, message: err instanceof Error ? err.message : 'Import failed' });
       }
@@ -784,7 +844,12 @@ async function importItemIds(
           errors.push({ id, message: 'Could not parse item' });
           continue;
         }
-        pending.push({ entry: applyBookSource(entry, raw, catalog, sourceId), ddbId: id });
+        pending.push({
+          entry: sourceId === DDB_HOMEBREW_SOURCE_ID
+            ? applyHomebrewSource(applyBookSource(entry, raw, catalog, sourceId))
+            : applyBookSource(entry, raw, catalog, sourceId),
+          ddbId: id,
+        });
       } catch (err) {
         errors.push({ id, message: err instanceof Error ? err.message : 'Import failed' });
       }
@@ -869,6 +934,48 @@ export async function importAllDdbLibraryFromSource(
     skipIndex?: ImportSkipIndex;
   },
 ): Promise<DdbLibraryImportResult> {
+  if (opts.sourceId === DDB_HOMEBREW_SOURCE_ID) {
+    const catalog = await loadDdbCatalog(ctx);
+    const runOpts: DdbImportRunOptions | undefined = opts.skipExisting
+      ? { skipExisting: true, skipIndex: opts.skipIndex }
+      : undefined;
+
+    if (opts.kind === 'monster') {
+      const summaries: DdbLibraryMonsterSummary[] = [];
+      let skip = 0;
+      const take = 100;
+      while (true) {
+        const { items } = await searchDdbMonsters(ctx, {
+          sourceIds: [DDB_HOMEBREW_SOURCE_ID],
+          skip,
+          take,
+        });
+        if (items.length === 0) break;
+        summaries.push(...items);
+        skip += items.length;
+        if (items.length < take) break;
+      }
+      const namesById = new Map(summaries.map((m) => [m.ddbId, m.name]));
+      return importMonsterIds(
+        ctx,
+        summaries.map((m) => m.ddbId),
+        catalog,
+        DDB_HOMEBREW_SOURCE_ID,
+        { ...runOpts, namesById },
+      );
+    }
+
+    if (opts.kind === 'spell') {
+      const pool = filterPoolByHomebrew(await loadSpellPool(ctx, opts.campaignId));
+      const ids = pool.map((raw) => ddbEntityId(raw)).filter((id): id is number => id != null);
+      return importSpellIds(ctx, ids, catalog, opts.campaignId, DDB_HOMEBREW_SOURCE_ID, runOpts);
+    }
+
+    const pool = filterPoolByHomebrew(await loadItemPool(ctx, opts.campaignId));
+    const ids = pool.map((raw) => ddbEntityId(raw)).filter((id): id is number => id != null);
+    return importItemIds(ctx, ids, catalog, opts.campaignId, DDB_HOMEBREW_SOURCE_ID, runOpts);
+  }
+
   const catalog = await loadDdbCatalog(ctx);
   const runOpts: DdbImportRunOptions | undefined = opts.skipExisting
     ? { skipExisting: true, skipIndex: opts.skipIndex }
@@ -911,6 +1018,67 @@ export async function importAllDdbLibraryFromSource(
   return importItemIds(ctx, ids, catalog, opts.campaignId, opts.sourceId, runOpts);
 }
 
+export async function importAllDdbHomebrew(
+  ctx: DdbAuthContext,
+  opts: {
+    campaignId?: number;
+    skipExisting?: boolean;
+    skipIndex?: ImportSkipIndex;
+  },
+): Promise<DdbLibraryImportResult> {
+  const catalog = await loadDdbCatalog(ctx);
+  const runOpts: DdbImportRunOptions | undefined = opts.skipExisting
+    ? { skipExisting: true, skipIndex: opts.skipIndex }
+    : undefined;
+
+  const summaries: DdbLibraryMonsterSummary[] = [];
+  let skip = 0;
+  const take = 100;
+  while (true) {
+    const { items } = await searchDdbMonsters(ctx, {
+      sourceIds: [DDB_HOMEBREW_SOURCE_ID],
+      skip,
+      take,
+    });
+    if (items.length === 0) break;
+    summaries.push(...items);
+    skip += items.length;
+    if (items.length < take) break;
+  }
+  const namesById = new Map(summaries.map((m) => [m.ddbId, m.name]));
+  const monsterResult = await importMonsterIds(
+    ctx,
+    summaries.map((m) => m.ddbId),
+    catalog,
+    DDB_HOMEBREW_SOURCE_ID,
+    { ...runOpts, namesById },
+  );
+
+  const spellPool = filterPoolByHomebrew(await loadSpellPool(ctx, opts.campaignId));
+  const itemPool = filterPoolByHomebrew(await loadItemPool(ctx, opts.campaignId));
+  const spellIds = spellPool.map((raw) => ddbEntityId(raw)).filter((id): id is number => id != null);
+  const itemIds = itemPool.map((raw) => ddbEntityId(raw)).filter((id): id is number => id != null);
+
+  const spellResult = await importSpellIds(
+    ctx,
+    spellIds,
+    catalog,
+    opts.campaignId,
+    DDB_HOMEBREW_SOURCE_ID,
+    runOpts,
+  );
+  const itemResult = await importItemIds(
+    ctx,
+    itemIds,
+    catalog,
+    opts.campaignId,
+    DDB_HOMEBREW_SOURCE_ID,
+    runOpts,
+  );
+
+  return mergeImportResults(monsterResult, spellResult, itemResult);
+}
+
 function mergeImportResults(...parts: DdbLibraryImportResult[]): DdbLibraryImportResult {
   const imported = parts.flatMap((p) => p.imported);
   const errors = parts.flatMap((p) => p.errors);
@@ -938,16 +1106,27 @@ export async function importAllDdbLibraryFromSources(
     skipExisting?: boolean;
   },
 ): Promise<DdbLibraryImportResult> {
-  const unique = [...new Set(opts.sourceIds.filter((id) => Number.isFinite(id) && id > 0))];
+  const unique = [...new Set(opts.sourceIds.filter((id) => Number.isFinite(id) && (id > 0 || id === DDB_HOMEBREW_SOURCE_ID)))];
   if (unique.length === 0) {
     return { imported: [], errors: [{ id: 0, message: 'No source books selected' }] };
   }
+
+  const homebrewSelected = unique.includes(DDB_HOMEBREW_SOURCE_ID);
+  const books = unique.filter((id) => id > 0);
 
   const kinds = opts.kinds?.length ? opts.kinds : (['monster', 'spell', 'item'] as const);
   const skipIndex = opts.skipExisting ? await loadImportSkipIndex(true) : undefined;
 
   const results: DdbLibraryImportResult[] = [];
-  for (const sourceId of unique) {
+  if (homebrewSelected) {
+    results.push(
+      await importAllDdbHomebrew(ctx, {
+        campaignId: opts.campaignId,
+        ...(opts.skipExisting ? { skipExisting: true, skipIndex } : {}),
+      }),
+    );
+  }
+  for (const sourceId of books) {
     for (const kind of kinds) {
       results.push(
         await importAllDdbLibraryFromSource(ctx, {
@@ -966,7 +1145,7 @@ export async function importAllDdbLibraryFromSources(
   );
   try {
     const fin = await finishDdbLibraryImport(ctx, {
-      sourceIds: unique,
+      sourceIds: books,
       ...(sourceLabels.length > 0 ? { sourceLabels } : {}),
     });
     return {

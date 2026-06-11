@@ -141,6 +141,11 @@ export interface DdbLinkStatus {
   rollBridgeEnabled?: boolean;
 }
 
+/** Pseudo source id for D&D Beyond homebrew (monsters, spells, items). */
+export const DDB_HOMEBREW_SOURCE_ID = -1;
+export const DDB_HOMEBREW_SOURCE_NAME = 'My D&D Beyond Homebrew';
+export const DDB_HOMEBREW_SOURCE_LABEL = 'D&D Beyond Homebrew';
+
 /** Source book / entitlement from DDB config (owned + shared). */
 export interface DdbSourceSummary {
   id: number;

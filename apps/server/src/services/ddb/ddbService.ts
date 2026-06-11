@@ -7,7 +7,7 @@ import { fetchDdbCampaigns, fetchDdbCharacterList } from './campaigns';
 import { pushHpToDdb, pushDeathSavesToDdb, type DdbDeathSavesPayload } from './characterUpdate';
 import { fetchDdbEncounters } from './encounters';
 import { fetchDdbCatalog } from './ddbSources';
-import { filterAccessibleSourceIds, listAccessibleDdbSources } from './ddbAccessibleSources';
+import { filterAccessibleSourceIds, invalidateAccessibleSourceCache, listAccessibleDdbSources } from './ddbAccessibleSources';
 import {
   fetchDdbMonsterDetail,
   importDdbLibraryEntries,
@@ -21,7 +21,7 @@ import {
 import { enrichMonstersForImport } from './ddbMonsterFetch';
 import { getDdbAuthContext } from './ddbAuthContext';
 import { normalizeDdbMonsterToCompendium } from './ddbContentNormalize';
-import { coerceGrimoireCharacter, type DdbLinkStatus, type GrimoireCharacter } from '@grimoire/shared';
+import { coerceGrimoireCharacter, DDB_HOMEBREW_SOURCE_ID, type DdbLinkStatus, type GrimoireCharacter } from '@grimoire/shared';
 import { DDB_NORMALIZER_VERSION } from './normalizerVersion';
 
 export async function getCobaltForUser(userId: string): Promise<string | null> {
@@ -54,6 +54,9 @@ export async function linkDdbAccount(userId: string, cobalt: string): Promise<Dd
       lastValidatedAt: now,
     },
   });
+
+  const ctx = await getDdbAuthContext(normalized);
+  if (ctx) invalidateAccessibleSourceCache(ctx.cacheId);
 
   return { linked: true, valid: true, linkedAt: now.toISOString(), lastValidatedAt: now.toISOString() };
 }
@@ -310,7 +313,7 @@ async function requireDdbAuth(userId: string) {
 
 export async function listDdbLibrarySources(
   userId: string,
-  opts?: { campaignId?: number },
+  opts?: { campaignId?: number; force?: boolean },
 ) {
   const ctx = await requireDdbAuth(userId);
   return listAccessibleDdbSources(ctx, opts);
@@ -398,7 +401,7 @@ export async function importAllFromDdbLibrarySource(
     : opts.sourceId
       ? [opts.sourceId]
       : [];
-  const unique = [...new Set(sourceIds.filter((id) => Number.isFinite(id) && id > 0))];
+  const unique = [...new Set(sourceIds.filter((id) => Number.isFinite(id) && (id > 0 || id === DDB_HOMEBREW_SOURCE_ID)))];
   const { accessible, inaccessible } = await filterAccessibleSourceIds(ctx, unique, {
     campaignId: opts.campaignId,
   });
