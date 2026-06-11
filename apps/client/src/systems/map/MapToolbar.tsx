@@ -69,6 +69,7 @@ export function MapToolbar() {
 
   const activeMap = getActiveMap();
   const showGrid = activeMap?.showGrid ?? true;
+  const wallCount = activeMap?.walls.length ?? 0;
 
   function handleFit() {
     const app = mapLayerRefs.app.current;
@@ -218,6 +219,11 @@ export function MapToolbar() {
           <span className="font-ui text-[9px] leading-snug" style={{ color: 'var(--color-text-secondary)' }}>
             Drag to orbit · scroll to zoom
           </span>
+          {wallCount === 0 && (
+            <span className="font-ui text-[9px] leading-snug" style={{ color: 'var(--color-accent-gold)' }}>
+              Use the Wall tool (🧱) on the 2D map to draw lines of sight — those segments extrude here.
+            </span>
+          )}
         </div>
       )}
 

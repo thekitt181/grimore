@@ -4,7 +4,7 @@ import { itemCenterXZ } from './coords';
 import { useThreeTexture } from './useThreeTexture';
 
 export function Map3DGround({ map }: { map: MapItem }) {
-  const texture = useThreeTexture(map.backgroundUrl);
+  const { texture, status } = useThreeTexture(map.backgroundUrl);
   const [cx, cz] = itemCenterXZ(map);
 
   const gridLines = useMemo(() => {
@@ -34,13 +34,13 @@ export function Map3DGround({ map }: { map: MapItem }) {
         <planeGeometry args={[map.width, map.height]} />
         <meshStandardMaterial
           {...(texture ? { map: texture } : {})}
-          color={texture ? '#ffffff' : '#1a1a24'}
+          color={texture ? '#ffffff' : status === 'error' ? '#3d2020' : '#14141c'}
           roughness={0.92}
           metalness={0.05}
         />
       </mesh>
 
-      {!texture && (
+      {!texture && status !== 'loading' && (
         <mesh rotation={[-Math.PI / 2, 0, 0]} position={[cx, 0.01, cz]}>
           <planeGeometry args={[map.width, map.height]} />
           <meshStandardMaterial color="#252532" wireframe transparent opacity={0.15} />
@@ -52,7 +52,11 @@ export function Map3DGround({ map }: { map: MapItem }) {
           <bufferGeometry>
             <bufferAttribute attach="attributes-position" args={[gridLines, 3]} />
           </bufferGeometry>
-          <lineBasicMaterial color={gridColor} transparent opacity={map.gridOpacity * 0.65} />
+          <lineBasicMaterial
+            color={gridColor}
+            transparent
+            opacity={texture ? map.gridOpacity * 0.22 : map.gridOpacity * 0.65}
+          />
         </lineSegments>
       )}
     </group>

@@ -49,6 +49,27 @@ function textureFromImage(img: HTMLImageElement, cacheKey: string): Texture {
 }
 
 /**
+ * Load a decoded image using the same rules as the Pixi map renderer (proxy, blob, CORS).
+ * Reuses the Pixi texture cache when the 2D map already loaded this URL.
+ */
+export async function loadImageUrl(url: string): Promise<HTMLImageElement> {
+  const resolved = proxiedDdbImageUrl(url);
+  const cached = cache.get(resolved);
+  if (cached && !cached.destroyed) {
+    const resource = cached.source?.resource;
+    if (resource instanceof HTMLImageElement) return resource;
+  }
+
+  const useBlob =
+    isDdbHostedImageUrl(url)
+    || resolved.startsWith('/api/ddb/proxy-image');
+
+  return useBlob
+    ? loadViaBlob(resolved)
+    : loadImageElement(resolved, !resolved.startsWith('blob:') && !resolved.startsWith('data:'));
+}
+
+/**
  * Loads a PixiJS Texture from any URL — http/https, blob:, or data:.
  * D&D Beyond URLs are fetched via our same-origin proxy as blobs so WebGL can upload them.
  */
@@ -57,14 +78,7 @@ export async function loadTexture(url: string): Promise<Texture> {
   const cached = cache.get(resolved);
   if (cached && !cached.destroyed) return cached;
 
-  const useBlob =
-    isDdbHostedImageUrl(url)
-    || resolved.startsWith('/api/ddb/proxy-image');
-
-  const img = useBlob
-    ? await loadViaBlob(resolved)
-    : await loadImageElement(resolved, !resolved.startsWith('blob:') && !resolved.startsWith('data:'));
-
+  const img = await loadImageUrl(url);
   return textureFromImage(img, resolved);
 }
 

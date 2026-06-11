@@ -1,61 +1,44 @@
 import { useEffect, useState } from 'react';
 import * as THREE from 'three';
-import { isDdbHostedImageUrl, proxiedDdbImageUrl } from '@/systems/ddb/ddbImageUrl';
+import { loadImageUrl } from '@/lib/textureLoader';
 
-async function loadImage(url: string): Promise<HTMLImageElement> {
-  const resolved = proxiedDdbImageUrl(url);
-  if (isDdbHostedImageUrl(url) || resolved.startsWith('/api/ddb/proxy-image')) {
-    const res = await fetch(resolved);
-    if (!res.ok) throw new Error(`Texture fetch failed: ${res.status}`);
-    const blob = await res.blob();
-    const blobUrl = URL.createObjectURL(blob);
-    try {
-      return await new Promise((resolve, reject) => {
-        const img = new Image();
-        img.onload = () => resolve(img);
-        img.onerror = () => reject(new Error('Image decode failed'));
-        img.src = blobUrl;
-      });
-    } finally {
-      URL.revokeObjectURL(blobUrl);
-    }
-  }
-
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    if (!resolved.startsWith('blob:') && !resolved.startsWith('data:')) {
-      img.crossOrigin = 'anonymous';
-    }
-    img.onload = () => resolve(img);
-    img.onerror = () => reject(new Error('Image load failed'));
-    img.src = resolved;
-  });
-}
-
-/** Load a Three.js texture from the same URLs as the Pixi map renderer. */
-export function useThreeTexture(url: string | null | undefined): THREE.Texture | null {
+/** Load a Three.js texture from the same URLs (and cache) as the Pixi map renderer. */
+export function useThreeTexture(url: string | null | undefined): {
+  texture: THREE.Texture | null;
+  status: 'idle' | 'loading' | 'ready' | 'error';
+} {
   const [texture, setTexture] = useState<THREE.Texture | null>(null);
+  const [status, setStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
 
   useEffect(() => {
     if (!url) {
       setTexture(null);
+      setStatus('idle');
       return;
     }
 
     let cancelled = false;
     let current: THREE.Texture | null = null;
+    setStatus('loading');
 
-    void loadImage(url)
+    void loadImageUrl(url)
       .then((img) => {
         if (cancelled) return;
         const tex = new THREE.Texture(img);
         tex.colorSpace = THREE.SRGBColorSpace;
+        tex.minFilter = THREE.LinearFilter;
+        tex.magFilter = THREE.LinearFilter;
+        tex.generateMipmaps = false;
         tex.needsUpdate = true;
         current = tex;
         setTexture(tex);
+        setStatus('ready');
       })
       .catch(() => {
-        if (!cancelled) setTexture(null);
+        if (!cancelled) {
+          setTexture(null);
+          setStatus('error');
+        }
       });
 
     return () => {
@@ -64,5 +47,5 @@ export function useThreeTexture(url: string | null | undefined): THREE.Texture |
     };
   }, [url]);
 
-  return texture;
+  return { texture, status };
 }

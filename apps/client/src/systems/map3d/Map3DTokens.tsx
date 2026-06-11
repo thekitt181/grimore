@@ -4,7 +4,7 @@ import { itemCenterXZ, degToRad } from './coords';
 import { useThreeTexture } from './useThreeTexture';
 
 function Token3DMesh({ token, activeTurn }: { token: TokenItem; activeTurn: boolean }) {
-  const texture = useThreeTexture(token.imageUrl);
+  const { texture } = useThreeTexture(token.imageUrl);
   const [cx, cz] = itemCenterXZ(token);
   const radius = Math.min(token.width, token.height) / 2;
   const baseHeight = Math.max(radius * 0.22, 4);
