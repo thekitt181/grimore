@@ -1,4 +1,5 @@
 import type { QueryClient } from '@tanstack/react-query';
+import { ensureApiAuthToken } from '@/lib/axios';
 import type {
   CompendiumItem,
   CompendiumMonster,
@@ -120,6 +121,7 @@ export async function refetchCompendiumAfterImport(
   qc: QueryClient,
   opts?: { catalogRev?: string },
 ): Promise<void> {
+  await ensureApiAuthToken({ attempts: 5, delayMs: 500 });
   await qc.invalidateQueries({
     predicate: (query) => query.queryKey[0] === 'compendium',
   });

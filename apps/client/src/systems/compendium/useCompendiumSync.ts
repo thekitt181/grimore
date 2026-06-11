@@ -3,14 +3,17 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { fetchSyncStatus } from './compendiumApi';
 import { useCompendiumUiStore } from './compendiumStore';
 import { getSocket } from '@/lib/socket';
+import { ensureApiAuthToken } from '@/lib/axios';
 
 /** Backup poll when socket push is healthy — compendium:updated drives refetches. */
 const POLL_CONNECTED_MS = 120_000;
 const POLL_MS = 45_000;
 const POLL_SLOW_MS = 120_000;
 
-function refetchAllCompendium(queryClient: ReturnType<typeof useQueryClient>) {
-  void queryClient.refetchQueries({
+async function refetchAllCompendium(queryClient: ReturnType<typeof useQueryClient>) {
+  const token = await ensureApiAuthToken({ attempts: 2 });
+  if (!token) return;
+  await queryClient.refetchQueries({
     predicate: (query) => {
       const key = query.queryKey;
       if (key[0] !== 'compendium') return false;
@@ -32,7 +35,7 @@ export function useCompendiumSyncPoll(enabled = true) {
   const scheduleRefetch = () => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
-      refetchAllCompendium(queryClient);
+      void refetchAllCompendium(queryClient);
     }, 150);
   };
 

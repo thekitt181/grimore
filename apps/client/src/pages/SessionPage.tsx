@@ -39,6 +39,7 @@ import { MonsterDexPanel } from '@/systems/compendium/MonsterDexPanel';
 import { ItemHandoutViewer } from '@/systems/compendium/ItemHandoutViewer';
 import { useHandoutRevealSocket } from '@/systems/compendium/useHandoutRevealSocket';
 import { useCompendiumSyncPoll } from '@/systems/compendium/useCompendiumSync';
+import { useCompendiumAuthRecovery } from '@/systems/compendium/useCompendiumAuthRecovery';
 import { useCompendiumUiStore } from '@/systems/compendium/compendiumStore';
 import { getSocket, isMobileClient } from '@/lib/socket';
 import type { InitiativeSyncPayload } from '@grimoire/shared';
@@ -81,6 +82,7 @@ export function SessionPage() {
   );
 
   useCompendiumSyncPoll(socketReady);
+  useCompendiumAuthRecovery(socketReady);
   useDiceSocket();
   useDdbHpSync();
   useDdbSocket();

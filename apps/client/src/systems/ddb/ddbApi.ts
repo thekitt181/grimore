@@ -551,39 +551,12 @@ export async function importAllDdbLibraryFromSource(
     throw new Error('Select at least one source book');
   }
 
-  if (body.skipExisting) {
-    const { data } = await api.post<DdbLibraryImportResult>('/ddb/library/import-all', {
-      sourceIds,
-      ...(body.campaignId != null && Number(body.campaignId) > 0
-        ? { campaignId: Number(body.campaignId) }
-        : {}),
-      skipExisting: true,
-    });
-    for (const sourceId of sourceIds) {
-      onProgress?.({
-        phase: 'complete',
-        sourceId,
-        ...(body.sourceNames?.[sourceId] ? { sourceName: body.sourceNames[sourceId] } : {}),
-        done: 1,
-        total: 1,
-        bookImported: data.imported.length,
-        bookErrors: data.errors.length,
-      });
-      await onBookComplete?.({
-        sourceId,
-        ...(body.sourceNames?.[sourceId] ? { sourceName: body.sourceNames[sourceId] } : {}),
-        result: data,
-        catalogRev: data.catalogRev ?? null,
-      });
-    }
-    return data;
-  }
-
   let merged: DdbLibraryImportResult = { imported: [], errors: [] };
   const importOpts = {
     ...(body.campaignId != null && Number(body.campaignId) > 0
       ? { campaignId: Number(body.campaignId) }
       : {}),
+    ...(body.skipExisting ? { skipExisting: true } : {}),
   };
 
   const sourceNames = body.sourceNames ?? {};

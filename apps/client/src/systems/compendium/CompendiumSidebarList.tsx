@@ -10,6 +10,8 @@ import {
   patchCompendiumSourceLock,
   refetchCompendiumAfterLock,
 } from './compendiumLockCache';
+import { reloadCompendiumCatalog } from './useCompendiumAuthRecovery';
+import { isApiAuthError } from '@/lib/axios';
 import { prefetchCompendiumEntry } from './prefetchCompendiumEntry';
 import { useCompendiumUiStore, type CompendiumBrowseMode, type CompendiumTab } from './compendiumStore';
 import { useSessionStore } from '@/store/sessionStore';
@@ -94,6 +96,7 @@ export function CompendiumSidebarList() {
   const isAdmin = useCompendiumEditor();
   const qc = useQueryClient();
   const [lockMessage, setLockMessage] = useState<string | null>(null);
+  const [reloadingCatalog, setReloadingCatalog] = useState(false);
 
   const compendiumReady = Boolean(isSignedIn);
 
@@ -207,6 +210,16 @@ export function CompendiumSidebarList() {
   const unavailable = showSourcePicker ? sourcesQ.isError : activeQ.isError;
 
   const activeError = showSourcePicker ? sourcesQ.error : activeQ.error;
+  const authBlocked = isApiAuthError(activeError) || (showSourcePicker && isApiAuthError(sourcesQ.error));
+
+  async function handleReloadCompendium() {
+    setReloadingCatalog(true);
+    try {
+      await reloadCompendiumCatalog(qc);
+    } finally {
+      setReloadingCatalog(false);
+    }
+  }
 
   const monsterEntries = useMemo(
     () => {
@@ -337,9 +350,21 @@ export function CompendiumSidebarList() {
       )}
 
       {unavailable && (
-        <p className="font-ui text-xs shrink-0 leading-snug" style={{ color: 'var(--color-accent-red-hot)' }}>
-          {compendiumErrorHint(activeError)}
-        </p>
+        <div className="space-y-1 shrink-0">
+          <p className="font-ui text-xs leading-snug" style={{ color: 'var(--color-accent-red-hot)' }}>
+            {compendiumErrorHint(activeError)}
+          </p>
+          {authBlocked && (
+            <button
+              type="button"
+              className="btn-ghost w-full text-xs py-0.5"
+              disabled={reloadingCatalog}
+              onClick={() => void handleReloadCompendium()}
+            >
+              {reloadingCatalog ? 'Reloading compendium…' : 'Reload compendium'}
+            </button>
+          )}
+        </div>
       )}
 
       {lockMessage && (
@@ -360,9 +385,11 @@ export function CompendiumSidebarList() {
             <p className="font-ui text-xs leading-snug" style={{ color: 'var(--color-text-secondary)' }}>
               {query.trim()
                 ? 'No source books match your search.'
-                : (sourcesQ.data?.length ?? 0) === 0
+                : sourcesQ.isSuccess && (sourcesQ.data?.length ?? 0) === 0
                   ? 'No imported books yet. Use D&D Beyond Library → Import all, then Sync compendium. Bundled books are hidden here.'
-                  : 'All source books are hidden (locked). Unlock a book in admin mode or import from D&D Beyond.'}
+                  : sourcesQ.isSuccess && (sourcesQ.data?.length ?? 0) > 0
+                    ? 'All source books are hidden (locked). Unlock a book in admin mode or import from D&D Beyond.'
+                    : 'Loading book list…'}
             </p>
             {!query.trim() && (
               <div className="flex flex-col gap-1">

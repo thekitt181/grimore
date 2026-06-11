@@ -347,10 +347,12 @@ export function DdbLibraryPanel({ onClose }: { onClose: () => void }) {
           if (progress.phase === 'complete') {
             const ok = progress.bookImported ?? 0;
             const fail = progress.bookErrors ?? 0;
-            setMessage(`${book}reimport complete (${ok} new${fail ? `, ${fail} failed` : ''}).`);
+            setMessage(
+              `${book}reimport complete (${ok} new${fail ? `, ${fail} failed` : ''}) — compendium updated.`,
+            );
             return;
           }
-          setMessage(`${book}checking ${progress.phase}… ${progress.done}/${progress.total || '?'}`);
+          setMessage(`${book}reimporting ${progress.phase}… ${progress.done}/${progress.total || '?'}`);
         },
         async (info) => {
           if (info.result.imported.length > 0) {

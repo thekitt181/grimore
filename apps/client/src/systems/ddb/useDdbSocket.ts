@@ -10,6 +10,7 @@ import { requestDdbRollBridgeStart } from './startRollBridge';
 import { useDdbStore } from './ddbStore';
 import { bindDdbRollSocket } from './bindDdbRollSocket';
 import { fetchDdbRollPoll } from './ddbApi';
+import { isApiAuthError } from '@/lib/axios';
 
 const POLL_MS = 2500;
 const POLL_MS_CONNECTED = 12_000;
@@ -35,10 +36,15 @@ export function useDdbSocket(): void {
 
     // HTTP poll — reliable path; does not depend on socket room or server bridge process.
     let pollCancelled = false;
+    let pollPaused = false;
     const runPoll = async () => {
+      if (pollPaused) return;
       try {
         const token = await getToken();
-        if (!token) return;
+        if (!token) {
+          pollPaused = true;
+          return;
+        }
         const rolls = await fetchDdbRollPoll(sessionId);
         // When the socket is live, rolls arrive via ddb:roll — poll only wakes the server fetch.
         if (pollCancelled || useSessionStore.getState().isConnected) return;
@@ -47,10 +53,19 @@ export function useDdbSocket(): void {
           console.info('[DDB] roll received (poll):', roll.characterName, roll.label, roll.total);
           useDiceStore.getState().addDdbRollEntry(roll);
         }
-      } catch {
-        // ignore transient poll errors
+      } catch (err) {
+        if (isApiAuthError(err)) {
+          pollPaused = true;
+          const fresh = await getToken({ skipCache: true });
+          if (fresh) pollPaused = false;
+        }
       }
     };
+    const resumePoll = () => {
+      pollPaused = false;
+      void runPoll();
+    };
+    window.addEventListener('grimoire:auth-recovered', resumePoll);
     void runPoll();
     const pollMs = isConnected ? POLL_MS_CONNECTED : POLL_MS;
     const pollTimer = setInterval(() => void runPoll(), pollMs);
@@ -79,6 +94,7 @@ export function useDdbSocket(): void {
 
     return () => {
       pollCancelled = true;
+      window.removeEventListener('grimoire:auth-recovered', resumePoll);
       clearTimeout(startTimer);
       clearInterval(pollTimer);
       socket.off('ddb:characterSync', onSync);
