@@ -18,7 +18,7 @@ const GM_TOOLS: ToolDef[] = [
   { id: 'pan',       label: 'Pan',     icon: '✋',  title: 'Pan the map (middle-mouse or this tool)' },
   { id: 'fog-reveal',label: 'Reveal',  icon: '☀',  title: 'Reveal fog cells' },
   { id: 'fog-hide',  label: 'Hide',    icon: '🌑', title: 'Hide fog cells' },
-  { id: 'wall',      label: 'Wall',    icon: '🧱', title: 'Draw & erase LOS walls (freehand, shapes)' },
+  { id: 'wall',      label: 'Wall',    icon: '🧱', title: 'Wall tool — freehand, rect, circle & eraser appear below' },
   { id: 'measure',   label: 'Measure', icon: '📏', title: 'Measure distance' },
   { id: 'calibrate', label: 'Calibrate', icon: '⊹', title: 'Calibrate grid — drag a rectangle over one cell' },
 ];
@@ -79,7 +79,6 @@ export function MapToolbar() {
   const tools = isGM ? GM_TOOLS : PLAYER_TOOLS;
 
   const [showDrawPanel, setShowDrawPanel] = useState(false);
-  const [showWallPanel, setShowWallPanel] = useState(false);
   const isDrawTool = DRAW_TOOLS.some((t) => t.id === activeTool);
   const isWallTool = activeTool === 'wall';
 
@@ -127,16 +126,35 @@ export function MapToolbar() {
             onClick={() => {
               setTool(tool.id);
               setShowDrawPanel(false);
-              if (tool.id === 'wall') setShowWallPanel((p) => !p);
-              else setShowWallPanel(false);
             }}
             className={clsx('w-9 h-9 rounded flex items-center justify-center text-base font-ui transition-all',
-              (activeTool === tool.id || (tool.id === 'wall' && showWallPanel)) ? ACTIVE_BTN : 'text-[#8a8075] hover:text-[#e8e0d0] hover:bg-[#1c1c28]'
+              activeTool === tool.id ? ACTIVE_BTN : 'text-[#8a8075] hover:text-[#e8e0d0] hover:bg-[#1c1c28]'
             )}
           >
             {tool.icon}
           </button>
         ))}
+
+        {isGM && isWallTool && (
+          <>
+            <div className="gold-divider my-1" />
+            {WALL_TOOLS.map((tool) => (
+              <button
+                key={tool.id}
+                title={tool.title}
+                onClick={() => setWallMode(tool.id)}
+                className={clsx('w-9 h-9 rounded flex items-center justify-center text-sm font-ui transition-all',
+                  wallMode === tool.id ? ACTIVE_BTN : 'text-[#8a8075] hover:text-[#e8e0d0] hover:bg-[#1c1c28]'
+                )}
+              >
+                {tool.icon}
+              </button>
+            ))}
+            <span className="font-ui text-[9px] text-center px-0.5 leading-snug" style={{ color: 'var(--color-text-secondary)' }}>
+              {wallCount} segs
+            </span>
+          </>
+        )}
 
         <div className="gold-divider my-1" />
         <MapViewModeToggle />
@@ -144,7 +162,7 @@ export function MapToolbar() {
         <div className="gold-divider my-1" />
         <button
           title="Drawing tools"
-          onClick={() => { setShowDrawPanel((p) => !p); setShowWallPanel(false); }}
+          onClick={() => setShowDrawPanel((p) => !p)}
           className={clsx(BTN, (showDrawPanel || isDrawTool) && ACTIVE_BTN)}
         >
           ✏
@@ -297,31 +315,6 @@ export function MapToolbar() {
               Enable auto-scan, or draw walls with 🧱 on the 2D map.
             </span>
           )}
-        </div>
-      )}
-
-      {/* Wall sub-panel */}
-      {showWallPanel && isGM && (
-        <div
-          className="flex flex-col gap-1 p-2 rounded-lg shadow-panel"
-          style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)', width: 52 }}
-        >
-          {WALL_TOOLS.map((tool) => (
-            <button
-              key={tool.id}
-              title={tool.title}
-              onClick={() => { setTool('wall'); setWallMode(tool.id); }}
-              className={clsx('w-9 h-9 rounded flex items-center justify-center text-sm font-ui transition-all',
-                isWallTool && wallMode === tool.id ? ACTIVE_BTN : 'text-[#8a8075] hover:text-[#e8e0d0] hover:bg-[#1c1c28]'
-              )}
-            >
-              {tool.icon}
-            </button>
-          ))}
-          <div className="gold-divider my-1" />
-          <span className="font-ui text-[9px] text-center px-0.5" style={{ color: 'var(--color-text-secondary)' }}>
-            {wallCount} segs
-          </span>
         </div>
       )}
 
