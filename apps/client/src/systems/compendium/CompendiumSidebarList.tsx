@@ -154,8 +154,10 @@ export function CompendiumSidebarList() {
   const sourcesQ = useQuery({
     queryKey: ['compendium', 'sources', 'books', isAdmin],
     queryFn: () => fetchBookSources(),
-    enabled: compendiumReady && (showSourcePicker || (isAdmin && browseMode === 'sources')),
+    enabled: compendiumReady && browseMode === 'sources',
     staleTime: 5_000,
+    refetchOnMount: 'always',
+    retry: 2,
   });
 
   const monsterQ = useInfiniteQuery({
@@ -199,7 +201,7 @@ export function CompendiumSidebarList() {
 
   const activeQ = tab === 'monsters' ? monsterQ : tab === 'items' ? itemQ : spellQ;
   const loading = showSourcePicker
-    ? sourcesQ.isPending && !sourcesQ.isError && !sourcesQ.data
+    ? sourcesQ.isLoading
     : activeQ.isPending && !activeQ.isError && !activeQ.data;
   const fetching = showSourcePicker ? sourcesQ.isFetching : activeQ.isFetching;
   const unavailable = showSourcePicker ? sourcesQ.isError : activeQ.isError;
@@ -363,13 +365,22 @@ export function CompendiumSidebarList() {
                   : 'All source books are hidden (locked). Unlock a book in admin mode or import from D&D Beyond.'}
             </p>
             {!query.trim() && (
-              <button
-                type="button"
-                className="btn-ghost w-full text-xs py-0.5"
-                onClick={() => setBrowseMode('all')}
-              >
-                Browse all {tab}
-              </button>
+              <div className="flex flex-col gap-1">
+                <button
+                  type="button"
+                  className="btn-ghost w-full text-xs py-0.5"
+                  onClick={() => void sourcesQ.refetch()}
+                >
+                  Refresh book list
+                </button>
+                <button
+                  type="button"
+                  className="btn-ghost w-full text-xs py-0.5"
+                  onClick={() => setBrowseMode('all')}
+                >
+                  Browse all {tab}
+                </button>
+              </div>
             )}
           </div>
         )}

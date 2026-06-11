@@ -31,6 +31,7 @@ import {
   saveOwlbearEntry,
   deleteOwlbearEntry,
   readRawGlobalDoc,
+  readOverrideSlicesForBookList,
   saveOwlbearEntriesBulk,
   clearRawGlobalDocInflight,
   type CompendiumKind,
@@ -751,20 +752,72 @@ function tallyBooksSourceCounts(
   return counts;
 }
 
+function bookSourcesFromOverrideSlices(
+  slices: Awaited<ReturnType<typeof readOverrideSlicesForBookList>>,
+  policy: CompendiumVisibilityPolicy,
+): Array<{ id: string; label: string; count: number }> {
+  const bundled = bundledSourceLabelSet();
+  const counts = tallyBooksSourceCounts(
+    {
+      _id: 'global',
+      monsters: [],
+      items: [],
+      spells: [],
+      overrideMonsters: slices.overrideMonsters,
+      overrideItems: slices.overrideItems,
+      overrideSpells: slices.overrideSpells,
+      deleted: [],
+      images: {},
+      imagesData: {},
+      entryImages: {},
+      lastUpdated: new Date(0).toISOString(),
+    },
+    policy,
+  );
+  return mapSourceListResults(counts, policy, false, true, bundled).map(
+    ({ id, label, count }) => ({ id, label, count }),
+  );
+}
+
 /** Merged DDB-imported book list (monsters + items + spells) for Compendium → Books. */
 export async function listAllBookSources(): Promise<
   Array<{ id: string; label: string; count: number }>
 > {
-  await ensureBundledSourcesLocked('listBooks');
-  await ensureImportedSourcesUnlocked('listBooks');
-  const policy = await readVisibilityPolicyFast();
-  clearRawGlobalDocInflight();
-  const raw = await readRawGlobalDoc({ includeImageData: false });
-  const bundled = bundledSourceLabelSet();
-  const counts = tallyBooksSourceCounts(raw, policy);
-  return mapSourceListResults(counts, policy, false, true, bundled).map(
-    ({ id, label, count }) => ({ id, label, count }),
-  );
+  let policy = await readVisibilityPolicyFast();
+  let slices = await readOverrideSlicesForBookList();
+  let results = bookSourcesFromOverrideSlices(slices, policy);
+
+  if (results.length === 0 && overrideSliceCount(slices) > 0) {
+    await ensureImportedSourcesUnlocked('listBooks-recovery');
+    policy = await readVisibilityPolicyFast();
+    results = bookSourcesFromOverrideSlices(slices, policy);
+  }
+
+  if (results.length === 0 && overrideSliceCount(slices) === 0) {
+    const { promoteFallbackToMongo } = await import('./compendiumFallbackMongoSync');
+    await promoteFallbackToMongo('listBooks');
+    clearRawGlobalDocInflight();
+    slices = await readOverrideSlicesForBookList();
+    policy = await readVisibilityPolicyFast();
+    results = bookSourcesFromOverrideSlices(slices, policy);
+    if (results.length === 0 && overrideSliceCount(slices) > 0) {
+      await ensureImportedSourcesUnlocked('listBooks-recovery');
+      policy = await readVisibilityPolicyFast();
+      results = bookSourcesFromOverrideSlices(slices, policy);
+    }
+  }
+
+  return results;
+}
+
+function overrideSliceCount(slices: {
+  overrideMonsters?: unknown[];
+  overrideItems?: unknown[];
+  overrideSpells?: unknown[];
+}): number {
+  return (slices.overrideMonsters?.length ?? 0)
+    + (slices.overrideItems?.length ?? 0)
+    + (slices.overrideSpells?.length ?? 0);
 }
 
 async function monstersFromRawOverrides(

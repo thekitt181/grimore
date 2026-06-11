@@ -299,6 +299,75 @@ export function clearRawGlobalDocInflight(): void {
   rawGlobalInflight = null;
 }
 
+const OVERRIDE_SLICES_PROJECTION = {
+  overrideMonsters: 1,
+  overrideItems: 1,
+  overrideSpells: 1,
+} as const;
+
+function overrideSliceCount(slices: {
+  overrideMonsters?: unknown[];
+  overrideItems?: unknown[];
+  overrideSpells?: unknown[];
+}): number {
+  return (slices.overrideMonsters?.length ?? 0)
+    + (slices.overrideItems?.length ?? 0)
+    + (slices.overrideSpells?.length ?? 0);
+}
+
+/** Fast Mongo read of DDB import override arrays for Compendium → Books. */
+export async function readOverrideSlicesForBookList(): Promise<{
+  overrideMonsters: OwlbearMonster[];
+  overrideItems: OwlbearItem[];
+  overrideSpells: OwlbearSpell[];
+}> {
+  if (!isMongoCircuitOpen()) {
+    try {
+      const col = await getCollection<OwlbearRawGlobalDoc>('data');
+      if (col) {
+        const doc = await withMongoTimeout(
+          col.findOne({ _id: 'global' }, { projection: OVERRIDE_SLICES_PROJECTION }),
+          20_000,
+        );
+        if (doc && overrideSliceCount(doc) > 0) {
+          return {
+            overrideMonsters: doc.overrideMonsters ?? [],
+            overrideItems: doc.overrideItems ?? [],
+            overrideSpells: doc.overrideSpells ?? [],
+          };
+        }
+      }
+    } catch (err) {
+      console.warn(
+        '[Compendium] Override slices read failed:',
+        err instanceof Error ? err.message : err,
+      );
+    }
+  }
+
+  clearRawGlobalDocInflight();
+  const raw = await readRawGlobalDoc({ includeImageData: false });
+  const slices = {
+    overrideMonsters: raw.overrideMonsters ?? [],
+    overrideItems: raw.overrideItems ?? [],
+    overrideSpells: raw.overrideSpells ?? [],
+  };
+  if (overrideSliceCount(slices) > 0) return slices;
+
+  const fallbackRaw = loadRawGlobalFallback();
+  if (fallbackRaw) {
+    const normalized = normalizeRawDoc(fallbackRaw);
+    const fromFile = {
+      overrideMonsters: normalized.overrideMonsters ?? [],
+      overrideItems: normalized.overrideItems ?? [],
+      overrideSpells: normalized.overrideSpells ?? [],
+    };
+    if (overrideSliceCount(fromFile) > 0) return fromFile;
+  }
+
+  return slices;
+}
+
 async function readRawGlobalDocInner(opts: RawGlobalDocReadOptions = {}): Promise<OwlbearRawGlobalDoc> {
   const includeImageData = opts.includeImageData !== false;
 
