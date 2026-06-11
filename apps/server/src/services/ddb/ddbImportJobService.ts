@@ -98,6 +98,11 @@ function kindToPhase(kind: ImportKind): DdbLibraryImportJobProgress['phase'] {
   return kind === 'monster' ? 'monsters' : kind === 'spell' ? 'spells' : 'items';
 }
 
+function normalizeSourceId(id: unknown): number | null {
+  const n = Number(id);
+  return Number.isFinite(n) ? n : null;
+}
+
 /** Which monster/spell/item pass to run first when resuming a partially imported book. */
 function resolveBookKindStart(
   progress: unknown,
@@ -107,7 +112,9 @@ function resolveBookKindStart(
     return { startKindIndex: 0, completedKinds: [] };
   }
   const p = progress as DdbLibraryImportJobProgress;
-  if (p.sourceId !== sourceId || p.phase === 'complete') {
+  const progressSourceId = normalizeSourceId(p.sourceId);
+  const targetSourceId = normalizeSourceId(sourceId);
+  if (progressSourceId === null || targetSourceId === null || progressSourceId !== targetSourceId || p.phase === 'complete') {
     return { startKindIndex: 0, completedKinds: [] };
   }
 
@@ -133,17 +140,50 @@ function resolveBookKindStart(
   return { startKindIndex: 0, completedKinds: [] };
 }
 
-function parseCompletedSourceIds(progress: unknown): Set<number> {
+function parseCompletedSourceIds(progress: unknown, accessible: number[]): Set<number> {
   const ids = new Set<number>();
   if (!progress || typeof progress !== 'object') return ids;
   const raw = progress as DdbLibraryImportJobProgress;
+
   for (const id of raw.completedSourceIds ?? []) {
-    if (Number.isFinite(id)) ids.add(id);
+    const n = normalizeSourceId(id);
+    if (n !== null) ids.add(n);
   }
-  if (raw.phase === 'complete' && Number.isFinite(raw.sourceId)) {
-    ids.add(raw.sourceId);
+
+  const currentSourceId = normalizeSourceId(raw.sourceId);
+  if (raw.phase === 'complete' && currentSourceId !== null) {
+    ids.add(currentSourceId);
   }
+
+  // Jobs started before book-level checkpoints only stored bookIndex + phase.
+  if (ids.size === 0 && accessible.length > 0) {
+    const bookIndex = Number(raw.bookIndex) || 0;
+    if (bookIndex > 1) {
+      const completedCount = raw.phase === 'complete' ? bookIndex : bookIndex - 1;
+      for (const id of accessible.slice(0, completedCount)) {
+        ids.add(id);
+      }
+      if (completedCount > 0) {
+        console.log(
+          `[DDB] Inferred ${completedCount} completed book(s) from legacy progress (bookIndex=${bookIndex}, phase=${raw.phase})`,
+        );
+      }
+    }
+  }
+
   return ids;
+}
+
+function hasPartialImportProgress(progress: unknown, result: unknown, accessible: number[]): boolean {
+  const completed = parseCompletedSourceIds(progress, accessible);
+  if (completed.size > 0) return true;
+  if (!progress || typeof progress !== 'object') return false;
+  const raw = progress as DdbLibraryImportJobProgress;
+  if ((raw.completedKinds?.length ?? 0) > 0) return true;
+  const bookIndex = Number(raw.bookIndex) || 0;
+  if (bookIndex > 1) return true;
+  const partial = parsePartialResult(result);
+  return partial.imported.length > 0;
 }
 
 function parsePartialResult(raw: unknown): DdbLibraryImportResult {
@@ -228,6 +268,15 @@ async function requireDdbAuthForUser(userId: string) {
   return ctx;
 }
 
+function sameSourceIdSet(a: number[], b: number[]): boolean {
+  if (a.length !== b.length) return false;
+  const left = new Set(a.map((id) => normalizeSourceId(id)).filter((id): id is number => id !== null));
+  return b.every((id) => {
+    const n = normalizeSourceId(id);
+    return n !== null && left.has(n);
+  });
+}
+
 async function runDdbLibraryImportJob(jobId: string): Promise<void> {
   if (runningJobs.has(jobId)) return;
   runningJobs.add(jobId);
@@ -243,7 +292,7 @@ async function runDdbLibraryImportJob(jobId: string): Promise<void> {
       campaignId: job.campaignId ?? undefined,
     });
 
-    const completedSourceIds = parseCompletedSourceIds(job.progress);
+    const completedSourceIds = parseCompletedSourceIds(job.progress, accessible);
     const pendingAccessible = accessible.filter((id) => !completedSourceIds.has(id));
 
     merged = parsePartialResult(job.result);
@@ -272,10 +321,35 @@ async function runDdbLibraryImportJob(jobId: string): Promise<void> {
 
     const bookTotal = accessible.length;
     const completedCount = completedSourceIds.size;
-    const savedProgress = job.progress as DdbLibraryImportJobProgress | null;
+
+    // Backfill completedSourceIds for legacy jobs so UI + future restarts see correct book position.
+    const initialProgress = job.progress as DdbLibraryImportJobProgress | null;
+    if (
+      initialProgress
+      && completedCount > 0
+      && (initialProgress.completedSourceIds?.length ?? 0) === 0
+      && pendingAccessible.length > 0
+    ) {
+      const currentSourceId = pendingAccessible[0]!;
+      const currentName = sourceNames[currentSourceId];
+      await updateJobProgress(jobId, {
+        ...initialProgress,
+        sourceId: currentSourceId,
+        bookIndex: completedCount + 1,
+        bookTotal,
+        completedSourceIds: [...completedSourceIds],
+        ...(currentName ? { sourceName: currentName } : {}),
+      });
+    }
 
     for (const [pendingIdx, sourceId] of pendingAccessible.entries()) {
       if (await isJobCancelled(jobId)) return;
+
+      const progressRow = await prisma.ddbLibraryImportJob.findUnique({
+        where: { id: jobId },
+        select: { progress: true },
+      });
+      const savedProgress = (progressRow?.progress ?? null) as DdbLibraryImportJobProgress | null;
 
       const bookIndex = completedCount + pendingIdx + 1;
       const sourceName = sourceNames[sourceId];
@@ -414,11 +488,41 @@ async function runDdbLibraryImportJob(jobId: string): Promise<void> {
 
 export async function resumeRunningImportJobs(): Promise<void> {
   const rows = await prisma.ddbLibraryImportJob.findMany({
-    where: { status: 'RUNNING' },
-    select: { id: true },
+    where: {
+      OR: [{ status: 'RUNNING' }, { status: 'FAILED' }],
+    },
+    select: { id: true, status: true, progress: true, result: true, sourceIds: true, userId: true },
     orderBy: { createdAt: 'asc' },
   });
+
+  const runningByUser = new Map<string, string>();
+  const failedRows: typeof rows = [];
+
   for (const row of rows) {
+    if (row.status === 'RUNNING') {
+      runningByUser.set(row.userId, row.id);
+    } else {
+      failedRows.push(row);
+    }
+  }
+
+  for (const jobId of runningByUser.values()) {
+    void runDdbLibraryImportJob(jobId);
+  }
+
+  for (const row of failedRows) {
+    if (runningByUser.has(row.userId)) continue;
+    const accessible = row.sourceIds.filter((id) => Number.isFinite(id) && (id > 0 || id === DDB_HOMEBREW_SOURCE_ID));
+    if (!hasPartialImportProgress(row.progress, row.result, accessible)) continue;
+    console.log(`[DDB] Re-opening failed import job ${row.id} with partial progress`);
+    await prisma.ddbLibraryImportJob.update({
+      where: { id: row.id },
+      data: {
+        status: 'RUNNING',
+        errorMessage: null,
+        completedAt: null,
+      },
+    });
     void runDdbLibraryImportJob(row.id);
   }
 }
@@ -435,6 +539,38 @@ export async function startDdbLibraryImportJob(
   const unique = [...new Set(opts.sourceIds.filter((id) => Number.isFinite(id) && (id > 0 || id === DDB_HOMEBREW_SOURCE_ID)))];
   if (unique.length === 0) {
     throw new Error('Select at least one source book');
+  }
+
+  const failedResume = await prisma.ddbLibraryImportJob.findFirst({
+    where: { userId, status: 'FAILED' },
+    orderBy: { createdAt: 'desc' },
+  });
+  if (
+    failedResume
+    && sameSourceIdSet(failedResume.sourceIds, unique)
+    && hasPartialImportProgress(failedResume.progress, failedResume.result, unique)
+  ) {
+    console.log(`[DDB] Resuming failed import job ${failedResume.id} instead of starting over`);
+    await prisma.ddbLibraryImportJob.updateMany({
+      where: { userId, status: 'RUNNING' },
+      data: {
+        status: 'CANCELLED',
+        errorMessage: 'Superseded by resumed import job',
+        completedAt: new Date(),
+      },
+    });
+    const reopened = await prisma.ddbLibraryImportJob.update({
+      where: { id: failedResume.id },
+      data: {
+        status: 'RUNNING',
+        skipExisting: Boolean(opts.skipExisting),
+        errorMessage: null,
+        completedAt: null,
+        ...(opts.campaignId !== undefined ? { campaignId: opts.campaignId ?? null } : {}),
+      },
+    });
+    void runDdbLibraryImportJob(reopened.id);
+    return toClientJob(reopened);
   }
 
   await prisma.ddbLibraryImportJob.updateMany({
