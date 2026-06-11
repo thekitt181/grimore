@@ -4,7 +4,7 @@ import { useAuth } from '@clerk/clerk-react';
 import { useInfiniteQuery, useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import type { CompendiumItem, CompendiumMonster, CompendiumSource, CompendiumSpell } from '@grimoire/shared';
 import { isHomebrewEntry } from '@grimoire/shared';
-import { deleteItem, deleteMonster, deleteSpell, fetchSources, lockCompendiumSource, searchItems, searchMonsters, searchSpells, unlockCompendiumSource } from './compendiumApi';
+import { deleteItem, deleteMonster, deleteSpell, fetchBookSources, fetchSources, lockCompendiumSource, searchItems, searchMonsters, searchSpells, unlockCompendiumSource } from './compendiumApi';
 import {
   applyCompendiumLockPolicy,
   patchCompendiumSourceLock,
@@ -153,26 +153,7 @@ export function CompendiumSidebarList() {
 
   const sourcesQ = useQuery({
     queryKey: ['compendium', 'sources', 'books', isAdmin],
-    queryFn: async () => {
-      const [monsters, items, spells] = await Promise.all([
-        fetchSources('monsters', { books: true }),
-        fetchSources('items', { books: true }),
-        fetchSources('spells', { books: true }),
-      ]);
-      const merged = new Map<string, CompendiumSource>();
-      for (const list of [monsters, items, spells]) {
-        for (const source of list) {
-          const prev = merged.get(source.id);
-          merged.set(
-            source.id,
-            prev
-              ? { ...source, count: prev.count + source.count }
-              : source,
-          );
-        }
-      }
-      return [...merged.values()].sort((a, b) => a.label.localeCompare(b.label));
-    },
+    queryFn: () => fetchBookSources(),
     enabled: compendiumReady && (showSourcePicker || (isAdmin && browseMode === 'sources')),
     staleTime: 5_000,
   });
@@ -415,7 +396,9 @@ export function CompendiumSidebarList() {
                 ? `No homebrew ${tab} yet.`
                 : debouncedQuery.trim()
                   ? `No ${tab} match your search.`
-                  : `No ${tab} in the catalog. If this persists, the server cannot reach MongoDB and bundled compendium data may be missing.`}
+                  : browseMode === 'sources' && selectedSource
+                    ? `No ${tab} found in “${selectedSourceLabel}”. Try Items or Spells, or run D&D Beyond Library → Sync compendium.`
+                    : `No ${tab} in the catalog. Run D&D Beyond Library → Sync compendium if you recently imported.`}
             </p>
             {browseMode === 'sources' && selectedSource && (
               <button

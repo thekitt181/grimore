@@ -12,6 +12,7 @@ import {
   getMonsterById,
   getSpellById,
   getSyncStatus,
+  listAllBookSources,
   listSources,
   saveItem,
   saveMonster,
@@ -229,8 +230,12 @@ router.get('/sync-status', ...auth, async (_req, res) => {
 router.get('/sources', ...auth, async (req: AuthenticatedRequest, res) => {
   try {
     const kind = req.query['kind'];
+    if (kind === 'books') {
+      res.json(await listAllBookSources());
+      return;
+    }
     if (kind !== 'monsters' && kind !== 'items' && kind !== 'spells') {
-      res.status(400).json({ error: 'kind must be monsters, items, or spells' });
+      res.status(400).json({ error: 'kind must be monsters, items, spells, or books' });
       return;
     }
     const books = req.query['books'] === '1' || req.query['books'] === 'true';

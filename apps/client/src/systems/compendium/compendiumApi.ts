@@ -75,6 +75,14 @@ export async function fetchSources(
   return data;
 }
 
+/** All imported DDB books (merged across monsters, items, and spells). */
+export async function fetchBookSources(): Promise<CompendiumSource[]> {
+  const { data } = await api.get<CompendiumSource[]>('/compendium/sources', {
+    params: { kind: 'books' },
+  });
+  return data;
+}
+
 export async function searchMonsters(params: {
   q?: string;
   page?: number;

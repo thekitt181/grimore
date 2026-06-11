@@ -61,7 +61,6 @@ import {
   bundledSourceLabelSet,
   ensureBundledSourcesLocked,
   ensureImportedSourcesUnlocked,
-  importedSourceLabelSet,
 } from './compendiumBundledLock';
 import {
   readVisibilityPolicyFast,
@@ -445,6 +444,11 @@ async function executeCatalogBuild(previousCache: CatalogCache | null): Promise<
       }
     }
 
+    if (catalogEntryCount(built) === 0 && rawOverrideCount(raw) > 0) {
+      console.warn('[Compendium] Rebuild empty despite Mongo overrides — retrying raw build');
+      built = await buildCatalogCacheFromRaw(raw, 'override-retry');
+    }
+
     if (
       catalogEntryCount(built) === 0
       && previousCache
@@ -558,10 +562,31 @@ registerCatalogPolicySink({
   patch: applyVisibilityPolicyUpdate,
 });
 
+async function catalogIsMissingOverrides(): Promise<boolean> {
+  if (!catalogCache) return true;
+  try {
+    clearRawGlobalDocInflight();
+    const raw = await readRawGlobalDoc({ includeImageData: false });
+    const overrideCount = rawOverrideCount(raw);
+    if (overrideCount === 0) return false;
+    return catalogEntryCount(catalogCache) < Math.min(overrideCount, 200);
+  } catch {
+    return false;
+  }
+}
+
+async function ensureCatalogIncludesOverrides(): Promise<void> {
+  if (!(await catalogIsMissingOverrides())) return;
+  console.warn('[Compendium] Catalog cache missing Mongo overrides — rebuilding');
+  await rebuildCatalogCacheAtomic();
+}
+
 async function buildCatalogCache(): Promise<CatalogCache> {
   const version = await readMongoGlobalVersion();
   const versionRev = version ?? '';
-  if (catalogCache && versionRev && catalogCache.rev.startsWith(`${versionRev}:`)) return catalogCache;
+  if (catalogCache && versionRev && catalogCache.rev.startsWith(`${versionRev}:`)) {
+    if (!(await catalogIsMissingOverrides())) return catalogCache;
+  }
   if (catalogBuildPromise) return catalogBuildPromise;
 
   catalogBuildPromise = (async () => {
@@ -650,10 +675,9 @@ function mapSourceListResults(
   includeDrafts: boolean,
   excludeBundled: boolean,
   bundled: Set<string> | null,
-  importedOverrides: Set<string> | null,
 ) {
   return Array.from(counts.entries())
-    .filter(([id, c]) => sourceListFilter(id, c, policy, includeDrafts, excludeBundled, bundled, importedOverrides))
+    .filter(([id, c]) => sourceListFilter(id, c, policy, includeDrafts, excludeBundled, bundled))
     .map(([id, c]) => ({
       id,
       label: formatSourceLabel(id),
@@ -691,6 +715,161 @@ function kindToCompendiumKind(kind: 'monsters' | 'items' | 'spells'): Compendium
   return 'spell';
 }
 
+function tallyBooksSourceCountsForKind(
+  entries: Array<{ name: string; source?: string }>,
+  kind: CompendiumKind,
+  policy: CompendiumVisibilityPolicy,
+  counts: SourceCountMap = new Map(),
+): SourceCountMap {
+  const bundled = bundledSourceLabelSet();
+  for (const entry of entries) {
+    if (isHomebrewEntry(true, entry.source)) continue;
+    for (const part of splitSources(entry.source)) {
+      if (part.toLowerCase() === 'custom') continue;
+      const norm = normalizeSourceLabel(part);
+      if (bundled.has(norm)) continue;
+      if (policyIsSourceLocked(part, policy)) continue;
+      const draft = isEntryDraft(kind, entry.name, entry.source, policy);
+      const cur = counts.get(part) ?? { total: 0, public: 0, draft: 0 };
+      cur.total += 1;
+      if (draft) cur.draft += 1;
+      else cur.public += 1;
+      counts.set(part, cur);
+    }
+  }
+  return counts;
+}
+
+function tallyBooksSourceCounts(
+  raw: Awaited<ReturnType<typeof readRawGlobalDoc>>,
+  policy: CompendiumVisibilityPolicy,
+): SourceCountMap {
+  let counts: SourceCountMap = new Map();
+  counts = tallyBooksSourceCountsForKind(raw.overrideMonsters ?? [], 'monster', policy, counts);
+  counts = tallyBooksSourceCountsForKind(raw.overrideItems ?? [], 'item', policy, counts);
+  counts = tallyBooksSourceCountsForKind(raw.overrideSpells ?? [], 'spell', policy, counts);
+  return counts;
+}
+
+/** Merged DDB-imported book list (monsters + items + spells) for Compendium → Books. */
+export async function listAllBookSources(): Promise<
+  Array<{ id: string; label: string; count: number }>
+> {
+  await ensureBundledSourcesLocked('listBooks');
+  await ensureImportedSourcesUnlocked('listBooks');
+  const policy = await readVisibilityPolicyFast();
+  clearRawGlobalDocInflight();
+  const raw = await readRawGlobalDoc({ includeImageData: false });
+  const bundled = bundledSourceLabelSet();
+  const counts = tallyBooksSourceCounts(raw, policy);
+  return mapSourceListResults(counts, policy, false, true, bundled).map(
+    ({ id, label, count }) => ({ id, label, count }),
+  );
+}
+
+async function monstersFromRawOverrides(
+  source?: string,
+  policy?: CompendiumVisibilityPolicy,
+): Promise<CompendiumMonster[]> {
+  const raw = await readRawGlobalDoc({ includeImageData: false });
+  const global = normalizeOwlbearGlobalDoc({
+    ...raw,
+    images: {},
+    imagesData: {},
+    entryImages: {},
+  });
+  const bundled = bundledSourceLabelSet();
+  let list = raw.overrideMonsters ?? [];
+  if (source) {
+    list = list.filter((m) => entryMatchesSource(m.source, source));
+  }
+  const out: CompendiumMonster[] = [];
+  for (const m of list) {
+    if (isHomebrewEntry(true, m.source)) continue;
+    const parts = splitSources(m.source);
+    if (parts.some((p) => bundled.has(normalizeSourceLabel(p)))) continue;
+    if (policy && parts.some((p) => policyIsSourceLocked(p, policy))) continue;
+    const monster = toMonster(
+      { ...m, _id: slugify(m.name) } as StoredMonster,
+      true,
+      global,
+      true,
+    );
+    out.push({ ...monster, isDraft: false });
+  }
+  out.sort((a, b) => a.name.localeCompare(b.name));
+  return out;
+}
+
+async function itemsFromRawOverrides(
+  source?: string,
+  policy?: CompendiumVisibilityPolicy,
+): Promise<CompendiumItem[]> {
+  const raw = await readRawGlobalDoc({ includeImageData: false });
+  const bundled = bundledSourceLabelSet();
+  let list = raw.overrideItems ?? [];
+  if (source) {
+    list = list.filter((i) => entryMatchesSource(i.source, source));
+  }
+  const out: CompendiumItem[] = [];
+  for (const i of list) {
+    if (isHomebrewEntry(true, i.source)) continue;
+    const parts = splitSources(i.source);
+    if (parts.some((p) => bundled.has(normalizeSourceLabel(p)))) continue;
+    if (policy && parts.some((p) => policyIsSourceLocked(p, policy))) continue;
+    const item: CompendiumItem = {
+      id: slugify(i.name),
+      name: i.name,
+      type: i.type,
+      source: i.source,
+      description: i.description,
+      isCustom: true,
+      ...(i.rarity ? { rarity: i.rarity } : {}),
+      ...(i.flavor ? { flavor: i.flavor } : {}),
+      ...(i.details ? { details: i.details } : {}),
+    };
+    out.push({ ...item, isDraft: false });
+  }
+  out.sort((a, b) => a.name.localeCompare(b.name));
+  return out;
+}
+
+async function spellsFromRawOverrides(
+  source?: string,
+  policy?: CompendiumVisibilityPolicy,
+): Promise<CompendiumSpell[]> {
+  const raw = await readRawGlobalDoc({ includeImageData: false });
+  const bundled = bundledSourceLabelSet();
+  let list = raw.overrideSpells ?? [];
+  if (source) {
+    list = list.filter((s) => entryMatchesSource(s.source, source));
+  }
+  const out: CompendiumSpell[] = [];
+  for (const s of list) {
+    if (isHomebrewEntry(true, s.source)) continue;
+    const parts = splitSources(s.source);
+    if (parts.some((p) => bundled.has(normalizeSourceLabel(p)))) continue;
+    if (policy && parts.some((p) => policyIsSourceLocked(p, policy))) continue;
+    const spell: CompendiumSpell = {
+      id: slugify(s.name),
+      name: s.name,
+      level: s.level,
+      ...(s.damage ? { damage: s.damage } : {}),
+      ...(s.type ? { type: s.type } : {}),
+      ...(s.save ? { save: s.save } : {}),
+      ...(s.aoe ? { aoe: s.aoe } : {}),
+      ...(s.attack !== undefined ? { attack: s.attack } : {}),
+      ...(s.secondary ? { secondary: s.secondary } : {}),
+      ...(s.description ? { description: s.description } : {}),
+      ...(s.source ? { source: s.source } : {}),
+      isCustom: true,
+    };
+    out.push({ ...spell, isDraft: false });
+  }
+  out.sort((a, b) => a.name.localeCompare(b.name));
+  return out;
+}
+
 /** Pre-build merged catalogs on server start so first search is instant. */
 export async function warmCompendiumCatalog(): Promise<void> {
   try {
@@ -722,7 +901,10 @@ function splitSources(source: string | undefined): string[] {
 }
 
 function entryMatchesSource(source: string | undefined, filterSource: string): boolean {
-  return splitSources(source).some((p) => p === filterSource);
+  const normFilter = normalizeSourceLabel(filterSource);
+  return splitSources(source).some(
+    (p) => p === filterSource || normalizeSourceLabel(p) === normFilter,
+  );
 }
 
 export interface CompendiumSaveOptions {
@@ -754,18 +936,17 @@ function sourceListFilter(
   includeDrafts: boolean,
   excludeBundled: boolean,
   bundled: Set<string> | null,
-  importedOverrides: Set<string> | null,
 ): boolean {
   const normId = normalizeSourceLabel(id);
-  const isImported = Boolean(importedOverrides?.has(normId));
 
-  if (excludeBundled && bundled?.has(normId) && !isImported) return false;
-
-  if (!includeDrafts && sourceIsLocked(id, policy)) {
-    // Imported DDB books must stay visible even if a stale lock slipped through.
-    if (isImported) return c.total > 0;
-    return false;
+  // Books tab: never show bundled PDFs or admin-locked sources.
+  if (excludeBundled) {
+    if (bundled?.has(normId)) return false;
+    if (sourceIsLocked(id, policy)) return false;
+    return c.total > 0;
   }
+
+  if (!includeDrafts && sourceIsLocked(id, policy)) return false;
   if (includeDrafts) return c.total > 0;
   return c.public > 0;
 }
@@ -778,17 +959,31 @@ export async function listSources(
 
   const includeDrafts = opts?.includeDrafts ?? false;
   const excludeBundled = opts?.excludeBundled ?? false;
+  const bundled = excludeBundled ? bundledSourceLabelSet() : null;
+  const policy = await readVisibilityPolicyFast();
+
   if (excludeBundled) {
     await ensureImportedSourcesUnlocked('listSources-books');
+    clearRawGlobalDocInflight();
+    const raw = await readRawGlobalDoc({ includeImageData: false });
+    const overrides =
+      kind === 'monsters'
+        ? raw.overrideMonsters
+        : kind === 'items'
+          ? raw.overrideItems
+          : raw.overrideSpells;
+    const counts = tallyBooksSourceCountsForKind(
+      overrides ?? [],
+      kindToCompendiumKind(kind),
+      policy,
+    );
+    return mapSourceListResults(counts, policy, false, true, bundled);
   }
 
-  const bundled = excludeBundled ? bundledSourceLabelSet() : null;
-  const importedOverrides = excludeBundled ? await importedSourceLabelSet() : null;
-  const policy = await readVisibilityPolicyFast();
   const compendiumKind = kindToCompendiumKind(kind);
-  const entries = await loadEntriesForSourceList(kind, excludeBundled);
+  const entries = await loadEntriesForSourceList(kind, false);
   const counts = tallySourceCounts(entries, compendiumKind, policy);
-  return mapSourceListResults(counts, policy, includeDrafts, excludeBundled, bundled, importedOverrides);
+  return mapSourceListResults(counts, policy, includeDrafts, false, null);
 }
 
 const SYNC_STATUS_TTL_MS = 5_000;
@@ -841,7 +1036,8 @@ export async function searchMonsters(opts: {
   const page = opts.page ?? 1;
   const limit = Math.min(opts.limit ?? 50, 100);
   const policy = await getCatalogPolicy();
-  const merged = filterVisible('monster', await getCachedMonsters(), policy, opts.includeDrafts ?? false);
+  await ensureCatalogIncludesOverrides();
+  let merged = filterVisible('monster', await getCachedMonsters(), policy, opts.includeDrafts ?? false);
   let filtered = filterMonsters(merged, opts.q ?? '', opts.crMin, opts.crMax);
   if (opts.isCustom === true) {
     filtered = filtered.filter((m) => isHomebrewEntry(m.isCustom, m.source));
@@ -850,13 +1046,21 @@ export async function searchMonsters(opts: {
   }
   if (opts.source) {
     filtered = filtered.filter((m) => entryMatchesSource(m.source, opts.source!));
+    if (filtered.length === 0) {
+      const fromOverrides = await monstersFromRawOverrides(opts.source, policy);
+      filtered = filterMonsters(fromOverrides, opts.q ?? '', opts.crMin, opts.crMax);
+    }
   }
   return paginate(filtered, page, limit);
 }
 
 export async function getMonsterById(id: string, opts?: { includeDrafts?: boolean }): Promise<CompendiumMonster | null> {
   const policy = await getCatalogPolicy();
-  const hit = (await getCachedMonsters()).find((m) => m.id === id);
+  await ensureCatalogIncludesOverrides();
+  let hit = (await getCachedMonsters()).find((m) => m.id === id);
+  if (!hit) {
+    hit = (await monstersFromRawOverrides(undefined, policy)).find((m) => m.id === id);
+  }
   if (!hit) return null;
   const marked = markDraft('monster', hit, policy);
   if (marked.isDraft && !opts?.includeDrafts) return null;
@@ -880,6 +1084,7 @@ export async function searchItems(opts: {
   const page = opts.page ?? 1;
   const limit = Math.min(opts.limit ?? 50, 100);
   const policy = await getCatalogPolicy();
+  await ensureCatalogIncludesOverrides();
   const merged = filterVisible('item', await getCachedItems(), policy, opts.includeDrafts ?? false);
   const lower = (opts.q ?? '').trim().toLowerCase();
   let filtered = merged.filter((i) => {
@@ -893,6 +1098,13 @@ export async function searchItems(opts: {
   }
   if (opts.source) {
     filtered = filtered.filter((i) => entryMatchesSource(i.source, opts.source!));
+    if (filtered.length === 0) {
+      const fromOverrides = await itemsFromRawOverrides(opts.source, policy);
+      filtered = fromOverrides.filter((i) => {
+        if (!lower) return true;
+        return i.name.toLowerCase().includes(lower) || i.description.toLowerCase().includes(lower);
+      });
+    }
   }
   filtered.sort((a, b) => a.name.localeCompare(b.name));
   return paginate(filtered, page, limit);
@@ -923,6 +1135,7 @@ export async function searchSpells(opts: {
   const page = opts.page ?? 1;
   const limit = Math.min(opts.limit ?? 50, 100);
   const policy = await getCatalogPolicy();
+  await ensureCatalogIncludesOverrides();
   const merged = filterVisible('spell', await getCachedSpells(), policy, opts.includeDrafts ?? false);
   const lower = (opts.q ?? '').trim().toLowerCase();
   let filtered = merged.filter((s) => {
@@ -936,6 +1149,13 @@ export async function searchSpells(opts: {
   }
   if (opts.source) {
     filtered = filtered.filter((s) => entryMatchesSource(s.source, opts.source!));
+    if (filtered.length === 0) {
+      const fromOverrides = await spellsFromRawOverrides(opts.source, policy);
+      filtered = fromOverrides.filter((s) => {
+        if (!lower) return true;
+        return s.name.toLowerCase().includes(lower);
+      });
+    }
   }
   filtered.sort((a, b) => a.name.localeCompare(b.name));
   return paginate(filtered, page, limit);
