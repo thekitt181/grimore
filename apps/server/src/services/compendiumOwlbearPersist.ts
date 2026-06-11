@@ -315,6 +315,66 @@ function overrideSliceCount(slices: {
     + (slices.overrideSpells?.length ?? 0);
 }
 
+export type BookSourceLabelBuckets = {
+  monsterSources: Array<string | undefined>;
+  itemSources: Array<string | undefined>;
+  spellSources: Array<string | undefined>;
+};
+
+function bookSourceLabelCount(buckets: BookSourceLabelBuckets): number {
+  return buckets.monsterSources.length + buckets.itemSources.length + buckets.spellSources.length;
+}
+
+/** Read only source fields via aggregation — avoids loading multi-MB stat blocks. */
+export async function readBookSourceLabelsFromMongo(): Promise<BookSourceLabelBuckets | null> {
+  if (isMongoCircuitOpen()) return null;
+  try {
+    const col = await getCollection<OwlbearRawGlobalDoc>('data');
+    if (!col) return null;
+    const rows = await withMongoTimeout(
+      col.aggregate([
+        { $match: { _id: 'global' } },
+        {
+          $project: {
+            _id: 0,
+            monsterSources: {
+              $map: {
+                input: { $ifNull: ['$overrideMonsters', []] },
+                as: 'm',
+                in: '$$m.source',
+              },
+            },
+            itemSources: {
+              $map: {
+                input: { $ifNull: ['$overrideItems', []] },
+                as: 'i',
+                in: '$$i.source',
+              },
+            },
+            spellSources: {
+              $map: {
+                input: { $ifNull: ['$overrideSpells', []] },
+                as: 's',
+                in: '$$s.source',
+              },
+            },
+          },
+        },
+      ]).toArray(),
+      45_000,
+    );
+    const doc = rows[0] as BookSourceLabelBuckets | undefined;
+    if (!doc || bookSourceLabelCount(doc) === 0) return null;
+    return doc;
+  } catch (err) {
+    console.warn(
+      '[Compendium] Book source label aggregation failed:',
+      err instanceof Error ? err.message : err,
+    );
+    return null;
+  }
+}
+
 /** Fast Mongo read of DDB import override arrays for Compendium → Books. */
 export async function readOverrideSlicesForBookList(): Promise<{
   overrideMonsters: OwlbearMonster[];
@@ -327,7 +387,7 @@ export async function readOverrideSlicesForBookList(): Promise<{
       if (col) {
         const doc = await withMongoTimeout(
           col.findOne({ _id: 'global' }, { projection: OVERRIDE_SLICES_PROJECTION }),
-          20_000,
+          45_000,
         );
         if (doc && overrideSliceCount(doc) > 0) {
           return {

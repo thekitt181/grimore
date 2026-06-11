@@ -53,9 +53,9 @@ function recordMongoSuccess(): void {
 function recordMongoFailure(err: unknown): void {
   consecutiveFailures += 1;
   const msg = err instanceof Error ? err.message : String(err);
-  const timedOut = msg.includes('timed out');
   const network = isMongoNetworkError(err);
-  if (consecutiveFailures >= CIRCUIT_FAIL_THRESHOLD || timedOut || network) {
+  // Require repeated failures — a single slow query must not trip the circuit.
+  if (consecutiveFailures >= CIRCUIT_FAIL_THRESHOLD || network) {
     openMongoCircuit(msg);
   }
 }

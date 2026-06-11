@@ -31,6 +31,7 @@ import {
   saveOwlbearEntry,
   deleteOwlbearEntry,
   readRawGlobalDoc,
+  readBookSourceLabelsFromMongo,
   readOverrideSlicesForBookList,
   saveOwlbearEntriesBulk,
   clearRawGlobalDocInflight,
@@ -752,6 +753,47 @@ function tallyBooksSourceCounts(
   return counts;
 }
 
+function tallyBooksFromSourceLabels(
+  buckets: Awaited<ReturnType<typeof readBookSourceLabelsFromMongo>>,
+  policy: CompendiumVisibilityPolicy,
+): SourceCountMap {
+  if (!buckets) return new Map();
+  const bundled = bundledSourceLabelSet();
+  const counts: SourceCountMap = new Map();
+
+  const addSources = (sources: Array<string | undefined>) => {
+    for (const source of sources) {
+      if (!source?.trim()) continue;
+      for (const part of splitSources(source)) {
+        if (part.toLowerCase() === 'custom') continue;
+        const norm = normalizeSourceLabel(part);
+        if (bundled.has(norm)) continue;
+        if (policyIsSourceLocked(part, policy)) continue;
+        const cur = counts.get(part) ?? { total: 0, public: 0, draft: 0 };
+        cur.total += 1;
+        cur.public += 1;
+        counts.set(part, cur);
+      }
+    }
+  };
+
+  addSources(buckets.monsterSources);
+  addSources(buckets.itemSources);
+  addSources(buckets.spellSources);
+  return counts;
+}
+
+function bookSourcesFromLabelBuckets(
+  buckets: Awaited<ReturnType<typeof readBookSourceLabelsFromMongo>>,
+  policy: CompendiumVisibilityPolicy,
+): Array<{ id: string; label: string; count: number }> {
+  const bundled = bundledSourceLabelSet();
+  const counts = tallyBooksFromSourceLabels(buckets, policy);
+  return mapSourceListResults(counts, policy, false, true, bundled).map(
+    ({ id, label, count }) => ({ id, label, count }),
+  );
+}
+
 function bookSourcesFromOverrideSlices(
   slices: Awaited<ReturnType<typeof readOverrideSlicesForBookList>>,
   policy: CompendiumVisibilityPolicy,
@@ -784,27 +826,48 @@ export async function listAllBookSources(): Promise<
   Array<{ id: string; label: string; count: number }>
 > {
   let policy = await readVisibilityPolicyFast();
-  let slices = await readOverrideSlicesForBookList();
-  let results = bookSourcesFromOverrideSlices(slices, policy);
+  let labelBuckets = await readBookSourceLabelsFromMongo();
+  let results = bookSourcesFromLabelBuckets(labelBuckets, policy);
 
-  if (results.length === 0 && overrideSliceCount(slices) > 0) {
-    await ensureImportedSourcesUnlocked('listBooks-recovery');
-    policy = await readVisibilityPolicyFast();
-    results = bookSourcesFromOverrideSlices(slices, policy);
-  }
-
-  if (results.length === 0 && overrideSliceCount(slices) === 0) {
-    const { promoteFallbackToMongo } = await import('./compendiumFallbackMongoSync');
-    await promoteFallbackToMongo('listBooks');
-    clearRawGlobalDocInflight();
-    slices = await readOverrideSlicesForBookList();
-    policy = await readVisibilityPolicyFast();
-    results = bookSourcesFromOverrideSlices(slices, policy);
-    if (results.length === 0 && overrideSliceCount(slices) > 0) {
-      await ensureImportedSourcesUnlocked('listBooks-recovery');
-      policy = await readVisibilityPolicyFast();
+  if (results.length === 0) {
+    let slices = await readOverrideSlicesForBookList();
+    const sliceCount = overrideSliceCount(slices);
+    if (sliceCount > 0) {
       results = bookSourcesFromOverrideSlices(slices, policy);
     }
+
+    if (results.length === 0 && (sliceCount > 0 || labelBuckets)) {
+      await ensureImportedSourcesUnlocked('listBooks-recovery');
+      policy = await readVisibilityPolicyFast();
+      results = labelBuckets
+        ? bookSourcesFromLabelBuckets(labelBuckets, policy)
+        : bookSourcesFromOverrideSlices(slices, policy);
+    }
+
+    if (results.length === 0 && sliceCount === 0 && !labelBuckets) {
+      const { promoteFallbackToMongo } = await import('./compendiumFallbackMongoSync');
+      await promoteFallbackToMongo('listBooks');
+      clearRawGlobalDocInflight();
+      labelBuckets = await readBookSourceLabelsFromMongo();
+      slices = await readOverrideSlicesForBookList();
+      policy = await readVisibilityPolicyFast();
+      results = labelBuckets
+        ? bookSourcesFromLabelBuckets(labelBuckets, policy)
+        : bookSourcesFromOverrideSlices(slices, policy);
+      if (results.length === 0 && (overrideSliceCount(slices) > 0 || labelBuckets)) {
+        await ensureImportedSourcesUnlocked('listBooks-recovery');
+        policy = await readVisibilityPolicyFast();
+        results = labelBuckets
+          ? bookSourcesFromLabelBuckets(labelBuckets, policy)
+          : bookSourcesFromOverrideSlices(slices, policy);
+      }
+    }
+  }
+
+  if (results.length > 0) {
+    console.log(`[Compendium] Books list: ${results.length} imported source(s)`);
+  } else {
+    console.warn('[Compendium] Books list empty — no imported override sources visible');
   }
 
   return results;
