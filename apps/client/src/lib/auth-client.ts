@@ -46,7 +46,11 @@ export async function signInWithGoogle(): Promise<string | null> {
   });
 
   if (result.error) {
-    return result.error.message ?? 'Google sign-in failed';
+    const message = result.error.message ?? 'Google sign-in failed';
+    if (/provider not found/i.test(message)) {
+      return 'Google sign-in is not configured — add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET on Render, then redeploy.';
+    }
+    return message;
   }
 
   const redirectUrl = result.data?.url;

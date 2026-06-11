@@ -1,9 +1,11 @@
 import { useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { authClient, signInWithGoogle } from '@/lib/auth-client';
+import { useGoogleOAuthAvailable } from '@/hooks/useGoogleOAuthAvailable';
 
 export function SignInPage() {
   const navigate = useNavigate();
+  const googleOAuthAvailable = useGoogleOAuthAvailable();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -122,19 +124,21 @@ export function SignInPage() {
             {loading ? 'Signing in…' : 'Sign in'}
           </button>
 
-          <button
-            type="button"
-            disabled={googleLoading || loading}
-            onClick={() => void onGoogleSignIn()}
-            className="w-full rounded py-2 font-ui text-sm border disabled:opacity-60"
-            style={{
-              borderColor: 'var(--color-border)',
-              color: 'var(--color-text-primary)',
-              background: 'transparent',
-            }}
-          >
-            {googleLoading ? 'Redirecting to Google…' : 'Continue with Google'}
-          </button>
+          {googleOAuthAvailable === true && (
+            <button
+              type="button"
+              disabled={googleLoading || loading}
+              onClick={() => void onGoogleSignIn()}
+              className="w-full rounded py-2 font-ui text-sm border disabled:opacity-60"
+              style={{
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text-primary)',
+                background: 'transparent',
+              }}
+            >
+              {googleLoading ? 'Redirecting to Google…' : 'Continue with Google'}
+            </button>
+          )}
 
           <p className="text-center font-ui text-sm" style={{ color: 'var(--color-text-secondary)' }}>
             No account?{' '}
