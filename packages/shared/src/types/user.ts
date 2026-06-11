@@ -2,7 +2,7 @@ export type UserRole = 'GM' | 'PLAYER';
 
 export interface UserProfile {
   id: string;
-  clerkId: string;
+  authUserId: string;
   username: string;
   avatarUrl?: string;
   createdAt: Date;

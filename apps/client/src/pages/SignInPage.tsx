@@ -1,14 +1,46 @@
-import { SignIn } from '@clerk/clerk-react';
-import { grimoireClerkAppearance } from '@/lib/clerkAppearance';
+import { useState, type FormEvent } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import { authClient } from '@/lib/auth-client';
 
 export function SignInPage() {
+  const navigate = useNavigate();
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  async function onSubmit(e: FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setLoading(true);
+    try {
+      const { error: signInError } = await authClient.signIn.email({ email, password });
+      if (signInError) {
+        setError(signInError.message ?? 'Sign in failed');
+        return;
+      }
+      navigate('/');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Sign in failed');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function signInWithGoogle() {
+    setError(null);
+    await authClient.signIn.social({
+      provider: 'google',
+      callbackURL: '/',
+    });
+  }
+
   return (
     <div
       className="min-h-screen flex items-center justify-center p-4"
       style={{ background: 'var(--color-bg-primary)' }}
     >
       <div className="w-full max-w-md">
-        {/* Logo */}
         <div className="text-center mb-8">
           <div className="text-5xl mb-3">🎲</div>
           <h1
@@ -22,12 +54,88 @@ export function SignInPage() {
           </p>
         </div>
 
-        <SignIn
-          routing="path"
-          path="/sign-in"
-          afterSignInUrl="/"
-          appearance={grimoireClerkAppearance}
-        />
+        <form
+          onSubmit={onSubmit}
+          className="rounded-lg border p-6 space-y-4"
+          style={{ background: 'var(--color-bg-secondary)', borderColor: 'var(--color-border)' }}
+        >
+          <h2 className="font-display text-xl" style={{ color: 'var(--color-text-primary)' }}>
+            Sign in
+          </h2>
+
+          {error && (
+            <p className="text-sm rounded px-3 py-2" style={{ background: '#3a1515', color: '#ffb4b4' }}>
+              {error}
+            </p>
+          )}
+
+          <label className="block space-y-1">
+            <span className="font-ui text-sm" style={{ color: 'var(--color-text-secondary)' }}>
+              Email
+            </span>
+            <input
+              type="email"
+              required
+              autoComplete="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="w-full rounded px-3 py-2 font-ui text-sm border"
+              style={{
+                background: 'var(--color-bg-primary)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text-primary)',
+              }}
+            />
+          </label>
+
+          <label className="block space-y-1">
+            <span className="font-ui text-sm" style={{ color: 'var(--color-text-secondary)' }}>
+              Password
+            </span>
+            <input
+              type="password"
+              required
+              autoComplete="current-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="w-full rounded px-3 py-2 font-ui text-sm border"
+              style={{
+                background: 'var(--color-bg-primary)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text-primary)',
+              }}
+            />
+          </label>
+
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full rounded py-2 font-ui text-sm font-semibold disabled:opacity-60"
+            style={{ background: 'var(--color-accent-gold)', color: '#1a1208' }}
+          >
+            {loading ? 'Signing in…' : 'Sign in'}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => void signInWithGoogle()}
+            className="w-full rounded py-2 font-ui text-sm border"
+            style={{
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text-primary)',
+              background: 'transparent',
+            }}
+          >
+            Continue with Google
+          </button>
+
+          <p className="text-center font-ui text-sm" style={{ color: 'var(--color-text-secondary)' }}>
+            No account?{' '}
+            <Link to="/sign-up" style={{ color: 'var(--color-accent-gold)' }}>
+              Sign up
+            </Link>
+          </p>
+        </form>
       </div>
     </div>
   );

@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { useEffect } from 'react';
-import { useAuth } from '@clerk/clerk-react';
+import { useGrimoireAuth } from '@/hooks/useGrimoireAuth';
 import { DraggablePanel } from '@/components/DraggablePanel';
 import { useCompendiumUiStore } from './compendiumStore';
 import { getItem, getMonster, getSpell } from './compendiumApi';
@@ -13,7 +13,7 @@ import { useCompendiumEditor } from './useCompendiumEditor';
 import { preloadCompendiumImageUrl } from './preloadCompendiumImage';
 
 export function MonsterDexPanel({ onClose }: { onClose: () => void }) {
-  const { isSignedIn } = useAuth();
+  const { isSignedIn } = useGrimoireAuth();
   const isAdmin = useCompendiumEditor();
   const isGM = useSessionStore((s) => s.myRole) === 'GM';
   const compendiumReady = Boolean(isSignedIn);

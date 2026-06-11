@@ -1,9 +1,9 @@
 import { Link } from 'react-router-dom';
-import { useUser, useClerk } from '@clerk/clerk-react';
+import { useGrimoireUser, useGrimoireSignOut } from '@/hooks/useGrimoireAuth';
 
 export function Navbar() {
-  const { user } = useUser();
-  const { signOut } = useClerk();
+  const { user } = useGrimoireUser();
+  const { signOut } = useGrimoireSignOut();
 
   const displayName = user?.username ?? user?.firstName ?? 'Adventurer';
   const initial = displayName.charAt(0).toUpperCase();
@@ -59,7 +59,7 @@ export function Navbar() {
         )}
         <button
           type="button"
-          onClick={() => void signOut({ redirectUrl: '/sign-in' })}
+          onClick={() => void signOut()}
           className="flex items-center gap-2 rounded-md px-2 py-1 transition-colors hover:opacity-90"
           title="Sign out"
         >

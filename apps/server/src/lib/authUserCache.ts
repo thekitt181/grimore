@@ -1,64 +1,65 @@
-import { createClerkClient } from '@clerk/backend';
 import { prisma } from './prisma';
-
-const clerk = createClerkClient({
-  secretKey: process.env['CLERK_SECRET_KEY'] ?? '',
-});
 
 export type AuthUserRecord = {
   id: string;
+  authUserId: string;
   username: string;
   avatarUrl: string | null;
 };
 
-const TTL_MS = Number(process.env['AUTH_USER_CACHE_TTL_MS'] ?? 10 * 60 * 1000);
 const cache = new Map<string, { user: AuthUserRecord; expiresAt: number }>();
+const TTL_MS = 60_000;
 
-function readCached(clerkUserId: string): AuthUserRecord | null {
-  const hit = cache.get(clerkUserId);
+function readCached(authUserId: string): AuthUserRecord | null {
+  const hit = cache.get(authUserId);
   if (!hit) return null;
-  if (hit.expiresAt <= Date.now()) {
-    cache.delete(clerkUserId);
+  if (Date.now() > hit.expiresAt) {
+    cache.delete(authUserId);
     return null;
   }
   return hit.user;
 }
 
-function writeCached(clerkUserId: string, user: AuthUserRecord): AuthUserRecord {
-  cache.set(clerkUserId, { user, expiresAt: Date.now() + TTL_MS });
+function writeCached(authUserId: string, user: AuthUserRecord): AuthUserRecord {
+  cache.set(authUserId, { user, expiresAt: Date.now() + TTL_MS });
   return user;
 }
 
-/** Resolve DB user from Clerk id — cached to cut Prisma/Clerk load on reconnect storms. */
-export async function resolveAuthUser(clerkUserId: string): Promise<AuthUserRecord> {
-  const cached = readCached(clerkUserId);
+function defaultUsername(name: string, email: string): string {
+  const fromName = name?.trim();
+  if (fromName) return fromName.slice(0, 32);
+  return email.split('@')[0]?.slice(0, 32) || 'adventurer';
+}
+
+/** Resolve app User from Better Auth user id — cached to cut Prisma load on reconnect storms. */
+export async function resolveAuthUser(authUserId: string): Promise<AuthUserRecord> {
+  const cached = readCached(authUserId);
   if (cached) return cached;
 
   let user = await prisma.user.findUnique({
-    where: { clerkId: clerkUserId },
-    select: { id: true, username: true, avatarUrl: true },
+    where: { authUserId },
+    select: { id: true, authUserId: true, username: true, avatarUrl: true },
   });
 
   if (!user) {
-    const clerkUser = await clerk.users.getUser(clerkUserId);
+    const authUser = await prisma.authUser.findUnique({ where: { id: authUserId } });
+    if (!authUser) {
+      throw new Error(`Auth user not found: ${authUserId}`);
+    }
     user = await prisma.user.create({
       data: {
-        clerkId: clerkUserId,
-        username:
-          clerkUser.username ??
-          clerkUser.firstName ??
-          clerkUser.emailAddresses[0]?.emailAddress.split('@')[0] ??
-          'Adventurer',
-        avatarUrl: clerkUser.imageUrl ?? null,
+        authUserId,
+        username: defaultUsername(authUser.name, authUser.email),
+        avatarUrl: authUser.image,
       },
-      select: { id: true, username: true, avatarUrl: true },
+      select: { id: true, authUserId: true, username: true, avatarUrl: true },
     });
   }
 
-  return writeCached(clerkUserId, user);
+  return writeCached(authUserId, user);
 }
 
-export function invalidateAuthUserCache(clerkUserId?: string): void {
-  if (clerkUserId) cache.delete(clerkUserId);
+export function invalidateAuthUserCache(authUserId?: string): void {
+  if (authUserId) cache.delete(authUserId);
   else cache.clear();
 }

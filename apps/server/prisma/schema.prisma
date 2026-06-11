@@ -13,22 +13,86 @@ datasource db {
 // ─── Users ────────────────────────────────────────────────────────────────────
 
 model User {
-  id        String   @id @default(cuid())
-  clerkId   String   @unique
-  username  String
-  avatarUrl String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id         String   @id @default(cuid())
+  authUserId String   @unique
+  username   String
+  avatarUrl  String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
   // Relations
-  ownedCampaigns      Campaign[]           @relation("CampaignGM")
-  memberships         CampaignMember[]
-  sessionLogs         SessionLog[]
-  chatMessages        ChatMessage[]
-  ddbConnection       DdbConnection?
-  ddbCharacterCaches  DdbCharacterCache[]
+  ownedCampaigns       Campaign[]            @relation("CampaignGM")
+  memberships          CampaignMember[]
+  sessionLogs          SessionLog[]
+  chatMessages         ChatMessage[]
+  ddbConnection        DdbConnection?
+  ddbCharacterCaches   DdbCharacterCache[]
+  ddbLibraryImportJobs DdbLibraryImportJob[]
 
-  @@index([clerkId])
+  @@index([authUserId])
+}
+
+// ─── Better Auth ──────────────────────────────────────────────────────────────
+
+model AuthUser {
+  id            String        @id @default(cuid())
+  name          String
+  email         String        @unique
+  emailVerified Boolean       @default(false)
+  image         String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  sessions      AuthSession[]
+  accounts      AuthAccount[]
+
+  @@map("auth_user")
+}
+
+model AuthSession {
+  id        String   @id @default(cuid())
+  expiresAt DateTime
+  token     String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  ipAddress String?
+  userAgent String?
+  userId    String
+  user      AuthUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("auth_session")
+}
+
+model AuthAccount {
+  id                    String    @id @default(cuid())
+  accountId             String
+  providerId            String
+  userId                String
+  user                  AuthUser  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@index([userId])
+  @@map("auth_account")
+}
+
+model AuthVerification {
+  id         String   @id @default(cuid())
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([identifier])
+  @@map("auth_verification")
 }
 
 // ─── D&D Beyond ───────────────────────────────────────────────────────────────
@@ -68,6 +132,34 @@ model DdbCampaignLink {
   linkedAt       DateTime @default(now())
 
   campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+}
+
+enum DdbLibraryImportJobStatus {
+  RUNNING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+model DdbLibraryImportJob {
+  id           String                    @id @default(cuid())
+  userId       String
+  status       DdbLibraryImportJobStatus @default(RUNNING)
+  skipExisting Boolean                   @default(false)
+  campaignId   Int?
+  sourceIds    Int[]
+  sourceNames  Json                      @default("{}")
+  progress     Json?
+  result       Json?
+  errorMessage String?
+  createdAt    DateTime                  @default(now())
+  updatedAt    DateTime                  @updatedAt
+  completedAt  DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status])
+  @@index([userId, createdAt])
 }
 
 // ─── Campaigns ────────────────────────────────────────────────────────────────

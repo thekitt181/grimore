@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { useUser } from '@clerk/clerk-react';
+import { useGrimoireUser } from '@/hooks/useGrimoireAuth';
 import { api } from '@/lib/axios';
 import { AppShell } from '@/components/layout/AppShell';
 import { CampaignCard } from '@/components/campaign/CampaignCard';
@@ -9,7 +9,7 @@ import { JoinCampaignModal } from '@/components/campaign/JoinCampaignModal';
 import type { CampaignWithMembers } from '@grimoire/shared';
 
 export function Dashboard() {
-  const { user } = useUser();
+  const { user } = useGrimoireUser();
   const [showCreate, setShowCreate] = useState(false);
   const [showJoin, setShowJoin] = useState(false);
 

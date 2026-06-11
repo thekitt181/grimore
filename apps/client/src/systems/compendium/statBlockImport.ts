@@ -1,4 +1,4 @@
-/** Parse pasted or OCR stat-block text into compendium create-form fields. */
+/** Parse pasted stat-block text into compendium create-form fields. */
 
 export interface ParsedMonsterFields {
   name?: string;
@@ -115,24 +115,6 @@ export function parseSpellStatBlock(raw: string): ParsedSpellFields {
   if (spellName) result.name = spellName;
   if (level != null && Number.isFinite(level)) result.level = level;
   return result;
-}
-
-/** OCR a stat-block image (lazy-loads tesseract.js). */
-export async function ocrImageDataUrl(dataUrl: string, onProgress?: (pct: number) => void): Promise<string> {
-  const { createWorker } = await import('tesseract.js');
-  const worker = await createWorker('eng', 1, {
-    logger: (m) => {
-      if (m.status === 'recognizing text' && typeof m.progress === 'number') {
-        onProgress?.(Math.round(m.progress * 100));
-      }
-    },
-  });
-  try {
-    const { data } = await worker.recognize(dataUrl);
-    return data.text ?? '';
-  } finally {
-    await worker.terminate();
-  }
 }
 
 export function applyMonsterFields(

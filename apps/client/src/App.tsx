@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
-import { useAuth } from '@clerk/clerk-react';
+import { useGrimoireAuth } from '@/hooks/useGrimoireAuth';
 import { setAuthTokenGetter } from '@/lib/axios';
 import { Dashboard } from '@/pages/Dashboard';
 import { CampaignDetail } from '@/pages/CampaignDetail';
@@ -8,10 +8,10 @@ import { SessionPage } from '@/pages/SessionPage';
 import { JoinPage } from '@/pages/JoinPage';
 import { SignInPage } from '@/pages/SignInPage';
 import { SignUpPage } from '@/pages/SignUpPage';
-import { AuthStatusBanner } from '@/components/AuthStatusBanner';
+import { DdbImportJobBanner } from '@/systems/ddb/DdbImportJobBanner';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { isSignedIn, isLoaded } = useAuth();
+  const { isSignedIn, isLoaded } = useGrimoireAuth();
 
   if (!isLoaded) {
     return (
@@ -29,16 +29,16 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   if (!isSignedIn) return <Navigate to="/sign-in" replace />;
   return (
     <>
-      <AuthStatusBanner />
+      <DdbImportJobBanner />
       {children}
     </>
   );
 }
 
 export default function App() {
-  const { getToken } = useAuth();
+  const { getToken } = useGrimoireAuth();
 
-  // Register Clerk token getter for axios interceptor (runs once on mount)
+  // Register bearer token getter for axios interceptor (runs once on mount)
   useEffect(() => {
     setAuthTokenGetter(async (opts) => (await getToken(opts)) ?? null);
   }, [getToken]);

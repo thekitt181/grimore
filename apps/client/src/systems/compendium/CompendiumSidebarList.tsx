@@ -1,6 +1,6 @@
 import { useMemo, useState, useEffect, type CSSProperties } from 'react';
 import axios from 'axios';
-import { useAuth } from '@clerk/clerk-react';
+import { useGrimoireAuth } from '@/hooks/useGrimoireAuth';
 import { useInfiniteQuery, useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import type { CompendiumItem, CompendiumMonster, CompendiumSource, CompendiumSpell } from '@grimoire/shared';
 import { isHomebrewEntry } from '@grimoire/shared';
@@ -38,7 +38,7 @@ function compendiumErrorHint(error: unknown): string {
     }
     if (error.response.status === 401) {
       if (isApiAuthBlocked()) {
-        return 'API rejected your sign-in token. Use Retry sign-in at the top, or sign out and back in. If this persists, check Render CLERK_SECRET_KEY matches VITE_CLERK_PUBLISHABLE_KEY.';
+        return 'Sign-in expired. Sign out and back in, or click Reload compendium below.';
       }
       return 'Sign in required to load the compendium.';
     }
@@ -98,7 +98,7 @@ export function CompendiumSidebarList() {
   const selectedMonsterId = useCompendiumUiStore((s) => s.selectedMonsterId);
   const selectedItemId = useCompendiumUiStore((s) => s.selectedItemId);
   const selectedSpellId = useCompendiumUiStore((s) => s.selectedSpellId);
-  const { isSignedIn } = useAuth();
+  const { isSignedIn } = useGrimoireAuth();
   const isAdmin = useCompendiumEditor();
   const qc = useQueryClient();
   const [lockMessage, setLockMessage] = useState<string | null>(null);

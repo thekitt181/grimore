@@ -7,13 +7,13 @@ import {
   fetchDdbStatus,
   fetchGrimoireDdbLink,
   importDdbLibraryEntries,
-  importAllDdbLibraryFromSource,
+  formatDdbImportJobProgress,
   syncCompendiumAfterImport,
   searchDdbLibraryItems,
   searchDdbLibraryMonsters,
   searchDdbLibrarySpells,
-  type DdbImportAllProgress,
 } from './ddbApi';
+import { useDdbImportJob } from './useDdbImportJob';
 import { fetchSources, lockCompendiumSource, unlockCompendiumSource } from '@/systems/compendium/compendiumApi';
 import {
   applyCompendiumLockPolicy,
@@ -55,47 +55,6 @@ function tabToKind(tab: LibraryTab): 'monster' | 'item' | 'spell' {
   if (tab === 'monsters') return 'monster';
   if (tab === 'spells') return 'spell';
   return 'item';
-}
-
-function formatImportProgress(progress: DdbImportAllProgress, verb: 'import' | 'reimport'): string {
-  const bookPos =
-    progress.bookIndex != null && progress.bookTotal != null
-      ? `Book ${progress.bookIndex}/${progress.bookTotal}`
-      : null;
-  const book = progress.sourceName
-    ? bookPos
-      ? `${bookPos} · ${progress.sourceName}`
-      : progress.sourceName
-    : bookPos ?? '';
-  const prefix = book ? `${book}: ` : '';
-
-  if (progress.phase === 'complete') {
-    const ok = progress.bookImported ?? 0;
-    const fail = progress.bookErrors ?? 0;
-    return `${prefix}${verb} complete (${ok} new${fail ? `, ${fail} failed` : ''})`;
-  }
-
-  const phaseLabel =
-    progress.phase === 'listing-monsters'
-      ? 'listing monsters from D&D Beyond'
-      : progress.phase === 'listing-spells'
-        ? 'listing spells from D&D Beyond'
-        : progress.phase === 'listing-items'
-          ? 'listing items from D&D Beyond'
-          : `${verb}ing ${progress.phase}`;
-
-  if (progress.phase.startsWith('listing-')) {
-    const listed = progress.done > 0 ? ` (${progress.done} found so far)` : '…';
-    return `${prefix}${phaseLabel}${listed}`;
-  }
-
-  const count =
-    progress.total > 0
-      ? ` ${progress.done}/${progress.total}`
-      : progress.done > 0
-        ? ` ${progress.done}`
-        : '';
-  return `${prefix}${phaseLabel}${count}`;
 }
 
 function formatImportResultMessage(result: DdbLibraryImportResult, base: string): string {
@@ -143,22 +102,75 @@ export function DdbLibraryPanel({ onClose }: { onClose: () => void }) {
   const [selectedSourceIds, setSelectedSourceIds] = useState<Set<number>>(loadSavedSourceIds);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [message, setMessage] = useState<string | null>(null);
-  const [importProgress, setImportProgress] = useState<DdbImportAllProgress | null>(null);
   const [sourcesSaved, setSourcesSaved] = useState(false);
-
-  function handleBulkImportProgress(progress: DdbImportAllProgress, verb: 'import' | 'reimport') {
-    setImportProgress(progress);
-    setMessage(formatImportProgress(progress, verb));
-  }
-
-  function clearBulkImportProgress() {
-    setImportProgress(null);
-  }
 
   const { data: ddbStatus } = useQuery({
     queryKey: ['ddb', 'status'],
     queryFn: fetchDdbStatus,
   });
+
+  const importJob = useDdbImportJob(Boolean(ddbStatus?.linked));
+
+  useEffect(() => {
+    const job = importJob.job;
+    if (!job) return;
+    const verb = job.skipExisting ? 'reimport' : 'import';
+    if (job.status === 'running') {
+      setMessage(
+        job.progress
+          ? formatDdbImportJobProgress(job.progress, verb)
+          : `Background ${verb} started — you can refresh or close this tab.`,
+      );
+      return;
+    }
+    if (job.status === 'completed' && job.result) {
+      const ok = job.result.imported.length;
+      const skipped = job.result.skipped ?? 0;
+      const fail = job.result.errors.length;
+      if (job.skipExisting) {
+        setMessage(
+          ok || skipped
+            ? formatImportResultMessage(
+                job.result,
+                ok
+                  ? `Reimported ${ok} missing entries${fail ? ` (${fail} failed)` : ''}.`
+                  : `All entries already in compendium${fail ? ` (${fail} failed)` : ''}.`,
+              )
+            : fail
+              ? job.result.errors.map((e) => e.message).join('; ')
+              : 'Nothing to reimport from the selected books.',
+        );
+      } else {
+        const byKind = job.result.imported.reduce(
+          (acc, entry) => {
+            acc[entry.kind] = (acc[entry.kind] ?? 0) + 1;
+            return acc;
+          },
+          {} as Record<string, number>,
+        );
+        const breakdown = ['monster', 'spell', 'item']
+          .filter((k) => byKind[k])
+          .map((k) => `${byKind[k]} ${k}${byKind[k] === 1 ? '' : 's'}`)
+          .join(', ');
+        setMessage(
+          ok
+            ? formatImportResultMessage(
+                job.result,
+                `Imported ${ok} entries (${breakdown})${fail ? ` — ${fail} failed` : ''}. Open Compendium → Books.`,
+              )
+            : fail
+              ? job.result.errors.map((e) => e.message).join('; ')
+              : 'Nothing to import from the selected books.',
+        );
+      }
+      return;
+    }
+    if (job.status === 'failed') {
+      setMessage(job.errorMessage ?? `${verb} failed`);
+    } else if (job.status === 'cancelled') {
+      setMessage(job.errorMessage ?? `${verb} cancelled`);
+    }
+  }, [importJob.job]);
 
   const { data: compendiumSources = [] } = useQuery({
     queryKey: ['compendium', 'sources', tab],
@@ -315,133 +327,22 @@ export function DdbLibraryPanel({ onClose }: { onClose: () => void }) {
     onError: (err: unknown) => setMessage(extractApiError(err, 'Import failed')),
   });
 
-  const importAllMut = useMutation({
-    mutationFn: () => {
-      if (selectedSourceIds.size === 0) throw new Error('Select at least one source book');
-      const sourceNames = Object.fromEntries(sources.map((s) => [s.id, s.name]));
-      return importAllDdbLibraryFromSource(
-        {
-          sourceIds: [...selectedSourceIds].map((id) => Number(id)),
-          sourceNames,
-          ...(ddbCampaignId != null && ddbCampaignId > 0 ? { campaignId: ddbCampaignId } : {}),
-        },
-        (progress) => handleBulkImportProgress(progress, 'import'),
-        async (info) => {
-          useCompendiumUiStore.getState().setBrowseMode('sources');
-          useCompendiumUiStore.getState().setPanelOpen(true);
-          await refetchCompendiumAfterImport(
-            qc,
-            info.catalogRev ? { catalogRev: info.catalogRev } : undefined,
-          );
-        },
-      );
-    },
-    onMutate: () => {
-      const total = selectedSourceIds.size;
-      setImportProgress({
-        phase: 'listing-monsters',
-        sourceId: 0,
-        bookIndex: 1,
-        bookTotal: total,
-        done: 0,
-        total: 0,
-      });
-      setMessage(`Starting import of ${total} book${total === 1 ? '' : 's'}…`);
-    },
-    onSettled: () => clearBulkImportProgress(),
-    onSuccess: async (result) => {
-      const ok = result.imported.length;
-      const fail = result.errors.length;
-      const bookCount = selectedSourceIds.size;
-      const byKind = result.imported.reduce(
-        (acc, entry) => {
-          acc[entry.kind] = (acc[entry.kind] ?? 0) + 1;
-          return acc;
-        },
-        {} as Record<string, number>,
-      );
-      const breakdown = ['monster', 'spell', 'item']
-        .filter((k) => byKind[k])
-        .map((k) => `${byKind[k]} ${k}${byKind[k] === 1 ? '' : 's'}`)
-        .join(', ');
-      setMessage(
-        ok
-          ? formatImportResultMessage(
-              result,
-              `Imported ${ok} entries (${breakdown}) from ${bookCount} book${bookCount === 1 ? '' : 's'}${fail ? ` — ${fail} failed` : ''}. Open Compendium → All to browse.`,
-            )
-          : fail
-            ? result.errors.map((e) => e.message).join('; ')
-            : 'Nothing to import from the selected books.',
-      );
-      setSelected(new Set());
-      await afterCompendiumImport(qc, result);
-    },
-    onError: (err: unknown) => {
-      const detail = extractApiError(err, 'Import failed — check D&D Beyond link and try again');
-      setMessage(
-        `${detail} If entries were saved before the error, click “Sync compendium” then check Compendium → Books.`,
-      );
-    },
-  });
-
-  const reimportMissingMut = useMutation({
-    mutationFn: () => {
-      if (selectedSourceIds.size === 0) throw new Error('Select at least one source book');
-      const sourceNames = Object.fromEntries(sources.map((s) => [s.id, s.name]));
-      return importAllDdbLibraryFromSource(
-        {
-          sourceIds: [...selectedSourceIds].map((id) => Number(id)),
-          sourceNames,
-          skipExisting: true,
-          ...(ddbCampaignId != null && ddbCampaignId > 0 ? { campaignId: ddbCampaignId } : {}),
-        },
-        (progress) => handleBulkImportProgress(progress, 'reimport'),
-        async (info) => {
-          if (info.result.imported.length > 0) {
-            useCompendiumUiStore.getState().setBrowseMode('sources');
-            useCompendiumUiStore.getState().setPanelOpen(true);
-            await refetchCompendiumAfterImport(
-              qc,
-              info.catalogRev ? { catalogRev: info.catalogRev } : undefined,
-            );
-          }
-        },
-      );
-    },
-    onMutate: () => {
-      const total = selectedSourceIds.size;
-      setImportProgress({
-        phase: 'listing-monsters',
-        sourceId: 0,
-        bookIndex: 1,
-        bookTotal: total,
-        done: 0,
-        total: 0,
-      });
-      setMessage(`Starting reimport of ${total} book${total === 1 ? '' : 's'} (skipping existing)…`);
-    },
-    onSettled: () => clearBulkImportProgress(),
-    onSuccess: async (result) => {
-      const ok = result.imported.length;
-      const skipped = result.skipped ?? 0;
-      const fail = result.errors.length;
-      setMessage(
-        ok || skipped
-          ? formatImportResultMessage(
-              result,
-              ok
-                ? `Reimported ${ok} missing entries${fail ? ` (${fail} failed)` : ''}.`
-                : `All entries already in compendium${fail ? ` (${fail} failed)` : ''}.`,
-            )
-          : fail
-            ? result.errors.map((e) => e.message).join('; ')
-            : 'Nothing to reimport from the selected books.',
-      );
-      if (ok > 0) await afterCompendiumImport(qc, result);
-    },
-    onError: (err: unknown) => setMessage(extractApiError(err, 'Reimport failed')),
-  });
+  async function startBulkImport(skipExisting: boolean) {
+    if (selectedSourceIds.size === 0) throw new Error('Select at least one source book');
+    const sourceNames = Object.fromEntries(sources.map((s) => [s.id, s.name]));
+    const total = selectedSourceIds.size;
+    setMessage(
+      skipExisting
+        ? `Starting background reimport of ${total} book${total === 1 ? '' : 's'}…`
+        : `Starting background import of ${total} book${total === 1 ? '' : 's'}…`,
+    );
+    await importJob.startImport({
+      sourceIds: [...selectedSourceIds].map((id) => Number(id)),
+      sourceNames,
+      skipExisting,
+      ...(ddbCampaignId != null && ddbCampaignId > 0 ? { campaignId: ddbCampaignId } : {}),
+    });
+  }
 
   const syncCatalogMut = useMutation({
     mutationFn: () =>
@@ -521,56 +422,37 @@ export function DdbLibraryPanel({ onClose }: { onClose: () => void }) {
     .filter((s) => selectedSourceIds.has(s.id))
     .map((s) => s.name);
 
-  const bulkImportActive = importAllMut.isPending || reimportMissingMut.isPending;
-  const bulkImportVerb: 'import' | 'reimport' = reimportMissingMut.isPending ? 'reimport' : 'import';
-  const progressLabel = importProgress ? formatImportProgress(importProgress, bulkImportVerb) : message;
-
-  const progressPercent = (() => {
-    if (!importProgress) return null;
-    const bookTotal = importProgress.bookTotal ?? 0;
-    const bookIndex = importProgress.bookIndex ?? 0;
-    if (bookTotal <= 0) return null;
-    let within = 0;
-    if (importProgress.phase === 'complete') {
-      within = 1;
-    } else if (importProgress.phase === 'listing-monsters') {
-      within = 0.05;
-    } else if (importProgress.phase === 'monsters' && importProgress.total > 0) {
-      within = 0.05 + (importProgress.done / importProgress.total) * 0.3;
-    } else if (importProgress.phase === 'listing-spells') {
-      within = 0.35;
-    } else if (importProgress.phase === 'spells' && importProgress.total > 0) {
-      within = 0.35 + (importProgress.done / importProgress.total) * 0.25;
-    } else if (importProgress.phase === 'listing-items') {
-      within = 0.6;
-    } else if (importProgress.phase === 'items' && importProgress.total > 0) {
-      within = 0.6 + (importProgress.done / importProgress.total) * 0.35;
-    } else if (importProgress.phase === 'monsters') {
-      within = 0.2;
-    } else if (importProgress.phase === 'spells') {
-      within = 0.5;
-    } else if (importProgress.phase === 'items') {
-      within = 0.75;
-    }
-    const completedBooks = Math.max(0, bookIndex - 1) + within;
-    return Math.min(100, Math.round((completedBooks / bookTotal) * 100));
-  })();
+  const bulkImportActive = importJob.isRunning || importJob.isStarting;
+  const bulkImportVerb = importJob.verb;
+  const jobProgress = importJob.job?.progress ?? null;
+  const progressLabel = jobProgress
+    ? formatDdbImportJobProgress(jobProgress, bulkImportVerb)
+    : message;
+  const progressPercent = importJob.progressPercent;
 
   function shortProgressLabel(): string | null {
-    if (!importProgress) return null;
+    if (!jobProgress) return bulkImportActive ? 'Background…' : null;
     const book =
-      importProgress.bookIndex != null && importProgress.bookTotal != null
-        ? `${importProgress.bookIndex}/${importProgress.bookTotal}`
+      jobProgress.bookIndex != null && jobProgress.bookTotal != null
+        ? `${jobProgress.bookIndex}/${jobProgress.bookTotal}`
         : null;
-    if (importProgress.phase.startsWith('listing-')) {
-      const kind = importProgress.phase.replace('listing-', '');
+    if (jobProgress.phase.startsWith('listing-')) {
+      const kind = jobProgress.phase.replace('listing-', '');
       return book ? `${book} · listing ${kind}…` : `Listing ${kind}…`;
     }
-    if (importProgress.phase === 'complete') return book ? `${book} · done` : 'Done';
-    const count = importProgress.total > 0 ? ` ${importProgress.done}/${importProgress.total}` : '';
+    if (jobProgress.phase === 'complete') return book ? `${book} · done` : 'Done';
+    const count = jobProgress.total > 0 ? ` ${jobProgress.done}/${jobProgress.total}` : '';
     return book
-      ? `${book} · ${importProgress.phase}${count}`
-      : `${importProgress.phase}${count}`;
+      ? `${book} · ${jobProgress.phase}${count}`
+      : `${jobProgress.phase}${count}`;
+  }
+
+  async function handleBulkImport(skipExisting: boolean) {
+    try {
+      await startBulkImport(skipExisting);
+    } catch (err: unknown) {
+      setMessage(extractApiError(err, skipExisting ? 'Reimport failed' : 'Import failed'));
+    }
   }
 
   return (
@@ -843,7 +725,7 @@ export function DdbLibraryPanel({ onClose }: { onClose: () => void }) {
           <div className="flex gap-2 shrink-0 flex-wrap">
             <button
               type="button"
-              disabled={selected.size === 0 || importMut.isPending || importAllMut.isPending || reimportMissingMut.isPending || syncCatalogMut.isPending}
+              disabled={selected.size === 0 || importMut.isPending || bulkImportActive || syncCatalogMut.isPending}
               onClick={() => importMut.mutate()}
               className="font-ui text-xs flex-1 py-2 rounded font-semibold disabled:opacity-40"
               style={{
@@ -858,8 +740,8 @@ export function DdbLibraryPanel({ onClose }: { onClose: () => void }) {
             </button>
             <button
               type="button"
-              disabled={selectedSourceIds.size === 0 || importMut.isPending || importAllMut.isPending || reimportMissingMut.isPending || syncCatalogMut.isPending}
-              onClick={() => importAllMut.mutate()}
+              disabled={selectedSourceIds.size === 0 || importMut.isPending || bulkImportActive || syncCatalogMut.isPending}
+              onClick={() => void handleBulkImport(false)}
               className="font-ui text-xs flex-1 py-2 rounded font-semibold disabled:opacity-40 min-w-[8rem]"
               style={{
                 background: 'rgba(201,168,76,0.08)',
@@ -872,16 +754,16 @@ export function DdbLibraryPanel({ onClose }: { onClose: () => void }) {
                   : 'Select one or more source books first'
               }
             >
-              {importAllMut.isPending
-                ? shortProgressLabel() ?? 'Importing all…'
+              {bulkImportActive && bulkImportVerb === 'import'
+                ? shortProgressLabel() ?? 'Importing in background…'
                 : selectedSourceIds.size > 0
                   ? `Import all types (${selectedSourceIds.size} book${selectedSourceIds.size === 1 ? '' : 's'})`
                   : 'Import all from books'}
             </button>
             <button
               type="button"
-              disabled={selectedSourceIds.size === 0 || importMut.isPending || importAllMut.isPending || reimportMissingMut.isPending || syncCatalogMut.isPending}
-              onClick={() => reimportMissingMut.mutate()}
+              disabled={selectedSourceIds.size === 0 || importMut.isPending || bulkImportActive || syncCatalogMut.isPending}
+              onClick={() => void handleBulkImport(true)}
               className="font-ui text-xs flex-1 py-2 rounded font-semibold disabled:opacity-40 min-w-[8rem]"
               style={{
                 background: 'rgba(255,255,255,0.04)',
@@ -890,15 +772,15 @@ export function DdbLibraryPanel({ onClose }: { onClose: () => void }) {
               }}
               title="Fast reimport: skips entries already in Mongo; re-fetches spells with broken duration text"
             >
-              {reimportMissingMut.isPending
-                ? shortProgressLabel() ?? 'Reimporting…'
+              {bulkImportActive && bulkImportVerb === 'reimport'
+                ? shortProgressLabel() ?? 'Reimporting in background…'
                 : selectedSourceIds.size > 0
                   ? `Reimport missing (${selectedSourceIds.size} book${selectedSourceIds.size === 1 ? '' : 's'})`
                   : 'Reimport missing'}
             </button>
             <button
               type="button"
-              disabled={importMut.isPending || importAllMut.isPending || reimportMissingMut.isPending || syncCatalogMut.isPending}
+              disabled={importMut.isPending || bulkImportActive || syncCatalogMut.isPending}
               onClick={() => syncCatalogMut.mutate()}
               className="font-ui text-xs w-full py-2 rounded font-semibold disabled:opacity-40"
               style={{

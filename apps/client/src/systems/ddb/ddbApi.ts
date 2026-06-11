@@ -7,6 +7,8 @@ import {
   type DdbCampaignSummary,
   type DdbCharacterSummary,
   type DdbEncounter,
+  type DdbLibraryImportJob,
+  type DdbLibraryImportJobProgress,
   type DdbLibraryImportResult,
   type DdbLibraryItemSummary,
   type DdbLibraryMonsterSummary,
@@ -719,4 +721,97 @@ export async function importAllDdbLibraryFromSource(
   }
 
   return merged;
+}
+
+const IMPORT_JOB_STORAGE_KEY = 'grimoire-ddb-import-job-id';
+
+export function getStoredDdbImportJobId(): string | null {
+  try {
+    return localStorage.getItem(IMPORT_JOB_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function setStoredDdbImportJobId(jobId: string | null): void {
+  try {
+    if (jobId) localStorage.setItem(IMPORT_JOB_STORAGE_KEY, jobId);
+    else localStorage.removeItem(IMPORT_JOB_STORAGE_KEY);
+  } catch {
+    // ignore
+  }
+}
+
+export async function startDdbLibraryImportJob(body: {
+  sourceIds: number[];
+  sourceNames?: Record<number, string>;
+  campaignId?: number;
+  skipExisting?: boolean;
+}): Promise<DdbLibraryImportJob> {
+  const { data } = await api.post<{ job: DdbLibraryImportJob }>('/ddb/library/import-jobs', body);
+  return data.job;
+}
+
+export async function fetchActiveDdbLibraryImportJob(): Promise<DdbLibraryImportJob | null> {
+  const { data } = await api.get<{ job: DdbLibraryImportJob | null }>('/ddb/library/import-jobs/active');
+  return data.job ?? null;
+}
+
+export async function fetchDdbLibraryImportJob(jobId: string): Promise<DdbLibraryImportJob | null> {
+  try {
+    const { data } = await api.get<{ job: DdbLibraryImportJob }>(`/ddb/library/import-jobs/${jobId}`);
+    return data.job ?? null;
+  } catch (err) {
+    if (axios.isAxiosError(err) && err.response?.status === 404) return null;
+    throw err;
+  }
+}
+
+export async function cancelDdbLibraryImportJob(jobId: string): Promise<DdbLibraryImportJob | null> {
+  const { data } = await api.delete<{ job: DdbLibraryImportJob }>(`/ddb/library/import-jobs/${jobId}`);
+  return data.job ?? null;
+}
+
+export function formatDdbImportJobProgress(
+  progress: DdbLibraryImportJobProgress,
+  verb: 'import' | 'reimport',
+): string {
+  const bookPos =
+    progress.bookIndex != null && progress.bookTotal != null
+      ? `Book ${progress.bookIndex}/${progress.bookTotal}`
+      : null;
+  const book = progress.sourceName
+    ? bookPos
+      ? `${bookPos} · ${progress.sourceName}`
+      : progress.sourceName
+    : bookPos ?? '';
+  const prefix = book ? `${book}: ` : '';
+
+  if (progress.phase === 'complete') {
+    const ok = progress.bookImported ?? 0;
+    const fail = progress.bookErrors ?? 0;
+    return `${prefix}${verb} complete (${ok} new${fail ? `, ${fail} failed` : ''})`;
+  }
+
+  const phaseLabel =
+    progress.phase === 'listing-monsters'
+      ? 'listing monsters from D&D Beyond'
+      : progress.phase === 'listing-spells'
+        ? 'listing spells from D&D Beyond'
+        : progress.phase === 'listing-items'
+          ? 'listing items from D&D Beyond'
+          : `${verb}ing ${progress.phase}`;
+
+  if (progress.phase.startsWith('listing-')) {
+    const listed = progress.done > 0 ? ` (${progress.done} found so far)` : '…';
+    return `${prefix}${phaseLabel}${listed}`;
+  }
+
+  const count =
+    progress.total > 0
+      ? ` ${progress.done}/${progress.total}`
+      : progress.done > 0
+        ? ` ${progress.done}`
+        : '';
+  return `${prefix}${phaseLabel}${count}`;
 }

@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { useAuth } from '@clerk/clerk-react';
+import { useGrimoireAuth } from '@/hooks/useGrimoireAuth';
 import type { DdbCharacterSyncPayload, DdbHpUpdatePayload } from '@grimoire/shared';
 import { getSocket } from '@/lib/socket';
 import { useSessionStore } from '@/store/sessionStore';
@@ -16,7 +16,7 @@ const POLL_MS = 2500;
 const POLL_MS_CONNECTED = 12_000;
 
 export function useDdbSocket(): void {
-  const { isLoaded, isSignedIn, getToken } = useAuth();
+  const { isLoaded, isSignedIn, getToken } = useGrimoireAuth();
   const sessionId = useSessionStore((s) => s.sessionId);
   const campaignId = useSessionStore((s) => s.campaignId);
   const isConnected = useSessionStore((s) => s.isConnected);

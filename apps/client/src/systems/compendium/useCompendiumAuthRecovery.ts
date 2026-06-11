@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { useAuth } from '@clerk/clerk-react';
+import { useGrimoireAuth } from '@/hooks/useGrimoireAuth';
 import { useQueryClient } from '@tanstack/react-query';
 import { isApiAuthBlocked } from '@/lib/apiAuthState';
 import { ensureApiAuthSession } from '@/lib/axios';
@@ -19,7 +19,7 @@ async function refetchCompendiumCatalog(qc: ReturnType<typeof useQueryClient>): 
 
 /** After a stale Clerk token (401), reload compendium data once auth is healthy again. */
 export function useCompendiumAuthRecovery(enabled = true): void {
-  const { isLoaded, isSignedIn } = useAuth();
+  const { isLoaded, isSignedIn } = useGrimoireAuth();
   const qc = useQueryClient();
   const recoveringRef = useRef(false);
   const authStaleRef = useRef(false);

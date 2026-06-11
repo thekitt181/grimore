@@ -24,6 +24,12 @@ import {
   patchCharacterDeathSaves,
   unlinkDdbAccount,
 } from '../services/ddb/ddbService';
+import {
+  cancelDdbLibraryImportJob,
+  getActiveDdbLibraryImportJob,
+  getDdbLibraryImportJob,
+  startDdbLibraryImportJob,
+} from '../services/ddb/ddbImportJobService';
 import { fetchDdbImage, isAllowedDdbImageUrl } from '../services/ddb/imageProxy';
 
 function parseSourceIds(query: Record<string, unknown>): number[] | undefined {
@@ -577,6 +583,85 @@ router.post('/library/import-all', requireAuth, async (req: AuthenticatedRequest
     res.json(result);
   } catch (err) {
     res.status(400).json({ error: err instanceof Error ? err.message : 'Import failed' });
+  }
+});
+
+const importJobStartSchema = z
+  .object({
+    sourceIds: z.array(z.coerce.number().int()).optional(),
+    sourceId: z.coerce.number().int().optional(),
+    campaignId: z.coerce.number().int().positive().optional(),
+    skipExisting: z.boolean().optional(),
+    sourceNames: z.record(z.string(), z.string()).optional(),
+  })
+  .transform((data) => {
+    const sourceIds = [...new Set([...(data.sourceIds ?? []), ...(data.sourceId != null ? [data.sourceId] : [])])]
+      .filter((id) => Number.isFinite(id) && (id > 0 || id === DDB_HOMEBREW_SOURCE_ID));
+    const sourceNames: Record<number, string> = {};
+    if (data.sourceNames) {
+      for (const [key, value] of Object.entries(data.sourceNames)) {
+        const id = Number(key);
+        if (Number.isFinite(id) && value.trim()) sourceNames[id] = value.trim();
+      }
+    }
+    return {
+      sourceIds,
+      sourceNames,
+      ...(data.campaignId != null ? { campaignId: data.campaignId } : {}),
+      ...(data.skipExisting ? { skipExisting: true } : {}),
+    };
+  })
+  .refine((data) => data.sourceIds.length > 0, {
+    message: 'Select at least one source book',
+  });
+
+router.post('/library/import-jobs', requireAuth, async (req: AuthenticatedRequest, res) => {
+  try {
+    const parsed = importJobStartSchema.safeParse(req.body);
+    if (!parsed.success) {
+      const detail = parsed.error.issues[0]?.message ?? 'Invalid import job payload';
+      res.status(400).json({ error: detail });
+      return;
+    }
+    const job = await startDdbLibraryImportJob(req.userId!, parsed.data);
+    res.status(202).json({ job });
+  } catch (err) {
+    res.status(400).json({ error: err instanceof Error ? err.message : 'Could not start import job' });
+  }
+});
+
+router.get('/library/import-jobs/active', requireAuth, async (req: AuthenticatedRequest, res) => {
+  try {
+    const job = await getActiveDdbLibraryImportJob(req.userId!);
+    res.json({ job });
+  } catch (err) {
+    res.status(400).json({ error: err instanceof Error ? err.message : 'Could not load import job' });
+  }
+});
+
+router.get('/library/import-jobs/:jobId', requireAuth, async (req: AuthenticatedRequest, res) => {
+  try {
+    const job = await getDdbLibraryImportJob(req.userId!, req.params.jobId);
+    if (!job) {
+      res.status(404).json({ error: 'Import job not found' });
+      return;
+    }
+    res.json({ job });
+  } catch (err) {
+    res.status(400).json({ error: err instanceof Error ? err.message : 'Could not load import job' });
+  }
+});
+
+router.delete('/library/import-jobs/:jobId', requireAuth, async (req: AuthenticatedRequest, res) => {
+  try {
+    const job = await cancelDdbLibraryImportJob(req.userId!, req.params.jobId);
+    if (!job) {
+      res.status(404).json({ error: 'No running import job with that id' });
+      return;
+    }
+    res.json({ job });
+  } catch (err) {
+    res.status(400).json({ error: err instanceof Error ? err.message : 'Could not cancel import job' });
   }
 });
 

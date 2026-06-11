@@ -1,9 +1,9 @@
 import type { Server as HttpServer } from 'http';
 import type { Socket } from 'socket.io';
 import { Server } from 'socket.io';
-import { verifyToken } from '@clerk/backend';
-import { prisma } from '../lib/prisma';
+import { getAuthUserIdFromRequest } from '../lib/sessionAuth';
 import { resolveAuthUser } from '../lib/authUserCache';
+import { prisma } from '../lib/prisma';
 import type { Prisma } from '@prisma/client';
 import {
   setRoomUsers,
@@ -134,15 +134,10 @@ export function initSocket(httpServer: HttpServer): Server {
   io.use(async (socket, next) => {
     try {
       const token = socket.handshake.auth['token'] as string | undefined;
-      if (!token) return next(new Error('Missing auth token'));
+      const authUserId = await getAuthUserIdFromRequest(socket.request.headers, token);
+      if (!authUserId) return next(new Error('Missing auth token'));
 
-      const payload = await verifyToken(token, {
-        secretKey: process.env['CLERK_SECRET_KEY'] ?? '',
-      });
-      const clerkUserId = payload.sub;
-      if (!clerkUserId) return next(new Error('Invalid token'));
-
-      const user = await resolveAuthUser(clerkUserId);
+      const user = await resolveAuthUser(authUserId);
 
       socket.data['userId'] = user.id;
       socket.data['username'] = user.username;

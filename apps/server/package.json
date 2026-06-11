@@ -17,11 +17,11 @@
     "import:compendium": "tsx scripts/import-compendium.ts"
   },
   "dependencies": {
-    "@clerk/backend": "^1.3.0",
     "@grimoire/monster-dex": "workspace:^",
     "@grimoire/shared": "workspace:*",
     "@prisma/client": "^5.14.0",
     "@socket.io/redis-adapter": "^8.3.0",
+    "better-auth": "^1.6.16",
     "cookie-parser": "^1.4.6",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",

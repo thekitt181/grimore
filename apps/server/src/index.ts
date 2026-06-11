@@ -16,12 +16,14 @@ import compendiumRoutes from './routes/compendium';
 import ddbRoutes from './routes/ddb';
 import { closeMongo } from './lib/mongo';
 import { getClientOrigins, getPrimaryClientUrl } from './lib/clientOrigins';
-import { mountClientSpa } from './lib/serveClient';
+import { toNodeHandler } from 'better-auth/node';
+import { auth } from './lib/auth';
+import { startCompendiumMongoWatch } from './services/compendiumMongoWatch';
 import { syncCompendiumStorageOnStartup } from './services/compendiumGlobal';
 import { reconcileRawGlobalStorage } from './services/compendiumOwlbearPersist';
 import { warmCompendiumCatalog } from './services/compendiumSync';
 import { startCompendiumExternalWatch } from './services/compendiumExternalWatch';
-import { startCompendiumMongoWatch } from './services/compendiumMongoWatch';
+import { mountClientSpa } from './lib/serveClient';
 
 const app = express();
 const httpServer = http.createServer(app);
@@ -51,8 +53,9 @@ app.use(cors({
   },
   credentials: true,
 }));
-app.use(express.json({ limit: '50mb' }));
 app.use(cookieParser());
+app.all('/api/auth/*', toNodeHandler(auth));
+app.use(express.json({ limit: '50mb' }));
 
 app.get('/health', (_req, res) => {
   const mongo = getMongoCircuitStatus();
@@ -129,6 +132,12 @@ async function bootServices(): Promise<void> {
     servicesReady = true;
     console.log('[Server] API ready');
     void startCompendiumBackground();
+    try {
+      const { resumeRunningImportJobs } = await import('./services/ddb/ddbImportJobService');
+      void resumeRunningImportJobs();
+    } catch (err) {
+      console.warn('[DDB] Could not resume import jobs:', err);
+    }
   } catch (err) {
     console.error('[Server] Service boot failed:', err);
   }

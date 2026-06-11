@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { useAuth } from '@clerk/clerk-react';
+import { useGrimoireAuth } from '@/hooks/useGrimoireAuth';
 import {
   configureSocketSession,
   connectSocket,
@@ -43,7 +43,7 @@ export function useSocket(
   campaignId: string | null,
   retryNonce = 0,
 ) {
-  const { isLoaded, getToken } = useAuth();
+  const { isLoaded, getToken } = useGrimoireAuth();
   const getTokenRef = useRef(getToken);
   getTokenRef.current = getToken;
 

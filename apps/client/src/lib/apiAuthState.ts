@@ -27,10 +27,3 @@ export function getApiAuthBlockReason(): string | null {
 export function wasApiSessionVerifiedRecently(): boolean {
   return Date.now() - lastVerifiedAt < VERIFY_TTL_MS;
 }
-
-export function isClerkDevKeyOnPublicSite(): boolean {
-  const key = import.meta.env['VITE_CLERK_PUBLISHABLE_KEY'] as string | undefined;
-  if (!key?.startsWith('pk_test_')) return false;
-  if (typeof window === 'undefined') return false;
-  return !/^(localhost|127\.0\.0\.1)$/i.test(window.location.hostname);
-}

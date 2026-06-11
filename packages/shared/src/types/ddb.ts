@@ -203,6 +203,44 @@ export interface DdbLibraryImportResult {
   skipped?: number;
 }
 
+export type DdbLibraryImportJobStatus = 'running' | 'completed' | 'failed' | 'cancelled';
+
+export type DdbLibraryImportJobPhase =
+  | 'monsters'
+  | 'spells'
+  | 'items'
+  | 'complete'
+  | 'listing-monsters'
+  | 'listing-spells'
+  | 'listing-items';
+
+export interface DdbLibraryImportJobProgress {
+  phase: DdbLibraryImportJobPhase;
+  sourceId: number;
+  sourceName?: string;
+  bookIndex?: number;
+  bookTotal?: number;
+  done: number;
+  total: number;
+  bookImported?: number;
+  bookErrors?: number;
+}
+
+export interface DdbLibraryImportJob {
+  id: string;
+  status: DdbLibraryImportJobStatus;
+  skipExisting: boolean;
+  campaignId?: number | null;
+  sourceIds: number[];
+  sourceNames: Record<number, string>;
+  progress: DdbLibraryImportJobProgress | null;
+  result: DdbLibraryImportResult | null;
+  errorMessage?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string | null;
+}
+
 export interface DdbRollBridgePayload {
   sessionId: string;
   characterName: string;

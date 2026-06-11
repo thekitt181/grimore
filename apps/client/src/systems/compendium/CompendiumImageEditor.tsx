@@ -7,7 +7,7 @@ import { getEntryImages, saveEntryImages } from './compendiumApi';
 import { withCompendiumImageCacheBust, sameCompendiumImageUrl } from './compendiumImageUrl';
 import { syncCompendiumImageToHandouts } from './syncHandoutImages';
 import { preloadCompendiumImageUrl } from './preloadCompendiumImage';
-import { useAuth } from '@clerk/clerk-react';
+import { useGrimoireAuth } from '@/hooks/useGrimoireAuth';
 
 function saveErrorMessage(err: unknown): string {
   if (axios.isAxiosError(err)) {
@@ -33,7 +33,7 @@ export function CompendiumImageEditor({
 }) {
   const qc = useQueryClient();
   const fileRef = useRef<HTMLInputElement>(null);
-  const { isSignedIn } = useAuth();
+  const { isSignedIn } = useGrimoireAuth();
   const canEditImages = imageEditable && Boolean(isSignedIn);
   const imagesEnabled = Boolean(isSignedIn) && Boolean(entryId);
   const [urlDraft, setUrlDraft] = useState('');

@@ -2,13 +2,11 @@ import { useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { CompendiumTab } from './compendiumStore';
 import { useCompendiumUiStore } from './compendiumStore';
-import { createItem, createMonster, createSpell, fetchSources, saveEntryImages } from './compendiumApi';
-import { fileToDataUrl } from '@/lib/imagePersistence';
+import { createItem, createMonster, createSpell, fetchSources } from './compendiumApi';
 import {
   applyItemFields,
   applyMonsterFields,
   applySpellFields,
-  ocrImageDataUrl,
   parseItemStatBlock,
   parseMonsterStatBlock,
   parseSpellStatBlock,
@@ -51,12 +49,7 @@ export function CompendiumCreateForm({ tab }: { tab: CompendiumTab }) {
   const [cr, setCr] = useState('0');
   const [level, setLevel] = useState(0);
   const [description, setDescription] = useState('');
-  const [imageUrl, setImageUrl] = useState('');
-  const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [importMsg, setImportMsg] = useState<string | null>(null);
-  const [scanning, setScanning] = useState(false);
-  const [scanPct, setScanPct] = useState(0);
-  const imageFileRef = useRef<HTMLInputElement>(null);
   const pasteRef = useRef<HTMLTextAreaElement>(null);
 
   const sourcesQ = useQuery({
@@ -105,46 +98,12 @@ export function CompendiumCreateForm({ tab }: { tab: CompendiumTab }) {
     setImportMsg(filled > 0 ? `Filled ${filled} field(s) from text.` : 'Could not parse fields — check the text format.');
   }
 
-  async function handleScanImage() {
-    const img = imagePreview ?? imageUrl.trim();
-    if (!img) {
-      setImportMsg('Upload or paste an image URL first.');
-      return;
-    }
-    setScanning(true);
-    setScanPct(0);
-    setImportMsg('Scanning image…');
-    try {
-      const text = await ocrImageDataUrl(img, setScanPct);
-      const filled = applyParsedText(text);
-      setImportMsg(
-        filled > 0
-          ? `Scanned image — filled ${filled} field(s). Review before saving.`
-          : 'OCR complete but could not parse fields — edit description manually.',
-      );
-    } catch {
-      setImportMsg('Image scan failed. Paste stat block text instead.');
-    } finally {
-      setScanning(false);
-      setScanPct(0);
-    }
-  }
-
-  async function onImageFile(file: File) {
-    const dataUrl = await fileToDataUrl(file);
-    setImagePreview(dataUrl);
-    setImageUrl('');
-    setImportMsg('Image ready — click Scan image to auto-fill stats.');
-  }
-
   const createMut = useMutation({
     mutationFn: async () => {
       const trimmed = name.trim();
       if (!trimmed) throw new Error('Name required');
       const source = resolveSource();
       if (!source) throw new Error('Select or enter a source book');
-
-      const img = imagePreview ?? (imageUrl.trim() || null);
 
       if (tab === 'monsters') {
         const entry = await createMonster({
@@ -156,7 +115,6 @@ export function CompendiumCreateForm({ tab }: { tab: CompendiumTab }) {
           cr,
           description,
         });
-        if (img) await saveEntryImages('monster', entry.id, img);
         return { entry, source, sourceKind };
       }
       if (tab === 'items') {
@@ -166,7 +124,6 @@ export function CompendiumCreateForm({ tab }: { tab: CompendiumTab }) {
           source,
           description,
         });
-        if (img) await saveEntryImages('item', entry.id, img);
         return { entry, source, sourceKind };
       }
       const entry = await createSpell({
@@ -175,7 +132,6 @@ export function CompendiumCreateForm({ tab }: { tab: CompendiumTab }) {
         source,
         description,
       });
-      if (img) await saveEntryImages('spell', entry.id, img);
       return { entry, source, sourceKind };
     },
     onSuccess: ({ entry, source, sourceKind: kind }) => {
@@ -260,51 +216,16 @@ export function CompendiumCreateForm({ tab }: { tab: CompendiumTab }) {
         style={{ background: 'var(--color-bg-primary)', border: '1px solid var(--color-border)' }}
       >
         <p className="font-ui text-[10px] font-semibold" style={{ color: 'var(--color-accent-gold)' }}>
-          Import from image or text
+          Import from text
         </p>
-        {imagePreview && (
-          <img src={imagePreview} alt="" className="max-h-24 rounded object-contain w-full" />
-        )}
-        <input
-          className="input-dark text-xs w-full py-0.5"
-          placeholder="Image URL (optional reference)"
-          value={imageUrl}
-          onChange={(e) => {
-            setImageUrl(e.target.value);
-            setImagePreview(e.target.value.trim() || null);
-          }}
-        />
-        <input
-          ref={imageFileRef}
-          type="file"
-          accept="image/*"
-          className="hidden"
-          onChange={async (e) => {
-            const file = e.target.files?.[0];
-            if (file) await onImageFile(file);
-          }}
-        />
-        <div className="flex flex-wrap gap-1">
-          <button type="button" className="btn-ghost text-xs py-0.5 px-1" onClick={() => imageFileRef.current?.click()}>
-            Upload image
-          </button>
-          <button
-            type="button"
-            className="btn-ghost text-xs py-0.5 px-1"
-            disabled={scanning || (!imagePreview && !imageUrl.trim())}
-            onClick={() => void handleScanImage()}
-          >
-            {scanning ? `Scanning… ${scanPct}%` : 'Scan image'}
-          </button>
-          <button type="button" className="btn-ghost text-xs py-0.5 px-1" onClick={handlePasteStatBlock}>
-            Import text
-          </button>
-        </div>
         <textarea
           ref={pasteRef}
           className="input-dark text-xs w-full h-16"
-          placeholder="Or paste stat block / item / spell text here, then Import text"
+          placeholder="Paste stat block / item / spell text here"
         />
+        <button type="button" className="btn-ghost text-xs py-0.5 px-1" onClick={handlePasteStatBlock}>
+          Import text
+        </button>
         {importMsg && (
           <p className="font-ui text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>{importMsg}</p>
         )}
@@ -359,7 +280,7 @@ export function CompendiumCreateForm({ tab }: { tab: CompendiumTab }) {
       <div className="flex gap-1">
         <button
           className="btn-primary text-xs px-2 py-0.5 flex-1"
-          disabled={!name.trim() || !sourceReady || createMut.isPending || scanning}
+          disabled={!name.trim() || !sourceReady || createMut.isPending}
           onClick={() => createMut.mutate()}
         >
           {createMut.isPending ? 'Saving…' : 'Create & sync'}

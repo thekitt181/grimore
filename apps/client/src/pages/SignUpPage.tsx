@@ -1,7 +1,45 @@
-import { SignUp } from '@clerk/clerk-react';
-import { grimoireClerkAppearance } from '@/lib/clerkAppearance';
+import { useState, type FormEvent } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import { authClient } from '@/lib/auth-client';
 
 export function SignUpPage() {
+  const navigate = useNavigate();
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  async function onSubmit(e: FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setLoading(true);
+    try {
+      const { error: signUpError } = await authClient.signUp.email({
+        name: name.trim() || email.split('@')[0] || 'Adventurer',
+        email,
+        password,
+      });
+      if (signUpError) {
+        setError(signUpError.message ?? 'Sign up failed');
+        return;
+      }
+      navigate('/');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Sign up failed');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function signUpWithGoogle() {
+    setError(null);
+    await authClient.signIn.social({
+      provider: 'google',
+      callbackURL: '/',
+    });
+  }
+
   return (
     <div
       className="min-h-screen flex items-center justify-center p-4"
@@ -17,16 +55,111 @@ export function SignUpPage() {
             GRIMOIRE
           </h1>
           <p className="font-body text-base mt-1" style={{ color: 'var(--color-text-secondary)' }}>
-            Begin your adventure
+            Dark Fantasy Virtual Tabletop
           </p>
         </div>
 
-        <SignUp
-          routing="path"
-          path="/sign-up"
-          afterSignUpUrl="/"
-          appearance={grimoireClerkAppearance}
-        />
+        <form
+          onSubmit={onSubmit}
+          className="rounded-lg border p-6 space-y-4"
+          style={{ background: 'var(--color-bg-secondary)', borderColor: 'var(--color-border)' }}
+        >
+          <h2 className="font-display text-xl" style={{ color: 'var(--color-text-primary)' }}>
+            Create account
+          </h2>
+
+          {error && (
+            <p className="text-sm rounded px-3 py-2" style={{ background: '#3a1515', color: '#ffb4b4' }}>
+              {error}
+            </p>
+          )}
+
+          <label className="block space-y-1">
+            <span className="font-ui text-sm" style={{ color: 'var(--color-text-secondary)' }}>
+              Display name
+            </span>
+            <input
+              type="text"
+              autoComplete="name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className="w-full rounded px-3 py-2 font-ui text-sm border"
+              style={{
+                background: 'var(--color-bg-primary)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text-primary)',
+              }}
+            />
+          </label>
+
+          <label className="block space-y-1">
+            <span className="font-ui text-sm" style={{ color: 'var(--color-text-secondary)' }}>
+              Email
+            </span>
+            <input
+              type="email"
+              required
+              autoComplete="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="w-full rounded px-3 py-2 font-ui text-sm border"
+              style={{
+                background: 'var(--color-bg-primary)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text-primary)',
+              }}
+            />
+          </label>
+
+          <label className="block space-y-1">
+            <span className="font-ui text-sm" style={{ color: 'var(--color-text-secondary)' }}>
+              Password
+            </span>
+            <input
+              type="password"
+              required
+              minLength={8}
+              autoComplete="new-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="w-full rounded px-3 py-2 font-ui text-sm border"
+              style={{
+                background: 'var(--color-bg-primary)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text-primary)',
+              }}
+            />
+          </label>
+
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full rounded py-2 font-ui text-sm font-semibold disabled:opacity-60"
+            style={{ background: 'var(--color-accent-gold)', color: '#1a1208' }}
+          >
+            {loading ? 'Creating account…' : 'Sign up'}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => void signUpWithGoogle()}
+            className="w-full rounded py-2 font-ui text-sm border"
+            style={{
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text-primary)',
+              background: 'transparent',
+            }}
+          >
+            Continue with Google
+          </button>
+
+          <p className="text-center font-ui text-sm" style={{ color: 'var(--color-text-secondary)' }}>
+            Already have an account?{' '}
+            <Link to="/sign-in" style={{ color: 'var(--color-accent-gold)' }}>
+              Sign in
+            </Link>
+          </p>
+        </form>
       </div>
     </div>
   );
