@@ -1,3 +1,10 @@
+import {
+  scanMapImageFromPixelData,
+  type MapSceneScanOptions,
+  type MapSceneScanResult,
+  type MapScanInput,
+} from '@grimoire/shared';
+
 export {
   buildSceneFromWalkableGrid,
   extractWallSegments,
@@ -30,9 +37,9 @@ function readImagePixels(img: HTMLImageElement, width: number, height: number): 
 }
 
 export async function scanMapImageForScene(
-  map: import('@grimoire/shared').MapScanInput & { id?: string; backgroundUrl: string | null },
-  options?: import('@grimoire/shared').MapSceneScanOptions,
-): Promise<import('@grimoire/shared').MapSceneScanResult | null> {
+  map: MapScanInput & { id?: string; backgroundUrl: string | null },
+  options?: MapSceneScanOptions,
+): Promise<MapSceneScanResult | null> {
   if (!map.backgroundUrl) return null;
 
   const maxDim = 2800;

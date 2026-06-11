@@ -8,15 +8,17 @@ import {
   type MapSceneScanResult,
 } from './mapImageSceneScan';
 
+type FloorplanScanMeta = { method: 'cubicasa' | 'cv'; fallback?: boolean };
+
+type ScanPayload = { scene: MapSceneScanResult; meta: FloorplanScanMeta } | null;
+
 const scanCache = new Map<string, MapSceneScanResult>();
-const inflightScans = new Map<string, Promise<MapSceneScanResult | null>>();
+const inflightScans = new Map<string, Promise<ScanPayload>>();
 
 type ScanApiResponse = MapSceneScanResult & {
   wallCells: number[];
   meta?: { method: 'cubicasa' | 'cv'; fallback?: boolean };
 };
-
-type FloorplanScanMeta = { method: 'cubicasa' | 'cv'; fallback?: boolean };
 
 async function scanMapViaServer(
   map: MapItem,
