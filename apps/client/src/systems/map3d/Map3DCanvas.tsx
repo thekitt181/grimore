@@ -99,18 +99,13 @@ function Map3DSceneContent() {
 
   return (
     <>
-      <ambientLight intensity={0.55} />
-      <directionalLight
-        position={[800, 1200, 400]}
-        intensity={1.15}
-        castShadow
-        shadow-mapSize={[2048, 2048]}
-      />
-      <hemisphereLight args={['#c9a84c', '#0a0a0f', 0.25]} />
+      <ambientLight intensity={0.72} />
+      <directionalLight position={[800, 1400, 500]} intensity={0.95} castShadow shadow-mapSize={[2048, 2048]} />
+      <directionalLight position={[-400, 600, -300]} intensity={0.35} />
 
       {maps.map((map) => (
         <group key={map.id}>
-          <Map3DGround map={map} />
+          <Map3DGround map={map} clayMode={scanImageWalls} />
           {autoExtrudeWalls && scanImageWalls && (
             <Map3DScannedScene map={map} wallHeight={wallHeight} />
           )}
@@ -159,8 +154,8 @@ export function Map3DCanvas() {
       style={{ position: 'absolute', inset: 0, touchAction: 'none' }}
       gl={{ antialias: true, alpha: false }}
     >
-      <color attach="background" args={['#0a0a0f']} />
-      <fog attach="fog" args={['#0a0a0f', span * 2, span * 6]} />
+      <color attach="background" args={['#1e1e22']} />
+      <fog attach="fog" args={['#1e1e22', span * 2, span * 6]} />
       <Suspense fallback={null}>
         <Map3DSceneContent />
       </Suspense>

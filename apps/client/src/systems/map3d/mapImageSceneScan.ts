@@ -31,6 +31,13 @@ export type ScannedStairs = {
   steps: number;
 };
 
+export type ScannedPit = {
+  id: string;
+  cx: number;
+  cz: number;
+  radiusCells: number;
+};
+
 export type MapSceneScanResult = {
   cols: number;
   rows: number;
@@ -39,6 +46,7 @@ export type MapSceneScanResult = {
   props: ScannedProp[];
   waters: ScannedWater[];
   stairs: ScannedStairs[];
+  pits: ScannedPit[];
   featureCount: number;
 };
 
@@ -188,11 +196,24 @@ function isStairs(stats: CellStats): boolean {
 }
 
 function isDetail(stats: CellStats, floorLum: number): boolean {
-  if (Math.abs(stats.lum - floorLum) < 28 && stats.variance < 220) return false;
-  if (stats.variance > 350) return true;
-  if (Math.abs(stats.lum - floorLum) > 45 && stats.lum > 40 && stats.lum < 210) return true;
-  if (stats.darkRatio > 0.12 && stats.darkRatio < 0.55 && stats.lum > 55) return true;
+  if (Math.abs(stats.lum - floorLum) < 18 && stats.variance < 160) return false;
+  if (stats.variance > 220) return true;
+  if (Math.abs(stats.lum - floorLum) > 32 && stats.lum > 35 && stats.lum < 215) return true;
+  if (stats.darkRatio > 0.08 && stats.darkRatio < 0.62 && stats.lum > 45) return true;
   return false;
+}
+
+function isSubCellProp(stats: CellStats, floorLum: number, opts: Required<MapSceneScanOptions>): boolean {
+  if (isWall(stats, opts) || isWater(stats)) return false;
+  if (Math.abs(stats.lum - floorLum) < 16 && stats.variance < 140) return false;
+  return stats.variance > 180 || Math.abs(stats.lum - floorLum) > 24 || stats.darkRatio > 0.1;
+}
+
+function classifySubProp(stats: CellStats, floorLum: number): PropKind {
+  if (stats.darkRatio > 0.35 && stats.lum < floorLum - 20) return 'prop';
+  if (stats.lum < floorLum - 35) return 'chair';
+  if (stats.variance > 500) return 'table';
+  return 'prop';
 }
 
 type Component = {
@@ -400,12 +421,129 @@ function cellToWorld(
 ): { wx: number; wz: number } {
   const gs = map.gridSize;
   return {
-    wx: map.x + map.gridOffsetX + cx * gs + gs / 2,
-    wz: map.y + map.gridOffsetY + cy * gs + gs / 2,
+    wx: map.x + map.gridOffsetX + cx * gs,
+    wz: map.y + map.gridOffsetY + cy * gs,
   };
 }
 
-const MAX_PROPS = 400;
+function detectPits(
+  wallRaw: Uint8Array,
+  wallCells: Uint8Array,
+  cols: number,
+  rows: number,
+  map: Pick<MapItem, 'x' | 'y' | 'gridOffsetX' | 'gridOffsetY' | 'gridSize'>,
+): ScannedPit[] {
+  const interior = new Uint8Array(cols * rows);
+  for (let y = 1; y < rows - 1; y++) {
+    for (let x = 1; x < cols - 1; x++) {
+      const idx = y * cols + x;
+      if (!wallRaw[idx] || wallCells[idx]) continue;
+      if (wallRaw[idx - 1] && wallRaw[idx + 1] && wallRaw[idx - cols] && wallRaw[idx + cols]) {
+        interior[idx] = 1;
+      }
+    }
+  }
+
+  const pits: ScannedPit[] = [];
+  const visited = new Uint8Array(cols * rows);
+  for (let y = 0; y < rows; y++) {
+    for (let x = 0; x < cols; x++) {
+      const comp = floodComponent(
+        interior,
+        new Array(cols * rows).fill(null),
+        cols,
+        rows,
+        x,
+        y,
+        1,
+        visited,
+      );
+      if (!comp || comp.cells.length < 4) continue;
+      const w = comp.maxX - comp.minX + 1;
+      const h = comp.maxY - comp.minY + 1;
+      const aspect = Math.max(w, h) / Math.max(1, Math.min(w, h));
+      if (aspect > 2.2) continue;
+      const cx = (comp.minX + comp.maxX + 1) / 2;
+      const cy = (comp.minY + comp.maxY + 1) / 2;
+      const { wx, wz } = cellToWorld(map, cx, cy);
+      pits.push({
+        id: `pit-${pits.length}`,
+        cx: wx,
+        cz: wz,
+        radiusCells: Math.max(w, h) / 2,
+      });
+    }
+  }
+  return pits;
+}
+
+function scanSubCellProps(
+  data: Uint8ClampedArray,
+  sampleW: number,
+  sampleH: number,
+  map: Pick<MapItem, 'x' | 'y' | 'gridOffsetX' | 'gridOffsetY' | 'gridSize'>,
+  cols: number,
+  rows: number,
+  scaledGrid: number,
+  scaledOffsetX: number,
+  scaledOffsetY: number,
+  wallRaw: Uint8Array,
+  types: Uint8Array,
+  floorLum: number,
+  opts: Required<MapSceneScanOptions>,
+  existing: ScannedProp[],
+  limit: number,
+): ScannedProp[] {
+  const SUB = 3;
+  const out: ScannedProp[] = [];
+  const gs = map.gridSize;
+
+  for (let cy = 0; cy < rows; cy++) {
+    for (let cx = 0; cx < cols; cx++) {
+      const idx = cy * cols + cx;
+      if (wallRaw[idx] || types[idx] === CELL_WATER || types[idx] === CELL_STAIRS) continue;
+
+      for (let sy = 0; sy < SUB; sy++) {
+        for (let sx = 0; sx < SUB; sx++) {
+          const x0 = Math.min(
+            sampleW - 1,
+            Math.max(0, scaledOffsetX + cx * scaledGrid + Math.floor((sx * scaledGrid) / SUB)),
+          );
+          const y0 = Math.min(
+            sampleH - 1,
+            Math.max(0, scaledOffsetY + cy * scaledGrid + Math.floor((sy * scaledGrid) / SUB)),
+          );
+          const x1 = Math.min(sampleW, x0 + Math.max(2, Math.ceil(scaledGrid / SUB)));
+          const y1 = Math.min(sampleH, y0 + Math.max(2, Math.ceil(scaledGrid / SUB)));
+          const stats = sampleCellStats(data, sampleW, sampleH, x0, y0, x1, y1, opts.darkPixelLum);
+          if (!stats || !isSubCellProp(stats, floorLum, opts)) continue;
+
+          const fcx = cx + (sx + 0.5) / SUB;
+          const fcy = cy + (sy + 0.5) / SUB;
+          const { wx, wz } = cellToWorld(map, fcx, fcy);
+          const tooClose = [...existing, ...out].some(
+            (p) => Math.hypot(p.cx - wx, p.cz - wz) < gs * 0.35,
+          );
+          if (tooClose) continue;
+
+          out.push({
+            id: `sub-${out.length}`,
+            kind: classifySubProp(stats, floorLum),
+            cx: wx,
+            cz: wz,
+            widthCells: 0.85 / SUB,
+            depthCells: 0.85 / SUB,
+            rotation: (sx + sy) % 2 === 0 ? 0 : Math.PI / 4,
+          });
+          if (out.length >= limit) return out;
+        }
+      }
+    }
+  }
+  return out;
+}
+
+const MAX_PROPS = 800;
 
 export async function scanMapImageForScene(
   map: Pick<MapItem, 'id' | 'backgroundUrl' | 'width' | 'height' | 'gridSize' | 'gridOffsetX' | 'gridOffsetY' | 'x' | 'y'>,
@@ -554,6 +692,27 @@ export async function scanMapImageForScene(
     if (props.length >= MAX_PROPS) break;
   }
 
+  const subProps = scanSubCellProps(
+    data,
+    sampleW,
+    sampleH,
+    map,
+    cols,
+    rows,
+    scaledGrid,
+    scaledOffsetX,
+    scaledOffsetY,
+    wallRaw,
+    types,
+    floorLum,
+    opts,
+    props,
+    MAX_PROPS - props.length,
+  );
+  props.push(...subProps);
+
+  const pits = detectPits(wallRaw, wallCells, cols, rows, map);
+
   let wallCellCount = 0;
   for (let i = 0; i < wallCells.length; i++) {
     if (wallCells[i]) wallCellCount++;
@@ -567,7 +726,8 @@ export async function scanMapImageForScene(
     props,
     waters,
     stairs,
-    featureCount: wallCellCount + props.length + waters.length + stairs.length,
+    pits,
+    featureCount: wallCellCount + props.length + waters.length + stairs.length + pits.length,
   };
 }
 
@@ -575,5 +735,5 @@ export function sceneScanCacheKey(
   map: Pick<MapItem, 'id' | 'backgroundUrl' | 'width' | 'height' | 'gridSize' | 'gridOffsetX' | 'gridOffsetY'>,
   threshold: number,
 ): string {
-  return `scene|v2|${map.id}|${map.backgroundUrl ?? ''}|${map.width}x${map.height}|${map.gridSize}|${map.gridOffsetX},${map.gridOffsetY}|t${threshold}`;
+  return `scene|v3|${map.id}|${map.backgroundUrl ?? ''}|${map.width}x${map.height}|${map.gridSize}|${map.gridOffsetX},${map.gridOffsetY}|t${threshold}`;
 }

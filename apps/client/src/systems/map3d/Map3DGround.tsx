@@ -2,13 +2,14 @@ import { useMemo } from 'react';
 import type { MapItem } from '@/systems/scene/types';
 import { itemCenterXZ } from './coords';
 import { useThreeTexture } from './useThreeTexture';
+import { CLAY, clayMaterialProps } from './clayMaterials';
 
-export function Map3DGround({ map }: { map: MapItem }) {
-  const { texture, status } = useThreeTexture(map.backgroundUrl);
+export function Map3DGround({ map, clayMode = false }: { map: MapItem; clayMode?: boolean }) {
+  const { texture, status } = useThreeTexture(clayMode ? null : map.backgroundUrl);
   const [cx, cz] = itemCenterXZ(map);
 
   const gridLines = useMemo(() => {
-    if (!map.showGrid) return null;
+    if (!map.showGrid || clayMode) return null;
     const cols = Math.ceil(map.width / map.gridSize);
     const rows = Math.ceil(map.height / map.gridSize);
     const points: number[] = [];
@@ -33,10 +34,11 @@ export function Map3DGround({ map }: { map: MapItem }) {
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[cx, 0, cz]}>
         <planeGeometry args={[map.width, map.height]} />
         <meshStandardMaterial
-          {...(texture ? { map: texture } : {})}
-          color={texture ? '#ffffff' : status === 'error' ? '#3d2020' : '#14141c'}
+          {...(texture && !clayMode ? { map: texture } : {})}
+          {...(clayMode ? clayMaterialProps('floor') : {})}
+          color={clayMode ? CLAY.floor : texture ? '#ffffff' : status === 'error' ? '#3d2020' : '#14141c'}
           roughness={0.92}
-          metalness={0.05}
+          metalness={0.02}
         />
       </mesh>
 

@@ -240,7 +240,7 @@ export function MapToolbar() {
               {scanStatus === 'ready' && scanResult && (
                 <span className="font-ui text-[9px]" style={{ color: 'var(--color-text-secondary)' }}>
                   {scanResult.featureCount > 0
-                    ? `${scanResult.wallCellCount} walls · ${scanResult.props.length} props · ${scanResult.waters.length} water · ${scanResult.stairs.length} stairs`
+                    ? `${scanResult.wallCellCount} walls · ${scanResult.props.length} props · ${scanResult.pits.length} pits · ${scanResult.waters.length} water · ${scanResult.stairs.length} stairs`
                     : 'Nothing detected — lower sensitivity or rescan'}
                 </span>
               )}
