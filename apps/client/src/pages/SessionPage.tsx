@@ -211,8 +211,18 @@ export function SessionPage() {
                 className="w-1.5 h-1.5 rounded-full"
                 style={{ background: isConnected ? '#4ade80' : '#f87171' }}
               />
-              <span className="font-ui text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                {isConnected ? 'Live' : connectionError ? (connectionError.includes('…') ? connectionError : 'Offline') : 'Reconnecting…'}
+              <span
+                className="font-ui text-xs"
+                style={{ color: 'var(--color-text-secondary)' }}
+                title={connectionError ?? undefined}
+              >
+                {isConnected
+                  ? 'Live'
+                  : connectionError?.includes('…')
+                    ? connectionError
+                    : connectionError
+                      ? 'Offline'
+                      : 'Reconnecting…'}
               </span>
             </div>
             {!isConnected && (

@@ -19,6 +19,10 @@ export const authClient = createAuthClient({
   baseURL: getServerOrigin(),
   plugins: [dashClient()] as never[],
   fetchOptions: {
+    auth: {
+      type: 'Bearer',
+      token: () => getBearerToken() ?? '',
+    },
     onSuccess: (ctx) => {
       const authToken = ctx.response.headers.get('set-auth-token');
       if (authToken) setBearerToken(authToken);
@@ -26,13 +30,44 @@ export const authClient = createAuthClient({
   },
 });
 
-export async function getAuthBearerToken(_opts?: { skipCache?: boolean }): Promise<string | null> {
+let bearerHydratePromise: Promise<string | null> | null = null;
+
+async function hydrateBearerFromSession(): Promise<string | null> {
+  try {
+    const { data } = await authClient.getSession();
+    if (!data?.session) return null;
+
+    const fromHeader = getBearerToken();
+    if (fromHeader) return fromHeader;
+
+    const sessionToken = (data.session as { token?: string }).token;
+    if (sessionToken) {
+      setBearerToken(sessionToken);
+      return sessionToken;
+    }
+  } catch (err) {
+    console.warn('[Auth] Bearer token hydration failed:', err);
+  }
   return getBearerToken();
+}
+
+/** Bearer token for Socket.io + API — hydrates from Better Auth session when missing (e.g. Google OAuth). */
+export async function getAuthBearerToken(opts?: { skipCache?: boolean }): Promise<string | null> {
+  if (!opts?.skipCache) {
+    const cached = getBearerToken();
+    if (cached) return cached;
+  }
+
+  if (!bearerHydratePromise || opts?.skipCache) {
+    bearerHydratePromise = hydrateBearerFromSession();
+  }
+  return bearerHydratePromise;
 }
 
 export async function signOutAndClear(): Promise<void> {
   await authClient.signOut();
   setBearerToken(null);
+  bearerHydratePromise = null;
 }
 
 /** Start Google OAuth — redirects on success; returns an error message otherwise. */

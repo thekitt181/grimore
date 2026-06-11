@@ -102,7 +102,7 @@ function softDisconnect(): void {
 }
 
 export async function connectSocket(
-  token: string,
+  token: string | null,
   options?: { retries?: number },
 ): Promise<void> {
   const retries = options?.retries ?? (isMobileClient() ? 6 : 3);
@@ -151,9 +151,13 @@ export async function reconnectSocketWithFreshAuth(): Promise<void> {
   });
 }
 
-async function connectSocketOnce(token: string): Promise<void> {
+async function connectSocketOnce(token: string | null): Promise<void> {
   const s = getSocket();
-  s.auth = { token };
+  if (token) {
+    s.auth = { token };
+  } else {
+    s.auth = {};
+  }
 
   if (s.connected) {
     return;

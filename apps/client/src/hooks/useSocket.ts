@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { useGrimoireAuth } from '@/hooks/useGrimoireAuth';
+import { authClient } from '@/lib/auth-client';
 import {
   configureSocketSession,
   connectSocket,
@@ -247,18 +248,23 @@ export function useSocket(
         if (!alive) return;
 
         if (!token) {
-          if (attempt < maxAttempts - 1) {
-            await delay(isMobileClient() ? 2000 * (attempt + 1) : 1200 * (attempt + 1));
-            return connect(attempt + 1);
+          const session = await authClient.getSession();
+          if (!session.data?.session) {
+            if (attempt < maxAttempts - 1) {
+              await delay(isMobileClient() ? 2000 * (attempt + 1) : 1200 * (attempt + 1));
+              return connect(attempt + 1);
+            }
+            setConnectionError('Sign in to join the live session');
+            setConnected(false);
+            return;
           }
-          setConnectionError('Sign in to join the live session');
-          setConnected(false);
-          return;
         }
+
+        const socketToken = token ?? (await getTokenRef.current({ skipCache: true }));
 
         attachHandlers();
 
-        await connectSocket(token, { retries: isMobileClient() ? 6 : 3 });
+        await connectSocket(socketToken, { retries: isMobileClient() ? 6 : 3 });
         if (!alive) return;
 
         if (socket.connected) {

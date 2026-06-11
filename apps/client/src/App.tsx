@@ -36,12 +36,19 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 }
 
 export default function App() {
-  const { getToken } = useGrimoireAuth();
+  const { getToken, isSignedIn, isLoaded } = useGrimoireAuth();
 
   // Register bearer token getter for axios interceptor (runs once on mount)
   useEffect(() => {
     setAuthTokenGetter(async (opts) => (await getToken(opts)) ?? null);
   }, [getToken]);
+
+  // Google OAuth / cookie sessions may not have set-auth-token until we hydrate once.
+  useEffect(() => {
+    if (isLoaded && isSignedIn) {
+      void getToken({ skipCache: true });
+    }
+  }, [isLoaded, isSignedIn, getToken]);
 
   return (
     <Routes>
