@@ -14,6 +14,7 @@ import userRoutes from './routes/users';
 import sessionRoutes from './routes/sessions';
 import compendiumRoutes from './routes/compendium';
 import ddbRoutes from './routes/ddb';
+import mapsRoutes from './routes/maps';
 import { closeMongo } from './lib/mongo';
 import { getClientOrigins, getPrimaryClientUrl } from './lib/clientOrigins';
 import { toNodeHandler } from 'better-auth/node';
@@ -24,6 +25,7 @@ import { reconcileRawGlobalStorage } from './services/compendiumOwlbearPersist';
 import { warmCompendiumCatalog } from './services/compendiumSync';
 import { startCompendiumExternalWatch } from './services/compendiumExternalWatch';
 import { mountClientSpa } from './lib/serveClient';
+import { isFloorplanScanConfigured } from './services/floorplan/floorplanScanService';
 
 const app = express();
 const httpServer = http.createServer(app);
@@ -91,6 +93,7 @@ app.use('/api/users', userRoutes);
 app.use('/api/sessions', sessionRoutes);
 app.use('/api/compendium', compendiumRoutes);
 app.use('/api/ddb', ddbRoutes);
+app.use('/api/maps', mapsRoutes);
 
 mountClientSpa(app);
 
@@ -163,6 +166,11 @@ async function bootServices(): Promise<void> {
     // API routes need Postgres only — don't block on Redis, compendium, or DDB jobs.
     servicesReady = true;
     console.log('[Server] API ready');
+    if (isFloorplanScanConfigured()) {
+      console.log('[Floorplan] CubiCasa UNet scan available');
+    } else {
+      console.log('[Floorplan] CV wall scan only (run pnpm floorplan:weights + pip install -e services/floorplan-scan for AI doors)');
+    }
 
     void connectRedisInBackground();
     void startCompendiumBackground();

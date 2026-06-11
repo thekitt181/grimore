@@ -1,0 +1,56 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Virtualenvs
+.venv/
+venv/
+
+# IDE
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+.idea/
+.DS_Store
+
+# Data and model artifacts (large, not source)
+data/*
+!data/README.md
+checkpoints/
+runs/
+weights/
+wandb/
+*.ckpt
+*.pt
+*.pth
+*.onnx
+
+# Notebook outputs (keep notebooks small in git)
+.ipynb_checkpoints/
+
+# Scratch notebooks — iteration / learning / scribbling. Never committed.
+# Move a notebook out of here to commit it as a polished narrative artifact.
+notebooks/scratch/
+
+# Local env overrides
+.env
+.env.local
+
+# Local-only notes (security advisories, scratch reminders, etc.)
+NOTES.local.md
+
+# Personal Claude Code settings (local-only)
+.claude/settings.local.json
+
+# Cloudflare wrangler cache
+.wrangler/
+
+# Raw screen recordings — source for docs/preview.gif, not for git
+*.mp4
+
+# Personal training infra — not for users
+runpod_setup.sh

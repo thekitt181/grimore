@@ -1,7 +1,7 @@
 import sharp from 'sharp';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { scanMapImageFromPixelData } from '../../client/src/systems/map3d/mapImageSceneScan.ts';
+import { scanMapImageFromPixelData } from '@grimoire/shared';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const fixture = path.join(__dirname, '../../../scripts/fixtures/dungeon-map-1000x826.png');

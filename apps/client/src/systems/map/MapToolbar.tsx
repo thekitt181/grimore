@@ -85,7 +85,7 @@ export function MapToolbar() {
   const activeMap = getActiveMap();
   const showGrid = activeMap?.showGrid ?? true;
   const wallCount = activeMap?.walls.length ?? 0;
-  const { result: scanResult, status: scanStatus, rescan } = useImageWallScan(
+  const { result: scanResult, status: scanStatus, scanMethod, rescan } = useImageWallScan(
     viewMode === '3d' ? activeMap ?? null : null,
   );
 
@@ -248,7 +248,7 @@ export function MapToolbar() {
           {scanImageWalls && (
             <>
               <span className="font-ui text-[9px] leading-snug" style={{ color: 'var(--color-text-secondary)' }}>
-                Set grid to match map art (e.g. 38px). Align grid to walls, then rescan.
+                CubiCasa AI segmentation — align grid to map art, then rescan.
               </span>
               <label className="font-ui text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
                 Wall sensitivity ({wallScanThreshold})
@@ -274,7 +274,7 @@ export function MapToolbar() {
               {scanStatus === 'ready' && scanResult && (
                 <span className="font-ui text-[9px]" style={{ color: 'var(--color-text-secondary)' }}>
                   {scanResult.featureCount > 0
-                    ? `${scanResult.wallSegments.length} walls · ${scanResult.doors.length} doors`
+                    ? `${scanResult.wallSegments.length} walls · ${scanResult.doors.length} doors · ${scanMethod === 'cubicasa' ? 'AI' : 'CV'}`
                     : 'Nothing detected — lower sensitivity or rescan'}
                 </span>
               )}

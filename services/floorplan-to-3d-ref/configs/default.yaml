@@ -1,0 +1,26 @@
+# ResNet34-UNet on CubiCasa5K, 4-class segmentation.
+
+data:
+  data_dir: data/cubicasa5k
+  image_size: [512, 512]
+  num_workers: 4
+  normalize: true
+  letterbox: true                    # aspect-preserving render + center-pad
+
+model:
+  encoder_name: resnet34
+  encoder_weights: imagenet
+
+optim:
+  lr: 1.0e-3
+  weight_decay: 1.0e-4
+  batch_size: 8
+
+train:
+  epochs: 30
+  log_every: 20
+  device: auto
+  checkpoint_every: 0
+
+output:
+  run_dir: runs

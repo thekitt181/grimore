@@ -14,3 +14,8 @@ apps/server/data/global.json
 coverage
 prisma/migrations/dev
 *.tsbuildinfo
+services/floorplan-scan/weights/
+services/floorplan-scan/src/*.egg-info/
+__pycache__/
+*.pyc
+*.safetensors

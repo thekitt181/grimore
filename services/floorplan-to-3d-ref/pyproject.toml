@@ -1,0 +1,52 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "buildingcv"
+version = "0.0.1"
+description = "Floor-plan structure extraction via computer vision"
+requires-python = ">=3.11"
+# Core deps: light, importable anywhere. No torch here — installing torch is
+# the user's choice (CPU vs CUDA build), pulled in by [train] or [serve].
+dependencies = [
+    "numpy>=1.26",
+    "pillow>=10",
+    "pyyaml>=6",
+    "tqdm>=4.66",
+    "cairosvg>=2.7",
+    "safetensors>=0.4",
+]
+
+[project.optional-dependencies]
+# Training stack.
+train = [
+    "torch>=2.2",
+    "torchvision>=0.17",
+    "segmentation-models-pytorch>=0.3.3",
+    "albumentations>=1.4",
+]
+# Local dev / data exploration.
+dev = [
+    "ruff>=0.4",
+    "ipykernel>=6.29",
+    "jupyter>=1.0",
+    "matplotlib>=3.8",
+]
+# Inference server for the 3D viewer. opencv-python-headless avoids pulling Qt.
+serve = [
+    "torch>=2.2",
+    "torchvision>=0.17",
+    "segmentation-models-pytorch>=0.3.3",
+    "fastapi>=0.110",
+    "uvicorn>=0.27",
+    "python-multipart>=0.0.9",
+    "opencv-python-headless>=4.10",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
