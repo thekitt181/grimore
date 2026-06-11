@@ -33,6 +33,7 @@ import {
 } from '@/systems/scene/sessionPersistence';
 import { mergeSceneItems, sameSceneItemSnapshot, sanitizePersistedItems } from '@/systems/scene/mergeSceneItems';
 import { fileToAssetDataUrl, isMapAssetFile, isModelUrl, modelFormatFromUrl, type ModelFormat } from '@/lib/modelFormats';
+import { persistModelFileForItem } from '@/lib/modelAssetStore';
 import { useWallTool } from './hooks/useWallTool';
 import { useEraserTool } from './hooks/useEraserTool';
 import { useDeleteKey } from './hooks/useDeleteKey';
@@ -50,6 +51,7 @@ interface PendingDrop {
   worldX:  number; worldY:  number;
   url: string;
   modelFormat?: ModelFormat | null;
+  modelFile?: File;
 }
 
 function createDefaultMap(): MapItem {
@@ -196,10 +198,12 @@ export function MapCanvas() {
     const onSync   = ({ items: list }: { items: unknown[] }) => {
       initialSyncRef.current.received = true;
       const serverItems = sanitizePersistedItems(list as Item[]);
-      const localItems = loadItemsLocal(sessionId) ?? (
-        Object.values(useItemStore.getState().items) as Item[]
-      );
+      const memoryItems = Object.values(useItemStore.getState().items) as Item[];
+      const diskItems = loadItemsLocal(sessionId) ?? [];
       const deletedIds = loadDeletedIds(sessionId);
+      const localItems = diskItems.length > 0
+        ? mergeSceneItems(diskItems, memoryItems, deletedIds)
+        : memoryItems;
       initialSyncRef.current.hadItems = serverItems.length > 0 || localItems.length > 0;
 
       if (serverItems.length > 0 || localItems.length > 0) {
@@ -421,6 +425,7 @@ export function MapCanvas() {
           worldY,
           url,
           modelFormat: format,
+          ...(format ? { modelFile: file } : {}),
         });
       })
       .catch(() => {
@@ -481,9 +486,9 @@ export function MapCanvas() {
   }, []);
   function handleCategorySelect(category: ImageCategory) {
     if (!pendingDrop) return;
-    const { url, worldX, worldY, modelFormat } = pendingDrop;
+    const drop = pendingDrop;
     setPendingDrop(null);
-    placeByCategory(category, url, worldX, worldY, modelFormat);
+    void placeByCategory(category, drop.url, drop.worldX, drop.worldY, drop.modelFormat, drop.modelFile);
   }
 
   return (
@@ -535,19 +540,27 @@ export function MapCanvas() {
 
 // ─── Drop placement ───────────────────────────────────────────────────────────
 
-function placeByCategory(
+async function placeByCategory(
   category: ImageCategory,
   url: string,
   worldX: number,
   worldY: number,
   modelFormat?: ModelFormat | null,
+  modelFile?: File,
 ) {
   const store = useItemStore.getState();
   const asModel = modelFormat != null || isModelUrl(url, modelFormat);
+  const sessionId = getPersistSessionId();
 
   if (category === 'map') {
     if (asModel) {
-      addMapModel(url, worldX, worldY);
+      const active = getActiveMap();
+      const mapId = active && !active.backgroundUrl && !active.modelUrl ? active.id : uuidv4();
+      let modelUrl = url;
+      if (modelFile && sessionId) {
+        modelUrl = await persistModelFileForItem(sessionId, mapId, modelFile, url);
+      }
+      addMapItem(null, modelUrl, 2560, 1920, worldX, worldY, mapId);
       return;
     }
     const img = new Image();
@@ -560,11 +573,19 @@ function placeByCategory(
 
   const grid = getActiveMap()?.gridSize ?? DEFAULT_MAP_GRID_SIZE;
   const nameMap: Record<string, string> = { character: 'Character', item: 'Item', prop: 'Prop', other: 'Object' };
+  const tokenId = uuidv4();
+  let modelUrl: string | undefined;
+  if (asModel) {
+    modelUrl = url;
+    if (modelFile && sessionId) {
+      modelUrl = await persistModelFileForItem(sessionId, tokenId, modelFile, url);
+    }
+  }
   const token: TokenItem = {
-    id: uuidv4(), type: 'token', x: worldX - grid / 2, y: worldY - grid / 2, rotation: 0,
+    id: tokenId, type: 'token', x: worldX - grid / 2, y: worldY - grid / 2, rotation: 0,
     width: grid, height: grid, zIndex: 0, locked: false, visible: true,
     name: nameMap[category] ?? 'Token',
-    ...(asModel ? { modelUrl: url } : { imageUrl: url }),
+    ...(asModel && modelUrl ? { modelUrl } : { imageUrl: url }),
     sizeCells: 1,
     hp: 10, maxHp: 10, tempHp: 0, ac: 10, visionRadius: 12, conditions: [],
   };
@@ -572,11 +593,15 @@ function placeByCategory(
   emitItemAdd(token);
 }
 
-function addMapModel(url: string, worldX: number, worldY: number) {
-  addMapItem(null, url, 2560, 1920, worldX, worldY);
-}
-
-function addMapItem(backgroundUrl: string | null, modelUrl: string | null, w: number, h: number, worldX: number, worldY: number) {
+function addMapItem(
+  backgroundUrl: string | null,
+  modelUrl: string | null,
+  w: number,
+  h: number,
+  worldX: number,
+  worldY: number,
+  mapId = uuidv4(),
+) {
   const store = useItemStore.getState();
   const active = getActiveMap();
   // First map with no background → fill it in; otherwise create a new map item.
@@ -593,7 +618,7 @@ function addMapItem(backgroundUrl: string | null, modelUrl: string | null, w: nu
     return;
   }
   const map: MapItem = {
-    id: uuidv4(), type: 'map', x: worldX, y: worldY, rotation: 0,
+    id: mapId, type: 'map', x: worldX, y: worldY, rotation: 0,
     width: w, height: h, zIndex: 0, locked: false, visible: true,
     backgroundUrl, ...(modelUrl ? { modelUrl } : {}), ...defaultMapGrid(w, h), gridType: 'square',
     gridColor: 0x2a2a3a, gridOpacity: 0.8, gridOffsetX: 0, gridOffsetY: 0, showGrid: true,

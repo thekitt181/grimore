@@ -1,0 +1,101 @@
+/** Persist large GLB/STL blobs outside localStorage (refs stored on map/token items). */
+export const GRIMOIRE_MODEL_PREFIX = 'grimoire-model://';
+
+const DB_NAME = 'grimoire-model-assets';
+const STORE = 'assets';
+const DB_VERSION = 1;
+
+function assetKey(sessionId: string, itemId: string): string {
+  return `${sessionId}:${itemId}`;
+}
+
+function openDb(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, DB_VERSION);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(STORE)) {
+        db.createObjectStore(STORE);
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error ?? new Error('IndexedDB open failed'));
+  });
+}
+
+function idbPut(key: string, value: Blob): Promise<void> {
+  return openDb().then(
+    (db) =>
+      new Promise((resolve, reject) => {
+        const tx = db.transaction(STORE, 'readwrite');
+        tx.objectStore(STORE).put(value, key);
+        tx.oncomplete = () => {
+          db.close();
+          resolve();
+        };
+        tx.onerror = () => {
+          db.close();
+          reject(tx.error ?? new Error('IndexedDB put failed'));
+        };
+      }),
+  );
+}
+
+function idbGet(key: string): Promise<Blob | undefined> {
+  return openDb().then(
+    (db) =>
+      new Promise((resolve, reject) => {
+        const tx = db.transaction(STORE, 'readonly');
+        const req = tx.objectStore(STORE).get(key);
+        req.onsuccess = () => {
+          db.close();
+          resolve(req.result as Blob | undefined);
+        };
+        req.onerror = () => {
+          db.close();
+          reject(req.error ?? new Error('IndexedDB get failed'));
+        };
+      }),
+  );
+}
+
+export function isGrimoireModelRef(url: string | null | undefined): url is string {
+  return !!url && url.startsWith(GRIMOIRE_MODEL_PREFIX);
+}
+
+export function toGrimoireModelRef(sessionId: string, itemId: string): string {
+  return `${GRIMOIRE_MODEL_PREFIX}${assetKey(sessionId, itemId)}`;
+}
+
+export async function saveModelAsset(sessionId: string, itemId: string, file: File | Blob): Promise<string> {
+  const key = assetKey(sessionId, itemId);
+  await idbPut(key, file instanceof File ? file : file);
+  return toGrimoireModelRef(sessionId, itemId);
+}
+
+export async function resolveModelAssetUrl(url: string): Promise<string> {
+  if (!isGrimoireModelRef(url)) return url;
+  const key = url.slice(GRIMOIRE_MODEL_PREFIX.length);
+  const blob = await idbGet(key);
+  if (!blob) throw new Error('3D model asset not found in browser storage');
+  return URL.createObjectURL(blob);
+}
+
+/** Inline data URLs blow localStorage quota — store blobs in IndexedDB instead. */
+export function shouldUseModelAssetStore(file: File): boolean {
+  return file.size > 256_000;
+}
+
+export async function persistModelFileForItem(
+  sessionId: string | null,
+  itemId: string,
+  file: File,
+  inlineDataUrl: string,
+): Promise<string> {
+  if (!sessionId || !shouldUseModelAssetStore(file)) return inlineDataUrl;
+  try {
+    return await saveModelAsset(sessionId, itemId, file);
+  } catch {
+    return inlineDataUrl;
+  }
+}

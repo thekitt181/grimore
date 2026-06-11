@@ -1,3 +1,5 @@
+import { GRIMOIRE_MODEL_PREFIX } from '@/lib/modelAssetStore';
+
 export type ModelFormat = 'glb' | 'gltf' | 'stl';
 
 export const MODEL_FILE_ACCEPT =
@@ -14,6 +16,8 @@ export function modelFormatFromName(name: string): ModelFormat | null {
 }
 
 export function modelFormatFromUrl(url: string): ModelFormat | null {
+  if (url.startsWith(GRIMOIRE_MODEL_PREFIX)) return 'glb';
+
   const fromName = modelFormatFromName(url.split('?')[0]?.split('#')[0]?.split('/').pop() ?? '');
   if (fromName) return fromName;
 

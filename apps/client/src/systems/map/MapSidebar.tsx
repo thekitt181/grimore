@@ -15,6 +15,8 @@ import { useMapStore } from './store/mapStore';
 import { useSessionStore } from '@/store/sessionStore';
 import { fileToDataUrl } from '@/lib/imagePersistence';
 import { MAP_ASSET_ACCEPT, fileToAssetDataUrl, isModelFile, isModelUrl } from '@/lib/modelFormats';
+import { persistModelFileForItem } from '@/lib/modelAssetStore';
+import { getPersistSessionId } from '@/systems/scene/sessionPersistence';
 import { CompendiumSidebarList } from '@/systems/compendium/CompendiumSidebarList';
 import { useDdbStore } from '@/systems/ddb/ddbStore';
 
@@ -106,11 +108,20 @@ function GMSidebarContent() {
     applyMapAsset({ backgroundUrl: url, width: w, height: h });
   }
 
-  function applyModel(url: string, w = DEFAULT_MAP_WIDTH, h = DEFAULT_MAP_HEIGHT) {
-    applyMapAsset({ modelUrl: url, width: w, height: h });
+  function applyModel(url: string, file?: File, w = DEFAULT_MAP_WIDTH, h = DEFAULT_MAP_HEIGHT) {
+    void (async () => {
+      const map = getActiveMap();
+      const mapId = map?.id ?? uuidv4();
+      const sessionId = getPersistSessionId();
+      let modelUrl = url;
+      if (file && sessionId) {
+        modelUrl = await persistModelFileForItem(sessionId, mapId, file, url);
+      }
+      applyMapAsset({ modelUrl, width: w, height: h }, mapId);
+    })();
   }
 
-  function applyMapAsset(patch: Partial<MapItem> & { width: number; height: number }) {
+  function applyMapAsset(patch: Partial<MapItem> & { width: number; height: number }, mapId?: string) {
     const map = getActiveMap();
     const gridDefaults = defaultMapGrid(patch.width, patch.height);
     if (map) {
@@ -119,7 +130,7 @@ function GMSidebarContent() {
       emitItemUpdate([{ id: map.id, patch: fullPatch }]);
     } else {
       const m: MapItem = {
-        id: uuidv4(), type: 'map', x: 0, y: 0, rotation: 0, width: patch.width, height: patch.height,
+        id: mapId ?? uuidv4(), type: 'map', x: 0, y: 0, rotation: 0, width: patch.width, height: patch.height,
         zIndex: 0, locked: false, visible: true, backgroundUrl: patch.backgroundUrl ?? null,
         modelUrl: patch.modelUrl ?? null,
         ...gridDefaults, gridType: 'square', gridColor: 0x2a2a3a, gridOpacity: 0.8,
@@ -182,7 +193,7 @@ function GMSidebarContent() {
     try {
       if (isModelFile(file)) {
         const { url } = await fileToAssetDataUrl(file);
-        applyModel(url);
+        applyModel(url, file);
       } else {
         const url = await fileToDataUrl(file);
         const img = new Image();

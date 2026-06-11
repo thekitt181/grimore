@@ -1,9 +1,10 @@
-import { useMemo } from 'react';
+import { useMemo, useEffect } from 'react';
 import { useLoader } from '@react-three/fiber';
 import { useGLTF } from '@react-three/drei';
 import * as THREE from 'three';
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
 import { modelFormatFromUrl } from '@/lib/modelFormats';
+import { useResolvedModelUrl } from './useResolvedModelUrl';
 
 function normalizeRoot(root: THREE.Object3D, targetSize: number, groundAlign: boolean) {
   const box = new THREE.Box3().setFromObject(root);
@@ -46,6 +47,18 @@ function GltfModel({
     return root;
   }, [scene, targetSize, groundAlign]);
 
+  useEffect(() => () => {
+    clone.traverse((child) => {
+      if ((child as THREE.Mesh).isMesh) {
+        const mesh = child as THREE.Mesh;
+        mesh.geometry?.dispose();
+        const mat = mesh.material;
+        if (Array.isArray(mat)) mat.forEach((m) => m.dispose());
+        else mat?.dispose();
+      }
+    });
+  }, [clone]);
+
   return <primitive object={clone} />;
 }
 
@@ -85,10 +98,11 @@ export function SceneModel({
   targetSize: number;
   groundAlign?: boolean;
 }) {
+  const resolvedUrl = useResolvedModelUrl(url);
   const format = modelFormatFromUrl(url);
-  if (!format) return null;
+  if (!format || !resolvedUrl) return null;
   if (format === 'stl') {
-    return <StlModel url={url} targetSize={targetSize} groundAlign={groundAlign} />;
+    return <StlModel url={resolvedUrl} targetSize={targetSize} groundAlign={groundAlign} />;
   }
-  return <GltfModel url={url} targetSize={targetSize} groundAlign={groundAlign} />;
+  return <GltfModel url={resolvedUrl} targetSize={targetSize} groundAlign={groundAlign} />;
 }

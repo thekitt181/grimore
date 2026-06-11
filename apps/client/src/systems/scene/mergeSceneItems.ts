@@ -1,17 +1,22 @@
 import type { Item, MapItem } from './types';
 import { isPersistableImageUrl } from '@/lib/imagePersistence';
+import { isGrimoireModelRef } from '@/lib/modelAssetStore';
+
+function pickAssetUrl(a: string | null, b: string | null): string | null {
+  if (a && (isPersistableImageUrl(a) || isGrimoireModelRef(a))) return a;
+  if (b && (isPersistableImageUrl(b) || isGrimoireModelRef(b))) return b;
+  return null;
+}
 
 function pickBackgroundUrl(a: string | null, b: string | null): string | null {
-  if (isPersistableImageUrl(a)) return a;
-  if (isPersistableImageUrl(b)) return b;
-  return null;
+  return pickAssetUrl(a, b);
 }
 
 function mergeMapItem(server: MapItem, local: MapItem): MapItem {
   return {
     ...server,
     backgroundUrl: pickBackgroundUrl(server.backgroundUrl, local.backgroundUrl),
-    modelUrl: pickBackgroundUrl(server.modelUrl ?? null, local.modelUrl ?? null),
+    modelUrl: pickAssetUrl(local.modelUrl ?? null, server.modelUrl ?? null),
     walls: (server.walls?.length ? server.walls : local.walls) ?? [],
     width: server.width || local.width,
     height: server.height || local.height,
@@ -38,8 +43,8 @@ export function mergeSceneItems(
     if (item.type === 'map' && loc?.type === 'map') {
       merged.push(mergeMapItem(item, loc));
     } else if (item.type === 'token' && loc?.type === 'token') {
-      const imageUrl = pickBackgroundUrl(item.imageUrl ?? null, loc.imageUrl ?? null);
-      const modelUrl = pickBackgroundUrl(item.modelUrl ?? null, loc.modelUrl ?? null);
+      const imageUrl = pickBackgroundUrl(loc.imageUrl ?? null, item.imageUrl ?? null);
+      const modelUrl = pickAssetUrl(loc.modelUrl ?? null, item.modelUrl ?? null);
       const mergedToken = { ...item } as typeof item;
       if (imageUrl) mergedToken.imageUrl = imageUrl;
       else delete mergedToken.imageUrl;
@@ -82,12 +87,12 @@ export function sanitizePersistedItems(items: Item[]): Item[] {
       if (m.backgroundUrl && !isPersistableImageUrl(m.backgroundUrl)) {
         next = { ...next, backgroundUrl: null };
       }
-      if (m.modelUrl && !isPersistableImageUrl(m.modelUrl)) {
+      if (m.modelUrl && !isPersistableImageUrl(m.modelUrl) && !isGrimoireModelRef(m.modelUrl)) {
         next = { ...next, modelUrl: null };
       }
       if (next !== m) return next;
     }
-    if (item.type === 'token' && item.modelUrl && !isPersistableImageUrl(item.modelUrl)) {
+    if (item.type === 'token' && item.modelUrl && !isPersistableImageUrl(item.modelUrl) && !isGrimoireModelRef(item.modelUrl)) {
       const { modelUrl: _dead, ...rest } = item;
       return rest;
     }
