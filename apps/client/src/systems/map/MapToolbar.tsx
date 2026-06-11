@@ -51,6 +51,12 @@ export function MapToolbar() {
   const fogEnabled = useMapStore((s) => s.fogEnabled);
   const sessionFogActive = useMapStore((s) => s.sessionFogActive);
   const fogOverlayOn = fogEnabled || sessionFogActive;
+  const viewMode = useMapStore((s) => s.viewMode);
+  const toggleViewMode = useMapStore((s) => s.toggleViewMode);
+  const autoExtrudeWalls = useMapStore((s) => s.autoExtrudeWalls);
+  const wallHeightCells = useMapStore((s) => s.wallHeightCells);
+  const setAutoExtrudeWalls = useMapStore((s) => s.setAutoExtrudeWalls);
+  const setWallHeightCells = useMapStore((s) => s.setWallHeightCells);
   const snapToGrid = useItemStore((s) => s.snapToGrid);
   const setSnap = useItemStore((s) => s.setSnap);
   const items = useItemStore((s) => s.items);
@@ -130,6 +136,15 @@ export function MapToolbar() {
         {/* Fit */}
         <button title="Fit map to screen" onClick={handleFit} className={BTN}>⛶</button>
 
+        {/* 2D / 3D view */}
+        <button
+          title={viewMode === '3d' ? 'Switch to 2D map' : 'Switch to 3D map (orbit, extruded walls)'}
+          onClick={toggleViewMode}
+          className={clsx(BTN, viewMode === '3d' && ACTIVE_BTN)}
+        >
+          {viewMode === '3d' ? '2D' : '3D'}
+        </button>
+
         {/* Grid toggle */}
         {isGM && (
           <button
@@ -175,6 +190,42 @@ export function MapToolbar() {
           </>
         )}
       </div>
+
+      {viewMode === '3d' && isGM && (
+        <div
+          className="flex flex-col gap-2 p-2 rounded-lg shadow-panel ml-1"
+          style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)', width: 120 }}
+        >
+          <span className="font-ui text-[10px] tracking-wide" style={{ color: 'var(--color-accent-gold)' }}>
+            3D MAP
+          </span>
+          <label className="flex items-center gap-1.5 font-ui text-[10px] cursor-pointer" style={{ color: 'var(--color-text-secondary)' }}>
+            <input
+              type="checkbox"
+              checked={autoExtrudeWalls}
+              onChange={(e) => setAutoExtrudeWalls(e.target.checked)}
+              className="accent-[#c9a84c]"
+            />
+            Extrude walls
+          </label>
+          <label className="font-ui text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
+            Wall height ({wallHeightCells.toFixed(1)} cells)
+            <input
+              type="range"
+              min={0.5}
+              max={6}
+              step={0.5}
+              value={wallHeightCells}
+              onChange={(e) => setWallHeightCells(Number(e.target.value))}
+              className="w-full accent-[#c9a84c] mt-1"
+              disabled={!autoExtrudeWalls}
+            />
+          </label>
+          <span className="font-ui text-[9px] leading-snug" style={{ color: 'var(--color-text-secondary)' }}>
+            Drag to orbit · scroll to zoom
+          </span>
+        </div>
+      )}
 
       {/* Draw sub-panel */}
       {showDrawPanel && (

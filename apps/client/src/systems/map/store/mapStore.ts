@@ -22,6 +22,8 @@ export type MapTool =
   | 'calibrate'
   | 'draw-freehand' | 'draw-rect' | 'draw-circle' | 'draw-arrow' | 'text' | 'eraser';
 
+export type MapViewMode = '2d' | '3d';
+
 export interface MapViewport {
   x: number;
   y: number;
@@ -47,6 +49,13 @@ interface SceneState extends ActiveGrid {
   activeTool: MapTool;
   viewport: MapViewport;
 
+  /** 2D Pixi canvas vs 3D orbit view (React Three Fiber). */
+  viewMode: MapViewMode;
+  /** Auto-extrude wall segments into 3D geometry in 3D mode. */
+  autoExtrudeWalls: boolean;
+  /** Wall height in grid cells (~5 ft per cell). */
+  wallHeightCells: number;
+
   // Fog
   revealedCells: Set<string>;
   fogBrushSize: number;
@@ -69,6 +78,11 @@ interface SceneState extends ActiveGrid {
   setDrawColor: (color: string) => void;
   setDrawStroke: (stroke: number) => void;
   setTextFontSize: (size: number) => void;
+
+  setViewMode: (mode: MapViewMode) => void;
+  toggleViewMode: () => void;
+  setAutoExtrudeWalls: (enabled: boolean) => void;
+  setWallHeightCells: (cells: number) => void;
 
   setActiveGrid: (grid: Partial<ActiveGrid>) => void;
 
@@ -111,6 +125,9 @@ export const useMapStore = create<SceneState>((set) => ({
 
   activeTool:   'select',
   viewport:     { x: 0, y: 0, scale: 1 },
+  viewMode:     '2d',
+  autoExtrudeWalls: true,
+  wallHeightCells: 2.5,
   revealedCells: new Set<string>(),
   fogBrushSize: 2,
   fogEnabled: false,
@@ -136,6 +153,13 @@ export const useMapStore = create<SceneState>((set) => ({
   setDrawColor:   (drawColor) => set({ drawColor }),
   setDrawStroke:  (drawStroke) => set({ drawStroke }),
   setTextFontSize:(textFontSize) => set({ textFontSize }),
+
+  setViewMode: (viewMode) => set({ viewMode }),
+  toggleViewMode: () =>
+    set((s) => ({ viewMode: s.viewMode === '2d' ? '3d' : '2d' })),
+  setAutoExtrudeWalls: (autoExtrudeWalls) => set({ autoExtrudeWalls }),
+  setWallHeightCells: (wallHeightCells) =>
+    set({ wallHeightCells: Math.max(0.5, Math.min(8, wallHeightCells)) }),
 
   setActiveGrid:  (grid) => set((s) => ({ ...s, ...grid })),
 
@@ -200,6 +224,9 @@ export const useMapStore = create<SceneState>((set) => ({
       ...DEFAULT_GRID,
       activeTool: 'select',
       viewport: { x: 0, y: 0, scale: 1 },
+      viewMode: '2d',
+      autoExtrudeWalls: true,
+      wallHeightCells: 2.5,
       revealedCells: new Set<string>(),
       fogEnabled: false,
       sessionFogActive: false,

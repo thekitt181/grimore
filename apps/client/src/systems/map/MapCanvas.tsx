@@ -39,6 +39,7 @@ import type { Item, MapItem, TokenItem } from '@/systems/scene/types';
 import { MapCategoryWheel, type ImageCategory } from './MapCategoryWheel';
 import { useSessionStore } from '@/store/sessionStore';
 import { getSocket } from '@/lib/socket';
+import { Map3DCanvas } from '@/systems/map3d/Map3DCanvas';
 
 // Back-compat alias — some modules still import mapLayerRefs.
 export const mapLayerRefs = sceneRefs;
@@ -68,6 +69,7 @@ export function MapCanvas() {
   const { sessionId: routeSessionId } = useParams<{ sessionId: string }>();
   const storeSessionId = useSessionStore((s) => s.sessionId);
   const sessionId = storeSessionId ?? routeSessionId ?? null;
+  const viewMode = useMapStore((s) => s.viewMode);
   const items = useItemStore((s) => s.items);
   const initialSyncRef = useRef({ received: false, hadItems: false, pushed: false });
   const fogSyncedRef = useRef(false);
@@ -426,16 +428,23 @@ export function MapCanvas() {
   }
 
   return (
-    <div
-      ref={containerRef}
-      className="w-full h-full relative"
-      style={{ background: '#0a0a0f' }}
-      onDragOver={handleDragOver}
-      onDragEnter={handleDragOver}
-      onDragLeave={handleDragLeave}
-      onDrop={handleDrop}
-    >
-      {isDragOver && (
+    <div className="w-full h-full relative" style={{ background: '#0a0a0f' }}>
+      {viewMode === '3d' && <Map3DCanvas />}
+
+      <div
+        ref={containerRef}
+        className="absolute inset-0 w-full h-full"
+        style={{
+          visibility: viewMode === '3d' ? 'hidden' : 'visible',
+          pointerEvents: viewMode === '3d' ? 'none' : 'auto',
+        }}
+        onDragOver={viewMode === '2d' ? handleDragOver : undefined}
+        onDragEnter={viewMode === '2d' ? handleDragOver : undefined}
+        onDragLeave={viewMode === '2d' ? handleDragLeave : undefined}
+        onDrop={viewMode === '2d' ? handleDrop : undefined}
+      />
+
+      {viewMode === '2d' && isDragOver && (
         <div
           className="absolute inset-0 z-50 flex flex-col items-center justify-center pointer-events-none"
           style={{ background: 'rgba(10,10,15,0.75)', border: '3px dashed var(--color-accent-gold)', borderRadius: 4 }}
