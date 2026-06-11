@@ -16,6 +16,7 @@ const MIGRATION_NAMES = [
   '20250606120000_ddb_integration',
   '20250611120000_ddb_library_import_jobs',
   '20250611190000_better_auth',
+  '20250611200000_auth_user_last_active_at',
 ];
 
 function run(args, options = {}) {
