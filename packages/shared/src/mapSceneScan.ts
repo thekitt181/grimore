@@ -291,6 +291,112 @@ function keepInteriorWalkable(walkable: Uint8Array, cols: number, rows: number):
 
 type EdgeRun = { axis: 'v' | 'h'; fixed: number; start: number; end: number };
 
+/** Fill single-cell zigzags on the walkable boundary before vectorizing walls. */
+function morphCloseWalkable(walkable: Uint8Array, cols: number, rows: number): Uint8Array {
+  const dilated = new Uint8Array(cols * rows);
+  for (let y = 0; y < rows; y++) {
+    for (let x = 0; x < cols; x++) {
+      const idx = y * cols + x;
+      let on = walkable[idx] ? 1 : 0;
+      if (!on && x > 0 && walkable[idx - 1]) on = 1;
+      if (!on && x < cols - 1 && walkable[idx + 1]) on = 1;
+      if (!on && y > 0 && walkable[idx - cols]) on = 1;
+      if (!on && y < rows - 1 && walkable[idx + cols]) on = 1;
+      dilated[idx] = on;
+    }
+  }
+  const closed = new Uint8Array(cols * rows);
+  for (let y = 0; y < rows; y++) {
+    for (let x = 0; x < cols; x++) {
+      const idx = y * cols + x;
+      if (!dilated[idx]) continue;
+      if (x > 0 && !dilated[idx - 1]) continue;
+      if (x < cols - 1 && !dilated[idx + 1]) continue;
+      if (y > 0 && !dilated[idx - cols]) continue;
+      if (y < rows - 1 && !dilated[idx + cols]) continue;
+      closed[idx] = 1;
+    }
+  }
+  return closed;
+}
+
+function mergeEdgeRuns(runs: EdgeRun[]): EdgeRun[] {
+  const groups = new Map<string, EdgeRun[]>();
+  for (const run of runs) {
+    const key = `${run.axis}:${run.fixed}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key)!.push(run);
+  }
+  const merged: EdgeRun[] = [];
+  for (const group of groups.values()) {
+    group.sort((a, b) => a.start - b.start);
+    let cur = group[0]!;
+    for (let i = 1; i < group.length; i++) {
+      const next = group[i]!;
+      if (next.start - cur.end <= 1) {
+        cur = { ...cur, end: Math.max(cur.end, next.end) };
+      } else {
+        merged.push(cur);
+        cur = next;
+      }
+    }
+    merged.push(cur);
+  }
+  return merged;
+}
+
+function consolidateWallSegments(segments: ScannedWallSegment[], gridSize: number): ScannedWallSegment[] {
+  const minLen = gridSize * 0.4;
+  const minGap = gridSize * 0.55;
+  const vertical = segments.filter((s) => s.rotation !== 0 && s.length >= minLen);
+  const horizontal = segments.filter((s) => s.rotation === 0 && s.length >= minLen);
+
+  function mergeAxis(group: ScannedWallSegment[], axis: 'v' | 'h'): ScannedWallSegment[] {
+    const byLine = new Map<number, ScannedWallSegment[]>();
+    for (const seg of group) {
+      const line = Math.round((axis === 'v' ? seg.cx : seg.cz) / gridSize);
+      if (!byLine.has(line)) byLine.set(line, []);
+      byLine.get(line)!.push(seg);
+    }
+    const out: ScannedWallSegment[] = [];
+    for (const lineSegs of byLine.values()) {
+      lineSegs.sort((a, b) => (axis === 'v' ? a.cz - b.cz : a.cx - b.cx));
+      let cur = lineSegs[0]!;
+      for (let i = 1; i < lineSegs.length; i++) {
+        const next = lineSegs[i]!;
+        const curEnd = axis === 'v' ? cur.cz + cur.length / 2 : cur.cx + cur.length / 2;
+        const nextStart = axis === 'v' ? next.cz - next.length / 2 : next.cx - next.length / 2;
+        if (nextStart <= curEnd + minGap) {
+          const start = axis === 'v'
+            ? Math.min(cur.cz - cur.length / 2, next.cz - next.length / 2)
+            : Math.min(cur.cx - cur.length / 2, next.cx - next.length / 2);
+          const end = axis === 'v'
+            ? Math.max(cur.cz + cur.length / 2, next.cz + next.length / 2)
+            : Math.max(cur.cx + cur.length / 2, next.cx + next.length / 2);
+          const len = end - start;
+          cur = {
+            ...cur,
+            id: cur.id,
+            length: len,
+            cx: axis === 'v' ? cur.cx : start + len / 2,
+            cz: axis === 'v' ? start + len / 2 : cur.cz,
+          };
+        } else {
+          out.push(cur);
+          cur = next;
+        }
+      }
+      out.push(cur);
+    }
+    return out;
+  }
+
+  return [
+    ...mergeAxis(vertical, 'v').map((s, i) => ({ ...s, id: `wv-${i}` })),
+    ...mergeAxis(horizontal, 'h').map((s, i) => ({ ...s, id: `wh-${i}` })),
+  ];
+}
+
 function collectEdgeRuns(walkable: Uint8Array, cols: number, rows: number): EdgeRun[] {
   const runs: EdgeRun[] = [];
 
@@ -314,7 +420,7 @@ function collectEdgeRuns(walkable: Uint8Array, cols: number, rows: number): Edge
     }
   }
 
-  return runs;
+  return mergeEdgeRuns(runs);
 }
 
 function hasVerticalEdge(walkable: Uint8Array, cols: number, rows: number, x: number, y: number): boolean {
@@ -424,9 +530,16 @@ export function extractWallSegmentsFromWalkable(
   const gs = map.gridSize;
   const ox = map.x + map.gridOffsetX;
   const oz = map.y + map.gridOffsetY;
-  const wallThickness = gs * 0.14;
-  const runs = collectEdgeRuns(walkable, cols, rows);
-  const doors = detectDoorsFromRuns(runs, walkable, cols, rows, map);
+  const wallThickness = gs * 0.1;
+  const doors = detectDoorsFromRuns(
+    collectEdgeRuns(walkable, cols, rows),
+    walkable,
+    cols,
+    rows,
+    map,
+  );
+  const smoothed = morphCloseWalkable(walkable, cols, rows);
+  const runs = collectEdgeRuns(smoothed, cols, rows);
   const segments: ScannedWallSegment[] = [];
 
   for (const run of runs) {
@@ -454,7 +567,7 @@ export function extractWallSegmentsFromWalkable(
     }
   }
 
-  return { segments, doors };
+  return { segments: consolidateWallSegments(segments, gs), doors };
 }
 
 /** Legacy â€” kept for tests; prefer extractWallSegmentsFromWalkable. */
@@ -538,7 +651,7 @@ export function sceneScanCacheKey(
   threshold: number,
   method: 'cubicasa' | 'cv' = 'cubicasa',
 ): string {
-  return `scene|${method === 'cubicasa' ? 'cubicasa-v1' : 'walls-v6'}|${map.id ?? ''}|${map.backgroundUrl ?? ''}|${map.width}x${map.height}|${map.gridSize}|${map.gridOffsetX},${map.gridOffsetY}|t${threshold}`;
+  return `scene|${method === 'cubicasa' ? 'cubicasa-v2' : 'walls-v7'}|${map.id ?? ''}|${map.backgroundUrl ?? ''}|${map.width}x${map.height}|${map.gridSize}|${map.gridOffsetX},${map.gridOffsetY}|t${threshold}`;
 }
 
 /** Build extrusion segments from a CubiCasa-style walkable grid (server segmentation). */

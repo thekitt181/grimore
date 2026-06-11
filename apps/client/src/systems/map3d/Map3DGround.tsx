@@ -5,7 +5,7 @@ import { useThreeTexture } from './useThreeTexture';
 import { CLAY, clayMaterialProps } from './clayMaterials';
 
 export function Map3DGround({ map, clayMode = false }: { map: MapItem; clayMode?: boolean }) {
-  const { texture, status } = useThreeTexture(clayMode ? null : map.backgroundUrl);
+  const { texture, status } = useThreeTexture(map.backgroundUrl);
   const [cx, cz] = itemCenterXZ(map);
 
   const gridLines = useMemo(() => {
@@ -25,24 +25,26 @@ export function Map3DGround({ map, clayMode = false }: { map: MapItem; clayMode?
       points.push(ox, 0.02, z, ox + cols * map.gridSize, 0.02, z);
     }
     return new Float32Array(points);
-  }, [map]);
+  }, [map, clayMode]);
 
   const gridColor = `#${map.gridColor.toString(16).padStart(6, '0')}`;
 
+  const floorMaterial = clayMode
+    ? texture
+      ? { map: texture, color: '#ffffff', roughness: 0.94, metalness: 0.01 }
+      : clayMaterialProps('floor')
+    : texture
+      ? { map: texture, color: '#ffffff', roughness: 0.92, metalness: 0.02 }
+      : { color: status === 'error' ? '#3d2020' : '#14141c', roughness: 0.92, metalness: 0.02 };
+
   return (
     <group>
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[cx, 0, cz]}>
-        <planeGeometry args={[map.width, map.height]} />
-        <meshStandardMaterial
-          {...(texture && !clayMode ? { map: texture } : {})}
-          {...(clayMode ? clayMaterialProps('floor') : {})}
-          color={clayMode ? CLAY.floor : texture ? '#ffffff' : status === 'error' ? '#3d2020' : '#14141c'}
-          roughness={0.92}
-          metalness={0.02}
-        />
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[cx, 0, cz]} receiveShadow={false}>
+        <planeGeometry args={[map.width, map.height, 1, 1]} />
+        <meshStandardMaterial {...floorMaterial} />
       </mesh>
 
-      {!texture && status !== 'loading' && (
+      {!texture && status !== 'loading' && !clayMode && (
         <mesh rotation={[-Math.PI / 2, 0, 0]} position={[cx, 0.01, cz]}>
           <planeGeometry args={[map.width, map.height]} />
           <meshStandardMaterial color="#252532" wireframe transparent opacity={0.15} />
