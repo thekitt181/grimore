@@ -1,5 +1,12 @@
-import { loadImageUrl } from '@/lib/textureLoader';
-import type { MapItem } from '@/systems/scene/types';
+export type MapScanInput = {
+  width: number;
+  height: number;
+  gridSize: number;
+  gridOffsetX: number;
+  gridOffsetY: number;
+  x: number;
+  y: number;
+};
 
 /** @deprecated Props disabled — walls-only scan */
 export type PropKind = 'prop';
@@ -77,7 +84,7 @@ export type MapSceneScanOptions = {
 };
 
 const DEFAULTS: Required<MapSceneScanOptions> = {
-  threshold: 70,
+  threshold: 64,
   darkRatio: 0.52,
   darkPixelLum: 58,
 };
@@ -161,58 +168,40 @@ function isWoodTone(stats: CellStats): boolean {
   return stats.r > stats.b + 8 && stats.g > stats.b && stats.lum > 68 && stats.lum < 175 && stats.darkRatio < 0.28;
 }
 
+/** Parchment margin outside the dungeon — not walkable floor. */
+function isParchment(stats: CellStats): boolean {
+  return stats.lum > 158 && stats.darkRatio < 0.22 && stats.r > stats.b + 4 && stats.g > stats.b;
+}
+
+/** Tan door swatches break wall lines but are walkable. */
+function isDoorTone(stats: CellStats): boolean {
+  return stats.r > 130 && stats.g > 105 && stats.b > 65 && stats.lum > 95 && stats.lum < 205 && stats.darkRatio < 0.38;
+}
+
 /** Strict wall test — only thick dark map borders, not furniture or lighting. */
 function isWall(stats: CellStats, opts: Required<MapSceneScanOptions>): boolean {
-  if (isAmbientGlow(stats) || isWater(stats) || isWoodTone(stats)) return false;
+  if (isAmbientGlow(stats) || isWater(stats) || isWoodTone(stats) || isParchment(stats) || isDoorTone(stats)) return false;
   if (stats.lum < 42 && stats.darkRatio >= 0.35) return true;
   if (stats.lum < opts.threshold && stats.darkRatio >= opts.darkRatio) return true;
   return false;
 }
 
-function dilate(cells: Uint8Array, cols: number, rows: number): Uint8Array {
-  const out = Uint8Array.from(cells);
+/** Remove lone wall speckles without eroding thin wall lines. */
+function removeIsolatedWallCells(wallMask: Uint8Array, cols: number, rows: number): Uint8Array {
+  const out = Uint8Array.from(wallMask);
   for (let y = 0; y < rows; y++) {
     for (let x = 0; x < cols; x++) {
-      if (!cells[y * cols + x]) continue;
-      for (let dy = -1; dy <= 1; dy++) {
-        for (let dx = -1; dx <= 1; dx++) {
-          const nx = x + dx;
-          const ny = y + dy;
-          if (nx >= 0 && ny >= 0 && nx < cols && ny < rows) out[ny * cols + nx] = 1;
-        }
-      }
+      const idx = y * cols + x;
+      if (!wallMask[idx]) continue;
+      let neighbors = 0;
+      if (x > 0 && wallMask[idx - 1]) neighbors++;
+      if (x < cols - 1 && wallMask[idx + 1]) neighbors++;
+      if (y > 0 && wallMask[idx - cols]) neighbors++;
+      if (y < rows - 1 && wallMask[idx + cols]) neighbors++;
+      if (neighbors === 0) out[idx] = 0;
     }
   }
   return out;
-}
-
-function erode(cells: Uint8Array, cols: number, rows: number): Uint8Array {
-  const out = Uint8Array.from(cells);
-  for (let y = 0; y < rows; y++) {
-    for (let x = 0; x < cols; x++) {
-      if (!cells[y * cols + x]) continue;
-      for (let dy = -1; dy <= 1; dy++) {
-        for (let dx = -1; dx <= 1; dx++) {
-          const nx = x + dx;
-          const ny = y + dy;
-          if (nx < 0 || ny < 0 || nx >= cols || ny >= rows || !cells[ny * cols + nx]) {
-            out[y * cols + x] = 0;
-            break;
-          }
-        }
-        if (!out[y * cols + x]) break;
-      }
-    }
-  }
-  return out;
-}
-
-function morphClose(cells: Uint8Array, cols: number, rows: number): Uint8Array {
-  return erode(dilate(cells, cols, rows), cols, rows);
-}
-
-function morphOpen(cells: Uint8Array, cols: number, rows: number): Uint8Array {
-  return dilate(erode(cells, cols, rows), cols, rows);
 }
 
 /** Dark blobs fully enclosed by floor (pits) are not walls. */
@@ -258,10 +247,60 @@ function removeEnclosedVoids(wallMask: Uint8Array, cols: number, rows: number): 
   return out;
 }
 
-function buildWalkableMask(wallMask: Uint8Array, cols: number, rows: number): Uint8Array {
-  const walkable = new Uint8Array(cols * rows);
-  for (let i = 0; i < wallMask.length; i++) walkable[i] = wallMask[i] ? 0 : 1;
-  return walkable;
+function buildWalkableMask(
+  wallMask: Uint8Array,
+  statsGrid: (CellStats | null)[],
+  cols: number,
+  rows: number,
+): Uint8Array {
+  const raw = new Uint8Array(cols * rows);
+  for (let i = 0; i < wallMask.length; i++) {
+    if (wallMask[i]) continue;
+    const st = statsGrid[i];
+    if (st && isParchment(st)) continue;
+    raw[i] = 1;
+  }
+  return keepInteriorWalkable(raw, cols, rows);
+}
+
+/** Drop exterior parchment — keep only floor reachable from map center. */
+function keepInteriorWalkable(walkable: Uint8Array, cols: number, rows: number): Uint8Array {
+  const out = new Uint8Array(cols * rows);
+  const visited = new Uint8Array(cols * rows);
+  const sx = Math.floor(cols / 2);
+  const sy = Math.floor(rows / 2);
+  let start = -1;
+
+  for (let r = 0; r <= Math.max(cols, rows) && start < 0; r++) {
+    for (let dy = -r; dy <= r && start < 0; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        const x = sx + dx;
+        const y = sy + dy;
+        if (x < 0 || y < 0 || x >= cols || y >= rows) continue;
+        const idx = y * cols + x;
+        if (walkable[idx]) {
+          start = idx;
+          break;
+        }
+      }
+    }
+  }
+  if (start < 0) return walkable;
+
+  const stack = [start];
+  while (stack.length > 0) {
+    const idx = stack.pop()!;
+    if (visited[idx] || !walkable[idx]) continue;
+    visited[idx] = 1;
+    out[idx] = 1;
+    const x = idx % cols;
+    const y = Math.floor(idx / cols);
+    if (x > 0) stack.push(idx - 1);
+    if (x < cols - 1) stack.push(idx + 1);
+    if (y > 0) stack.push(idx - cols);
+    if (y < rows - 1) stack.push(idx + cols);
+  }
+  return out;
 }
 
 type EdgeRun = { axis: 'v' | 'h'; fixed: number; start: number; end: number };
@@ -315,7 +354,7 @@ function detectDoorsFromRuns(
   walkable: Uint8Array,
   cols: number,
   rows: number,
-  map: Pick<MapItem, 'x' | 'y' | 'gridOffsetX' | 'gridOffsetY' | 'gridSize'>,
+  map: MapScanInput,
 ): ScannedDoor[] {
   const doors: ScannedDoor[] = [];
   const gs = map.gridSize;
@@ -394,7 +433,7 @@ export function extractWallSegmentsFromWalkable(
   walkable: Uint8Array,
   cols: number,
   rows: number,
-  map: Pick<MapItem, 'x' | 'y' | 'gridOffsetX' | 'gridOffsetY' | 'gridSize'>,
+  map: MapScanInput,
 ): { segments: ScannedWallSegment[]; doors: ScannedDoor[] } {
   const gs = map.gridSize;
   const ox = map.x + map.gridOffsetX;
@@ -437,39 +476,35 @@ export function extractWallSegments(
   wallCells: Uint8Array,
   cols: number,
   rows: number,
-  map: Pick<MapItem, 'x' | 'y' | 'gridOffsetX' | 'gridOffsetY' | 'gridSize'>,
+  map: MapScanInput,
 ): ScannedWallSegment[] {
-  const walkable = buildWalkableMask(wallCells, cols, rows);
+  const walkable = buildWalkableMask(wallCells, new Array(cols * rows).fill(null), cols, rows);
   return extractWallSegmentsFromWalkable(walkable, cols, rows, map).segments;
 }
 
-export async function scanMapImageForScene(
-  map: Pick<MapItem, 'id' | 'backgroundUrl' | 'width' | 'height' | 'gridSize' | 'gridOffsetX' | 'gridOffsetY' | 'x' | 'y'>,
+export function scanMapImageFromPixelData(
+  map: MapScanInput,
+  data: Uint8ClampedArray,
+  sampleW: number,
+  sampleH: number,
   options?: MapSceneScanOptions,
-): Promise<MapSceneScanResult | null> {
-  if (!map.backgroundUrl) return null;
-
+): MapSceneScanResult {
   const opts = { ...DEFAULTS, ...options };
   const gridSize = Math.max(4, map.gridSize);
   const cols = Math.ceil(map.width / gridSize);
   const rows = Math.ceil(map.height / gridSize);
-
-  const img = await loadImageUrl(map.backgroundUrl);
   const maxDim = 2800;
   const scale = Math.min(1, maxDim / Math.max(map.width, map.height));
-  const sampleW = Math.max(32, Math.round(map.width * scale));
-  const sampleH = Math.max(32, Math.round(map.height * scale));
-  const data = readImagePixels(img, sampleW, sampleH);
-  if (!data) return null;
-
   const scaledGrid = Math.max(4, Math.round(gridSize * scale));
   const scaledOffsetX = Math.round(map.gridOffsetX * scale);
   const scaledOffsetY = Math.round(map.gridOffsetY * scale);
 
+  const statsGrid: (CellStats | null)[] = new Array(cols * rows).fill(null);
   let wallMask = new Uint8Array(cols * rows);
 
   for (let cy = 0; cy < rows; cy++) {
     for (let cx = 0; cx < cols; cx++) {
+      const idx = cy * cols + cx;
       const x0 = Math.min(sampleW - 1, Math.max(0, scaledOffsetX + cx * scaledGrid));
       const y0 = Math.min(sampleH - 1, Math.max(0, scaledOffsetY + cy * scaledGrid));
       const stats = sampleCellStats(
@@ -482,15 +517,16 @@ export async function scanMapImageForScene(
         Math.min(sampleH, y0 + scaledGrid),
         opts.darkPixelLum,
       );
-      if (stats && isWall(stats, opts)) wallMask[cy * cols + cx] = 1;
+      if (!stats) continue;
+      statsGrid[idx] = stats;
+      if (isWall(stats, opts)) wallMask[idx] = 1;
     }
   }
 
-  wallMask = new Uint8Array(morphClose(wallMask, cols, rows));
-  wallMask = new Uint8Array(morphOpen(wallMask, cols, rows));
+  wallMask = new Uint8Array(removeIsolatedWallCells(wallMask, cols, rows));
   wallMask = new Uint8Array(removeEnclosedVoids(wallMask, cols, rows));
 
-  const walkable = buildWalkableMask(wallMask, cols, rows);
+  const walkable = buildWalkableMask(wallMask, statsGrid, cols, rows);
   const { segments: wallSegments, doors } = extractWallSegmentsFromWalkable(walkable, cols, rows, map);
 
   let wallCellCount = 0;
@@ -511,9 +547,28 @@ export async function scanMapImageForScene(
   };
 }
 
+export async function scanMapImageForScene(
+  map: MapScanInput & { id?: string; backgroundUrl: string | null },
+  options?: MapSceneScanOptions,
+): Promise<MapSceneScanResult | null> {
+  if (!map.backgroundUrl) return null;
+
+  const maxDim = 2800;
+  const scale = Math.min(1, maxDim / Math.max(map.width, map.height));
+  const sampleW = Math.max(32, Math.round(map.width * scale));
+  const sampleH = Math.max(32, Math.round(map.height * scale));
+
+  const { loadImageUrl } = await import('@/lib/textureLoader');
+  const img = await loadImageUrl(map.backgroundUrl);
+  const data = readImagePixels(img, sampleW, sampleH);
+  if (!data) return null;
+
+  return scanMapImageFromPixelData(map, data, sampleW, sampleH, options);
+}
+
 export function sceneScanCacheKey(
-  map: Pick<MapItem, 'id' | 'backgroundUrl' | 'width' | 'height' | 'gridSize' | 'gridOffsetX' | 'gridOffsetY'>,
+  map: MapScanInput & { id?: string; backgroundUrl?: string | null },
   threshold: number,
 ): string {
-  return `scene|walls-v5|${map.id}|${map.backgroundUrl ?? ''}|${map.width}x${map.height}|${map.gridSize}|${map.gridOffsetX},${map.gridOffsetY}|t${threshold}`;
+  return `scene|walls-v6|${map.id ?? ''}|${map.backgroundUrl ?? ''}|${map.width}x${map.height}|${map.gridSize}|${map.gridOffsetX},${map.gridOffsetY}|t${threshold}`;
 }

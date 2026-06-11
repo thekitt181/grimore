@@ -214,7 +214,7 @@ export function MapToolbar() {
           {scanImageWalls && (
             <>
               <span className="font-ui text-[9px] leading-snug" style={{ color: 'var(--color-text-secondary)' }}>
-                Detects walls and door openings from map art.
+                Set grid to match map art (e.g. 38px). Align grid to walls, then rescan.
               </span>
               <label className="font-ui text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
                 Wall sensitivity ({wallScanThreshold})
