@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { authClient } from '@/lib/auth-client';
+import { authClient, signInWithGoogle } from '@/lib/auth-client';
 
 export function SignInPage() {
   const navigate = useNavigate();
@@ -8,6 +8,7 @@ export function SignInPage() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -27,12 +28,17 @@ export function SignInPage() {
     }
   }
 
-  async function signInWithGoogle() {
+  async function onGoogleSignIn() {
     setError(null);
-    await authClient.signIn.social({
-      provider: 'google',
-      callbackURL: '/',
-    });
+    setGoogleLoading(true);
+    try {
+      const message = await signInWithGoogle();
+      if (message) setError(message);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Google sign-in failed');
+    } finally {
+      setGoogleLoading(false);
+    }
   }
 
   return (
@@ -118,15 +124,16 @@ export function SignInPage() {
 
           <button
             type="button"
-            onClick={() => void signInWithGoogle()}
-            className="w-full rounded py-2 font-ui text-sm border"
+            disabled={googleLoading || loading}
+            onClick={() => void onGoogleSignIn()}
+            className="w-full rounded py-2 font-ui text-sm border disabled:opacity-60"
             style={{
               borderColor: 'var(--color-border)',
               color: 'var(--color-text-primary)',
               background: 'transparent',
             }}
           >
-            Continue with Google
+            {googleLoading ? 'Redirecting to Google…' : 'Continue with Google'}
           </button>
 
           <p className="text-center font-ui text-sm" style={{ color: 'var(--color-text-secondary)' }}>

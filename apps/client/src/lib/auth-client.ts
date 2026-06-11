@@ -32,3 +32,26 @@ export async function signOutAndClear(): Promise<void> {
   await authClient.signOut();
   setBearerToken(null);
 }
+
+/** Start Google OAuth — redirects on success; returns an error message otherwise. */
+export async function signInWithGoogle(): Promise<string | null> {
+  if (typeof window === 'undefined') return 'Google sign-in is unavailable';
+
+  const callbackURL = `${window.location.origin}/`;
+  const result = await authClient.signIn.social({
+    provider: 'google',
+    callbackURL,
+  });
+
+  if (result.error) {
+    return result.error.message ?? 'Google sign-in failed';
+  }
+
+  const redirectUrl = result.data?.url;
+  if (redirectUrl) {
+    window.location.assign(redirectUrl);
+    return null;
+  }
+
+  return 'Google sign-in did not start — check GOOGLE_CLIENT_ID on the server';
+}

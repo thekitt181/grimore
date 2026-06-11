@@ -7,8 +7,16 @@ import { getClientOrigins, getPrimaryClientUrl } from './clientOrigins';
 const googleClientId = process.env['GOOGLE_CLIENT_ID']?.trim();
 const googleClientSecret = process.env['GOOGLE_CLIENT_SECRET']?.trim();
 
+export function isGoogleOAuthEnabled(): boolean {
+  return Boolean(googleClientId && googleClientSecret);
+}
+
+export function getAuthBaseUrl(): string {
+  return process.env['BETTER_AUTH_URL']?.trim() ?? getPrimaryClientUrl();
+}
+
 export const auth = betterAuth({
-  baseURL: process.env['BETTER_AUTH_URL']?.trim() ?? getPrimaryClientUrl(),
+  baseURL: getAuthBaseUrl(),
   secret:
     process.env['BETTER_AUTH_SECRET']?.trim() ??
     'grimoire-dev-auth-secret-change-in-production',
@@ -24,6 +32,7 @@ export const auth = betterAuth({
           google: {
             clientId: googleClientId,
             clientSecret: googleClientSecret,
+            prompt: 'select_account',
           },
         },
       }

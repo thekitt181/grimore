@@ -17,7 +17,7 @@ import ddbRoutes from './routes/ddb';
 import { closeMongo } from './lib/mongo';
 import { getClientOrigins, getPrimaryClientUrl } from './lib/clientOrigins';
 import { toNodeHandler } from 'better-auth/node';
-import { auth } from './lib/auth';
+import { auth, getAuthBaseUrl, isGoogleOAuthEnabled } from './lib/auth';
 import { startCompendiumMongoWatch } from './services/compendiumMongoWatch';
 import { syncCompendiumStorageOnStartup } from './services/compendiumGlobal';
 import { reconcileRawGlobalStorage } from './services/compendiumOwlbearPersist';
@@ -67,6 +67,11 @@ app.get('/health', (_req, res) => {
     mongo: isMongoConfigured()
       ? (mongo.open ? 'circuit-open' : 'configured')
       : 'disabled',
+    auth: {
+      baseUrl: getAuthBaseUrl(),
+      googleOAuth: isGoogleOAuthEnabled(),
+      googleCallback: `${getAuthBaseUrl()}/api/auth/callback/google`,
+    },
     timestamp: new Date().toISOString(),
   });
 });
