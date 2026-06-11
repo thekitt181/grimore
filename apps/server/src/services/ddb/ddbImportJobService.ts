@@ -91,6 +91,48 @@ async function isJobCancelled(jobId: string): Promise<boolean> {
   return row?.status === 'CANCELLED';
 }
 
+const STANDARD_KINDS = ['monster', 'spell', 'item'] as const;
+type ImportKind = (typeof STANDARD_KINDS)[number];
+
+function kindToPhase(kind: ImportKind): DdbLibraryImportJobProgress['phase'] {
+  return kind === 'monster' ? 'monsters' : kind === 'spell' ? 'spells' : 'items';
+}
+
+/** Which monster/spell/item pass to run first when resuming a partially imported book. */
+function resolveBookKindStart(
+  progress: unknown,
+  sourceId: number,
+): { startKindIndex: number; completedKinds: ImportKind[] } {
+  if (!progress || typeof progress !== 'object') {
+    return { startKindIndex: 0, completedKinds: [] };
+  }
+  const p = progress as DdbLibraryImportJobProgress;
+  if (p.sourceId !== sourceId || p.phase === 'complete') {
+    return { startKindIndex: 0, completedKinds: [] };
+  }
+
+  const fromProgress = (p.completedKinds ?? []).filter((k): k is ImportKind =>
+    k === 'monster' || k === 'spell' || k === 'item',
+  );
+  if (fromProgress.length > 0) {
+    const nextIdx = STANDARD_KINDS.findIndex((k) => !fromProgress.includes(k));
+    return {
+      startKindIndex: nextIdx === -1 ? STANDARD_KINDS.length : nextIdx,
+      completedKinds: fromProgress,
+    };
+  }
+
+  // Legacy jobs: infer completed kinds from last recorded phase.
+  const phase = p.phase;
+  if (phase === 'items' || phase === 'listing-items') {
+    return { startKindIndex: 2, completedKinds: ['monster', 'spell'] };
+  }
+  if (phase === 'spells' || phase === 'listing-spells') {
+    return { startKindIndex: 1, completedKinds: ['monster'] };
+  }
+  return { startKindIndex: 0, completedKinds: [] };
+}
+
 function parseCompletedSourceIds(progress: unknown): Set<number> {
   const ids = new Set<number>();
   if (!progress || typeof progress !== 'object') return ids;
@@ -222,7 +264,7 @@ async function runDdbLibraryImportJob(jobId: string): Promise<void> {
       return;
     }
 
-    if (completedSourceIds.size > 0) {
+    if (completedSourceIds.size > 0 || (job.progress && (job.progress as unknown as DdbLibraryImportJobProgress).completedKinds?.length)) {
       console.log(
         `[DDB] Resuming import job ${jobId}: ${completedSourceIds.size} book(s) done, ${pendingAccessible.length} remaining`,
       );
@@ -230,6 +272,7 @@ async function runDdbLibraryImportJob(jobId: string): Promise<void> {
 
     const bookTotal = accessible.length;
     const completedCount = completedSourceIds.size;
+    const savedProgress = job.progress as DdbLibraryImportJobProgress | null;
 
     for (const [pendingIdx, sourceId] of pendingAccessible.entries()) {
       if (await isJobCancelled(jobId)) return;
@@ -247,27 +290,52 @@ async function runDdbLibraryImportJob(jobId: string): Promise<void> {
       };
 
       if (sourceId === DDB_HOMEBREW_SOURCE_ID) {
-        await updateJobProgress(jobId, {
-          ...progressBase,
-          phase: 'monsters',
-          done: 0,
-          total: 0,
-        });
-        bookMerged = await importAllDdbHomebrew(ctx, {
-          campaignId: job.campaignId ?? undefined,
-          ...(job.skipExisting ? { skipExisting: true } : {}),
-        });
-        merged = mergeImportResults(merged, bookMerged);
+        const homebrewDone =
+          savedProgress?.sourceId === sourceId
+          && (savedProgress.completedKinds?.includes('monster')
+            || savedProgress.phase === 'complete'
+            || savedProgress.phase === 'spells'
+            || savedProgress.phase === 'items');
+        if (!homebrewDone) {
+          await updateJobProgress(jobId, {
+            ...progressBase,
+            phase: 'monsters',
+            done: 0,
+            total: 0,
+            completedKinds: [],
+          });
+          bookMerged = await importAllDdbHomebrew(ctx, {
+            campaignId: job.campaignId ?? undefined,
+            ...(job.skipExisting ? { skipExisting: true } : {}),
+          });
+          merged = mergeImportResults(merged, bookMerged);
+          await persistPartialResult(jobId, merged);
+        } else {
+          console.log(`[DDB] Skipping homebrew — already imported before restart`);
+        }
       } else {
-        for (const kind of ['monster', 'spell', 'item'] as const) {
+        const { startKindIndex, completedKinds } = resolveBookKindStart(savedProgress, sourceId);
+        if (startKindIndex > 0 || completedKinds.length > 0) {
+          console.log(
+            `[DDB] Resuming book ${sourceId} (${sourceName ?? 'unknown'}): kinds done [${completedKinds.join(', ')}], starting at ${STANDARD_KINDS[startKindIndex] ?? 'finish'}`,
+          );
+        }
+
+        const kindsDone: ImportKind[] = [...completedKinds];
+
+        for (let kindIdx = startKindIndex; kindIdx < STANDARD_KINDS.length; kindIdx++) {
           if (await isJobCancelled(jobId)) return;
-          const phase = kind === 'monster' ? 'monsters' : kind === 'spell' ? 'spells' : 'items';
+          const kind = STANDARD_KINDS[kindIdx]!;
+          const phase = kindToPhase(kind);
+
           await updateJobProgress(jobId, {
             ...progressBase,
             phase,
             done: 0,
             total: 0,
+            completedKinds: kindsDone,
           });
+
           const chunk = await importAllDdbLibraryFromSource(ctx, {
             kind,
             sourceId,
@@ -276,26 +344,38 @@ async function runDdbLibraryImportJob(jobId: string): Promise<void> {
           });
           bookMerged = mergeImportResults(bookMerged, chunk);
           merged = mergeImportResults(merged, chunk);
+          kindsDone.push(kind);
+
+          await updateJobProgress(jobId, {
+            ...progressBase,
+            phase,
+            done: 0,
+            total: 0,
+            completedKinds: kindsDone,
+          });
+          await persistPartialResult(jobId, merged);
         }
       }
 
-      if (bookMerged.imported.length > 0) {
+      try {
         const sourceLabels = [
-          ...new Set(bookMerged.imported.map((e) => e.source).filter((s): s is string => Boolean(s))),
+          ...new Set([
+            ...(sourceName ? [sourceName] : []),
+            ...bookMerged.imported.map((e) => e.source).filter((s): s is string => Boolean(s)),
+          ]),
         ];
-        try {
-          const fin = await finishDdbLibraryImport(ctx, {
-            sourceIds: sourceId > 0 ? [sourceId] : [],
-            ...(sourceLabels.length > 0 ? { sourceLabels } : {}),
-          });
-          merged = {
-            ...merged,
-            catalogRev: fin.catalogRev ?? merged.catalogRev,
-            sourcesUnlocked: [...new Set([...(merged.sourcesUnlocked ?? []), ...(fin.sourcesUnlocked ?? [])])],
-          };
-        } catch (err) {
-          console.warn(`[DDB] finish-import failed for job ${jobId} source ${sourceId}:`, err);
-        }
+        const fin = await finishDdbLibraryImport(ctx, {
+          sourceIds: sourceId > 0 ? [sourceId] : [],
+          ...(sourceLabels.length > 0 ? { sourceLabels } : {}),
+        });
+        merged = {
+          ...merged,
+          catalogRev: fin.catalogRev ?? merged.catalogRev,
+          sourcesUnlocked: [...new Set([...(merged.sourcesUnlocked ?? []), ...(fin.sourcesUnlocked ?? [])])],
+        };
+        await persistPartialResult(jobId, merged);
+      } catch (err) {
+        console.warn(`[DDB] finish-import failed for job ${jobId} source ${sourceId}:`, err);
       }
 
       const doneIds = [...completedSourceIds, ...pendingAccessible.slice(0, pendingIdx + 1)];
@@ -307,6 +387,7 @@ async function runDdbLibraryImportJob(jobId: string): Promise<void> {
         bookImported: bookMerged.imported.length,
         bookErrors: bookMerged.errors.length,
         completedSourceIds: doneIds,
+        completedKinds: [],
       });
       completedSourceIds.add(sourceId);
       await persistPartialResult(jobId, merged);

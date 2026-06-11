@@ -226,6 +226,8 @@ export interface DdbLibraryImportJobProgress {
   bookErrors?: number;
   /** Source books fully imported (used to resume after server restart). */
   completedSourceIds?: number[];
+  /** Kinds finished for the current in-progress book (monster/spell/item). */
+  completedKinds?: Array<'monster' | 'spell' | 'item'>;
 }
 
 export interface DdbLibraryImportJob {
