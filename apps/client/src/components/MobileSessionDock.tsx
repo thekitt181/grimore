@@ -1,3 +1,5 @@
+import { MapViewModeToggle } from '@/systems/map/MapViewModeToggle';
+
 const GOLD = 'var(--color-accent-gold)';
 const BD = 'var(--color-border)';
 
@@ -34,6 +36,7 @@ export function MobileSessionDock({
         title="Dice roller"
         onClick={onToggleDice}
       />
+      <MapViewModeToggle variant="dock" />
     </div>
   );
 }

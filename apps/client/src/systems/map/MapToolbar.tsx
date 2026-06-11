@@ -8,6 +8,7 @@ import { emitItemUpdate, emitItemRemove } from '@/systems/scene/sceneSync';
 import { clsx } from 'clsx';
 import { setFogVisibleForSession } from '@/systems/scene/fogActiveSync';
 import { DRAW_COLOR_PRESETS, DEFAULT_TEXT_FONT_SIZE, MAX_TEXT_FONT_SIZE, MIN_TEXT_FONT_SIZE } from './drawColors';
+import { MapViewModeToggle } from './MapViewModeToggle';
 
 type ToolDef = { id: MapTool; label: string; icon: string; title: string };
 
@@ -51,12 +52,11 @@ export function MapToolbar() {
   const fogEnabled = useMapStore((s) => s.fogEnabled);
   const sessionFogActive = useMapStore((s) => s.sessionFogActive);
   const fogOverlayOn = fogEnabled || sessionFogActive;
-  const viewMode = useMapStore((s) => s.viewMode);
-  const toggleViewMode = useMapStore((s) => s.toggleViewMode);
   const autoExtrudeWalls = useMapStore((s) => s.autoExtrudeWalls);
   const wallHeightCells = useMapStore((s) => s.wallHeightCells);
   const setAutoExtrudeWalls = useMapStore((s) => s.setAutoExtrudeWalls);
   const setWallHeightCells = useMapStore((s) => s.setWallHeightCells);
+  const viewMode = useMapStore((s) => s.viewMode);
   const snapToGrid = useItemStore((s) => s.snapToGrid);
   const setSnap = useItemStore((s) => s.setSnap);
   const items = useItemStore((s) => s.items);
@@ -114,6 +114,9 @@ export function MapToolbar() {
         ))}
 
         <div className="gold-divider my-1" />
+        <MapViewModeToggle />
+
+        <div className="gold-divider my-1" />
         <button
           title="Drawing tools"
           onClick={() => setShowDrawPanel((p) => !p)}
@@ -135,15 +138,6 @@ export function MapToolbar() {
 
         {/* Fit */}
         <button title="Fit map to screen" onClick={handleFit} className={BTN}>⛶</button>
-
-        {/* 2D / 3D view */}
-        <button
-          title={viewMode === '3d' ? 'Switch to 2D map' : 'Switch to 3D map (orbit, extruded walls)'}
-          onClick={toggleViewMode}
-          className={clsx(BTN, viewMode === '3d' && ACTIVE_BTN)}
-        >
-          {viewMode === '3d' ? '2D' : '3D'}
-        </button>
 
         {/* Grid toggle */}
         {isGM && (

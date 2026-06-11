@@ -7,6 +7,7 @@ import { useSessionStore } from '@/store/sessionStore';
 import { useInitiativeStore } from '@/systems/map/store/initiativeStore';
 import { MapCanvas } from '@/systems/map/MapCanvas';
 import { MapToolbar } from '@/systems/map/MapToolbar';
+import { MapViewModeToggle } from '@/systems/map/MapViewModeToggle';
 import { MapSidebar } from '@/systems/map/MapSidebar';
 import { ItemInspector } from '@/systems/scene/ItemInspector';
 import { ItemContextMenu } from '@/systems/scene/ItemContextMenu';
@@ -249,7 +250,7 @@ export function SessionPage() {
       {/* ── Main layout ──────────────────────────────────────────────────────── */}
       <div className="flex-1 flex overflow-hidden">
         {/* Toolbar */}
-        <div className="p-2 flex flex-col items-start shrink-0 z-10">
+        <div className="p-2 flex flex-col items-start shrink-0 z-10 h-full min-h-0 overflow-y-auto">
           <MapToolbar />
         </div>
 
@@ -343,6 +344,7 @@ export function SessionPage() {
               <RollModeBar />
 
               <div className="flex gap-2">
+                <MapViewModeToggle variant="dock" />
                 {isGM && (
                   <button
                     onClick={() => setPanelOpen(!panelOpen)}
