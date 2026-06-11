@@ -2,18 +2,18 @@ import { useEffect, useState } from 'react';
 import type { MapItem } from '@/systems/scene/types';
 import { useMapStore } from '@/systems/map/store/mapStore';
 import {
-  scanMapImageForWalls,
-  wallScanCacheKey,
-  type MapWallScanResult,
-} from './mapImageWallScan';
+  scanMapImageForScene,
+  sceneScanCacheKey,
+  type MapSceneScanResult,
+} from './mapImageSceneScan';
 
-const scanCache = new Map<string, MapWallScanResult>();
-const inflightScans = new Map<string, Promise<MapWallScanResult | null>>();
+const scanCache = new Map<string, MapSceneScanResult>();
+const inflightScans = new Map<string, Promise<MapSceneScanResult | null>>();
 
-export function useImageWallScan(map: MapItem | null) {
+export function useImageSceneScan(map: MapItem | null) {
   const scanImageWalls = useMapStore((s) => s.scanImageWalls);
   const wallScanThreshold = useMapStore((s) => s.wallScanThreshold);
-  const [result, setResult] = useState<MapWallScanResult | null>(null);
+  const [result, setResult] = useState<MapSceneScanResult | null>(null);
   const [status, setStatus] = useState<'idle' | 'scanning' | 'ready' | 'error'>('idle');
   const [scanToken, setScanToken] = useState(0);
 
@@ -24,7 +24,7 @@ export function useImageWallScan(map: MapItem | null) {
       return;
     }
 
-    const key = wallScanCacheKey(map, wallScanThreshold);
+    const key = sceneScanCacheKey(map, wallScanThreshold);
     const cached = scanCache.get(key);
     if (cached && scanToken === 0) {
       setResult(cached);
@@ -38,10 +38,10 @@ export function useImageWallScan(map: MapItem | null) {
     const run = () => {
       const pending = inflightScans.get(key);
       if (pending) return pending;
-      const promise = scanMapImageForWalls(map, { threshold: wallScanThreshold })
-        .then((grid) => {
-          if (grid && grid.wallCellCount > 0) scanCache.set(key, grid);
-          return grid;
+      const promise = scanMapImageForScene(map, { threshold: wallScanThreshold })
+        .then((scene) => {
+          if (scene && scene.featureCount > 0) scanCache.set(key, scene);
+          return scene;
         })
         .finally(() => {
           inflightScans.delete(key);
@@ -51,10 +51,10 @@ export function useImageWallScan(map: MapItem | null) {
     };
 
     void run()
-      .then((grid) => {
+      .then((scene) => {
         if (cancelled) return;
-        setResult(grid);
-        setStatus(grid ? 'ready' : 'error');
+        setResult(scene);
+        setStatus(scene ? 'ready' : 'error');
       })
       .catch(() => {
         if (!cancelled) {
@@ -73,7 +73,7 @@ export function useImageWallScan(map: MapItem | null) {
     status,
     rescan: () => {
       if (map) {
-        const key = wallScanCacheKey(map, wallScanThreshold);
+        const key = sceneScanCacheKey(map, wallScanThreshold);
         scanCache.delete(key);
         inflightScans.delete(key);
       }
@@ -81,3 +81,8 @@ export function useImageWallScan(map: MapItem | null) {
     },
   };
 }
+
+/** @deprecated Use useImageSceneScan */
+export const useImageWallScan = useImageSceneScan;
+
+export type { MapSceneScanResult as MapWallScanResult };

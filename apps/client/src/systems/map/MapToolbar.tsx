@@ -209,10 +209,13 @@ export function MapToolbar() {
               onChange={(e) => setScanImageWalls(e.target.checked)}
               className="accent-[#c9a84c]"
             />
-            Scan walls from image
+            Auto-scan map for 3D
           </label>
           {scanImageWalls && (
             <>
+              <span className="font-ui text-[9px] leading-snug" style={{ color: 'var(--color-text-secondary)' }}>
+                Detects walls, water, fountains, stairs, tables, chairs &amp; props from map art.
+              </span>
               <label className="font-ui text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
                 Wall sensitivity ({wallScanThreshold})
                 <input
@@ -236,9 +239,9 @@ export function MapToolbar() {
               </button>
               {scanStatus === 'ready' && scanResult && (
                 <span className="font-ui text-[9px]" style={{ color: 'var(--color-text-secondary)' }}>
-                  {scanResult.wallCellCount > 0
-                    ? `${scanResult.wallCellCount} wall cells extruded`
-                    : 'No walls detected — lower sensitivity or rescan'}
+                  {scanResult.featureCount > 0
+                    ? `${scanResult.wallCellCount} walls · ${scanResult.props.length} props · ${scanResult.waters.length} water · ${scanResult.stairs.length} stairs`
+                    : 'Nothing detected — lower sensitivity or rescan'}
                 </span>
               )}
               {scanStatus === 'error' && (
@@ -275,7 +278,7 @@ export function MapToolbar() {
           </span>
           {!scanImageWalls && wallCount === 0 && (
             <span className="font-ui text-[9px] leading-snug" style={{ color: 'var(--color-accent-gold)' }}>
-              Enable image scan, or draw walls with 🧱 on the 2D map.
+              Enable auto-scan, or draw walls with 🧱 on the 2D map.
             </span>
           )}
         </div>

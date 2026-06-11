@@ -9,7 +9,7 @@ import { useSessionStore } from '@/store/sessionStore';
 import type { DrawItem, MapItem, TextItem, TokenItem } from '@/systems/scene/types';
 import { itemCenterXZ } from './coords';
 import { Map3DGround } from './Map3DGround';
-import { Map3DImageWalls } from './Map3DImageWalls';
+import { Map3DScannedScene } from './Map3DScannedScene';
 import { Map3DWalls } from './Map3DWalls';
 import { Map3DTokens } from './Map3DTokens';
 import { Map3DDrawings } from './Map3DDrawings';
@@ -112,7 +112,7 @@ function Map3DSceneContent() {
         <group key={map.id}>
           <Map3DGround map={map} />
           {autoExtrudeWalls && scanImageWalls && (
-            <Map3DImageWalls map={map} wallHeight={wallHeight} />
+            <Map3DScannedScene map={map} wallHeight={wallHeight} />
           )}
           {autoExtrudeWalls && !scanImageWalls && map.walls.length > 0 && (
             <Map3DWalls map={map} wallHeight={wallHeight} wallThickness={wallThickness} />
