@@ -1,11 +1,13 @@
 import { useEffect, useRef } from 'react';
 import { useAuth } from '@clerk/clerk-react';
 import { useQueryClient } from '@tanstack/react-query';
-import { ensureApiAuthToken } from '@/lib/axios';
+import { isApiAuthBlocked } from '@/lib/apiAuthState';
+import { ensureApiAuthSession } from '@/lib/axios';
 
 async function refetchCompendiumCatalog(qc: ReturnType<typeof useQueryClient>): Promise<void> {
-  const token = await ensureApiAuthToken({ attempts: 4 });
-  if (!token) return;
+  if (isApiAuthBlocked()) return;
+  const ok = await ensureApiAuthSession();
+  if (!ok) return;
   await qc.invalidateQueries({
     predicate: (query) => query.queryKey[0] === 'compendium',
   });
@@ -26,11 +28,11 @@ export function useCompendiumAuthRecovery(enabled = true): void {
     if (!enabled || !isLoaded || !isSignedIn) return;
 
     const recover = async () => {
-      if (recoveringRef.current) return;
+      if (recoveringRef.current || isApiAuthBlocked()) return;
       recoveringRef.current = true;
       try {
-        const token = await ensureApiAuthToken({ attempts: 4 });
-        if (!token) return;
+        const ok = await ensureApiAuthSession(true);
+        if (!ok) return;
         authStaleRef.current = false;
         await refetchCompendiumCatalog(qc);
       } finally {
@@ -67,8 +69,8 @@ export function useCompendiumAuthRecovery(enabled = true): void {
 export async function reloadCompendiumCatalog(
   qc: ReturnType<typeof useQueryClient>,
 ): Promise<boolean> {
-  const token = await ensureApiAuthToken({ attempts: 4 });
-  if (!token) return false;
+  const ok = await ensureApiAuthSession(true);
+  if (!ok) return false;
   await refetchCompendiumCatalog(qc);
   return true;
 }

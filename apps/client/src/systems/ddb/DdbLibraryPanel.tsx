@@ -12,6 +12,7 @@ import {
   searchDdbLibraryItems,
   searchDdbLibraryMonsters,
   searchDdbLibrarySpells,
+  type DdbImportAllProgress,
 } from './ddbApi';
 import { fetchSources, lockCompendiumSource, unlockCompendiumSource } from '@/systems/compendium/compendiumApi';
 import {
@@ -54,6 +55,47 @@ function tabToKind(tab: LibraryTab): 'monster' | 'item' | 'spell' {
   if (tab === 'monsters') return 'monster';
   if (tab === 'spells') return 'spell';
   return 'item';
+}
+
+function formatImportProgress(progress: DdbImportAllProgress, verb: 'import' | 'reimport'): string {
+  const bookPos =
+    progress.bookIndex != null && progress.bookTotal != null
+      ? `Book ${progress.bookIndex}/${progress.bookTotal}`
+      : null;
+  const book = progress.sourceName
+    ? bookPos
+      ? `${bookPos} · ${progress.sourceName}`
+      : progress.sourceName
+    : bookPos ?? '';
+  const prefix = book ? `${book}: ` : '';
+
+  if (progress.phase === 'complete') {
+    const ok = progress.bookImported ?? 0;
+    const fail = progress.bookErrors ?? 0;
+    return `${prefix}${verb} complete (${ok} new${fail ? `, ${fail} failed` : ''})`;
+  }
+
+  const phaseLabel =
+    progress.phase === 'listing-monsters'
+      ? 'listing monsters from D&D Beyond'
+      : progress.phase === 'listing-spells'
+        ? 'listing spells from D&D Beyond'
+        : progress.phase === 'listing-items'
+          ? 'listing items from D&D Beyond'
+          : `${verb}ing ${progress.phase}`;
+
+  if (progress.phase.startsWith('listing-')) {
+    const listed = progress.done > 0 ? ` (${progress.done} found so far)` : '…';
+    return `${prefix}${phaseLabel}${listed}`;
+  }
+
+  const count =
+    progress.total > 0
+      ? ` ${progress.done}/${progress.total}`
+      : progress.done > 0
+        ? ` ${progress.done}`
+        : '';
+  return `${prefix}${phaseLabel}${count}`;
 }
 
 function formatImportResultMessage(result: DdbLibraryImportResult, base: string): string {
@@ -101,7 +143,17 @@ export function DdbLibraryPanel({ onClose }: { onClose: () => void }) {
   const [selectedSourceIds, setSelectedSourceIds] = useState<Set<number>>(loadSavedSourceIds);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [message, setMessage] = useState<string | null>(null);
+  const [importProgress, setImportProgress] = useState<DdbImportAllProgress | null>(null);
   const [sourcesSaved, setSourcesSaved] = useState(false);
+
+  function handleBulkImportProgress(progress: DdbImportAllProgress, verb: 'import' | 'reimport') {
+    setImportProgress(progress);
+    setMessage(formatImportProgress(progress, verb));
+  }
+
+  function clearBulkImportProgress() {
+    setImportProgress(null);
+  }
 
   const { data: ddbStatus } = useQuery({
     queryKey: ['ddb', 'status'],
@@ -273,18 +325,7 @@ export function DdbLibraryPanel({ onClose }: { onClose: () => void }) {
           sourceNames,
           ...(ddbCampaignId != null && ddbCampaignId > 0 ? { campaignId: ddbCampaignId } : {}),
         },
-        (progress) => {
-          const book = progress.sourceName ? `${progress.sourceName}: ` : '';
-          if (progress.phase === 'complete') {
-            const ok = progress.bookImported ?? 0;
-            const fail = progress.bookErrors ?? 0;
-            setMessage(
-              `${book}import complete (${ok} entries${fail ? `, ${fail} failed` : ''}) — compendium updated.`,
-            );
-            return;
-          }
-          setMessage(`${book}importing ${progress.phase}… ${progress.done}/${progress.total || '?'}`);
-        },
+        (progress) => handleBulkImportProgress(progress, 'import'),
         async (info) => {
           useCompendiumUiStore.getState().setBrowseMode('sources');
           useCompendiumUiStore.getState().setPanelOpen(true);
@@ -295,6 +336,19 @@ export function DdbLibraryPanel({ onClose }: { onClose: () => void }) {
         },
       );
     },
+    onMutate: () => {
+      const total = selectedSourceIds.size;
+      setImportProgress({
+        phase: 'listing-monsters',
+        sourceId: 0,
+        bookIndex: 1,
+        bookTotal: total,
+        done: 0,
+        total: 0,
+      });
+      setMessage(`Starting import of ${total} book${total === 1 ? '' : 's'}…`);
+    },
+    onSettled: () => clearBulkImportProgress(),
     onSuccess: async (result) => {
       const ok = result.imported.length;
       const fail = result.errors.length;
@@ -342,18 +396,7 @@ export function DdbLibraryPanel({ onClose }: { onClose: () => void }) {
           skipExisting: true,
           ...(ddbCampaignId != null && ddbCampaignId > 0 ? { campaignId: ddbCampaignId } : {}),
         },
-        (progress) => {
-          const book = progress.sourceName ? `${progress.sourceName}: ` : '';
-          if (progress.phase === 'complete') {
-            const ok = progress.bookImported ?? 0;
-            const fail = progress.bookErrors ?? 0;
-            setMessage(
-              `${book}reimport complete (${ok} new${fail ? `, ${fail} failed` : ''}) — compendium updated.`,
-            );
-            return;
-          }
-          setMessage(`${book}reimporting ${progress.phase}… ${progress.done}/${progress.total || '?'}`);
-        },
+        (progress) => handleBulkImportProgress(progress, 'reimport'),
         async (info) => {
           if (info.result.imported.length > 0) {
             useCompendiumUiStore.getState().setBrowseMode('sources');
@@ -366,6 +409,19 @@ export function DdbLibraryPanel({ onClose }: { onClose: () => void }) {
         },
       );
     },
+    onMutate: () => {
+      const total = selectedSourceIds.size;
+      setImportProgress({
+        phase: 'listing-monsters',
+        sourceId: 0,
+        bookIndex: 1,
+        bookTotal: total,
+        done: 0,
+        total: 0,
+      });
+      setMessage(`Starting reimport of ${total} book${total === 1 ? '' : 's'} (skipping existing)…`);
+    },
+    onSettled: () => clearBulkImportProgress(),
     onSuccess: async (result) => {
       const ok = result.imported.length;
       const skipped = result.skipped ?? 0;
@@ -464,6 +520,58 @@ export function DdbLibraryPanel({ onClose }: { onClose: () => void }) {
   const selectedSourceNames = sources
     .filter((s) => selectedSourceIds.has(s.id))
     .map((s) => s.name);
+
+  const bulkImportActive = importAllMut.isPending || reimportMissingMut.isPending;
+  const bulkImportVerb: 'import' | 'reimport' = reimportMissingMut.isPending ? 'reimport' : 'import';
+  const progressLabel = importProgress ? formatImportProgress(importProgress, bulkImportVerb) : message;
+
+  const progressPercent = (() => {
+    if (!importProgress) return null;
+    const bookTotal = importProgress.bookTotal ?? 0;
+    const bookIndex = importProgress.bookIndex ?? 0;
+    if (bookTotal <= 0) return null;
+    let within = 0;
+    if (importProgress.phase === 'complete') {
+      within = 1;
+    } else if (importProgress.phase === 'listing-monsters') {
+      within = 0.05;
+    } else if (importProgress.phase === 'monsters' && importProgress.total > 0) {
+      within = 0.05 + (importProgress.done / importProgress.total) * 0.3;
+    } else if (importProgress.phase === 'listing-spells') {
+      within = 0.35;
+    } else if (importProgress.phase === 'spells' && importProgress.total > 0) {
+      within = 0.35 + (importProgress.done / importProgress.total) * 0.25;
+    } else if (importProgress.phase === 'listing-items') {
+      within = 0.6;
+    } else if (importProgress.phase === 'items' && importProgress.total > 0) {
+      within = 0.6 + (importProgress.done / importProgress.total) * 0.35;
+    } else if (importProgress.phase === 'monsters') {
+      within = 0.2;
+    } else if (importProgress.phase === 'spells') {
+      within = 0.5;
+    } else if (importProgress.phase === 'items') {
+      within = 0.75;
+    }
+    const completedBooks = Math.max(0, bookIndex - 1) + within;
+    return Math.min(100, Math.round((completedBooks / bookTotal) * 100));
+  })();
+
+  function shortProgressLabel(): string | null {
+    if (!importProgress) return null;
+    const book =
+      importProgress.bookIndex != null && importProgress.bookTotal != null
+        ? `${importProgress.bookIndex}/${importProgress.bookTotal}`
+        : null;
+    if (importProgress.phase.startsWith('listing-')) {
+      const kind = importProgress.phase.replace('listing-', '');
+      return book ? `${book} · listing ${kind}…` : `Listing ${kind}…`;
+    }
+    if (importProgress.phase === 'complete') return book ? `${book} · done` : 'Done';
+    const count = importProgress.total > 0 ? ` ${importProgress.done}/${importProgress.total}` : '';
+    return book
+      ? `${book} · ${importProgress.phase}${count}`
+      : `${importProgress.phase}${count}`;
+  }
 
   return (
     <DraggablePanel
@@ -707,10 +815,29 @@ export function DdbLibraryPanel({ onClose }: { onClose: () => void }) {
             )}
           </div>
 
-          {message && (
-            <p className="font-ui text-[10px] mb-2 shrink-0" style={{ color: GOLD }}>
-              {message}
-            </p>
+          {(message || bulkImportActive) && (
+            <div className="mb-2 shrink-0 space-y-1.5">
+              {bulkImportActive && progressPercent != null && (
+                <div
+                  className="h-1.5 w-full rounded overflow-hidden"
+                  style={{ background: 'rgba(255,255,255,0.08)' }}
+                >
+                  <div
+                    className="h-full transition-all duration-300"
+                    style={{
+                      width: `${progressPercent}%`,
+                      background: GOLD,
+                    }}
+                  />
+                </div>
+              )}
+              <p
+                className="font-ui text-[10px] leading-snug"
+                style={{ color: bulkImportActive ? GOLD : GOLD }}
+              >
+                {progressLabel}
+              </p>
+            </div>
           )}
 
           <div className="flex gap-2 shrink-0 flex-wrap">
@@ -746,7 +873,7 @@ export function DdbLibraryPanel({ onClose }: { onClose: () => void }) {
               }
             >
               {importAllMut.isPending
-                ? 'Importing all…'
+                ? shortProgressLabel() ?? 'Importing all…'
                 : selectedSourceIds.size > 0
                   ? `Import all types (${selectedSourceIds.size} book${selectedSourceIds.size === 1 ? '' : 's'})`
                   : 'Import all from books'}
@@ -764,7 +891,7 @@ export function DdbLibraryPanel({ onClose }: { onClose: () => void }) {
               title="Fast reimport: skips entries already in Mongo; re-fetches spells with broken duration text"
             >
               {reimportMissingMut.isPending
-                ? 'Reimporting…'
+                ? shortProgressLabel() ?? 'Reimporting…'
                 : selectedSourceIds.size > 0
                   ? `Reimport missing (${selectedSourceIds.size} book${selectedSourceIds.size === 1 ? '' : 's'})`
                   : 'Reimport missing'}

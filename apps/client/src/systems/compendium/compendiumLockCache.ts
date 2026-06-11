@@ -1,5 +1,6 @@
 import type { QueryClient } from '@tanstack/react-query';
-import { ensureApiAuthToken } from '@/lib/axios';
+import { isApiAuthBlocked } from '@/lib/apiAuthState';
+import { ensureApiAuthSession } from '@/lib/axios';
 import type {
   CompendiumItem,
   CompendiumMonster,
@@ -121,7 +122,9 @@ export async function refetchCompendiumAfterImport(
   qc: QueryClient,
   opts?: { catalogRev?: string },
 ): Promise<void> {
-  await ensureApiAuthToken({ attempts: 5, delayMs: 500 });
+  if (isApiAuthBlocked()) return;
+  await ensureApiAuthSession();
+  if (isApiAuthBlocked()) return;
   await qc.invalidateQueries({
     predicate: (query) => query.queryKey[0] === 'compendium',
   });

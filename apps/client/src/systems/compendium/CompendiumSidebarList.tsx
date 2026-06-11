@@ -12,6 +12,7 @@ import {
 } from './compendiumLockCache';
 import { reloadCompendiumCatalog } from './useCompendiumAuthRecovery';
 import { isApiAuthError } from '@/lib/axios';
+import { isApiAuthBlocked } from '@/lib/apiAuthState';
 import { prefetchCompendiumEntry } from './prefetchCompendiumEntry';
 import { useCompendiumUiStore, type CompendiumBrowseMode, type CompendiumTab } from './compendiumStore';
 import { useSessionStore } from '@/store/sessionStore';
@@ -35,7 +36,12 @@ function compendiumErrorHint(error: unknown): string {
     if (!error.response) {
       return 'Cannot reach the API server. Start it with pnpm dev in grimoire-vtt (port 3001).';
     }
-    if (error.response.status === 401) return 'Sign in required to load the compendium.';
+    if (error.response.status === 401) {
+      if (isApiAuthBlocked()) {
+        return 'API rejected your sign-in token. Use Retry sign-in at the top, or sign out and back in. If this persists, check Render CLERK_SECRET_KEY matches VITE_CLERK_PUBLISHABLE_KEY.';
+      }
+      return 'Sign in required to load the compendium.';
+    }
     if (error.response.status === 403) return 'Admin password required to edit. Unlock admin mode or sign in.';
     if (error.response.status === 502 || error.response.status === 504) {
       return 'API server unreachable (502). The server may have crashed or is still waking up — wait 30s and refresh.';

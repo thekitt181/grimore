@@ -8,6 +8,7 @@ import { SessionPage } from '@/pages/SessionPage';
 import { JoinPage } from '@/pages/JoinPage';
 import { SignInPage } from '@/pages/SignInPage';
 import { SignUpPage } from '@/pages/SignUpPage';
+import { AuthStatusBanner } from '@/components/AuthStatusBanner';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isSignedIn, isLoaded } = useAuth();
@@ -26,7 +27,12 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   }
 
   if (!isSignedIn) return <Navigate to="/sign-in" replace />;
-  return <>{children}</>;
+  return (
+    <>
+      <AuthStatusBanner />
+      {children}
+    </>
+  );
 }
 
 export default function App() {

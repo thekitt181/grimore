@@ -427,7 +427,10 @@ function chunkIds(ids: number[], size: number): number[][] {
   return chunks;
 }
 
-async function collectMonsterIdsForSource(sourceId: number): Promise<number[]> {
+async function collectMonsterIdsForSource(
+  sourceId: number,
+  onPage?: (listed: number) => void,
+): Promise<number[]> {
   const ids: number[] = [];
   let skip = 0;
   const take = 100;
@@ -436,6 +439,7 @@ async function collectMonsterIdsForSource(sourceId: number): Promise<number[]> {
     if (items.length === 0) break;
     ids.push(...items.map((m) => m.ddbId));
     skip += items.length;
+    onPage?.(ids.length);
     if (items.length < take) break;
   }
   return ids;
@@ -513,9 +517,18 @@ export async function importDdbLibraryEntries(
 }
 
 export type DdbImportAllProgress = {
-  phase: 'monsters' | 'spells' | 'items' | 'complete';
+  phase:
+    | 'monsters'
+    | 'spells'
+    | 'items'
+    | 'complete'
+    | 'listing-monsters'
+    | 'listing-spells'
+    | 'listing-items';
   sourceId: number;
   sourceName?: string;
+  bookIndex?: number;
+  bookTotal?: number;
   done: number;
   total: number;
   bookImported?: number;
@@ -563,15 +576,38 @@ export async function importAllDdbLibraryFromSource(
   const finishedBooks = new Set<number>();
 
   try {
-    for (const sourceId of sourceIds) {
+    for (const [bookIdx, sourceId] of sourceIds.entries()) {
       const sourceName = sourceNames[sourceId];
+      const bookIndex = bookIdx + 1;
+      const bookTotal = sourceIds.length;
       let bookMerged: DdbLibraryImportResult = { imported: [], errors: [] };
 
-      const monsterIds = await collectMonsterIdsForSource(sourceId);
+      onProgress?.({
+        phase: 'listing-monsters',
+        sourceId,
+        bookIndex,
+        bookTotal,
+        ...(sourceName ? { sourceName } : {}),
+        done: 0,
+        total: 0,
+      });
+      const monsterIds = await collectMonsterIdsForSource(sourceId, (listed) => {
+        onProgress?.({
+          phase: 'listing-monsters',
+          sourceId,
+          bookIndex,
+          bookTotal,
+          ...(sourceName ? { sourceName } : {}),
+          done: listed,
+          total: listed,
+        });
+      });
       for (const [i, chunk] of chunkIds(monsterIds, MONSTER_IMPORT_CHUNK).entries()) {
         onProgress?.({
           phase: 'monsters',
           sourceId,
+          bookIndex,
+          bookTotal,
           ...(sourceName ? { sourceName } : {}),
           done: Math.min((i + 1) * MONSTER_IMPORT_CHUNK, monsterIds.length),
           total: monsterIds.length,
@@ -584,6 +620,15 @@ export async function importAllDdbLibraryFromSource(
         merged = mergeImportResults(merged, chunkResult);
       }
 
+      onProgress?.({
+        phase: 'listing-spells',
+        sourceId,
+        bookIndex,
+        bookTotal,
+        ...(sourceName ? { sourceName } : {}),
+        done: 0,
+        total: 0,
+      });
       const spells = await searchDdbLibrarySpells({
         sourceId,
         sourceIds: [sourceId],
@@ -595,6 +640,8 @@ export async function importAllDdbLibraryFromSource(
         onProgress?.({
           phase: 'spells',
           sourceId,
+          bookIndex,
+          bookTotal,
           ...(sourceName ? { sourceName } : {}),
           done: Math.min((i + 1) * DEFAULT_IMPORT_CHUNK, spellIds.length),
           total: spellIds.length,
@@ -607,6 +654,15 @@ export async function importAllDdbLibraryFromSource(
         merged = mergeImportResults(merged, chunkResult);
       }
 
+      onProgress?.({
+        phase: 'listing-items',
+        sourceId,
+        bookIndex,
+        bookTotal,
+        ...(sourceName ? { sourceName } : {}),
+        done: 0,
+        total: 0,
+      });
       const items = await searchDdbLibraryItems({
         sourceId,
         sourceIds: [sourceId],
@@ -618,6 +674,8 @@ export async function importAllDdbLibraryFromSource(
         onProgress?.({
           phase: 'items',
           sourceId,
+          bookIndex,
+          bookTotal,
           ...(sourceName ? { sourceName } : {}),
           done: Math.min((i + 1) * DEFAULT_IMPORT_CHUNK, itemIds.length),
           total: itemIds.length,
@@ -637,9 +695,11 @@ export async function importAllDdbLibraryFromSource(
       onProgress?.({
         phase: 'complete',
         sourceId,
+        bookIndex,
+        bookTotal,
         ...(sourceName ? { sourceName } : {}),
-        done: 1,
-        total: 1,
+        done: bookIndex,
+        total: bookTotal,
         bookImported: bookMerged.imported.length,
         bookErrors: bookMerged.errors.length,
       });

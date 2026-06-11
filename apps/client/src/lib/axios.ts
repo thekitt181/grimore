@@ -1,5 +1,11 @@
 import axios, { type InternalAxiosRequestConfig } from 'axios';
 import { getApiBaseUrl } from './appUrls';
+import {
+  clearApiAuthBlocked,
+  isApiAuthBlocked,
+  markApiAuthBlocked,
+  wasApiSessionVerifiedRecently,
+} from './apiAuthState';
 
 export const api = axios.create({
   baseURL: getApiBaseUrl(),
@@ -18,22 +24,31 @@ export function isApiAuthError(err: unknown): boolean {
   return axios.isAxiosError(err) && err.response?.status === 401;
 }
 
-/** Wait for a Clerk token (refreshing when needed) before compendium refetches. */
-export async function ensureApiAuthToken(opts?: {
-  attempts?: number;
-  delayMs?: number;
-}): Promise<string | null> {
-  if (!getAuthToken) return null;
-  const attempts = opts?.attempts ?? 4;
-  const baseDelay = opts?.delayMs ?? 350;
-  for (let i = 0; i < attempts; i++) {
-    const token = await getAuthToken({ skipCache: i > 0 });
-    if (token) return token;
-    if (i < attempts - 1) {
-      await new Promise((r) => setTimeout(r, baseDelay * (i + 1)));
-    }
+/** Confirm the server accepts the current Clerk token (not just that Clerk returned one). */
+export async function verifyApiSession(force = false): Promise<boolean> {
+  if (!force && wasApiSessionVerifiedRecently() && !isApiAuthBlocked()) return true;
+  if (!getAuthToken) return false;
+  const token = await getAuthToken({ skipCache: true });
+  if (!token) {
+    markApiAuthBlocked('missing-token');
+    return false;
   }
-  return null;
+  try {
+    await api.get('/users/me', {
+      headers: { Authorization: `Bearer ${token}` },
+      __authRetried: true,
+    } as RetriableConfig);
+    clearApiAuthBlocked();
+    return true;
+  } catch (err) {
+    if (isApiAuthError(err)) markApiAuthBlocked('unauthorized');
+    return false;
+  }
+}
+
+export async function ensureApiAuthSession(force = false): Promise<boolean> {
+  if (!force && isApiAuthBlocked()) return false;
+  return verifyApiSession(force);
 }
 
 function dispatchAuthEvent(name: 'grimoire:auth-expired' | 'grimoire:auth-recovered'): void {
@@ -86,7 +101,13 @@ function wakeRetryDelayMs(attempt: number): number {
 }
 
 api.interceptors.response.use(
-  (res) => res,
+  (res) => {
+    if ((res.config as RetriableConfig).__authRetried) {
+      clearApiAuthBlocked();
+      dispatchAuthEvent('grimoire:auth-recovered');
+    }
+    return res;
+  },
   async (err: unknown) => {
     if (!axios.isAxiosError(err) || !err.config) {
       return Promise.reject(err);
@@ -109,11 +130,12 @@ api.interceptors.response.use(
       const token = await getAuthToken({ skipCache: true });
       if (token) {
         config.headers['Authorization'] = `Bearer ${token}`;
-        dispatchAuthEvent('grimoire:auth-recovered');
         return api.request(config);
       }
+      markApiAuthBlocked('missing-token');
       dispatchAuthEvent('grimoire:auth-expired');
     } else if (status === 401) {
+      if (config.__authRetried) markApiAuthBlocked('unauthorized');
       dispatchAuthEvent('grimoire:auth-expired');
     }
 
