@@ -116,27 +116,55 @@ async function startCompendiumBackground(): Promise<void> {
   void reconcileRawGlobalStorage();
 }
 
+async function connectDatabase(maxAttempts = 6): Promise<void> {
+  const timeoutMs = 20_000;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      await Promise.race([
+        prisma.$connect(),
+        new Promise<never>((_, reject) => {
+          setTimeout(() => reject(new Error(`PostgreSQL connect timeout after ${timeoutMs}ms`)), timeoutMs);
+        }),
+      ]);
+      console.log('[DB] PostgreSQL connected');
+      return;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.warn(`[DB] Connect attempt ${attempt}/${maxAttempts} failed:`, message);
+      if (attempt === maxAttempts) throw err;
+      await new Promise((resolve) => setTimeout(resolve, Math.min(2000 * attempt, 10_000)));
+    }
+  }
+}
+
+async function connectRedisInBackground(): Promise<void> {
+  let redisOk = false;
+  try {
+    redisOk = await connectRedisOptional();
+  } catch (err) {
+    console.warn('[Redis] Startup error — continuing without Redis:', err);
+  }
+  if (!redisOk) {
+    console.warn('[Redis] Running without Redis — session caches and DDB dedup are degraded');
+    return;
+  }
+  if (isSocketRedisAdapterEnabled()) {
+    await attachRedisSocketAdapter(io);
+  } else {
+    console.log('[Socket] Single-instance mode (no Redis socket adapter)');
+  }
+}
+
 async function bootServices(): Promise<void> {
   try {
-    await prisma.$connect();
-    console.log('[DB] PostgreSQL connected');
+    await connectDatabase();
 
-    let redisOk = false;
-    try {
-      redisOk = await connectRedisOptional();
-    } catch (err) {
-      console.warn('[Redis] Startup error — continuing without Redis:', err);
-    }
-    if (!redisOk) {
-      console.warn('[Redis] Running without Redis — session caches and DDB dedup are degraded');
-    } else if (isSocketRedisAdapterEnabled()) {
-      await attachRedisSocketAdapter(io);
-    } else {
-      console.log('[Socket] Single-instance mode (no Redis socket adapter)');
-    }
-
+    // API routes need Postgres only — don't block on Redis, compendium, or DDB jobs.
     servicesReady = true;
     console.log('[Server] API ready');
+
+    void connectRedisInBackground();
     void startCompendiumBackground();
     try {
       const { resumeRunningImportJobs } = await import('./services/ddb/ddbImportJobService');
@@ -145,7 +173,7 @@ async function bootServices(): Promise<void> {
       console.warn('[DDB] Could not resume import jobs:', err);
     }
   } catch (err) {
-    console.error('[Server] Service boot failed:', err);
+    console.error('[Server] Service boot failed — API stays unavailable until DB connects:', err);
   }
 }
 

@@ -93,11 +93,11 @@ type RetriableConfig = InternalAxiosRequestConfig & {
   __wakeRetryCount?: number;
 };
 
-const WAKE_RETRY_MAX = 4;
+const WAKE_RETRY_MAX = 8;
 const WAKE_RETRY_STATUSES = new Set([502, 503, 504]);
 
 function wakeRetryDelayMs(attempt: number): number {
-  return Math.min(1500 * 2 ** attempt, 12_000);
+  return Math.min(2000 * 2 ** attempt, 15_000);
 }
 
 api.interceptors.response.use(
