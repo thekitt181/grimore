@@ -1,6 +1,12 @@
 import { sceneRefs } from '@/systems/scene/sceneRefs';
 import { useMapStore } from '@/systems/map/store/mapStore';
 import { fitMapToScreen } from '@/systems/map/hooks/useMapViewport';
+import { clampViewportScale } from '@/systems/map/viewportLimits';
+import { isMobileClient } from '@/lib/socket';
+
+function maxScale(): number {
+  return isMobileClient() ? 24 : 8;
+}
 
 function zoomBy(factor: number) {
   const world = sceneRefs.world.current;
@@ -8,8 +14,10 @@ function zoomBy(factor: number) {
   if (!world || !app) return;
   const sw = app.screen.width;
   const sh = app.screen.height;
+  const viewMode = useMapStore.getState().viewMode;
   const oldScale = world.scale.x;
-  const newScale = oldScale * factor;
+  const newScale = clampViewportScale(oldScale * factor, viewMode, maxScale());
+  if (Math.abs(newScale - oldScale) < 1e-7) return;
   const ratio = newScale / oldScale;
   world.x = sw / 2 - (sw / 2 - world.x) * ratio;
   world.y = sh / 2 - (sh / 2 - world.y) * ratio;

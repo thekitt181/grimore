@@ -149,6 +149,7 @@ export function MapSceneCanvas() {
       gl={{ antialias: true, alpha: true }}
       onCreated={({ gl }) => {
         gl.setClearColor(0x000000, 0);
+        gl.domElement.style.pointerEvents = 'none';
       }}
     >
       {is3d ? (

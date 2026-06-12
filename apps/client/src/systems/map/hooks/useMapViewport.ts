@@ -183,8 +183,10 @@ export function useMapViewport(
       const oldScale = w.scale.x;
       applyZoomAt(w, mouseX, mouseY, oldScale + delta * oldScale, setViewport);
     }
-    canvas.addEventListener('wheel', onWheel, { passive: false });
-    document.addEventListener('wheel', onWheel, { passive: false, capture: true });
+    const mapArea = mapAreaRef?.current;
+    const wheelRoot: EventTarget = mapArea ?? document;
+    const onWheelCapture = (evt: Event) => onWheel(evt as WheelEvent);
+    wheelRoot.addEventListener('wheel', onWheelCapture, { passive: false, capture: true });
 
     function onPointerDown(e: PointerEvent) {
       pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -275,8 +277,7 @@ export function useMapViewport(
       canvas.style.touchAction = '';
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
-      canvas.removeEventListener('wheel', onWheel);
-      document.removeEventListener('wheel', onWheel, { capture: true } as AddEventListenerOptions);
+      wheelRoot.removeEventListener('wheel', onWheelCapture, { capture: true } as AddEventListenerOptions);
       canvas.removeEventListener('pointerdown', onPointerDown);
       canvas.removeEventListener('pointermove', onPointerMove);
       canvas.removeEventListener('pointerup', onPointerUp);

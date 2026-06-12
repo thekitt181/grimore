@@ -203,6 +203,8 @@ export function useSelectionTool(appReady: boolean) {
         store.items,
         useLiveTransformStore.getState().byId,
       );
+      const viewMode = useMapStore.getState().viewMode;
+      const is3dNavigate = viewMode === '3d' && !e.shiftKey;
 
       const moveModeId = useTokenStore.getState().moveModeTokenId;
       if (moveModeId) {
@@ -258,11 +260,11 @@ export function useSelectionTool(appReady: boolean) {
           const it = store.items[id];
           return it && canManipulate(it);
         });
-        if (ids.length && hit.type !== 'token') beginMove(ids, e);
+        if (ids.length && hit.type !== 'token' && !is3dNavigate) beginMove(ids, e);
         return;
       }
 
-      if (gm) {
+      if (gm && !is3dNavigate) {
         const map = getActiveMap();
         if (map) {
           const scale = sceneRefs.world.current?.scale.x ?? 1;
@@ -297,8 +299,8 @@ export function useSelectionTool(appReady: boolean) {
         }
       }
 
-      // GM: 3D map pick volume or ground hit selects the map.
-      if (!hit && gm) {
+      // GM: 3D map pick volume or ground hit selects the map (2D / Shift+drag only).
+      if (!hit && gm && !is3dNavigate) {
         const pickId = pickSceneItem(e.clientX, e.clientY);
         const pickedItem = pickId ? merged[pickId] : undefined;
         const mapHit = pickedItem?.type === 'map'
@@ -325,8 +327,7 @@ export function useSelectionTool(appReady: boolean) {
 
       // Otherwise pan (3D empty drag) or marquee-select (2D, or Shift+drag in 3D).
       if (!e.shiftKey) store.clearSelection();
-      const viewMode = useMapStore.getState().viewMode;
-      if (viewMode === '3d' && !e.shiftKey) {
+      if (is3dNavigate) {
         const world = sceneRefs.world.current;
         if (world) {
           viewPan = {
