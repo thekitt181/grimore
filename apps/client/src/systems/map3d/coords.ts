@@ -31,3 +31,14 @@ export function screenPanToGroundDelta(
     dcz: panX * sinA + panZ * cosA,
   };
 }
+
+/** Screen drag → world (Pixi x/y) delta — object follows finger in 2D and 3D orbit. */
+export function screenDeltaToWorldDelta(
+  screenDx: number,
+  screenDy: number,
+  scale: number,
+  azimuth: number,
+): { dx: number; dy: number } {
+  const { dcx, dcz } = screenPanToGroundDelta(screenDx, screenDy, azimuth, scale);
+  return { dx: -dcx, dy: -dcz };
+}
