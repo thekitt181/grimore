@@ -32,7 +32,6 @@ import {
   deleteOwlbearEntry,
   readRawGlobalDoc,
   saveOwlbearEntriesBulk,
-  type BookSourceLabelBuckets,
   clearRawGlobalDocInflight,
   type CompendiumKind,
   type PersistRawGlobalDocResult,
@@ -59,7 +58,6 @@ import {
   type CompendiumVisibilityPolicy,
 } from './compendiumVisibility';
 import {
-  readBookSourceLabelBucketsWithFallback,
   readOverrideCountsFromMongo,
   readOverrideEntriesFromMongo,
   readOverrideEntryByIdFromMongo,
@@ -689,9 +687,10 @@ function mapSourceListResults(
     .map(([id, c]) => ({
       id,
       label: formatSourceLabel(id),
-      count: includeDrafts ? c.total : c.public,
-      ...(includeDrafts && sourceIsLocked(id, policy) ? { locked: true } : {}),
-      ...(includeDrafts && c.draft > 0 ? { draftCount: c.draft } : {}),
+      // Books tab: show all imported override entries per source (incl. locked/draft).
+      count: excludeBundled ? c.total : (includeDrafts ? c.total : c.public),
+      ...(sourceIsLocked(id, policy) ? { locked: true } : {}),
+      ...(c.draft > 0 ? { draftCount: c.draft } : {}),
     }))
     .sort((a, b) => a.label.localeCompare(b.label));
 }
@@ -724,10 +723,9 @@ function tallyBooksSourceCountsForKind(
   counts: SourceCountMap = new Map(),
 ): SourceCountMap {
   for (const entry of entries) {
-    if (isHomebrewEntry(true, entry.source)) continue;
-    for (const part of splitSources(entry.source)) {
-      if (part.toLowerCase() === 'custom') continue;
-      if (policyIsSourceLocked(part, policy)) continue;
+    const parts = splitSources(entry.source);
+    const labels = parts.length > 0 ? parts : ['D&D Beyond'];
+    for (const part of labels) {
       const draft = isEntryDraft(kind, entry.name, entry.source, policy);
       const cur = counts.get(part) ?? { total: 0, public: 0, draft: 0 };
       cur.total += 1;
@@ -750,113 +748,26 @@ function tallyBooksSourceCounts(
   return counts;
 }
 
-function tallyBooksFromSourceLabels(
-  buckets: BookSourceLabelBuckets | null,
-  _policy: CompendiumVisibilityPolicy,
-): SourceCountMap {
-  if (!buckets) return new Map();
-  const counts: SourceCountMap = new Map();
-
-  const addSources = (sources: Array<string | undefined>) => {
-    for (const source of sources) {
-      if (!source?.trim()) continue;
-      for (const part of splitSources(source)) {
-        if (part.toLowerCase() === 'custom') continue;
-        const cur = counts.get(part) ?? { total: 0, public: 0, draft: 0 };
-        cur.total += 1;
-        cur.public += 1;
-        counts.set(part, cur);
-      }
-    }
-  };
-
-  addSources(buckets.monsterSources);
-  addSources(buckets.itemSources);
-  addSources(buckets.spellSources);
-  return counts;
-}
-
-function bookSourcesFromLabelBuckets(
-  buckets: BookSourceLabelBuckets | null,
-  policy: CompendiumVisibilityPolicy,
-): Array<{ id: string; label: string; count: number }> {
-  const bundled = bundledSourceLabelSet();
-  const counts = tallyBooksFromSourceLabels(buckets, policy);
-  return mapSourceListResults(counts, policy, false, true, bundled).map(
-    ({ id, label, count }) => ({ id, label, count }),
-  );
-}
-
 /** Merged DDB-imported book list (monsters + items + spells) for Compendium → Books. */
 export async function listAllBookSources(): Promise<
-  Array<{ id: string; label: string; count: number }>
+  Array<{ id: string; label: string; count: number; locked?: boolean; draftCount?: number }>
 > {
-  const mongoCounts = await readOverrideCountsFromMongo();
-  const overrideTotal = mongoCounts
-    ? mongoCounts.monsters + mongoCounts.items + mongoCounts.spells
-    : 0;
-
   await ensureImportedSourcesUnlocked('listBooks');
-  let policy = await readVisibilityPolicyFast();
-  const bundled = bundledSourceLabelSet();
-  let labelBuckets = await readBookSourceLabelBucketsWithFallback();
-  let results = bookSourcesFromLabelBuckets(labelBuckets, policy);
-
-  const rawForCounts = await readRawGlobalDoc({ includeImageData: false });
-  const rawTally = mapSourceListResults(
-    tallyBooksSourceCounts(rawForCounts, policy),
+  const policy = await readVisibilityPolicyFast();
+  const raw = await readRawGlobalDoc({ includeImageData: false });
+  return mapSourceListResults(
+    tallyBooksSourceCounts(raw, policy),
     policy,
-    false,
     true,
-    bundled,
-  ).map(({ id, label, count }) => ({ id, label, count }));
-  const labelTallyTotal = results.reduce((sum, row) => sum + row.count, 0);
-  const rawTallyTotal = rawTally.reduce((sum, row) => sum + row.count, 0);
-  if (rawTallyTotal > labelTallyTotal) {
-    results = rawTally;
-  }
-
-  if (results.length === 0 && overrideTotal > 0) {
-    await ensureImportedSourcesUnlocked('listBooks-recovery');
-    policy = await readVisibilityPolicyFast();
-    labelBuckets = await readBookSourceLabelBucketsWithFallback();
-    results = bookSourcesFromLabelBuckets(labelBuckets, policy);
-  }
-
-  if (results.length === 0 && overrideTotal === 0) {
-    const { promoteFallbackToMongo } = await import('./compendiumFallbackMongoSync');
-    await promoteFallbackToMongo('listBooks');
-    clearRawGlobalDocInflight();
-    labelBuckets = await readBookSourceLabelBucketsWithFallback();
-    policy = await readVisibilityPolicyFast();
-    results = bookSourcesFromLabelBuckets(labelBuckets, policy);
-    if (results.length === 0 && labelBuckets) {
-      await ensureImportedSourcesUnlocked('listBooks-recovery');
-      policy = await readVisibilityPolicyFast();
-      results = bookSourcesFromLabelBuckets(labelBuckets, policy);
-    }
-  }
-
-  if (results.length > 0) {
-    console.log(`[Compendium] Books list: ${results.length} imported source(s)`);
-  } else if (overrideTotal > 0) {
-    console.warn(
-      `[Compendium] Books list empty but Mongo has ${overrideTotal} override entries — check bundled/lock filters`,
-    );
-  } else {
-    console.warn('[Compendium] Books list empty — no imported override sources in Mongo');
-  }
-
-  return results;
+    true,
+    null,
+  );
 }
 
 function compendiumMonsterFromOverride(
   m: OwlbearMonster,
-  policy?: CompendiumVisibilityPolicy,
+  _policy?: CompendiumVisibilityPolicy,
 ): CompendiumMonster | null {
-  if (isHomebrewEntry(true, m.source)) return null;
-  const parts = splitSources(m.source);
-  if (policy && parts.some((p) => policyIsSourceLocked(p, policy))) return null;
   return toMonster(
     { ...m, _id: slugify(m.name) } as StoredMonster,
     true,
@@ -867,11 +778,8 @@ function compendiumMonsterFromOverride(
 
 function compendiumItemFromOverride(
   i: OwlbearItem,
-  policy?: CompendiumVisibilityPolicy,
+  _policy?: CompendiumVisibilityPolicy,
 ): CompendiumItem | null {
-  if (isHomebrewEntry(true, i.source)) return null;
-  const parts = splitSources(i.source);
-  if (policy && parts.some((p) => policyIsSourceLocked(p, policy))) return null;
   return {
     id: slugify(i.name),
     name: i.name,
@@ -887,11 +795,8 @@ function compendiumItemFromOverride(
 
 function compendiumSpellFromOverride(
   s: OwlbearSpell,
-  policy?: CompendiumVisibilityPolicy,
+  _policy?: CompendiumVisibilityPolicy,
 ): CompendiumSpell | null {
-  if (isHomebrewEntry(true, s.source)) return null;
-  const parts = splitSources(s.source);
-  if (policy && parts.some((p) => policyIsSourceLocked(p, policy))) return null;
   return {
     id: slugify(s.name),
     name: s.name,
@@ -1057,7 +962,7 @@ export async function listSources(
       kindToCompendiumKind(kind),
       policy,
     );
-    return mapSourceListResults(counts, policy, false, true, bundled);
+    return mapSourceListResults(counts, policy, true, true, null);
   }
 
   const compendiumKind = kindToCompendiumKind(kind);

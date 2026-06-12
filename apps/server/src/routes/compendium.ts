@@ -258,7 +258,7 @@ router.get('/monsters', ...auth, async (req: AuthenticatedRequest, res) => {
     const crMax = req.query['crMax'] !== undefined ? Number(req.query['crMax']) : undefined;
     const source = typeof req.query['source'] === 'string' ? req.query['source'] : undefined;
     const isCustom = req.query['isCustom'] === 'true' ? true : req.query['isCustom'] === 'false' ? false : undefined;
-    const includeDrafts = isCompendiumAdmin(req);
+    const includeDrafts = isCompendiumAdmin(req) || Boolean(source?.trim());
     const result = await searchMonsters({ q, page, limit, crMin, crMax, source, isCustom, includeDrafts });
     res.json(result);
   } catch (err) {
@@ -349,7 +349,8 @@ router.get('/items', ...auth, async (req: AuthenticatedRequest, res) => {
     const limit = Number(req.query['limit'] ?? 50);
     const source = typeof req.query['source'] === 'string' ? req.query['source'] : undefined;
     const isCustom = req.query['isCustom'] === 'true' ? true : req.query['isCustom'] === 'false' ? false : undefined;
-    res.json(await searchItems({ q, page, limit, source, isCustom, includeDrafts: isCompendiumAdmin(req) }));
+    const includeDrafts = isCompendiumAdmin(req) || Boolean(source?.trim());
+    res.json(await searchItems({ q, page, limit, source, isCustom, includeDrafts }));
   } catch (err) {
     res.status(500).json({ error: 'Failed to search items' });
   }
@@ -422,7 +423,8 @@ router.get('/spells', ...auth, async (req: AuthenticatedRequest, res) => {
     const limit = Number(req.query['limit'] ?? 50);
     const source = typeof req.query['source'] === 'string' ? req.query['source'] : undefined;
     const isCustom = req.query['isCustom'] === 'true' ? true : req.query['isCustom'] === 'false' ? false : undefined;
-    res.json(await searchSpells({ q, page, limit, source, isCustom, includeDrafts: isCompendiumAdmin(req) }));
+    const includeDrafts = isCompendiumAdmin(req) || Boolean(source?.trim());
+    res.json(await searchSpells({ q, page, limit, source, isCustom, includeDrafts }));
   } catch (err) {
     res.status(500).json({ error: 'Failed to search spells' });
   }

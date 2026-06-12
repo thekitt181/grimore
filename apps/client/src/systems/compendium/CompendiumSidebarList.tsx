@@ -253,11 +253,9 @@ export function CompendiumSidebarList() {
 
   const filteredSources = useMemo(() => {
     const list = sourcesQ.data ?? [];
-    // Books tab shows player-visible sources only — locked books stay in admin All/drafts.
-    const visible = list.filter((s) => !s.locked);
     const q = query.trim().toLowerCase();
-    if (!q) return visible;
-    return visible.filter((s) => s.label.toLowerCase().includes(q) || s.id.toLowerCase().includes(q));
+    if (!q) return list;
+    return list.filter((s) => s.label.toLowerCase().includes(q) || s.id.toLowerCase().includes(q));
   }, [sourcesQ.data, query]);
 
   const selectedSourceMeta = sourcesQ.data?.find((s) => s.id === selectedSource);
@@ -392,9 +390,9 @@ export function CompendiumSidebarList() {
               {query.trim()
                 ? 'No source books match your search.'
                 : sourcesQ.isSuccess && (sourcesQ.data?.length ?? 0) === 0
-                  ? 'No imported books yet. Use D&D Beyond Library → Import all, then Sync compendium. Bundled books are hidden here.'
+                  ? 'No imported books yet. Use D&D Beyond Library → Import all, then Sync compendium.'
                   : sourcesQ.isSuccess && (sourcesQ.data?.length ?? 0) > 0
-                    ? 'All source books are hidden (locked). Unlock a book in admin mode or import from D&D Beyond.'
+                    ? 'No books match your search.'
                     : 'Loading book list…'}
             </p>
             {!query.trim() && (
