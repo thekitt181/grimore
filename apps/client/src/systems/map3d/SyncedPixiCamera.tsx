@@ -1,14 +1,10 @@
-import { useRef, type RefObject } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
-import type { MapViewport } from '@/systems/map/store/mapStore';
-
-type OrbitControlsLike = { target: THREE.Vector3; update: () => void };
+import { useMapStore, type MapViewport } from '@/systems/map/store/mapStore';
 
 /** Orthographic camera locked to the Pixi pan/zoom (top-down, Y-up ground on XZ). */
 export function SyncedPixiOrthographicCamera({ viewport }: { viewport: MapViewport }) {
   const { camera, size } = useThree();
-  const ready = useRef(false);
 
   useFrame(() => {
     if (!(camera instanceof THREE.OrthographicCamera)) return;
@@ -29,40 +25,40 @@ export function SyncedPixiOrthographicCamera({ viewport }: { viewport: MapViewpo
     camera.up.set(0, 0, -1);
     camera.rotation.set(-Math.PI / 2, 0, 0);
     camera.updateProjectionMatrix();
-    ready.current = true;
   });
 
   return null;
 }
 
-/** Perspective orbit camera driven by Pixi viewport (pan/zoom on 2D layer). */
+/** Perspective camera synced to Pixi pan/zoom with user-controlled orbit angles. */
 export function SyncedPixiPerspectiveCamera({
   viewport,
   span,
-  controlsRef,
 }: {
   viewport: MapViewport;
   span: number;
-  controlsRef: RefObject<OrbitControlsLike | null>;
 }) {
   const { camera, size } = useThree();
+  const orbit = useMapStore((s) => s.view3dOrbit);
 
   useFrame(() => {
     const { x, y, scale } = viewport;
     const s = Math.max(scale, 0.08);
     const cx = (size.width / 2 - x) / s;
     const cz = (size.height / 2 - y) / s;
-    const dist = (span * 0.85) / s;
-    const camY = (span * 0.55) / s;
+    const radius = (span * 0.85) / s;
+    const sinP = Math.sin(orbit.polar);
+    const cosP = Math.cos(orbit.polar);
+    const sinA = Math.sin(orbit.azimuth);
+    const cosA = Math.cos(orbit.azimuth);
 
-    camera.position.set(cx + dist * 0.707, camY, cz + dist * 0.707);
+    camera.position.set(
+      cx + radius * sinP * sinA,
+      radius * cosP,
+      cz + radius * sinP * cosA,
+    );
+    camera.up.set(0, 1, 0);
     camera.lookAt(cx, 0, cz);
-
-    const controls = controlsRef.current;
-    if (controls) {
-      controls.target.set(cx, 0, cz);
-      controls.update();
-    }
   });
 
   return null;

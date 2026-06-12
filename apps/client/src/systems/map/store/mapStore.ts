@@ -32,6 +32,19 @@ export interface MapViewport {
   scale: number;
 }
 
+/** Spherical orbit around the map center in 3D view (radians). */
+export interface View3DOrbit {
+  /** Rotation around vertical axis — full 360°. */
+  azimuth: number;
+  /** Angle from top-down (0) toward horizon (π/2). */
+  polar: number;
+}
+
+export const DEFAULT_VIEW3D_ORBIT: View3DOrbit = {
+  azimuth: Math.PI / 4,
+  polar: 0.95,
+};
+
 export interface ActiveGrid {
   gridType: GridType;
   gridSize: number;
@@ -53,6 +66,8 @@ interface SceneState extends ActiveGrid {
 
   /** 2D Pixi canvas vs 3D orbit view (React Three Fiber). */
   viewMode: MapViewMode;
+  /** 3D camera orbit (right-drag or Alt+drag in 3D view). */
+  view3dOrbit: View3DOrbit;
   /** Auto-extrude wall segments into 3D geometry in 3D mode. */
   autoExtrudeWalls: boolean;
   /** Wall height in grid cells (~5 ft per cell). */
@@ -92,6 +107,8 @@ interface SceneState extends ActiveGrid {
 
   setViewMode: (mode: MapViewMode) => void;
   toggleViewMode: () => void;
+  adjustView3dOrbit: (deltaAzimuth: number, deltaPolar: number) => void;
+  resetView3dOrbit: () => void;
   setAutoExtrudeWalls: (enabled: boolean) => void;
   setWallHeightCells: (cells: number) => void;
   setScanImageWalls: (enabled: boolean) => void;
@@ -140,6 +157,7 @@ export const useMapStore = create<SceneState>((set) => ({
   wallMode:     'freehand',
   viewport:     { x: 0, y: 0, scale: 1 },
   viewMode:     '2d',
+  view3dOrbit:    { ...DEFAULT_VIEW3D_ORBIT },
   autoExtrudeWalls: false,
   wallHeightCells: 1.8,
   scanImageWalls: false,
@@ -174,6 +192,18 @@ export const useMapStore = create<SceneState>((set) => ({
   setViewMode: (viewMode) => set({ viewMode }),
   toggleViewMode: () =>
     set((s) => ({ viewMode: s.viewMode === '2d' ? '3d' : '2d' })),
+  adjustView3dOrbit: (deltaAzimuth, deltaPolar) =>
+    set((s) => {
+      const polarMin = 0.12;
+      const polarMax = Math.PI / 2 - 0.05;
+      return {
+        view3dOrbit: {
+          azimuth: s.view3dOrbit.azimuth + deltaAzimuth,
+          polar: Math.max(polarMin, Math.min(polarMax, s.view3dOrbit.polar + deltaPolar)),
+        },
+      };
+    }),
+  resetView3dOrbit: () => set({ view3dOrbit: { ...DEFAULT_VIEW3D_ORBIT } }),
   setAutoExtrudeWalls: (autoExtrudeWalls) => set({ autoExtrudeWalls }),
   setWallHeightCells: (wallHeightCells) =>
     set({ wallHeightCells: Math.max(0.5, Math.min(8, wallHeightCells)) }),
@@ -246,6 +276,7 @@ export const useMapStore = create<SceneState>((set) => ({
       wallMode: 'freehand',
       viewport: { x: 0, y: 0, scale: 1 },
       viewMode: '2d',
+      view3dOrbit: { ...DEFAULT_VIEW3D_ORBIT },
       autoExtrudeWalls: false,
       wallHeightCells: 1.8,
       scanImageWalls: false,

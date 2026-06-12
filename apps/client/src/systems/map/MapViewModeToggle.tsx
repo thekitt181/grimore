@@ -8,7 +8,9 @@ export function MapViewModeToggle({ variant = 'toolbar' }: { variant?: 'toolbar'
   const viewMode = useMapStore((s) => s.viewMode);
   const toggleViewMode = useMapStore((s) => s.toggleViewMode);
   const is3d = viewMode === '3d';
-  const title = is3d ? 'Switch to 2D map' : 'Switch to 3D map (orbit, extruded walls)';
+  const title = is3d
+    ? 'Switch to 2D map (right-drag to orbit in 3D)'
+    : 'Switch to 3D map (right-drag to orbit, extruded walls)';
 
   if (variant === 'dock') {
     return (

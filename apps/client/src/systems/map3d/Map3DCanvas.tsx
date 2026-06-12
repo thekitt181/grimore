@@ -1,6 +1,5 @@
-import { Suspense, useMemo, useRef } from 'react';
+import { Suspense, useMemo } from 'react';
 import { Canvas } from '@react-three/fiber';
-import { OrbitControls } from '@react-three/drei';
 import { useItemStore, selectSortedItems } from '@/systems/scene/store/itemStore';
 import { useMapStore } from '@/systems/map/store/mapStore';
 import type { DrawItem, MapItem, TextItem } from '@/systems/scene/types';
@@ -14,33 +13,9 @@ import { Map3DMapModel } from './Map3DMapModel';
 import { SyncedPixiPerspectiveCamera } from './SyncedPixiCamera';
 import { useVisibleSceneTokens } from './useVisibleSceneTokens';
 
-function ViewportOrbitControls({ span }: { span: number }) {
+function ViewportCamera({ span }: { span: number }) {
   const viewport = useMapStore((s) => s.viewport);
-  const controlsRef = useRef<React.ComponentRef<typeof OrbitControls>>(null);
-  const radius = span * 0.75;
-
-  return (
-    <>
-      <SyncedPixiPerspectiveCamera
-        viewport={viewport}
-        span={span}
-        controlsRef={controlsRef}
-      />
-      <OrbitControls
-        ref={controlsRef}
-        enablePan={false}
-        enableZoom={false}
-        enableRotate={false}
-        enabled={false}
-        minDistance={radius * 0.15}
-        maxDistance={radius * 3.5}
-        maxPolarAngle={Math.PI / 2 - 0.08}
-        minPolarAngle={0.15}
-        dampingFactor={0.08}
-        enableDamping
-      />
-    </>
-  );
+  return <SyncedPixiPerspectiveCamera viewport={viewport} span={span} />;
 }
 
 function Map3DSceneContent() {
@@ -97,7 +72,7 @@ function Map3DSceneContent() {
       />
       <Map3DDrawings drawings={drawings} labels={labels} />
 
-      <ViewportOrbitControls span={span} />
+      <ViewportCamera span={span} />
     </>
   );
 }

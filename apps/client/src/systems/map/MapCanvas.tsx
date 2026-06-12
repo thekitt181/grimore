@@ -38,6 +38,7 @@ import { useWallTool } from './hooks/useWallTool';
 import { useEraserTool } from './hooks/useEraserTool';
 import { useDeleteKey } from './hooks/useDeleteKey';
 import { useMap3DPixiMode } from './hooks/useMap3DPixiMode';
+import { useMap3DOrbit } from './hooks/useMap3DOrbit';
 import type { Item, MapItem, TokenItem } from '@/systems/scene/types';
 import { MapCategoryWheel, type ImageCategory } from './MapCategoryWheel';
 import { useSessionStore } from '@/store/sessionStore';
@@ -347,6 +348,7 @@ export function MapCanvas() {
   useEraserTool(appReady);
   useDeleteKey(appReady);
   useMap3DPixiMode(appReady, viewMode);
+  useMap3DOrbit(appReady, viewMode);
 
   // ── Fix maps that still use 96px after an image changed their dimensions ─
   const gridFixed = useRef(false);
