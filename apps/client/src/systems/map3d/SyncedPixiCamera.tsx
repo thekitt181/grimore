@@ -1,7 +1,7 @@
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { useMapStore, type MapViewport } from '@/systems/map/store/mapStore';
-import { view3dCameraRef } from './view3dCameraRef';
+import { sceneCameraRef } from './sceneCameraRef';
 
 /** Orthographic camera locked to the Pixi pan/zoom (top-down, Y-up ground on XZ). */
 export function SyncedPixiOrthographicCamera({ viewport }: { viewport: MapViewport }) {
@@ -26,6 +26,15 @@ export function SyncedPixiOrthographicCamera({ viewport }: { viewport: MapViewpo
     camera.up.set(0, 0, -1);
     camera.rotation.set(-Math.PI / 2, 0, 0);
     camera.updateProjectionMatrix();
+
+    sceneCameraRef.current = {
+      type: 'orthographic',
+      left: camera.left,
+      right: camera.right,
+      top: camera.top,
+      bottom: camera.bottom,
+      position: { x: camera.position.x, y: camera.position.y, z: camera.position.z },
+    };
   });
 
   return null;
@@ -67,7 +76,8 @@ export function SyncedPixiPerspectiveCamera({
     camera.updateProjectionMatrix();
 
     if (camera instanceof THREE.PerspectiveCamera) {
-      view3dCameraRef.current = {
+      sceneCameraRef.current = {
+        type: 'perspective',
         position: { x: camera.position.x, y: camera.position.y, z: camera.position.z },
         target: { x: cx, y: 0, z: cz },
         fov: camera.fov,

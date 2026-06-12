@@ -10,13 +10,22 @@ import { Map3DWalls } from './Map3DWalls';
 import { Map3DTokens } from './Map3DTokens';
 import { Map3DDrawings } from './Map3DDrawings';
 import { Map3DMapModel } from './Map3DMapModel';
-import { SyncedPixiPerspectiveCamera } from './SyncedPixiCamera';
+import { SyncedPixiOrthographicCamera, SyncedPixiPerspectiveCamera } from './SyncedPixiCamera';
 import { useVisibleSceneTokens } from './useVisibleSceneTokens';
 import { Map3DSelectionOutlines } from './Map3DSelectionOutlines';
+import { MapPickVolume } from './MapPickVolume';
 
-function ViewportCamera({ span }: { span: number }) {
-  const viewport = useMapStore((s) => s.viewport);
-  return <SyncedPixiPerspectiveCamera viewport={viewport} span={span} />;
+function TokenLayer() {
+  const { tokens, activeTurnItemId } = useVisibleSceneTokens();
+  return (
+    <>
+      <Map3DTokens
+        tokens={tokens}
+        {...(activeTurnItemId ? { activeTurnItemId } : {})}
+      />
+      <Map3DSelectionOutlines />
+    </>
+  );
 }
 
 function Map3DSceneContent() {
@@ -34,7 +43,6 @@ function Map3DSceneContent() {
   const wallHeightCells = useMapStore((s) => s.wallHeightCells);
 
   const maps = items.filter((i): i is MapItem => i.type === 'map' && i.visible);
-  const { tokens, activeTurnItemId } = useVisibleSceneTokens();
   const drawings = items.filter((i): i is DrawItem => i.type === 'drawing');
   const labels = items.filter((i): i is TextItem => i.type === 'text');
 
@@ -65,22 +73,48 @@ function Map3DSceneContent() {
             <Map3DWalls map={map} wallHeight={wallHeight} wallThickness={wallThickness} />
           )}
           <Map3DMapModel map={map} />
+          <MapPickGroup map={map} />
         </group>
       ))}
 
-      <Map3DTokens
-        tokens={tokens}
-        {...(activeTurnItemId ? { activeTurnItemId } : {})}
-      />
+      <TokenLayer />
       <Map3DDrawings drawings={drawings} labels={labels} />
 
-      <Map3DSelectionOutlines />
       <ViewportCamera span={span} />
     </>
   );
 }
 
-export function Map3DCanvas() {
+function MapPickGroup({ map }: { map: MapItem }) {
+  const [cx, cz] = itemCenterXZ(map);
+  return (
+    <group position={[cx, 0, cz]} rotation={[0, (map.rotation * Math.PI) / 180, 0]}>
+      <MapPickVolume map={map} />
+    </group>
+  );
+}
+
+function ViewportCamera({ span }: { span: number }) {
+  const viewport = useMapStore((s) => s.viewport);
+  return <SyncedPixiPerspectiveCamera viewport={viewport} span={span} />;
+}
+
+function TokenOverlayContent() {
+  const viewport = useMapStore((s) => s.viewport);
+  return (
+    <>
+      <ambientLight intensity={0.85} />
+      <directionalLight position={[400, 800, 300]} intensity={0.9} />
+      <SyncedPixiOrthographicCamera viewport={viewport} />
+      <TokenLayer />
+    </>
+  );
+}
+
+/** Unified Three.js layer: 3D tokens in 2D + full 3D scene in 3D view. */
+export function MapSceneCanvas() {
+  const viewMode = useMapStore((s) => s.viewMode);
+  const is3d = viewMode === '3d';
   const items = useItemStore(selectSortedItems);
   const activeMapId = useItemStore((s) => s.activeMapId);
   const activeMap = useMemo(() => {
@@ -98,20 +132,45 @@ export function Map3DCanvas() {
 
   return (
     <Canvas
-      shadows
-      camera={{
-        position: [cx + camDist, camY, cz + camDist],
-        fov: 45,
-        near: 1,
-        far: Math.max(span * 8, 20000),
+      shadows={is3d}
+      orthographic={!is3d}
+      camera={
+        is3d
+          ? {
+              position: [cx + camDist, camY, cz + camDist],
+              fov: 45,
+              near: 1,
+              far: Math.max(span * 8, 20000),
+            }
+          : { position: [0, 0, 1000], zoom: 1, near: 0.1, far: 5000 }
+      }
+      style={{
+        position: 'absolute',
+        inset: 0,
+        zIndex: is3d ? 0 : 3,
+        touchAction: 'none',
+        pointerEvents: 'none',
       }}
-      style={{ position: 'absolute', inset: 0, zIndex: 0, touchAction: 'none', pointerEvents: 'none' }}
-      gl={{ antialias: true, alpha: false }}
+      gl={{ antialias: true, alpha: !is3d }}
+      onCreated={({ gl }) => {
+        if (!is3d) gl.setClearColor(0x000000, 0);
+      }}
     >
-      <color attach="background" args={['#1e1e22']} />
-      <Suspense fallback={null}>
-        <Map3DSceneContent />
-      </Suspense>
+      {is3d ? (
+        <>
+          <color attach="background" args={['#1e1e22']} />
+          <Suspense fallback={null}>
+            <Map3DSceneContent />
+          </Suspense>
+        </>
+      ) : (
+        <Suspense fallback={null}>
+          <TokenOverlayContent />
+        </Suspense>
+      )}
     </Canvas>
   );
 }
+
+/** @deprecated use MapSceneCanvas */
+export const Map3DCanvas = MapSceneCanvas;

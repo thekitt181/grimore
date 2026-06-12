@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { View3DCameraState } from './view3dCameraRef';
+import type { PerspectiveCameraState } from './sceneCameraRef';
 
 const ndc = new THREE.Vector2();
 const raycaster = new THREE.Raycaster();
@@ -12,7 +12,7 @@ export function screenToGroundXZ(
   clientX: number,
   clientY: number,
   canvasRect: DOMRect,
-  cam: View3DCameraState,
+  cam: PerspectiveCameraState,
 ): { x: number; y: number } | null {
   if (canvasRect.width <= 0 || canvasRect.height <= 0) return null;
 

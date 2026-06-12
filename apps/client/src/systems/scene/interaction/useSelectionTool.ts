@@ -10,7 +10,7 @@ import {
 import { useItemStore, getActiveMap } from '../store/itemStore';
 import { useSessionStore } from '@/store/sessionStore';
 import { itemsWithLiveTransforms } from '../store/liveTransformStore';
-import { sceneRefs, clientToWorld } from '../sceneRefs';
+import { sceneRefs, clientToWorld, pickSceneItem } from '../sceneRefs';
 import { hitTest, hitTestMap, itemIntersectsRect, isInteriorClick } from '../hitTest';
 import { snapPoint } from '../snap';
 import { emitItemUpdate } from '../sceneSync';
@@ -148,11 +148,15 @@ export function useSelectionTool(appReady: boolean) {
       const { x: wx, y: wy } = clientToWorld(e.clientX, e.clientY);
       const store = useItemStore.getState();
 
+      const pickId = pickSceneItem(e.clientX, e.clientY);
+      const pickedItem = pickId ? store.items[pickId] : undefined;
+
       // Maps are background items: they are NOT picked by clicking their body
       // (so you can marquee tokens on top of them). Select maps via the sidebar.
       const clickable = selectableItems().filter((i) => i.type !== 'map');
-      // Locked items are still selectable (so they can be unlocked) — just not movable.
-      const hit = hitTest(clickable, wx, wy, { includeLocked: true });
+      let hit = pickedItem && pickedItem.type !== 'map'
+        ? pickedItem
+        : hitTest(clickable, wx, wy, { includeLocked: true });
 
       // Interior clicks move; only edge/corner clicks hit resize handles.
       const onHandle = !hit || !isInteriorClick(hit, wx, wy) ? pickHandle(wx, wy) : null;
@@ -242,24 +246,28 @@ export function useSelectionTool(appReady: boolean) {
         }
       }
 
-      // No token/drawing/text under the cursor — GM can click a map surface to select/move it.
-      const mapAt = hitTestMap(selectableItems(), wx, wy);
-      if (!hit && gm && mapAt) {
-        const additive = e.shiftKey;
-        const alreadySelected = store.selectedIds.includes(mapAt.id);
-        if (additive) store.select([mapAt.id], 'toggle');
-        else if (!alreadySelected) {
-          store.select([mapAt.id], 'set');
-          store.clearWallSelection();
+      // GM: 3D map pick volume or ground hit selects the map.
+      if (!hit && gm) {
+        const mapHit = pickedItem?.type === 'map'
+          ? pickedItem
+          : hitTestMap(selectableItems(), wx, wy);
+        if (mapHit) {
+          const additive = e.shiftKey;
+          const alreadySelected = store.selectedIds.includes(mapHit.id);
+          if (additive) store.select([mapHit.id], 'toggle');
+          else if (!alreadySelected) {
+            store.select([mapHit.id], 'set');
+            store.clearWallSelection();
+          }
+          if (canManipulate(mapHit) && useItemStore.getState().selectedIds.includes(mapHit.id)) {
+            const ids = useItemStore.getState().selectedIds.filter((id) => {
+              const it = store.items[id];
+              return it && canManipulate(it);
+            });
+            if (ids.length) beginMove(ids);
+          }
+          return;
         }
-        if (canManipulate(mapAt) && useItemStore.getState().selectedIds.includes(mapAt.id)) {
-          const ids = useItemStore.getState().selectedIds.filter((id) => {
-            const it = store.items[id];
-            return it && canManipulate(it);
-          });
-          if (ids.length) beginMove(ids);
-        }
-        return;
       }
 
       // Otherwise start a marquee.

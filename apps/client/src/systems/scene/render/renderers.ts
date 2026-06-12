@@ -177,9 +177,8 @@ function renderTokenBase(c: Container, item: TokenItem, ctx: RenderContext) {
   const cx = size / 2;
   const cy = size / 2;
   const radius = size / 2 - 4;
-  const isModelToken = Boolean(item.modelUrl);
-  /** 2D map uses Three.js miniatures above Pixi — keep only an invisible hit target here. */
-  const hidePixiBody = isModelToken || ctx.viewMode === '2d';
+  /** All tokens render as Three.js miniatures — Pixi keeps only an invisible hit fallback. */
+  const hidePixiBody = true;
 
   if (item.auraRadius && item.auraRadius > 0 && !hidePixiBody) {
     const aura = new Graphics();
@@ -198,7 +197,7 @@ function renderTokenBase(c: Container, item: TokenItem, ctx: RenderContext) {
   circle.label = 'circle';
   circle.circle(cx, cy, radius);
   if (hidePixiBody) {
-    // Invisible hit target — GLB/STL or 2D miniature renders in Map2DTokenModels above Pixi.
+    // Invisible hit fallback — tokens render in MapSceneCanvas (Three.js).
     circle.fill({ color: 0xffffff, alpha: 0.001 });
   } else {
     circle.fill({ color: 0x1c1c28 });

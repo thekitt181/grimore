@@ -44,8 +44,7 @@ import type { Item, MapItem, TokenItem } from '@/systems/scene/types';
 import { MapCategoryWheel, type ImageCategory } from './MapCategoryWheel';
 import { useSessionStore } from '@/store/sessionStore';
 import { getSocket } from '@/lib/socket';
-import { Map3DCanvas } from '@/systems/map3d/Map3DCanvas';
-import { Map2DTokenModels } from '@/systems/map3d/Map2DTokenModels';
+import { MapSceneCanvas } from '@/systems/map3d/Map3DCanvas';
 
 // Back-compat alias — some modules still import mapLayerRefs.
 export const mapLayerRefs = sceneRefs;
@@ -543,17 +542,9 @@ export function MapCanvas() {
       className="w-full h-full relative select-none"
       style={{ background: '#0a0a0f' }}
     >
-      {viewMode === '3d' && (
-        <div className="absolute inset-0 z-0" style={{ pointerEvents: 'none' }}>
-          <Map3DCanvas />
-        </div>
-      )}
-
-      {viewMode === '2d' && (
-        <div className="absolute inset-0 z-[3]" style={{ pointerEvents: 'none' }}>
-          <Map2DTokenModels />
-        </div>
-      )}
+      <div className="absolute inset-0 z-0" style={{ pointerEvents: 'none' }}>
+        <MapSceneCanvas />
+      </div>
 
       <div
         ref={containerRef}

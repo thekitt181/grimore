@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { useSessionStore } from '@/store/sessionStore';
-import { sceneRefs, clientToWorld } from '@/systems/scene/sceneRefs';
+import { sceneRefs, clientToWorld, pickSceneItem } from '@/systems/scene/sceneRefs';
 import { hitTest } from '@/systems/scene/hitTest';
 import { useItemStore } from '@/systems/scene/store/itemStore';
 import type { TokenItem } from '@/systems/scene/types';
@@ -22,9 +22,14 @@ export function useAttackTargetPick(appReady: boolean) {
 
     function onDown(e: PointerEvent) {
       if (e.button !== 0) return;
+      const pickId = pickSceneItem(e.clientX, e.clientY);
+      const store = useItemStore.getState();
+      const picked = pickId ? store.items[pickId] : null;
       const { x: wx, y: wy } = clientToWorld(e.clientX, e.clientY);
-      const all = Object.values(useItemStore.getState().items);
-      const hit = hitTest(all, wx, wy, { includeLocked: true });
+      const all = Object.values(store.items);
+      const hit = picked?.type === 'token'
+        ? picked
+        : hitTest(all, wx, wy, { includeLocked: true });
       if (!hit || hit.type !== 'token') return;
 
       const token = hit as TokenItem;
