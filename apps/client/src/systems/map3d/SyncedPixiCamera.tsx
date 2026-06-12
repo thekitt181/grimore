@@ -2,6 +2,7 @@ import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { useMapStore, type MapViewport } from '@/systems/map/store/mapStore';
 import { sceneCameraRef } from './sceneCameraRef';
+import { effectiveViewportScale } from '@/systems/map/viewportLimits';
 
 /** Orthographic camera locked to the Pixi pan/zoom (top-down, Y-up ground on XZ). */
 export function SyncedPixiOrthographicCamera({ viewport }: { viewport: MapViewport }) {
@@ -9,8 +10,9 @@ export function SyncedPixiOrthographicCamera({ viewport }: { viewport: MapViewpo
 
   useFrame(() => {
     if (!(camera instanceof THREE.OrthographicCamera)) return;
+    const viewMode = useMapStore.getState().viewMode;
     const { x, y, scale } = viewport;
-    const s = Math.max(scale, 0.08);
+    const s = effectiveViewportScale(scale, viewMode);
     const halfW = size.width / (2 * s);
     const halfH = size.height / (2 * s);
     const cx = (size.width / 2 - x) / s;
@@ -52,12 +54,13 @@ export function SyncedPixiPerspectiveCamera({
   const orbit = useMapStore((s) => s.view3dOrbit);
 
   useFrame(() => {
+    const viewMode = useMapStore.getState().viewMode;
     const { x, y, scale } = viewport;
-    const s = Math.max(scale, 0.08);
+    const s = effectiveViewportScale(scale, viewMode);
     const cx = (size.width / 2 - x) / s;
     const cz = (size.height / 2 - y) / s;
-    const radius = (span * 0.85) / s;
-    const minRadius = span * 0.16;
+    const radius = (span * 1.15) / s;
+    const minRadius = span * 0.06;
     const orbitRadius = Math.max(radius, minRadius);
     const sinP = Math.sin(orbit.polar);
     const cosP = Math.cos(orbit.polar);
@@ -71,8 +74,8 @@ export function SyncedPixiPerspectiveCamera({
     );
     camera.up.set(0, 1, 0);
     camera.lookAt(cx, 0, cz);
-    camera.near = Math.max(0.5, orbitRadius * 0.002);
-    camera.far = Math.max(orbitRadius * 16, span * 4);
+    camera.near = Math.max(0.5, orbitRadius * 0.001);
+    camera.far = Math.max(orbitRadius * 24, span * 12);
     camera.updateProjectionMatrix();
 
     if (camera instanceof THREE.PerspectiveCamera) {

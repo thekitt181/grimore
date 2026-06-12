@@ -5,6 +5,7 @@ import { useMapStore } from '../store/mapStore';
 import { getPersistSessionId, persistViewportLocal } from '@/systems/scene/sessionPersistence';
 import type { MapViewport } from '../store/mapStore';
 import { screenPanToGroundDelta } from '@/systems/map3d/coords';
+import { clampViewportScale } from '../viewportLimits';
 
 let viewportPersistTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -26,17 +27,18 @@ export function applyViewport(world: Container, vp: MapViewport): void {
   useMapStore.getState().setViewport(vp);
 }
 
-const MIN_SCALE = 0.08;
 const MAX_SCALE_DESKTOP = 8;
 const MAX_SCALE_MOBILE = 24;
 const ZOOM_SPEED = 0.001;
+const ZOOM_SPEED_3D = 0.0014;
 
 function maxScale(): number {
   return isMobileClient() ? MAX_SCALE_MOBILE : MAX_SCALE_DESKTOP;
 }
 
 function clampScale(scale: number): number {
-  return Math.max(MIN_SCALE, Math.min(maxScale(), scale));
+  const viewMode = useMapStore.getState().viewMode;
+  return clampViewportScale(scale, viewMode, maxScale());
 }
 
 function applyZoomAt(
@@ -147,7 +149,8 @@ export function useMapViewport(
       const rect = canvas.getBoundingClientRect();
       const mouseX = e.clientX - rect.left;
       const mouseY = e.clientY - rect.top;
-      const delta = -e.deltaY * ZOOM_SPEED;
+      const zoomSpeed = useMapStore.getState().viewMode === '3d' ? ZOOM_SPEED_3D : ZOOM_SPEED;
+      const delta = -e.deltaY * zoomSpeed;
       const oldScale = w.scale.x;
       applyZoomAt(w, mouseX, mouseY, oldScale + delta * oldScale, setViewport);
     }
