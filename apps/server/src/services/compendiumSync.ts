@@ -804,8 +804,23 @@ export async function listAllBookSources(): Promise<
 
   await ensureImportedSourcesUnlocked('listBooks');
   let policy = await readVisibilityPolicyFast();
+  const bundled = bundledSourceLabelSet();
   let labelBuckets = await readBookSourceLabelBucketsWithFallback();
   let results = bookSourcesFromLabelBuckets(labelBuckets, policy);
+
+  const rawForCounts = await readRawGlobalDoc({ includeImageData: false });
+  const rawTally = mapSourceListResults(
+    tallyBooksSourceCounts(rawForCounts, policy),
+    policy,
+    false,
+    true,
+    bundled,
+  ).map(({ id, label, count }) => ({ id, label, count }));
+  const labelTallyTotal = results.reduce((sum, row) => sum + row.count, 0);
+  const rawTallyTotal = rawTally.reduce((sum, row) => sum + row.count, 0);
+  if (rawTallyTotal > labelTallyTotal) {
+    results = rawTally;
+  }
 
   if (results.length === 0 && overrideTotal > 0) {
     await ensureImportedSourcesUnlocked('listBooks-recovery');

@@ -36,6 +36,13 @@ function rawEntryCount(raw: OwlbearRawGlobalDoc): number {
     + (raw.spells?.length ?? 0);
 }
 
+/** DDB imports live in override* arrays — compare these when deciding promotion / mirror safety. */
+export function rawOverrideEntryCount(raw: OwlbearRawGlobalDoc): number {
+  return (raw.overrideMonsters?.length ?? 0)
+    + (raw.overrideItems?.length ?? 0)
+    + (raw.overrideSpells?.length ?? 0);
+}
+
 function mergeNamedEntries<T extends { name: string }>(
   mongoArr: T[] | undefined,
   fallbackArr: T[] | undefined,
@@ -88,6 +95,7 @@ export function needsFallbackPromotion(
   const fallbackMs = Math.max(parseIsoMs(fallback.lastUpdated), parseIsoMs(fileRev));
   const mongoMs = parseIsoMs(mongo.lastUpdated);
   if (fallbackMs > mongoMs) return true;
+  if (rawOverrideEntryCount(fallback) > rawOverrideEntryCount(mongo)) return true;
   return rawEntryCount(fallback) > rawEntryCount(mongo);
 }
 
@@ -128,7 +136,10 @@ export async function promoteFallbackToMongo(reason: string): Promise<FallbackMo
 
     const mongo = await readMongoRawGlobalDoc();
     if (!needsFallbackPromotion(mongo, normalizedFallback)) {
-      if (mongo) {
+      if (
+        mongo
+        && rawOverrideEntryCount(mongo) >= rawOverrideEntryCount(normalizedFallback)
+      ) {
         saveGlobalFallback(normalizeOwlbearGlobalDoc(mongo), mongo);
       }
       return { promoted: false, reason: 'Mongo already up to date' };
@@ -155,6 +166,23 @@ export async function promoteFallbackToMongo(reason: string): Promise<FallbackMo
       mergedEntries: after,
     };
   });
+}
+
+/** Mirror Mongo overrides to local data.json when Mongo is authoritative (never shrink fallback). */
+export async function mirrorMongoOverridesToFallback(reason: string): Promise<void> {
+  if (!isMongoConfigured() || isMongoCircuitOpen()) return;
+  const mongo = await readMongoRawGlobalDoc();
+  if (!mongo) return;
+  const fallback = loadRawGlobalFallback();
+  const normalizedFallback = fallback ? normalizeOwlbearRawDoc(fallback) : null;
+  if (
+    normalizedFallback
+    && rawOverrideEntryCount(mongo) < rawOverrideEntryCount(normalizedFallback)
+  ) {
+    return;
+  }
+  saveGlobalFallback(normalizeOwlbearGlobalDoc(mongo), mongo);
+  console.log(`[Compendium] Mirrored Mongo overrides → local fallback (${reason})`);
 }
 
 let syncInflight: Promise<FallbackMongoSyncResult> | null = null;

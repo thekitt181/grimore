@@ -2,7 +2,8 @@ import type { OwlbearItem, OwlbearMonster, OwlbearRawGlobalDoc, OwlbearSpell } f
 import { splitCompendiumSources } from '@grimoire/shared';
 import { slugify } from '@grimoire/monster-dex';
 import { getCollection, isMongoCircuitOpen, withMongoTimeout } from '../lib/mongo';
-import { namesMatch } from './compendiumMerge';
+import { loadRawGlobalFallback } from './compendiumGlobalFallback';
+import { entryNameKey, namesMatch } from './compendiumMerge';
 import type { CompendiumKind } from './compendiumOwlbearPersist';
 import type { BookSourceLabelBuckets } from './compendiumOwlbearPersist';
 import { entryMatchesSource } from './compendiumVisibility';
@@ -25,19 +26,51 @@ function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+function readOverrideEntriesFromFallback<K extends CompendiumKind>(
+  kind: K,
+  source?: string,
+): OverrideEntryMap[K][] {
+  const fallback = loadRawGlobalFallback();
+  if (!fallback) return [];
+  const field = OVERRIDE_FIELD[kind];
+  let entries = (fallback[field] as OverrideEntryMap[K][] | undefined) ?? [];
+  if (source) {
+    entries = entries.filter((e) => entryMatchesSource(e.source, source));
+  }
+  return entries;
+}
+
+function mergeOverrideEntriesByName<K extends CompendiumKind>(
+  mongoEntries: OverrideEntryMap[K][],
+  fallbackEntries: OverrideEntryMap[K][],
+): OverrideEntryMap[K][] {
+  if (fallbackEntries.length === 0) return mongoEntries;
+  const map = new Map<string, OverrideEntryMap[K]>();
+  for (const entry of mongoEntries) {
+    if (entry?.name) map.set(entryNameKey(entry.name), entry);
+  }
+  for (const entry of fallbackEntries) {
+    if (entry?.name) map.set(entryNameKey(entry.name), entry);
+  }
+  return Array.from(map.values());
+}
+
 /** Load one override array from Mongo — never pulls the full global document. */
 export async function readOverrideEntriesFromMongo<K extends CompendiumKind>(
   kind: K,
   opts?: { source?: string },
 ): Promise<OverrideEntryMap[K][]> {
-  if (isMongoCircuitOpen()) return [];
-
   const field = OVERRIDE_FIELD[kind];
   const source = opts?.source?.trim();
+  const fallbackEntries = readOverrideEntriesFromFallback(kind, source);
+
+  if (isMongoCircuitOpen()) {
+    return fallbackEntries;
+  }
 
   try {
     const col = await getCollection<OwlbearRawGlobalDoc>('data');
-    if (!col) return [];
+    if (!col) return fallbackEntries;
 
     let entries: OverrideEntryMap[K][];
 
@@ -75,13 +108,24 @@ export async function readOverrideEntriesFromMongo<K extends CompendiumKind>(
       entries = (doc?.[field] as OverrideEntryMap[K][] | undefined) ?? [];
     }
 
+    if (entries.length === 0 && fallbackEntries.length > 0) {
+      return fallbackEntries;
+    }
+    if (fallbackEntries.length > entries.length) {
+      console.warn(
+        `[Compendium] Mongo ${kind} overrides (${entries.length}) < local fallback (${fallbackEntries.length}) — merging`,
+      );
+      const { scheduleFallbackMongoSync } = await import('./compendiumFallbackMongoSync');
+      scheduleFallbackMongoSync('override-read-merge');
+      return mergeOverrideEntriesByName(entries, fallbackEntries);
+    }
     return entries;
   } catch (err) {
     console.warn(
       `[Compendium] Mongo override read (${kind}${source ? `, source=${source}` : ''}) failed:`,
       err instanceof Error ? err.message : err,
     );
-    return [];
+    return fallbackEntries;
   }
 }
 

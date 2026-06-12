@@ -444,7 +444,21 @@ async function readRawGlobalDocInner(opts: RawGlobalDocReadOptions = {}): Promis
         col.findOne({ _id: 'global' }, projection ? { projection } : undefined),
         includeImageData ? RAW_GLOBAL_FULL_READ_MS : RAW_GLOBAL_LITE_READ_MS,
       );
-      if (doc) return normalizeRawDoc(doc);
+      if (doc) {
+        const normalizedMongo = normalizeRawDoc(doc);
+        const fallbackRaw = loadRawGlobalFallback();
+        if (fallbackRaw) {
+          const normalizedFallback = normalizeRawDoc(fallbackRaw);
+          const { mergeRawGlobalDocs, rawOverrideEntryCount } = await import('./compendiumFallbackMongoSync');
+          if (rawOverrideEntryCount(normalizedFallback) > rawOverrideEntryCount(normalizedMongo)) {
+            console.warn(
+              '[Compendium] Local fallback has more imported entries than Mongo — merging for read',
+            );
+            return mergeRawGlobalDocs(normalizedMongo, normalizedFallback);
+          }
+        }
+        return normalizedMongo;
+      }
     }
   } catch (err) {
     console.warn(
@@ -612,6 +626,17 @@ function applyOwlbearEntryToRaw(
   }
 }
 
+async function mergeRawWithLocalFallbackIfRicher(
+  raw: OwlbearRawGlobalDoc,
+): Promise<OwlbearRawGlobalDoc> {
+  const fallbackRaw = loadRawGlobalFallback();
+  if (!fallbackRaw) return raw;
+  const normalizedFallback = normalizeRawDoc(fallbackRaw);
+  const { mergeRawGlobalDocs, rawOverrideEntryCount } = await import('./compendiumFallbackMongoSync');
+  if (rawOverrideEntryCount(normalizedFallback) <= rawOverrideEntryCount(raw)) return raw;
+  return mergeRawGlobalDocs(raw, normalizedFallback);
+}
+
 async function persistEntriesToRawDoc(
   kind: CompendiumKind,
   entries: Array<{ entry: OwlbearMonster | OwlbearItem | OwlbearSpell; opts: OwlbearSaveOptions }>,
@@ -619,7 +644,8 @@ async function persistEntriesToRawDoc(
 ): Promise<PersistRawGlobalDocResult> {
   clearRawGlobalReadCaches();
   clearRawGlobalDocInflight();
-  const raw = await readRawGlobalDoc({ includeImageData: false });
+  let raw = await readRawGlobalDoc({ includeImageData: false });
+  raw = await mergeRawWithLocalFallbackIfRicher(raw);
   for (const { entry, opts: entryOpts } of entries) {
     applyOwlbearEntryToRaw(raw, kind, entry, entryOpts);
   }
@@ -704,6 +730,8 @@ export async function patchOwlbearEntriesBulk(
       clearRawGlobalDocInflight();
       const { invalidateImportSkipIndex } = await import('./compendiumImportIndex');
       invalidateImportSkipIndex();
+      const { mirrorMongoOverridesToFallback } = await import('./compendiumFallbackMongoSync');
+      void mirrorMongoOverridesToFallback('bulk-patch').catch(() => {});
       return { mongoPersisted: true, lastUpdated };
     } catch (err) {
       console.warn(
