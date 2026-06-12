@@ -23,7 +23,7 @@ import {
   normalizeDdbSpellToCompendium,
 } from './ddbContentNormalize';
 import { getCatalogRevision, saveItemsBulkForImport, saveMonstersBulkForImport, saveSpellsBulkForImport } from '../compendiumSync';
-import { unlockCompendiumSource } from '../compendiumSourcePolicy';
+import { unlockCompendiumSourcesBulk } from '../compendiumSourcePolicy';
 import { sourceMatchesLocked } from '../compendiumVisibility';
 import { ensureBundledSourcesLocked, ensureImportedSourcesUnlocked } from '../compendiumBundledLock';
 import { ImportSkipIndex, loadImportSkipIndex } from '../compendiumImportIndex';
@@ -445,40 +445,27 @@ function applyHomebrewSource<T extends { source?: string }>(entry: T): T {
 }
 
 async function unlockImportedBookSources(catalog: DdbCatalog, sourceIds: number[]): Promise<string[]> {
-  const unlocked: string[] = [];
-  for (const sourceId of sourceIds) {
-    const label = catalog.sourceNames.get(sourceId);
-    if (!label || label === 'D&D Beyond') continue;
-    try {
-      await unlockCompendiumSource(label);
-      unlocked.push(label);
-    } catch (err) {
-      console.warn(
-        '[DDB Import] Could not unlock compendium source:',
-        label,
-        err instanceof Error ? err.message : err,
-      );
-    }
-  }
-  return unlocked;
+  const labels = sourceIds
+    .map((sourceId) => catalog.sourceNames.get(sourceId))
+    .filter((label): label is string => Boolean(label && label !== 'D&D Beyond'));
+  return unlockImportedBookSourceLabels(labels);
 }
 
 async function unlockImportedBookSourceLabels(sourceLabels: string[]): Promise<string[]> {
-  const unlocked: string[] = [];
-  for (const label of [...new Set(sourceLabels)]) {
-    if (!label || label === 'D&D Beyond' || label.toLowerCase() === 'custom') continue;
-    try {
-      await unlockCompendiumSource(label);
-      unlocked.push(label);
-    } catch (err) {
-      console.warn(
-        '[DDB Import] Could not unlock compendium source:',
-        label,
-        err instanceof Error ? err.message : err,
-      );
-    }
+  const labels = [...new Set(sourceLabels)].filter(
+    (label) => label && label !== 'D&D Beyond' && label.toLowerCase() !== 'custom',
+  );
+  if (labels.length === 0) return [];
+  try {
+    await unlockCompendiumSourcesBulk(labels);
+    return labels;
+  } catch (err) {
+    console.warn(
+      '[DDB Import] Could not unlock compendium sources:',
+      err instanceof Error ? err.message : err,
+    );
+    return [];
   }
-  return unlocked;
 }
 
 function sourceLabelsFromEntries(entries: Array<{ source?: string }>): string[] {
@@ -1211,7 +1198,11 @@ export async function finishDdbLibraryImport(
     /** Unlock every book source found in saved compendium entries (recovery after interrupted import). */
     unlockAllImportedSources?: boolean;
   },
-): Promise<{ catalogRev: string | null; sourcesUnlocked?: string[] }> {
+): Promise<{
+  catalogRev: string | null;
+  sourcesUnlocked?: string[];
+  catalogRebuildPending?: boolean;
+}> {
   const { promoteFallbackToMongo } = await import('../compendiumFallbackMongoSync');
   await promoteFallbackToMongo('ddb-finish-import');
   await ensureBundledSourcesLocked('ddb-finish-import');
@@ -1220,30 +1211,33 @@ export async function finishDdbLibraryImport(
   const { clearRawGlobalDocInflight } = await import('../compendiumOwlbearPersist');
   clearRawGlobalDocInflight();
 
-  const catalog = await loadDdbCatalog(ctx);
-  const compendiumLabels = await collectSourceLabelsFromCompendium();
   const { collectImportedSourceLabels } = await import('../compendiumBundledLock');
-  const allImportedLabels = await collectImportedSourceLabels();
   const unlocked: string[] = [];
-  if (opts?.sourceIds?.length) {
-    unlocked.push(...await unlockImportedBookSources(catalog, opts.sourceIds));
-    const matched = compendiumLabelsForSourceIds(catalog, opts.sourceIds, compendiumLabels);
-    if (matched.length > 0) {
-      unlocked.push(...await unlockImportedBookSourceLabels(matched));
+
+  // ensureImportedSourcesUnlocked already unlocks every override source — only add targeted unlocks.
+  const needsTargetedUnlock =
+    (opts?.sourceIds?.length || opts?.sourceLabels?.length)
+    && !opts?.unlockAllImportedSources;
+
+  if (needsTargetedUnlock) {
+    const labelsToUnlock: string[] = [...(opts?.sourceLabels ?? [])];
+    if (opts?.sourceIds?.length) {
+      const catalog = await loadDdbCatalog(ctx);
+      for (const label of await unlockImportedBookSources(catalog, opts.sourceIds)) {
+        labelsToUnlock.push(label);
+      }
+      const compendiumLabels = await collectSourceLabelsFromCompendium();
+      labelsToUnlock.push(
+        ...compendiumLabelsForSourceIds(catalog, opts.sourceIds, compendiumLabels),
+      );
     }
+    unlocked.push(...await unlockImportedBookSourceLabels(labelsToUnlock));
+  } else {
+    unlocked.push(...await collectImportedSourceLabels());
   }
-  if (opts?.sourceLabels?.length) {
-    unlocked.push(...await unlockImportedBookSourceLabels(opts.sourceLabels));
-  }
-  if (opts?.unlockAllImportedSources) {
-    unlocked.push(...await unlockImportedBookSourceLabels(compendiumLabels));
-  }
-  // Always unlock every override source (including PHB/MM names shared with bundled JSON).
-  if (allImportedLabels.length > 0) {
-    unlocked.push(...await unlockImportedBookSourceLabels(allImportedLabels));
-  }
+
   const { finishBulkCompendiumImport } = await import('../compendiumSync');
-  const result = await finishBulkCompendiumImport();
+  const result = await finishBulkCompendiumImport({ deferCatalogRebuild: true });
   return {
     ...result,
     sourcesUnlocked: [...new Set(unlocked)],

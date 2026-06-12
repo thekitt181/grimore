@@ -353,13 +353,20 @@ export function DdbLibraryPanel({ onClose }: { onClose: () => void }) {
     onSuccess: async (result) => {
       const unlocked = result.sourcesUnlocked?.length ?? 0;
       setMessage(
-        unlocked > 0
-          ? `Compendium synced — ${unlocked} book${unlocked === 1 ? '' : 's'} unlocked. Open Compendium → Books.`
-          : 'Compendium catalog rebuilt. Open Compendium → Books to browse imported sources.',
+        result.catalogRebuildPending
+          ? unlocked > 0
+            ? `Unlocked ${unlocked} book${unlocked === 1 ? '' : 's'} — rebuilding catalog in background…`
+            : 'Rebuilding compendium catalog in background…'
+          : unlocked > 0
+            ? `Compendium synced — ${unlocked} book${unlocked === 1 ? '' : 's'} unlocked. Open Compendium → Books.`
+            : 'Compendium catalog rebuilt. Open Compendium → Books to browse imported sources.',
       );
       useCompendiumUiStore.getState().setBrowseMode('sources');
       useCompendiumUiStore.getState().setPanelOpen(true);
-      await refetchCompendiumAfterImport(qc, result.catalogRev ? { catalogRev: result.catalogRev } : undefined);
+      await refetchCompendiumAfterImport(qc, {
+        ...(result.catalogRev ? { catalogRev: result.catalogRev } : {}),
+        ...(result.catalogRebuildPending ? { catalogRebuildPending: true } : {}),
+      });
     },
     onError: (err: unknown) => setMessage(extractApiError(err, 'Could not sync compendium')),
   });
@@ -790,7 +797,7 @@ export function DdbLibraryPanel({ onClose }: { onClose: () => void }) {
               }}
               title="Rebuild compendium catalog and unlock imported books after an interrupted import"
             >
-              {syncCatalogMut.isPending ? 'Syncing…' : 'Sync compendium'}
+              {syncCatalogMut.isPending ? 'Syncing compendium…' : 'Sync compendium'}
             </button>
           </div>
         </>

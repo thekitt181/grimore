@@ -117,10 +117,10 @@ export async function refetchCompendiumAfterLock(qc: QueryClient): Promise<void>
   });
 }
 
-/** Wait for catalog to be ready after DDB import (server rebuilds before responding). */
+/** Wait for catalog to be ready after DDB import (server rebuilds before or after responding). */
 export async function refetchCompendiumAfterImport(
   qc: QueryClient,
-  opts?: { catalogRev?: string },
+  opts?: { catalogRev?: string; catalogRebuildPending?: boolean },
 ): Promise<void> {
   if (isApiAuthBlocked()) return;
   await ensureApiAuthSession();
@@ -132,12 +132,15 @@ export async function refetchCompendiumAfterImport(
     predicate: (query) => query.queryKey[0] === 'compendium',
   });
 
-  if (!opts?.catalogRev) return;
+  if (!opts?.catalogRev && !opts?.catalogRebuildPending) return;
 
-  const deadline = Date.now() + 12_000;
+  const deadline = Date.now() + (opts?.catalogRebuildPending ? 120_000 : 12_000);
   while (Date.now() < deadline) {
     const status = qc.getQueryData<{ catalogRev?: string }>(['compendium', 'sync-status']);
-    if (status?.catalogRev === opts.catalogRev) return;
+    if (opts?.catalogRev && status?.catalogRev === opts.catalogRev) return;
+    if (opts?.catalogRebuildPending && status?.catalogRev && status.catalogRev !== opts.catalogRev) {
+      return;
+    }
     await qc.refetchQueries({ queryKey: ['compendium', 'sync-status'] });
     await new Promise((r) => setTimeout(r, 400));
   }

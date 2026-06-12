@@ -143,20 +143,28 @@ export async function lockCompendiumSource(sourceLabel: string): Promise<Compend
   });
 }
 
-export async function unlockCompendiumSource(sourceLabel: string): Promise<CompendiumVisibilityPolicy> {
-  const label = normalizeLockLabel(sourceLabel);
+export async function unlockCompendiumSourcesBulk(
+  sourceLabels: string[],
+): Promise<CompendiumVisibilityPolicy> {
+  const labels = [...new Set(sourceLabels.map(normalizeLockLabel).filter(Boolean))];
+  if (labels.length === 0) return emptyVisibilityPolicy();
 
   return enqueueCompendiumWrite(async () => {
     const { policy } = await readPolicyDoc();
-    const next = {
-      ...policy,
-      lockedSources: policy.lockedSources.filter(
+    let locked = [...policy.lockedSources];
+    for (const label of labels) {
+      locked = locked.filter(
         (s) => !sourceMatchesLocked(s, label) && !sourceMatchesLocked(label, s),
-      ),
-    };
+      );
+    }
+    const next = { ...policy, lockedSources: locked };
     const lastUpdated = new Date().toISOString();
     return commitPolicyChange(next, lastUpdated);
   });
+}
+
+export async function unlockCompendiumSource(sourceLabel: string): Promise<CompendiumVisibilityPolicy> {
+  return unlockCompendiumSourcesBulk([sourceLabel]);
 }
 
 export async function publishCompendiumEntry(

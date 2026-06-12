@@ -346,11 +346,20 @@ export async function finishDdbLibraryImport(opts?: {
   sourceIds?: number[];
   sourceLabels?: string[];
   unlockAllImportedSources?: boolean;
-}): Promise<{ catalogRev: string | null; sourcesUnlocked?: string[] }> {
+}): Promise<{
+  catalogRev: string | null;
+  sourcesUnlocked?: string[];
+  catalogRebuildPending?: boolean;
+}> {
   try {
-    const { data } = await api.post<{ catalogRev: string | null; sourcesUnlocked?: string[] }>(
+    const { data } = await api.post<{
+      catalogRev: string | null;
+      sourcesUnlocked?: string[];
+      catalogRebuildPending?: boolean;
+    }>(
       '/ddb/library/finish-import',
       opts ?? {},
+      { timeout: 180_000 },
     );
     return data;
   } catch (err) {
@@ -362,7 +371,11 @@ export async function finishDdbLibraryImport(opts?: {
 export async function syncCompendiumAfterImport(opts?: {
   sourceIds?: number[];
   unlockAllImportedSources?: boolean;
-}): Promise<{ catalogRev: string | null; sourcesUnlocked?: string[] }> {
+}): Promise<{
+  catalogRev: string | null;
+  sourcesUnlocked?: string[];
+  catalogRebuildPending?: boolean;
+}> {
   return finishDdbLibraryImport({
     ...(opts?.sourceIds?.length ? { sourceIds: opts.sourceIds } : {}),
     unlockAllImportedSources: opts?.unlockAllImportedSources ?? true,

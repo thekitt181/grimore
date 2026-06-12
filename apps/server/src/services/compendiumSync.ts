@@ -65,8 +65,6 @@ import {
 import { getCompendiumVisibilityPolicy } from './compendiumSourcePolicy';
 import {
   bundledSourceLabelSet,
-  ensureBundledSourcesLocked,
-  ensureImportedSourcesUnlocked,
 } from './compendiumBundledLock';
 import {
   readVisibilityPolicyFast,
@@ -752,7 +750,6 @@ function tallyBooksSourceCounts(
 export async function listAllBookSources(): Promise<
   Array<{ id: string; label: string; count: number; locked?: boolean; draftCount?: number }>
 > {
-  await ensureImportedSourcesUnlocked('listBooks');
   const policy = await readVisibilityPolicyFast();
   const raw = await readRawGlobalDoc({ includeImageData: false });
   return mapSourceListResults(
@@ -940,15 +937,12 @@ export async function listSources(
   kind: 'monsters' | 'items' | 'spells',
   opts?: { includeDrafts?: boolean; excludeBundled?: boolean },
 ): Promise<Array<{ id: string; label: string; count: number; locked?: boolean; draftCount?: number }>> {
-  await ensureBundledSourcesLocked('listSources');
-
   const includeDrafts = opts?.includeDrafts ?? false;
   const excludeBundled = opts?.excludeBundled ?? false;
   const bundled = excludeBundled ? bundledSourceLabelSet() : null;
   const policy = await readVisibilityPolicyFast();
 
   if (excludeBundled) {
-    await ensureImportedSourcesUnlocked('listSources-books');
     clearRawGlobalDocInflight();
     const raw = await readRawGlobalDoc({ includeImageData: false });
     const overrides =
@@ -1482,11 +1476,27 @@ export interface CompendiumBulkSaveOptions {
   deferCatalogRebuild?: boolean;
 }
 
-export async function finishBulkCompendiumImport(): Promise<{ catalogRev: string | null }> {
+export async function finishBulkCompendiumImport(opts?: {
+  /** Respond before catalog rebuild finishes — clients wait for compendium:updated. */
+  deferCatalogRebuild?: boolean;
+}): Promise<{ catalogRev: string | null; catalogRebuildPending?: boolean }> {
   clearRawGlobalDocInflight();
-  const { notifyCompendiumCatalogRebuilt } = await import('./compendiumChangeNotify');
-  await notifyCompendiumCatalogRebuilt(new Date().toISOString());
   invalidateSyncStatusCache();
+  const catalogRev = getCatalogRevision();
+  const { notifyCompendiumCatalogRebuilt } = await import('./compendiumChangeNotify');
+  const lastUpdated = new Date().toISOString();
+
+  if (opts?.deferCatalogRebuild) {
+    void notifyCompendiumCatalogRebuilt(lastUpdated).catch((err) => {
+      console.warn(
+        '[Compendium] Background catalog rebuild failed:',
+        err instanceof Error ? err.message : err,
+      );
+    });
+    return { catalogRev, catalogRebuildPending: true };
+  }
+
+  await notifyCompendiumCatalogRebuilt(lastUpdated);
   return { catalogRev: getCatalogRevision() };
 }
 
