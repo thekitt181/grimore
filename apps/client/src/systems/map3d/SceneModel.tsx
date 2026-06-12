@@ -1,4 +1,4 @@
-import { useMemo, useEffect, useLayoutEffect } from 'react';
+import { useMemo, useEffect, useLayoutEffect, Suspense } from 'react';
 import { useLoader } from '@react-three/fiber';
 import { useGLTF } from '@react-three/drei';
 import * as THREE from 'three';
@@ -142,6 +142,23 @@ function StlModel({
   return <primitive object={mesh} />;
 }
 
+function ModelPlaceholder({ targetSize, tokenRender }: { targetSize: number; tokenRender?: boolean }) {
+  const h = Math.max(targetSize * 0.45, 12);
+  const r = h * 0.38;
+  return (
+    <mesh position={[0, h / 2, 0]}>
+      <cylinderGeometry args={[r * 0.92, r, h, 20]} />
+      <meshStandardMaterial
+        color={tokenRender ? '#c9a84c' : '#8a7a50'}
+        roughness={0.45}
+        metalness={0.25}
+        emissive={tokenRender ? '#3a3020' : '#000000'}
+        emissiveIntensity={tokenRender ? 0.15 : 0}
+      />
+    </mesh>
+  );
+}
+
 /** Load GLB/GLTF/STL and scale to a target world size (max axis). */
 export function SceneModel({
   url,
@@ -158,39 +175,39 @@ export function SceneModel({
   /** Brighter materials + render on top of map geometry (tokens). */
   tokenRender?: boolean;
 }) {
-  const resolvedUrl = useResolvedModelUrl(url);
+  const { resolved, status } = useResolvedModelUrl(url);
   const format = modelFormatFromUrl(url);
 
   if (!format) return null;
 
-  if (!resolvedUrl) {
-    const s = Math.max(targetSize * 0.35, 8);
-    return (
-      <mesh position={[0, s / 2, 0]}>
-        <boxGeometry args={[s, s, s]} />
-        <meshStandardMaterial color="#8a7a50" roughness={0.6} metalness={0.2} wireframe />
-      </mesh>
-    );
+  if (status === 'error' || !resolved) {
+    return <ModelPlaceholder targetSize={targetSize} tokenRender={tokenRender} />;
   }
+
+  const fallback = <ModelPlaceholder targetSize={targetSize} tokenRender={tokenRender} />;
 
   if (format === 'stl') {
     return (
-      <StlModel
-        url={resolvedUrl}
+      <Suspense fallback={fallback}>
+        <StlModel
+          url={resolved}
+          targetSize={targetSize}
+          groundAlign={groundAlign}
+          registerRaycast={registerRaycast}
+          tokenRender={tokenRender}
+        />
+      </Suspense>
+    );
+  }
+  return (
+    <Suspense fallback={fallback}>
+      <GltfModel
+        url={resolved}
         targetSize={targetSize}
         groundAlign={groundAlign}
         registerRaycast={registerRaycast}
         tokenRender={tokenRender}
       />
-    );
-  }
-  return (
-    <GltfModel
-      url={resolvedUrl}
-      targetSize={targetSize}
-      groundAlign={groundAlign}
-      registerRaycast={registerRaycast}
-      tokenRender={tokenRender}
-    />
+    </Suspense>
   );
 }

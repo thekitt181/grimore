@@ -177,8 +177,8 @@ function renderTokenBase(c: Container, item: TokenItem, ctx: RenderContext) {
   const cx = size / 2;
   const cy = size / 2;
   const radius = size / 2 - 4;
-  /** All tokens render as Three.js miniatures — Pixi keeps only an invisible hit fallback. */
-  const hidePixiBody = true;
+  /** 3D view: Three.js only. 2D + modelUrl: Pixi fallback circle while GLB loads. */
+  const hidePixiBody = ctx.viewMode === '3d' || !item.modelUrl;
 
   if (item.auraRadius && item.auraRadius > 0 && !hidePixiBody) {
     const aura = new Graphics();

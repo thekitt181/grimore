@@ -154,7 +154,11 @@ export function useSelectionTool(appReady: boolean) {
       const store = useItemStore.getState();
 
       const pickId = pickSceneItem(e.clientX, e.clientY);
-      const pickedItem = pickId ? store.items[pickId] : undefined;
+      const merged = itemsWithLiveTransforms(
+        store.items,
+        useLiveTransformStore.getState().byId,
+      );
+      const pickedItem = pickId ? merged[pickId] : undefined;
 
       // Maps are background items: they are NOT picked by clicking their body
       // (so you can marquee tokens on top of them). Select maps via the sidebar.

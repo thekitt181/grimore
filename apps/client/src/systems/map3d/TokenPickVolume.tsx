@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import { registerPickRoot } from './scenePickRegistry';
 
-/** Invisible pick mesh aligned to token footprint (raycast selection from any angle). */
+/** Raycast pick volume — must stay visible (Three.js skips invisible meshes). */
 export function TokenPickVolume({
   itemId,
   radius,
@@ -24,9 +24,9 @@ export function TokenPickVolume({
   }, [itemId]);
 
   return (
-    <mesh ref={meshRef} position={[0, y + height / 2, 0]} visible={false}>
+    <mesh ref={meshRef} position={[0, y + height / 2, 0]}>
       <cylinderGeometry args={[radius, radius, height, 16]} />
-      <meshBasicMaterial />
+      <meshBasicMaterial transparent opacity={0} depthWrite={false} side={THREE.DoubleSide} />
     </mesh>
   );
 }
