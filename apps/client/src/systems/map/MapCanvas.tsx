@@ -409,7 +409,17 @@ export function MapCanvas() {
     };
   }
 
+  function isExternalAssetDrag(dt: DataTransfer | null): boolean {
+    if (!dt?.types?.length) return false;
+    const types = Array.from(dt.types);
+    if (types.includes('Files')) return true;
+    if (types.includes('application/x-moz-file')) return true;
+    if (types.includes('text/uri-list')) return true;
+    return false;
+  }
+
   function acceptDrop(e: { preventDefault(): void; dataTransfer: DataTransfer | null; clientX: number; clientY: number }) {
+    if (!isExternalAssetDrag(e.dataTransfer)) return;
     e.preventDefault();
     if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
     setIsDragOver(true);
@@ -450,8 +460,12 @@ export function MapCanvas() {
     const el = dropZoneRef.current;
     if (!el) return;
 
+    const onDragStart = (e: DragEvent) => {
+      if (!isExternalAssetDrag(e.dataTransfer)) e.preventDefault();
+    };
+
     const onDragOver = (e: DragEvent) => {
-      if (!e.dataTransfer?.types.length) return;
+      if (!isExternalAssetDrag(e.dataTransfer)) return;
       acceptDrop(e);
     };
     const onDragLeave = (e: DragEvent) => {
@@ -480,10 +494,12 @@ export function MapCanvas() {
       }
     };
 
+    el.addEventListener('dragstart', onDragStart, true);
     el.addEventListener('dragover', onDragOver, true);
     el.addEventListener('dragleave', onDragLeave);
     el.addEventListener('drop', onDrop, true);
     return () => {
+      el.removeEventListener('dragstart', onDragStart, true);
       el.removeEventListener('dragover', onDragOver, true);
       el.removeEventListener('dragleave', onDragLeave);
       el.removeEventListener('drop', onDrop, true);
@@ -499,7 +515,7 @@ export function MapCanvas() {
   return (
     <div
       ref={dropZoneRef}
-      className="w-full h-full relative"
+      className="w-full h-full relative select-none"
       style={{ background: '#0a0a0f' }}
       onDragOver={handleDragOver}
       onDragEnter={handleDragOver}
