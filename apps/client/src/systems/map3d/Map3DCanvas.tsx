@@ -30,7 +30,8 @@ function ViewportOrbitControls({ span }: { span: number }) {
         ref={controlsRef}
         enablePan={false}
         enableZoom={false}
-        enableRotate
+        enableRotate={false}
+        enabled={false}
         minDistance={radius * 0.15}
         maxDistance={radius * 3.5}
         maxPolarAngle={Math.PI / 2 - 0.08}
