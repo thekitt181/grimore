@@ -82,21 +82,21 @@ function renderMap(c: Container, item: MapItem) {
   } else if (item.modelUrl) {
     const modelBadge = new Graphics();
     modelBadge.label = 'model-badge';
-    modelBadge.rect(item.width * 0.25, item.height * 0.3, item.width * 0.5, item.height * 0.4);
-    modelBadge.fill({ color: 0x1a1a28, alpha: 0.92 });
-    modelBadge.setStrokeStyle({ width: 2, color: 0xc9a84c, alpha: 0.7 });
+    modelBadge.rect(item.width * 0.2, item.height * 0.25, item.width * 0.6, item.height * 0.5);
+    modelBadge.fill({ color: 0x1a1a28, alpha: 0.75 });
+    modelBadge.setStrokeStyle({ width: 2, color: 0x8a7a50, alpha: 0.6 });
     modelBadge.stroke();
     c.addChildAt(modelBadge, 1);
 
     const label = new Text({
-      text: '3D map\n(switch to 3D view)',
+      text: '3D map\n(use 3D view toggle)',
       style: new TextStyle({
         fontFamily: 'Inter',
         fontSize: Math.max(12, Math.min(item.width, item.height) * 0.04),
-        fill: 0xc9a84c,
+        fill: 0x8a7a50,
         align: 'center',
         wordWrap: true,
-        wordWrapWidth: item.width * 0.45,
+        wordWrapWidth: item.width * 0.55,
       }),
     });
     label.label = 'model-label';
@@ -176,8 +176,9 @@ function renderTokenBase(c: Container, item: TokenItem) {
   const cx = size / 2;
   const cy = size / 2;
   const radius = size / 2 - 4;
+  const isModelToken = Boolean(item.modelUrl);
 
-  if (item.auraRadius && item.auraRadius > 0) {
+  if (item.auraRadius && item.auraRadius > 0 && !isModelToken) {
     const aura = new Graphics();
     aura.label = 'aura';
     const color = item.auraColor ? cssHex(item.auraColor) : 0x4169e1;
@@ -193,9 +194,14 @@ function renderTokenBase(c: Container, item: TokenItem) {
   const circle = new Graphics();
   circle.label = 'circle';
   circle.circle(cx, cy, radius);
-  circle.fill({ color: 0x1c1c28 });
-  circle.setStrokeStyle({ width: 2, color: 0xc9a84c });
-  circle.stroke();
+  if (isModelToken) {
+    // Invisible hit target — GLB/STL renders in Map2DTokenModels below this Pixi layer.
+    circle.fill({ color: 0xffffff, alpha: 0.001 });
+  } else {
+    circle.fill({ color: 0x1c1c28 });
+    circle.setStrokeStyle({ width: 2, color: 0xc9a84c });
+    circle.stroke();
+  }
   c.addChild(circle);
 
   if (item.imageUrl) {
@@ -214,40 +220,19 @@ function renderTokenBase(c: Container, item: TokenItem) {
       c.addChildAt(sprite, Math.min(2, c.children.length));
       c.addChild(mask);
     }).catch(() => {});
-  } else if (item.modelUrl) {
-    const badge = new Graphics();
-    badge.label = 'model-badge';
-    badge.circle(cx, cy, radius - 6);
-    badge.fill({ color: 0x252532, alpha: 0.95 });
-    badge.setStrokeStyle({ width: 2, color: 0xc9a84c, alpha: 0.85 });
-    badge.stroke();
-    c.addChild(badge);
-
-    const cube = new Text({
-      text: '3D',
-      style: new TextStyle({
-        fontFamily: 'Inter',
-        fontSize: Math.max(10, radius * 0.45),
-        fill: 0xc9a84c,
-        fontWeight: '700',
-      }),
-    });
-    cube.label = 'model-label';
-    cube.anchor.set(0.5);
-    cube.x = cx;
-    cube.y = cy;
-    c.addChild(cube);
   }
 
-  const nameText = new Text({
-    text: item.name,
-    style: new TextStyle({ fontFamily: 'Inter', fontSize: 10, fill: 0xe8e0d0, stroke: { color: 0x000000, width: 3 } }),
-  });
-  nameText.label = 'name';
-  nameText.anchor.set(0.5, 0);
-  nameText.x = cx;
-  nameText.y = cy + radius + 2;
-  c.addChild(nameText);
+  if (!isModelToken) {
+    const nameText = new Text({
+      text: item.name,
+      style: new TextStyle({ fontFamily: 'Inter', fontSize: 10, fill: 0xe8e0d0, stroke: { color: 0x000000, width: 3 } }),
+    });
+    nameText.label = 'name';
+    nameText.anchor.set(0.5, 0);
+    nameText.x = cx;
+    nameText.y = cy + radius + 2;
+    c.addChild(nameText);
+  }
 }
 
 function renderTokenOverlay(c: Container, item: TokenItem, ctx: RenderContext) {

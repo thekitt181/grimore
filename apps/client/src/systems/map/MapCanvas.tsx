@@ -42,6 +42,7 @@ import { MapCategoryWheel, type ImageCategory } from './MapCategoryWheel';
 import { useSessionStore } from '@/store/sessionStore';
 import { getSocket } from '@/lib/socket';
 import { Map3DCanvas } from '@/systems/map3d/Map3DCanvas';
+import { Map2DTokenModels } from '@/systems/map3d/Map2DTokenModels';
 
 // Back-compat alias — some modules still import mapLayerRefs.
 export const mapLayerRefs = sceneRefs;
@@ -501,17 +502,23 @@ export function MapCanvas() {
       onDragLeave={handleDragLeave}
     >
       {viewMode === '3d' && (
-        <div className="absolute inset-0" style={{ pointerEvents: isDragOver ? 'none' : 'auto' }}>
+        <div className="absolute inset-0" style={{ pointerEvents: 'none' }}>
           <Map3DCanvas />
+        </div>
+      )}
+
+      {viewMode === '2d' && (
+        <div className="absolute inset-0 z-[1]" style={{ pointerEvents: 'none' }}>
+          <Map2DTokenModels />
         </div>
       )}
 
       <div
         ref={containerRef}
-        className="absolute inset-0 w-full h-full"
+        className="absolute inset-0 w-full h-full z-[2]"
         style={{
-          visibility: viewMode === '3d' ? 'hidden' : 'visible',
-          pointerEvents: viewMode === '3d' ? 'none' : 'auto',
+          opacity: viewMode === '3d' ? 0 : 1,
+          pointerEvents: 'auto',
         }}
       />
 
