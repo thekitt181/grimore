@@ -1,16 +1,16 @@
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
-import { useMapStore, type MapViewport } from '@/systems/map/store/mapStore';
+import { useMapStore } from '@/systems/map/store/mapStore';
 import { sceneCameraRef } from './sceneCameraRef';
 import { effectiveViewportScale } from '@/systems/map/viewportLimits';
 
 /** Orthographic camera locked to the Pixi pan/zoom (top-down, Y-up ground on XZ). */
-export function SyncedPixiOrthographicCamera({ viewport }: { viewport: MapViewport }) {
+export function SyncedPixiOrthographicCamera() {
   const { camera, size } = useThree();
 
   useFrame(() => {
     if (!(camera instanceof THREE.OrthographicCamera)) return;
-    const viewMode = useMapStore.getState().viewMode;
+    const { viewMode, viewport } = useMapStore.getState();
     const { x, y, scale } = viewport;
     const s = effectiveViewportScale(scale, viewMode);
     const halfW = size.width / (2 * s);
@@ -43,29 +43,24 @@ export function SyncedPixiOrthographicCamera({ viewport }: { viewport: MapViewpo
 }
 
 /** Perspective camera synced to Pixi pan/zoom with user-controlled orbit angles. */
-export function SyncedPixiPerspectiveCamera({
-  viewport,
-  span,
-}: {
-  viewport: MapViewport;
-  span: number;
-}) {
+export function SyncedPixiPerspectiveCamera({ span }: { span: number }) {
   const { camera, size } = useThree();
-  const orbit = useMapStore((s) => s.view3dOrbit);
 
   useFrame(() => {
-    const viewMode = useMapStore.getState().viewMode;
+    if (!(camera instanceof THREE.PerspectiveCamera)) return;
+
+    const { viewMode, view3dOrbit, viewport } = useMapStore.getState();
     const { x, y, scale } = viewport;
     const s = effectiveViewportScale(scale, viewMode);
     const cx = (size.width / 2 - x) / s;
     const cz = (size.height / 2 - y) / s;
     const radius = (span * 1.15) / s;
-    const minRadius = span * 0.06;
+    const minRadius = (span * 0.04) / Math.max(s, 0.08);
     const orbitRadius = Math.max(radius, minRadius);
-    const sinP = Math.sin(orbit.polar);
-    const cosP = Math.cos(orbit.polar);
-    const sinA = Math.sin(orbit.azimuth);
-    const cosA = Math.cos(orbit.azimuth);
+    const sinP = Math.sin(view3dOrbit.polar);
+    const cosP = Math.cos(view3dOrbit.polar);
+    const sinA = Math.sin(view3dOrbit.azimuth);
+    const cosA = Math.cos(view3dOrbit.azimuth);
 
     camera.position.set(
       cx + orbitRadius * sinP * sinA,
@@ -78,14 +73,14 @@ export function SyncedPixiPerspectiveCamera({
     camera.far = Math.max(orbitRadius * 24, span * 12);
     camera.updateProjectionMatrix();
 
-    if (camera instanceof THREE.PerspectiveCamera) {
-      sceneCameraRef.current = {
-        type: 'perspective',
-        position: { x: camera.position.x, y: camera.position.y, z: camera.position.z },
-        target: { x: cx, y: 0, z: cz },
-        fov: camera.fov,
-      };
-    }
+    sceneCameraRef.current = {
+      type: 'perspective',
+      position: { x: camera.position.x, y: camera.position.y, z: camera.position.z },
+      target: { x: cx, y: 0, z: cz },
+      fov: camera.fov,
+      near: camera.near,
+      far: camera.far,
+    };
   });
 
   return null;

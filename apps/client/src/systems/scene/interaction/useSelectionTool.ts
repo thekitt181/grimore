@@ -12,6 +12,7 @@ import { useSessionStore } from '@/store/sessionStore';
 import { itemsWithLiveTransforms } from '../store/liveTransformStore';
 import { sceneRefs, clientToWorld, pickSceneItem } from '../sceneRefs';
 import { screenDeltaToWorldDelta } from '@/systems/map3d/coords';
+import { pickTokenAtScreen } from '@/systems/map3d/pickTokenScreen';
 import { hitTest, hitTestMap, itemIntersectsRect, isInteriorClick } from '../hitTest';
 import { snapPoint } from '../snap';
 import { emitItemUpdate } from '../sceneSync';
@@ -187,7 +188,11 @@ export function useSelectionTool(appReady: boolean) {
       const { x: wx, y: wy } = clientToWorld(e.clientX, e.clientY);
       const store = useItemStore.getState();
 
-      const pickId = pickSceneItem(e.clientX, e.clientY);
+      let pickId = pickSceneItem(e.clientX, e.clientY);
+      if (!pickId && useMapStore.getState().viewMode === '3d') {
+        const tokens = selectableItems().filter((i): i is TokenItem => i.type === 'token');
+        pickId = pickTokenAtScreen(e.clientX, e.clientY, tokens);
+      }
       const merged = itemsWithLiveTransforms(
         store.items,
         useLiveTransformStore.getState().byId,

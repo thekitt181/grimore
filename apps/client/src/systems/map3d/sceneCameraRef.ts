@@ -4,6 +4,8 @@ export type PerspectiveCameraState = {
   position: { x: number; y: number; z: number };
   target: { x: number; y: number; z: number };
   fov: number;
+  near: number;
+  far: number;
 };
 
 export type OrthographicCameraState = {

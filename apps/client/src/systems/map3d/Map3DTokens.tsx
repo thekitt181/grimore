@@ -31,7 +31,7 @@ function Token3DModel({
       <group rotation={[pitch, 0, 0]}>
         <SceneModel url={token.modelUrl!} targetSize={targetSize} groundAlign tokenRender />
       </group>
-      <TokenPickVolume itemId={token.id} radius={targetSize / 2} height={targetSize} />
+      <TokenPickVolume itemId={token.id} radius={targetSize * 0.58} height={targetSize * 1.35} />
       <TokenNameLabel name={token.name} localY={targetSize * 0.92} />
 
       {activeTurn && (
@@ -87,7 +87,7 @@ function Token3DMesh({ token, activeTurn }: { token: TokenItem; activeTurn: bool
         <meshStandardMaterial color="#c9a84c" roughness={0.4} metalness={0.6} />
       </mesh>
 
-      <TokenPickVolume itemId={token.id} radius={radius * 0.95} height={pickHeight} />
+      <TokenPickVolume itemId={token.id} radius={radius * 1.05} height={pickHeight * 1.25} />
       <TokenNameLabel name={token.name} localY={yTop + radius * 0.75} />
 
       {activeTurn && (

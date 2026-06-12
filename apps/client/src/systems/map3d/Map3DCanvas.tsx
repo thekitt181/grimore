@@ -1,9 +1,10 @@
-import { Suspense, useMemo } from 'react';
+import { Suspense, useEffect, useMemo } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { useItemStore, selectSortedItems } from '@/systems/scene/store/itemStore';
 import { useMapStore } from '@/systems/map/store/mapStore';
 import type { DrawItem, MapItem, TextItem } from '@/systems/scene/types';
 import { itemCenterXZ } from './coords';
+import { sceneCameraRef } from './sceneCameraRef';
 import { Map3DGround } from './Map3DGround';
 import { Map3DScannedScene } from './Map3DScannedScene';
 import { Map3DWalls } from './Map3DWalls';
@@ -94,17 +95,15 @@ function MapPickGroup({ map }: { map: MapItem }) {
 }
 
 function ViewportCamera({ span }: { span: number }) {
-  const viewport = useMapStore((s) => s.viewport);
-  return <SyncedPixiPerspectiveCamera viewport={viewport} span={span} />;
+  return <SyncedPixiPerspectiveCamera span={span} />;
 }
 
 function TokenOverlayContent() {
-  const viewport = useMapStore((s) => s.viewport);
   return (
     <>
       <ambientLight intensity={0.85} />
       <directionalLight position={[400, 800, 300]} intensity={0.9} />
-      <SyncedPixiOrthographicCamera viewport={viewport} />
+      <SyncedPixiOrthographicCamera />
       <TokenLayer />
     </>
   );
@@ -128,6 +127,10 @@ export function MapSceneCanvas() {
   const span = activeMap ? Math.max(activeMap.width, activeMap.height) : 2560;
   const camY = span * 0.55;
   const camDist = span * 0.85;
+
+  useEffect(() => {
+    sceneCameraRef.current = null;
+  }, [is3d]);
 
   return (
     <Canvas

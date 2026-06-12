@@ -1,11 +1,12 @@
 import * as THREE from 'three';
+import { useMapStore } from '@/systems/map/store/mapStore';
 import type { SceneCameraState } from './sceneCameraRef';
+import { syncPerspectiveCamera } from './perspectiveCameraSync';
 
 const pickRoots = new Set<THREE.Object3D>();
 
 const ndc = new THREE.Vector2();
 const raycaster = new THREE.Raycaster();
-const perspCam = new THREE.PerspectiveCamera();
 const orthoCam = new THREE.OrthographicCamera();
 
 export function registerPickRoot(root: THREE.Object3D): () => void {
@@ -15,16 +16,7 @@ export function registerPickRoot(root: THREE.Object3D): () => void {
 
 function cameraFromState(state: SceneCameraState, rect: DOMRect): THREE.Camera {
   if (state.type === 'perspective') {
-    perspCam.fov = state.fov;
-    perspCam.aspect = rect.width / rect.height;
-    perspCam.near = 0.1;
-    perspCam.far = 100_000;
-    perspCam.position.set(state.position.x, state.position.y, state.position.z);
-    perspCam.up.set(0, 1, 0);
-    perspCam.lookAt(state.target.x, state.target.y, state.target.z);
-    perspCam.updateMatrixWorld();
-    perspCam.updateProjectionMatrix();
-    return perspCam;
+    return syncPerspectiveCamera(state, rect.width / Math.max(rect.height, 1));
   }
 
   orthoCam.left = state.left;
@@ -50,6 +42,9 @@ export function pickSceneItemId(
 ): string | null {
   if (pickRoots.size === 0 || rect.width <= 0 || rect.height <= 0) return null;
 
+  const viewMode = useMapStore.getState().viewMode;
+  if (viewMode === '3d' && cam.type !== 'perspective') return null;
+
   ndc.x = ((clientX - rect.left) / rect.width) * 2 - 1;
   ndc.y = -((clientY - rect.top) / rect.height) * 2 + 1;
 
@@ -58,6 +53,7 @@ export function pickSceneItemId(
 
   const hits: THREE.Intersection[] = [];
   for (const root of pickRoots) {
+    root.updateWorldMatrix(true, true);
     hits.push(...raycaster.intersectObject(root, true));
   }
   if (hits.length === 0) return null;
