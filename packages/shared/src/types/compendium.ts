@@ -126,6 +126,20 @@ export interface CompendiumSyncStatus {
   /** In-memory catalog revision after last rebuild. */
   catalogRev?: string;
   entryCounts?: { monsters: number; items: number; spells: number };
+  /** Present while the in-memory catalog is being rebuilt after a large import. */
+  catalogRebuild?: CatalogRebuildProgress;
+}
+
+/** Live progress for background compendium catalog rebuilds. */
+export interface CatalogRebuildProgress {
+  active: boolean;
+  phase: string;
+  label: string;
+  /** 0–100 */
+  percent: number;
+  startedAt: string;
+  entryCounts?: { monsters?: number; items?: number; spells?: number };
+  importCounts?: { monsters: number; items: number; spells: number };
 }
 
 export type CompendiumImageKind = 'monster' | 'item' | 'spell';

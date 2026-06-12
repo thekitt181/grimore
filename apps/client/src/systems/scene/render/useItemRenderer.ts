@@ -45,6 +45,7 @@ export function useItemRenderer(
   const activeTurnItemId = useInitiativeStore((s) =>
     s.isActive && s.combatants[s.currentIndex] ? s.combatants[s.currentIndex]!.tokenId : undefined
   );
+  const viewMode = useMapStore((s) => s.viewMode);
 
   const containers = useRef<Map<string, Container>>(new Map());
   const wallContainers = useRef<Map<string, Container>>(new Map());
@@ -69,7 +70,11 @@ export function useItemRenderer(
 
     layer.sortableChildren = true;
     const gm: boolean = myRole === 'GM';
-    const ctx: RenderContext = { gm, ...(activeTurnItemId ? { activeTurnItemId } : {}) };
+    const ctx: RenderContext = {
+      gm,
+      viewMode,
+      ...(activeTurnItemId ? { activeTurnItemId } : {}),
+    };
     const itemsForVision = itemsWithLiveTransforms(items, liveById);
     const activeMap = getActiveMap();
     const fogFiltersTokens = !gm && isFogOverlayVisible();
@@ -208,6 +213,7 @@ export function useItemRenderer(
     liveById,
     liveTick,
     activeTurnItemId,
+    viewMode,
     appReady,
   ]);
 

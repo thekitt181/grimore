@@ -1,5 +1,5 @@
 import type { Server } from 'socket.io';
-import type { ServerToClientEvents, ClientToServerEvents } from '@grimoire/shared';
+import type { CatalogRebuildProgress, ServerToClientEvents, ClientToServerEvents } from '@grimoire/shared';
 
 let io: Server<ClientToServerEvents, ServerToClientEvents> | null = null;
 let pendingBroadcast: ReturnType<typeof setTimeout> | null = null;
@@ -23,4 +23,8 @@ export function broadcastCompendiumUpdated(lastUpdated: string): void {
     pendingBroadcast = null;
     io?.emit('compendium:updated', { lastUpdated: pendingLastUpdated });
   }, 400);
+}
+
+export function broadcastCatalogRebuildProgress(payload: CatalogRebuildProgress): void {
+  io?.emit('compendium:catalog-rebuild', payload);
 }

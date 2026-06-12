@@ -1,5 +1,6 @@
 import type { SessionUser } from './user';
 import type { DdbCharacterSyncPayload, DdbHpUpdatePayload, DdbRollBridgePayload } from './ddb';
+import type { CatalogRebuildProgress } from './compendium';
 
 // ─── Map events ───────────────────────────────────────────────────────────────
 
@@ -261,6 +262,8 @@ export interface CompendiumUpdatedPayload {
   lastUpdated: string;
 }
 
+export type CompendiumCatalogRebuildPayload = CatalogRebuildProgress;
+
 // ─── D&D Beyond events ────────────────────────────────────────────────────────
 
 export type { DdbRollBridgePayload, DdbCharacterSyncPayload, DdbHpUpdatePayload };
@@ -298,6 +301,7 @@ export interface ServerToClientEvents {
   'session:userLeft':     (payload: UserLeftPayload)          => void;
   'session:roomState':    (payload: { users: SessionUser[]; fogActive?: boolean }) => void;
   'compendium:updated':   (payload: CompendiumUpdatedPayload) => void;
+  'compendium:catalog-rebuild': (payload: CompendiumCatalogRebuildPayload) => void;
   'ddb:roll':             (payload: DdbRollBridgePayload) => void;
   'ddb:rollBridge:status': (payload: {
     sessionId: string;

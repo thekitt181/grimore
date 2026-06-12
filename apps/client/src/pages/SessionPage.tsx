@@ -40,6 +40,7 @@ import { MonsterDexPanel } from '@/systems/compendium/MonsterDexPanel';
 import { ItemHandoutViewer } from '@/systems/compendium/ItemHandoutViewer';
 import { useHandoutRevealSocket } from '@/systems/compendium/useHandoutRevealSocket';
 import { useCompendiumSyncPoll } from '@/systems/compendium/useCompendiumSync';
+import { CatalogRebuildBanner } from '@/systems/compendium/CatalogRebuildBanner';
 import { useCompendiumAuthRecovery } from '@/systems/compendium/useCompendiumAuthRecovery';
 import { useCompendiumUiStore } from '@/systems/compendium/compendiumStore';
 import { getSocket, isMobileClient } from '@/lib/socket';
@@ -391,6 +392,7 @@ export function SessionPage() {
         {/* Sidebar */}
         <MapSidebar />
       </div>
+      <CatalogRebuildBanner />
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import type { CatalogRebuildProgress, CompendiumSyncStatus } from '@grimoire/shared';
 import { fetchSyncStatus } from './compendiumApi';
 import { useCompendiumUiStore } from './compendiumStore';
 import { getSocket } from '@/lib/socket';
@@ -10,6 +11,7 @@ import { ensureApiAuthSession } from '@/lib/axios';
 const POLL_CONNECTED_MS = 120_000;
 const POLL_MS = 45_000;
 const POLL_SLOW_MS = 120_000;
+const POLL_REBUILD_MS = 1_000;
 
 async function refetchAllCompendium(queryClient: ReturnType<typeof useQueryClient>) {
   if (isApiAuthBlocked()) return;
@@ -46,7 +48,11 @@ export function useCompendiumSyncPoll(enabled = true) {
     queryFn: fetchSyncStatus,
     enabled,
     staleTime: 15_000,
-    refetchInterval: enabled ? (socketConnected ? POLL_CONNECTED_MS : pollMs) : false,
+    refetchInterval: (query) => {
+      if (!enabled) return false;
+      if (query.state.data?.catalogRebuild?.active) return POLL_REBUILD_MS;
+      return socketConnected ? POLL_CONNECTED_MS : pollMs;
+    },
     refetchOnWindowFocus: !socketConnected,
     retry: 1,
   });
@@ -69,12 +75,23 @@ export function useCompendiumSyncPoll(enabled = true) {
       scheduleRefetch();
     };
 
+    const onCatalogRebuild = (payload: CatalogRebuildProgress) => {
+      queryClient.setQueryData<CompendiumSyncStatus>(['compendium', 'sync-status'], (old) => {
+        if (!old) return old;
+        if (payload.active) return { ...old, catalogRebuild: payload };
+        const { catalogRebuild: _removed, ...rest } = old;
+        return rest;
+      });
+    };
+
     const onConnect = () => setSocketConnected(true);
     const onDisconnect = () => setSocketConnected(false);
 
     const attach = () => {
       socket.off('compendium:updated', onUpdated);
       socket.on('compendium:updated', onUpdated);
+      socket.off('compendium:catalog-rebuild', onCatalogRebuild);
+      socket.on('compendium:catalog-rebuild', onCatalogRebuild);
     };
 
     setSocketConnected(socket.connected);
@@ -85,6 +102,7 @@ export function useCompendiumSyncPoll(enabled = true) {
 
     return () => {
       socket.off('compendium:updated', onUpdated);
+      socket.off('compendium:catalog-rebuild', onCatalogRebuild);
       socket.off('connect', onConnect);
       socket.off('disconnect', onDisconnect);
       socket.off('connect', attach);

@@ -8,7 +8,7 @@ import { useVisibleSceneTokens } from './useVisibleSceneTokens';
 /** Renders GLB/STL token models over the 2D Pixi map (Pixi handles input + fog). */
 export function Map2DTokenModels() {
   const viewport = useMapStore((s) => s.viewport);
-  const { tokens, activeTurnItemId } = useVisibleSceneTokens({ modelOnly: true });
+  const { tokens, activeTurnItemId } = useVisibleSceneTokens();
 
   if (tokens.length === 0) return null;
 
@@ -30,6 +30,7 @@ export function Map2DTokenModels() {
         <Suspense fallback={null}>
           <Map3DTokens
             tokens={tokens}
+            orthographicLabels
             {...(activeTurnItemId ? { activeTurnItemId } : {})}
           />
         </Suspense>

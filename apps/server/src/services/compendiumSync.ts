@@ -64,6 +64,7 @@ import {
   readTypedImportOverrideSlices,
   typedImportOverrideCount,
   readOverrideCountsFromTypedCollections,
+  collectImportedSourceLabelsFromMongo,
 } from './compendiumMongoReads';
 import { getCompendiumVisibilityPolicy } from './compendiumSourcePolicy';
 import {
@@ -73,6 +74,12 @@ import {
   readVisibilityPolicyFast,
   registerCatalogPolicySink,
 } from './compendiumPolicyCache';
+import {
+  finishCatalogRebuild,
+  getCatalogRebuildProgress,
+  startCatalogRebuild,
+  updateCatalogRebuild,
+} from './compendiumCatalogRebuildProgress';
 
 type StoredMonster = OwlbearMonster & { _id: string; isCustom?: boolean };
 type StoredItem = OwlbearItem & { _id: string; isCustom?: boolean };
@@ -396,12 +403,16 @@ async function augmentRawWithTypedImports(
   raw: Awaited<ReturnType<typeof readRawGlobalDoc>>,
 ): Promise<Awaited<ReturnType<typeof readRawGlobalDoc>>> {
   const typed = await readTypedImportOverrideSlices();
-  const globalCount = rawOverrideCount(raw);
   const typedCount = typedImportOverrideCount(typed);
-  if (typedCount <= globalCount) return raw;
-  console.warn(
-    `[Compendium] Typed import collections have ${typedCount} entries vs ${globalCount} in global doc — merging for catalog/books`,
-  );
+  if (typedCount === 0) return raw;
+
+  const globalCount = rawOverrideCount(raw);
+  if (typedCount > globalCount) {
+    console.warn(
+      `[Compendium] Typed import collections have ${typedCount} entries vs ${globalCount} in global doc — merging for catalog/books`,
+    );
+  }
+
   const mergeList = <T extends { name: string }>(global: T[] | undefined, typedList: T[]): T[] => {
     const map = new Map<string, T>();
     for (const entry of global ?? []) {
@@ -424,6 +435,11 @@ async function buildCatalogCacheFromRaw(
   raw: Awaited<ReturnType<typeof readRawGlobalDoc>>,
   revSuffix?: string,
 ): Promise<CatalogCache> {
+  updateCatalogRebuild({
+    phase: 'merging-imports',
+    label: 'Merging imported book entries…',
+    percent: 12,
+  });
   raw = await augmentRawWithTypedImports(raw);
   const global = normalizeOwlbearGlobalDoc({
     ...raw,
@@ -435,11 +451,62 @@ async function buildCatalogCacheFromRaw(
   const effectiveRev = isoTimestamp(global.lastUpdated);
   const deleted = raw.deleted ?? [];
   const policy = policyFromRaw(raw);
-  const [monsters, items, spells] = await Promise.all([
-    mergeMonsters(await loadBaseMonsters(), raw.overrideMonsters ?? [], raw.monsters ?? [], deleted, global, true),
-    mergeItems(await loadBaseItems(), raw.overrideItems ?? [], raw.items ?? [], deleted, global, true),
-    mergeSpells(await loadBaseSpells(), raw.overrideSpells ?? [], raw.spells ?? [], deleted, global, true),
-  ]);
+  const importCounts = {
+    monsters: raw.overrideMonsters?.length ?? 0,
+    items: raw.overrideItems?.length ?? 0,
+    spells: raw.overrideSpells?.length ?? 0,
+  };
+
+  updateCatalogRebuild({
+    phase: 'building-monsters',
+    label: `Building monster index (${importCounts.monsters.toLocaleString()} imports)…`,
+    percent: 25,
+  });
+  const monsters = mergeMonsters(
+    await loadBaseMonsters(),
+    raw.overrideMonsters ?? [],
+    raw.monsters ?? [],
+    deleted,
+    global,
+    true,
+  );
+
+  updateCatalogRebuild({
+    phase: 'building-items',
+    label: `Building item index (${importCounts.items.toLocaleString()} imports)…`,
+    percent: 50,
+    entryCounts: { monsters: monsters.length },
+  });
+  const items = mergeItems(
+    await loadBaseItems(),
+    raw.overrideItems ?? [],
+    raw.items ?? [],
+    deleted,
+    global,
+    true,
+  );
+
+  updateCatalogRebuild({
+    phase: 'building-spells',
+    label: `Building spell index (${importCounts.spells.toLocaleString()} imports)…`,
+    percent: 75,
+    entryCounts: { monsters: monsters.length, items: items.length },
+  });
+  const spells = mergeSpells(
+    await loadBaseSpells(),
+    raw.overrideSpells ?? [],
+    raw.spells ?? [],
+    deleted,
+    global,
+    true,
+  );
+
+  updateCatalogRebuild({
+    phase: 'sorting',
+    label: 'Sorting catalog…',
+    percent: 92,
+    entryCounts: { monsters: monsters.length, items: items.length, spells: spells.length },
+  });
   monsters.sort((a, b) => a.name.localeCompare(b.name));
   items.sort((a, b) => a.name.localeCompare(b.name));
   spells.sort((a, b) => a.name.localeCompare(b.name));
@@ -455,6 +522,11 @@ async function buildCatalogCacheFromRaw(
 
 async function executeCatalogBuild(previousCache: CatalogCache | null): Promise<CatalogCache> {
   try {
+    updateCatalogRebuild({
+      phase: 'loading-data',
+      label: 'Loading compendium data from database…',
+      percent: 5,
+    });
     const raw = await readRawGlobalDoc({ includeImageData: false });
     let built = await buildCatalogCacheFromRaw(raw);
 
@@ -462,6 +534,11 @@ async function executeCatalogBuild(previousCache: CatalogCache | null): Promise<
     if (rawFallback) {
       const normalizedFallback = normalizeOwlbearRawDoc(rawFallback);
       if (rawOverrideCount(normalizedFallback) > rawOverrideCount(raw)) {
+        updateCatalogRebuild({
+          phase: 'verifying',
+          label: 'Merging local fallback data…',
+          percent: 94,
+        });
         const { mergeRawGlobalDocs } = await import('./compendiumFallbackMongoSync');
         const merged = mergeRawGlobalDocs(raw, normalizedFallback);
         const mergedBuilt = await buildCatalogCacheFromRaw(merged, 'merged-fallback');
@@ -472,6 +549,11 @@ async function executeCatalogBuild(previousCache: CatalogCache | null): Promise<
         catalogEntryCount(built) === 0
         && rawOverrideCount(normalizedFallback) > 0
       ) {
+        updateCatalogRebuild({
+          phase: 'fallback',
+          label: 'Using local fallback file…',
+          percent: 94,
+        });
         const fallbackBuilt = await buildCatalogCacheFromRaw(normalizedFallback, 'raw-fallback');
         if (catalogEntryCount(fallbackBuilt) > 0) {
           console.warn('[Compendium] Primary rebuild empty — using local fallback file');
@@ -482,6 +564,11 @@ async function executeCatalogBuild(previousCache: CatalogCache | null): Promise<
 
     if (catalogEntryCount(built) === 0 && rawOverrideCount(raw) > 0) {
       console.warn('[Compendium] Rebuild empty despite Mongo overrides — retrying raw build');
+      updateCatalogRebuild({
+        phase: 'verifying',
+        label: 'Retrying catalog build…',
+        percent: 96,
+      });
       built = await buildCatalogCacheFromRaw(raw, 'override-retry');
     }
 
@@ -499,6 +586,11 @@ async function executeCatalogBuild(previousCache: CatalogCache | null): Promise<
       '[Compendium] Catalog build failed, using local fallback:',
       err instanceof Error ? err.message : err,
     );
+    updateCatalogRebuild({
+      phase: 'fallback',
+      label: 'Recovering from fallback data…',
+      percent: 50,
+    });
     const rawFallback = loadRawGlobalFallback();
     if (rawFallback) {
       const fallbackBuilt = await buildCatalogCacheFromRaw(rawFallback, 'raw-fallback');
@@ -558,10 +650,31 @@ async function executeCatalogBuild(previousCache: CatalogCache | null): Promise<
 export async function rebuildCatalogCacheAtomic(): Promise<CatalogCache> {
   const previousCache = catalogCache;
   catalogBuildPromise = null;
-  const built = await executeCatalogBuild(previousCache);
-  catalogCache = built;
-  invalidateSyncStatusCache();
-  return built;
+
+  const [mongoCounts, typedCounts] = await Promise.all([
+    readOverrideCountsFromMongo(),
+    readOverrideCountsFromTypedCollections(),
+  ]);
+  const pickCounts = (
+    a: { monsters: number; items: number; spells: number } | null,
+    b: typeof a,
+  ) => {
+    if (!a) return b ?? undefined;
+    if (!b) return a;
+    const aTotal = a.monsters + a.items + a.spells;
+    const bTotal = b.monsters + b.items + b.spells;
+    return bTotal > aTotal ? b : a;
+  };
+  startCatalogRebuild(pickCounts(mongoCounts, typedCounts));
+
+  try {
+    const built = await executeCatalogBuild(previousCache);
+    catalogCache = built;
+    invalidateSyncStatusCache();
+    return built;
+  } finally {
+    finishCatalogRebuild(getCatalogEntryCounts() ?? undefined);
+  }
 }
 
 export function getCatalogRevision(): string | null {
@@ -783,9 +896,24 @@ export async function listAllBookSources(): Promise<
   Array<{ id: string; label: string; count: number; locked?: boolean; draftCount?: number }>
 > {
   const policy = await readVisibilityPolicyFast();
-  const raw = await augmentRawWithTypedImports(await readRawGlobalDoc({ includeImageData: false }));
+  let counts: SourceCountMap = new Map();
+
+  for (const kind of ['monster', 'item', 'spell'] as const) {
+    const overrides = await readOverrideEntriesFromMongo(kind);
+    counts = tallyBooksSourceCountsForKind(overrides, kind, policy, counts);
+  }
+
+  if (counts.size === 0) {
+    const labels = await collectImportedSourceLabelsFromMongo();
+    for (const label of labels) {
+      if (!counts.has(label)) {
+        counts.set(label, { total: 1, public: 1, draft: 0 });
+      }
+    }
+  }
+
   return mapSourceListResults(
-    tallyBooksSourceCounts(raw, policy),
+    counts,
     policy,
     true,
     true,
@@ -990,7 +1118,8 @@ export async function listSources(
 const SYNC_STATUS_TTL_MS = 5_000;
 
 export async function getSyncStatus(): Promise<CompendiumSyncStatus> {
-  if (syncStatusCache && Date.now() - syncStatusCache.at < SYNC_STATUS_TTL_MS) {
+  const rebuild = getCatalogRebuildProgress();
+  if (!rebuild && syncStatusCache && Date.now() - syncStatusCache.at < SYNC_STATUS_TTL_MS) {
     return syncStatusCache.value;
   }
 
@@ -1036,8 +1165,11 @@ export async function getSyncStatus(): Promise<CompendiumSyncStatus> {
     mongoConnected,
     catalogRev: getCatalogRevision() ?? undefined,
     entryCounts,
+    ...(rebuild ? { catalogRebuild: rebuild } : {}),
   };
-  syncStatusCache = { at: Date.now(), value };
+  if (!rebuild) {
+    syncStatusCache = { at: Date.now(), value };
+  }
   return value;
 }
 
@@ -1581,6 +1713,7 @@ async function saveEntriesBulkForImport<T extends OwlbearMonster | OwlbearItem |
         hidePrevious: opts?.hidePrevious,
       },
     })),
+    { typedCollectionsOnly: true },
   );
 
   await upsertCollection(

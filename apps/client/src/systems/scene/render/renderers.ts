@@ -9,6 +9,7 @@ import { loadTexture } from '@/lib/textureLoader';
 export interface RenderContext {
   gm: boolean;
   activeTurnItemId?: string;
+  viewMode?: '2d' | '3d';
 }
 
 // Standard D&D 5e condition colours
@@ -38,7 +39,7 @@ export function itemVisualSignature(item: Item, ctx: RenderContext): string {
     case 'map':
       return `${base}|${item.backgroundUrl}|${item.modelUrl ?? ''}|${item.gridSize}|${item.gridType}|${item.gridColor}|${item.gridOpacity}|${item.gridOffsetX}|${item.gridOffsetY}|${item.showGrid}`;
     case 'token':
-      return `${base}|${tokenBaseVisualSignature(item)}`;
+      return `${base}|${tokenBaseVisualSignature(item)}|${ctx.viewMode ?? '2d'}`;
     case 'drawing':
       return `${base}|${item.shape}|${item.color}|${item.stroke}|${item.points.length}`;
     case 'text':
@@ -159,7 +160,7 @@ const HP_BAR_HEIGHT = 6;
 
 function renderToken(c: Container, item: TokenItem, ctx: RenderContext) {
   c.removeChildren();
-  renderTokenBase(c, item);
+  renderTokenBase(c, item, ctx);
   renderTokenOverlay(c, item, ctx);
 }
 
@@ -170,15 +171,17 @@ export function updateTokenOverlay(c: Container, item: TokenItem, ctx: RenderCon
   renderTokenOverlay(c, item, ctx);
 }
 
-function renderTokenBase(c: Container, item: TokenItem) {
+function renderTokenBase(c: Container, item: TokenItem, ctx: RenderContext) {
   const size = item.width;
   const cellPx = item.width / item.sizeCells;
   const cx = size / 2;
   const cy = size / 2;
   const radius = size / 2 - 4;
   const isModelToken = Boolean(item.modelUrl);
+  /** 2D map uses Three.js miniatures above Pixi — keep only an invisible hit target here. */
+  const hidePixiBody = isModelToken || ctx.viewMode === '2d';
 
-  if (item.auraRadius && item.auraRadius > 0 && !isModelToken) {
+  if (item.auraRadius && item.auraRadius > 0 && !hidePixiBody) {
     const aura = new Graphics();
     aura.label = 'aura';
     const color = item.auraColor ? cssHex(item.auraColor) : 0x4169e1;
@@ -194,8 +197,8 @@ function renderTokenBase(c: Container, item: TokenItem) {
   const circle = new Graphics();
   circle.label = 'circle';
   circle.circle(cx, cy, radius);
-  if (isModelToken) {
-    // Invisible hit target — GLB/STL renders in Map2DTokenModels above this Pixi layer.
+  if (hidePixiBody) {
+    // Invisible hit target — GLB/STL or 2D miniature renders in Map2DTokenModels above Pixi.
     circle.fill({ color: 0xffffff, alpha: 0.001 });
   } else {
     circle.fill({ color: 0x1c1c28 });
@@ -204,7 +207,7 @@ function renderTokenBase(c: Container, item: TokenItem) {
   }
   c.addChild(circle);
 
-  if (item.imageUrl) {
+  if (item.imageUrl && !hidePixiBody) {
     void loadTexture(item.imageUrl).then((tex) => {
       if (c.destroyed) return;
       const sprite = new Sprite(tex);
@@ -222,7 +225,7 @@ function renderTokenBase(c: Container, item: TokenItem) {
     }).catch(() => {});
   }
 
-  if (!isModelToken) {
+  if (!hidePixiBody) {
     const nameText = new Text({
       text: item.name,
       style: new TextStyle({ fontFamily: 'Inter', fontSize: 10, fill: 0xe8e0d0, stroke: { color: 0x000000, width: 3 } }),

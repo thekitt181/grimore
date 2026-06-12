@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { DraggablePanel } from '@/components/DraggablePanel';
 import { useSessionStore } from '@/store/sessionStore';
@@ -15,6 +15,7 @@ import {
 } from './ddbApi';
 import { useDdbImportJob } from './useDdbImportJob';
 import { fetchSources, lockCompendiumSource, unlockCompendiumSource } from '@/systems/compendium/compendiumApi';
+import { useCatalogRebuildProgress } from '@/systems/compendium/useCatalogRebuildProgress';
 import {
   applyCompendiumLockPolicy,
   patchCompendiumSourceLock,
@@ -102,6 +103,8 @@ export function DdbLibraryPanel({ onClose }: { onClose: () => void }) {
   const [selectedSourceIds, setSelectedSourceIds] = useState<Set<number>>(loadSavedSourceIds);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [message, setMessage] = useState<string | null>(null);
+  const [catalogWatch, setCatalogWatch] = useState(false);
+  const catalogRebuildSeenRef = useRef(false);
   const [sourcesSaved, setSourcesSaved] = useState(false);
 
   const { data: ddbStatus } = useQuery({
@@ -367,6 +370,10 @@ export function DdbLibraryPanel({ onClose }: { onClose: () => void }) {
         ...(result.catalogRev ? { catalogRev: result.catalogRev } : {}),
         ...(result.catalogRebuildPending ? { catalogRebuildPending: true } : {}),
       });
+      if (result.catalogRebuildPending) {
+        catalogRebuildSeenRef.current = false;
+        setCatalogWatch(true);
+      }
     },
     onError: (err: unknown) => setMessage(extractApiError(err, 'Could not sync compendium')),
   });
@@ -432,10 +439,30 @@ export function DdbLibraryPanel({ onClose }: { onClose: () => void }) {
   const bulkImportActive = importJob.isRunning || importJob.isStarting;
   const bulkImportVerb = importJob.verb;
   const jobProgress = importJob.job?.progress ?? null;
+  const catalogRebuild = useCatalogRebuildProgress(catalogWatch);
+  const catalogRebuildActive = catalogWatch && catalogRebuild.active;
   const progressLabel = jobProgress
     ? formatDdbImportJobProgress(jobProgress, bulkImportVerb)
-    : message;
-  const progressPercent = importJob.progressPercent;
+    : catalogRebuildActive && catalogRebuild.label
+      ? catalogRebuild.label
+      : message;
+  const progressPercent = bulkImportActive
+    ? importJob.progressPercent
+    : catalogRebuildActive
+      ? catalogRebuild.percent
+      : null;
+
+  useEffect(() => {
+    if (catalogRebuild.active) catalogRebuildSeenRef.current = true;
+  }, [catalogRebuild.active]);
+
+  useEffect(() => {
+    if (!catalogWatch || catalogRebuild.active) return;
+    if (!catalogRebuildSeenRef.current) return;
+    catalogRebuildSeenRef.current = false;
+    setCatalogWatch(false);
+    setMessage('Compendium catalog rebuilt. Open Compendium → Books to browse imported sources.');
+  }, [catalogWatch, catalogRebuild.active]);
 
   function shortProgressLabel(): string | null {
     if (!jobProgress) return bulkImportActive ? 'Background…' : null;
@@ -704,9 +731,9 @@ export function DdbLibraryPanel({ onClose }: { onClose: () => void }) {
             )}
           </div>
 
-          {(message || bulkImportActive) && (
+          {(message || bulkImportActive || catalogRebuildActive) && (
             <div className="mb-2 shrink-0 space-y-1.5">
-              {bulkImportActive && progressPercent != null && (
+              {(bulkImportActive || catalogRebuildActive) && progressPercent != null && (
                 <div
                   className="h-1.5 w-full rounded overflow-hidden"
                   style={{ background: 'rgba(255,255,255,0.08)' }}

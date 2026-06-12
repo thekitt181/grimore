@@ -36,6 +36,7 @@ import {
   normalizeEntryName,
   normalizeOwlbearRawDoc,
 } from './compendiumMerge';
+import { readTypedImportOverrideSlices } from './compendiumMongoReads';
 
 export type CompendiumKind = 'monster' | 'item' | 'spell';
 
@@ -389,12 +390,16 @@ export async function readOverrideSlicesForBookList(): Promise<{
           col.findOne({ _id: 'global' }, { projection: OVERRIDE_SLICES_PROJECTION }),
           45_000,
         );
-        if (doc && overrideSliceCount(doc) > 0) {
-          return {
-            overrideMonsters: doc.overrideMonsters ?? [],
-            overrideItems: doc.overrideItems ?? [],
-            overrideSpells: doc.overrideSpells ?? [],
+        if (doc) {
+          let normalized = normalizeRawDoc(doc);
+          const { loadOverrideShardsIntoRawDoc } = await import('./compendiumGlobalShards');
+          normalized = await loadOverrideShardsIntoRawDoc(normalized);
+          const slices = {
+            overrideMonsters: normalized.overrideMonsters ?? [],
+            overrideItems: normalized.overrideItems ?? [],
+            overrideSpells: normalized.overrideSpells ?? [],
           };
+          if (overrideSliceCount(slices) > 0) return slices;
         }
       }
     } catch (err) {
@@ -407,10 +412,21 @@ export async function readOverrideSlicesForBookList(): Promise<{
 
   clearRawGlobalDocInflight();
   const raw = await readRawGlobalDoc({ includeImageData: false });
+  const typed = await readTypedImportOverrideSlices();
+  const mergeList = <T extends { name: string }>(global: T[] | undefined, typedList: T[]): T[] => {
+    const map = new Map<string, T>();
+    for (const entry of global ?? []) {
+      if (entry?.name) map.set(entryNameKey(entry.name), entry);
+    }
+    for (const entry of typedList) {
+      if (entry?.name) map.set(entryNameKey(entry.name), entry);
+    }
+    return Array.from(map.values());
+  };
   const slices = {
-    overrideMonsters: raw.overrideMonsters ?? [],
-    overrideItems: raw.overrideItems ?? [],
-    overrideSpells: raw.overrideSpells ?? [],
+    overrideMonsters: mergeList(raw.overrideMonsters, typed.overrideMonsters),
+    overrideItems: mergeList(raw.overrideItems, typed.overrideItems),
+    overrideSpells: mergeList(raw.overrideSpells, typed.overrideSpells),
   };
   if (overrideSliceCount(slices) > 0) return slices;
 
@@ -445,7 +461,9 @@ async function readRawGlobalDocInner(opts: RawGlobalDocReadOptions = {}): Promis
         includeImageData ? RAW_GLOBAL_FULL_READ_MS : RAW_GLOBAL_LITE_READ_MS,
       );
       if (doc) {
-        const normalizedMongo = normalizeRawDoc(doc);
+        let normalizedMongo = normalizeRawDoc(doc);
+        const { loadOverrideShardsIntoRawDoc } = await import('./compendiumGlobalShards');
+        normalizedMongo = await loadOverrideShardsIntoRawDoc(normalizedMongo);
         const fallbackRaw = loadRawGlobalFallback();
         if (fallbackRaw) {
           const normalizedFallback = normalizeRawDoc(fallbackRaw);
@@ -502,8 +520,25 @@ export async function persistRawGlobalDoc(
   opts?: { notify?: PersistNotifyMode },
 ): Promise<PersistRawGlobalDocResult> {
   const lastUpdated = new Date().toISOString();
-  const payload = normalizeRawDoc({ ...raw, lastUpdated });
+  let payload = normalizeRawDoc({ ...raw, lastUpdated });
   const notify = opts?.notify ?? 'full';
+
+  const {
+    rawDocNeedsSharding,
+    splitRawDocOverridesIntoShards,
+    persistOverrideShards,
+    isBsonTooLargeError,
+  } = await import('./compendiumGlobalShards');
+
+  let shardWrite: ReturnType<typeof splitRawDocOverridesIntoShards> | null = null;
+  if (rawDocNeedsSharding(payload)) {
+    shardWrite = splitRawDocOverridesIntoShards(payload);
+    payload = normalizeRawDoc(shardWrite.global);
+    console.warn(
+      '[Compendium] Global doc exceeds BSON safe size — storing overrides in'
+      + ` ${shardWrite.shards.length} shard document(s)`,
+    );
+  }
 
   const col = await getCollection<OwlbearRawGlobalDoc>('data');
   let mongoPersisted = false;
@@ -516,9 +551,18 @@ export async function persistRawGlobalDoc(
           12_000,
         );
         mongoPersisted = result.acknowledged;
+        if (shardWrite && shardWrite.shards.length > 0) {
+          mongoPersisted = await persistOverrideShards(shardWrite.shards, shardWrite.meta) && mongoPersisted;
+        }
         break;
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
+        if (!shardWrite && isBsonTooLargeError(err)) {
+          shardWrite = splitRawDocOverridesIntoShards(payload);
+          payload = normalizeRawDoc(shardWrite.global);
+          console.warn('[Compendium] Mongo rejected oversized global doc — retrying with shards');
+          continue;
+        }
         if (attempt < 2) {
           console.warn(`[Compendium] Mongo write retry ${attempt + 1}/3:`, msg);
           await new Promise((r) => setTimeout(r, 600 * (attempt + 1)));
@@ -675,6 +719,7 @@ export async function saveOwlbearEntriesBulk(
 export async function patchOwlbearEntriesBulk(
   kind: CompendiumKind,
   entries: Array<{ entry: OwlbearMonster | OwlbearItem | OwlbearSpell; opts: OwlbearSaveOptions }>,
+  opts?: { typedCollectionsOnly?: boolean },
 ): Promise<{ mongoPersisted: boolean; lastUpdated: string }> {
   if (entries.length === 0) {
     return { mongoPersisted: true, lastUpdated: new Date().toISOString() };
@@ -688,6 +733,28 @@ export async function patchOwlbearEntriesBulk(
       console.warn('[Compendium] Mongo unavailable — saving import via compendium doc fallback');
       const result = await persistEntriesToRawDoc(kind, entries, 'none');
       return { mongoPersisted: result.mongoPersisted, lastUpdated: result.lastUpdated };
+    }
+
+    if (opts?.typedCollectionsOnly) {
+      markCompendiumWritePending();
+      try {
+        await withMongoTimeout(
+          col.updateOne(
+            { _id: 'global' },
+            { $set: { lastUpdated } },
+            { upsert: true },
+          ),
+          8_000,
+        );
+        clearRawGlobalDocInflight();
+        return { mongoPersisted: true, lastUpdated };
+      } catch (err) {
+        console.warn(
+          '[Compendium] typed-only import metadata update failed:',
+          err instanceof Error ? err.message : err,
+        );
+        return { mongoPersisted: false, lastUpdated };
+      }
     }
 
     const fields = KIND_FIELDS[kind];

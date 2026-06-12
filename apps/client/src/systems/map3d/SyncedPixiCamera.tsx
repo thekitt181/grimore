@@ -47,20 +47,22 @@ export function SyncedPixiPerspectiveCamera({
     const cx = (size.width / 2 - x) / s;
     const cz = (size.height / 2 - y) / s;
     const radius = (span * 0.85) / s;
+    const minRadius = span * 0.16;
+    const orbitRadius = Math.max(radius, minRadius);
     const sinP = Math.sin(orbit.polar);
     const cosP = Math.cos(orbit.polar);
     const sinA = Math.sin(orbit.azimuth);
     const cosA = Math.cos(orbit.azimuth);
 
     camera.position.set(
-      cx + radius * sinP * sinA,
-      radius * cosP,
-      cz + radius * sinP * cosA,
+      cx + orbitRadius * sinP * sinA,
+      orbitRadius * cosP,
+      cz + orbitRadius * sinP * cosA,
     );
     camera.up.set(0, 1, 0);
     camera.lookAt(cx, 0, cz);
-    camera.near = Math.max(0.5, radius * 0.002);
-    camera.far = Math.max(radius * 16, span * 4);
+    camera.near = Math.max(0.5, orbitRadius * 0.002);
+    camera.far = Math.max(orbitRadius * 16, span * 4);
     camera.updateProjectionMatrix();
   });
 

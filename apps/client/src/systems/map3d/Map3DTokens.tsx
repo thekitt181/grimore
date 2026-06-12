@@ -1,12 +1,38 @@
 import { Html } from '@react-three/drei';
+import { useMemo } from 'react';
 import type { TokenItem } from '@/systems/scene/types';
+import { useItemStore, selectSortedItems } from '@/systems/scene/store/itemStore';
+import { useMapStore } from '@/systems/map/store/mapStore';
 import { itemCenterXZ, degToRad } from './coords';
 import { useThreeTexture } from './useThreeTexture';
 import { SceneModel } from './SceneModel';
 
-function Token3DModel({ token, activeTurn }: { token: TokenItem; activeTurn: boolean }) {
+/** Keep drei Html name tags a consistent screen size as the 3D camera zooms in/out. */
+function useTokenLabelDistanceFactor(tokenSize: number): number {
+  const viewport = useMapStore((s) => s.viewport);
+  const items = useItemStore(selectSortedItems);
+  const span = useMemo(() => {
+    const maps = items.filter((i) => i.type === 'map' && i.visible);
+    if (maps.length === 0) return 2560;
+    return Math.max(...maps.map((m) => Math.max(m.width, m.height)));
+  }, [items]);
+  const cameraDist = (span * 0.85) / Math.max(viewport.scale, 0.08);
+  return Math.max(cameraDist * 1.15, tokenSize * 2.5, 80);
+}
+
+function Token3DModel({
+  token,
+  activeTurn,
+  orthographicLabels,
+}: {
+  token: TokenItem;
+  activeTurn: boolean;
+  orthographicLabels?: boolean;
+}) {
   const [cx, cz] = itemCenterXZ(token);
   const targetSize = Math.min(token.width, token.height);
+  const dynamicLabelFactor = useTokenLabelDistanceFactor(targetSize);
+  const labelDistanceFactor = orthographicLabels ? 900 : dynamicLabelFactor;
 
   return (
     <group position={[cx, 0, cz]} rotation={[0, degToRad(token.rotation), 0]}>
@@ -34,7 +60,7 @@ function Token3DModel({ token, activeTurn }: { token: TokenItem; activeTurn: boo
       <Html
         position={[0, targetSize * 0.65, 0]}
         center
-        distanceFactor={Math.max(targetSize * 2.5, 80)}
+        distanceFactor={labelDistanceFactor}
         style={{ pointerEvents: 'none', userSelect: 'none' }}
       >
         <span
@@ -52,10 +78,20 @@ function Token3DModel({ token, activeTurn }: { token: TokenItem; activeTurn: boo
   );
 }
 
-function Token3DMesh({ token, activeTurn }: { token: TokenItem; activeTurn: boolean }) {
+function Token3DMesh({
+  token,
+  activeTurn,
+  orthographicLabels,
+}: {
+  token: TokenItem;
+  activeTurn: boolean;
+  orthographicLabels?: boolean;
+}) {
   const { texture } = useThreeTexture(token.imageUrl);
   const [cx, cz] = itemCenterXZ(token);
   const radius = Math.min(token.width, token.height) / 2;
+  const dynamicLabelFactor = useTokenLabelDistanceFactor(radius * 2);
+  const labelDistanceFactor = orthographicLabels ? 900 : dynamicLabelFactor;
   const baseHeight = Math.max(radius * 0.22, 4);
   const yTop = baseHeight + 0.5;
 
@@ -103,7 +139,7 @@ function Token3DMesh({ token, activeTurn }: { token: TokenItem; activeTurn: bool
       <Html
         position={[0, yTop + radius * 0.8, 0]}
         center
-        distanceFactor={Math.max(radius * 2.5, 80)}
+        distanceFactor={labelDistanceFactor}
         style={{ pointerEvents: 'none', userSelect: 'none' }}
       >
         <span
@@ -124,20 +160,29 @@ function Token3DMesh({ token, activeTurn }: { token: TokenItem; activeTurn: bool
 export function Map3DTokens({
   tokens,
   activeTurnItemId,
+  orthographicLabels,
 }: {
   tokens: TokenItem[];
   activeTurnItemId?: string;
+  /** Top-down 2D overlay — fixed Html label scale for orthographic camera. */
+  orthographicLabels?: boolean;
 }) {
   return (
     <group>
       {tokens.map((token) =>
         token.modelUrl ? (
-          <Token3DModel key={token.id} token={token} activeTurn={token.id === activeTurnItemId} />
+          <Token3DModel
+            key={token.id}
+            token={token}
+            activeTurn={token.id === activeTurnItemId}
+            {...(orthographicLabels ? { orthographicLabels: true } : {})}
+          />
         ) : (
           <Token3DMesh
             key={token.id}
             token={token}
             activeTurn={token.id === activeTurnItemId}
+            {...(orthographicLabels ? { orthographicLabels: true } : {})}
           />
         ),
       )}
