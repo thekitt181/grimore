@@ -61,6 +61,9 @@ import {
   readOverrideCountsFromMongo,
   readOverrideEntriesFromMongo,
   readOverrideEntryByIdFromMongo,
+  readTypedImportOverrideSlices,
+  typedImportOverrideCount,
+  readOverrideCountsFromTypedCollections,
 } from './compendiumMongoReads';
 import { getCompendiumVisibilityPolicy } from './compendiumSourcePolicy';
 import {
@@ -389,10 +392,39 @@ function rawOverrideCount(raw: {
     + (raw.overrideSpells?.length ?? 0);
 }
 
+async function augmentRawWithTypedImports(
+  raw: Awaited<ReturnType<typeof readRawGlobalDoc>>,
+): Promise<Awaited<ReturnType<typeof readRawGlobalDoc>>> {
+  const typed = await readTypedImportOverrideSlices();
+  const globalCount = rawOverrideCount(raw);
+  const typedCount = typedImportOverrideCount(typed);
+  if (typedCount <= globalCount) return raw;
+  console.warn(
+    `[Compendium] Typed import collections have ${typedCount} entries vs ${globalCount} in global doc — merging for catalog/books`,
+  );
+  const mergeList = <T extends { name: string }>(global: T[] | undefined, typedList: T[]): T[] => {
+    const map = new Map<string, T>();
+    for (const entry of global ?? []) {
+      if (entry?.name) map.set(entryNameKey(entry.name), entry);
+    }
+    for (const entry of typedList) {
+      if (entry?.name) map.set(entryNameKey(entry.name), entry);
+    }
+    return Array.from(map.values());
+  };
+  return {
+    ...raw,
+    overrideMonsters: mergeList(raw.overrideMonsters, typed.overrideMonsters),
+    overrideItems: mergeList(raw.overrideItems, typed.overrideItems),
+    overrideSpells: mergeList(raw.overrideSpells, typed.overrideSpells),
+  };
+}
+
 async function buildCatalogCacheFromRaw(
   raw: Awaited<ReturnType<typeof readRawGlobalDoc>>,
   revSuffix?: string,
 ): Promise<CatalogCache> {
+  raw = await augmentRawWithTypedImports(raw);
   const global = normalizeOwlbearGlobalDoc({
     ...raw,
     images: {},
@@ -751,7 +783,7 @@ export async function listAllBookSources(): Promise<
   Array<{ id: string; label: string; count: number; locked?: boolean; draftCount?: number }>
 > {
   const policy = await readVisibilityPolicyFast();
-  const raw = await readRawGlobalDoc({ includeImageData: false });
+  const raw = await augmentRawWithTypedImports(await readRawGlobalDoc({ includeImageData: false }));
   return mapSourceListResults(
     tallyBooksSourceCounts(raw, policy),
     policy,
@@ -943,19 +975,9 @@ export async function listSources(
   const policy = await readVisibilityPolicyFast();
 
   if (excludeBundled) {
-    clearRawGlobalDocInflight();
-    const raw = await readRawGlobalDoc({ includeImageData: false });
-    const overrides =
-      kind === 'monsters'
-        ? raw.overrideMonsters
-        : kind === 'items'
-          ? raw.overrideItems
-          : raw.overrideSpells;
-    const counts = tallyBooksSourceCountsForKind(
-      overrides ?? [],
-      kindToCompendiumKind(kind),
-      policy,
-    );
+    const compendiumKind = kindToCompendiumKind(kind);
+    const overrides = await readOverrideEntriesFromMongo(compendiumKind);
+    const counts = tallyBooksSourceCountsForKind(overrides, compendiumKind, policy);
     return mapSourceListResults(counts, policy, true, true, null);
   }
 
@@ -994,8 +1016,17 @@ export async function getSyncStatus(): Promise<CompendiumSyncStatus> {
   let entryCounts = getCatalogEntryCounts() ?? undefined;
   if (mongoConnected && (!entryCounts || entryCounts.monsters + entryCounts.items + entryCounts.spells === 0)) {
     const mongoCounts = await readOverrideCountsFromMongo();
-    if (mongoCounts && mongoCounts.monsters + mongoCounts.items + mongoCounts.spells > 0) {
-      entryCounts = mongoCounts;
+    const typedCounts = await readOverrideCountsFromTypedCollections();
+    const pick = (a: { monsters: number; items: number; spells: number } | null, b: typeof a) => {
+      if (!a) return b ?? undefined;
+      if (!b) return a;
+      const aTotal = a.monsters + a.items + a.spells;
+      const bTotal = b.monsters + b.items + b.spells;
+      return bTotal > aTotal ? b : a;
+    };
+    const best = pick(mongoCounts, typedCounts);
+    if (best && best.monsters + best.items + best.spells > 0) {
+      entryCounts = best;
     }
   }
 

@@ -22,6 +22,103 @@ type OverrideEntryMap = {
   spell: OwlbearSpell;
 };
 
+const TYPED_IMPORT_COLLECTION: Record<CompendiumKind, string> = {
+  monster: 'monsters',
+  item: 'items',
+  spell: 'spells',
+};
+
+function mergeOverrideEntryLists<T extends { name: string }>(base: T[], extra: T[]): T[] {
+  if (extra.length === 0) return base;
+  const map = new Map<string, T>();
+  for (const entry of base) {
+    if (entry?.name) map.set(entryNameKey(entry.name), entry);
+  }
+  for (const entry of extra) {
+    if (entry?.name) map.set(entryNameKey(entry.name), entry);
+  }
+  return Array.from(map.values());
+}
+
+/** Per-entry Mongo collections (DDB imports) — not subject to the 16MB global doc limit. */
+export async function readTypedImportEntriesFromMongo<K extends CompendiumKind>(
+  kind: K,
+  opts?: { source?: string },
+): Promise<OverrideEntryMap[K][]> {
+  if (isMongoCircuitOpen()) return [];
+  const colName = TYPED_IMPORT_COLLECTION[kind];
+  try {
+    const col = await getCollection<OverrideEntryMap[K] & { _id?: string; isCustom?: boolean }>(colName);
+    if (!col) return [];
+
+    const source = opts?.source?.trim();
+    const filter: Record<string, unknown> = {
+      source: { $exists: true, $nin: ['Custom', ''] },
+    };
+    if (source) {
+      filter.source = { $regex: escapeRegex(source), $options: 'i' };
+    }
+
+    const rows = await withMongoTimeout(
+      col.find(filter as never, { projection: { _id: 0 } }).limit(25_000).toArray(),
+      MONGO_OVERRIDE_READ_MS,
+    );
+    return rows.filter((entry) => !source || entryMatchesSource(entry.source, source)) as OverrideEntryMap[K][];
+  } catch (err) {
+    console.warn(
+      `[Compendium] Typed ${kind} import read failed:`,
+      err instanceof Error ? err.message : err,
+    );
+    return [];
+  }
+}
+
+export async function readTypedImportOverrideSlices(): Promise<{
+  overrideMonsters: OwlbearMonster[];
+  overrideItems: OwlbearItem[];
+  overrideSpells: OwlbearSpell[];
+}> {
+  const [overrideMonsters, overrideItems, overrideSpells] = await Promise.all([
+    readTypedImportEntriesFromMongo('monster'),
+    readTypedImportEntriesFromMongo('item'),
+    readTypedImportEntriesFromMongo('spell'),
+  ]);
+  return { overrideMonsters, overrideItems, overrideSpells };
+}
+
+export function typedImportOverrideCount(slices: {
+  overrideMonsters?: unknown[];
+  overrideItems?: unknown[];
+  overrideSpells?: unknown[];
+}): number {
+  return (slices.overrideMonsters?.length ?? 0)
+    + (slices.overrideItems?.length ?? 0)
+    + (slices.overrideSpells?.length ?? 0);
+}
+
+export async function readOverrideCountsFromTypedCollections(): Promise<{
+  monsters: number;
+  items: number;
+  spells: number;
+} | null> {
+  if (isMongoCircuitOpen()) return null;
+  try {
+    const counts = { monsters: 0, items: 0, spells: 0 };
+    for (const kind of ['monster', 'item', 'spell'] as const) {
+      const col = await getCollection(TYPED_IMPORT_COLLECTION[kind]);
+      if (!col) continue;
+      counts[kind === 'monster' ? 'monsters' : kind === 'item' ? 'items' : 'spells'] = await withMongoTimeout(
+        col.countDocuments({ source: { $exists: true, $nin: ['Custom', ''] } }),
+        15_000,
+      );
+    }
+    if (counts.monsters + counts.items + counts.spells === 0) return null;
+    return counts;
+  } catch {
+    return null;
+  }
+}
+
 function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -40,31 +137,22 @@ function readOverrideEntriesFromFallback<K extends CompendiumKind>(
   return entries;
 }
 
-function mergeOverrideEntriesByName<K extends CompendiumKind>(
-  mongoEntries: OverrideEntryMap[K][],
-  fallbackEntries: OverrideEntryMap[K][],
-): OverrideEntryMap[K][] {
-  if (fallbackEntries.length === 0) return mongoEntries;
-  const map = new Map<string, OverrideEntryMap[K]>();
-  for (const entry of mongoEntries) {
-    if (entry?.name) map.set(entryNameKey(entry.name), entry);
-  }
-  for (const entry of fallbackEntries) {
-    if (entry?.name) map.set(entryNameKey(entry.name), entry);
-  }
-  return Array.from(map.values());
-}
-
-/** Load one override array from Mongo — never pulls the full global document. */
+/** Load one override array from Mongo — merges typed per-entry collections when global doc is incomplete. */
 export async function readOverrideEntriesFromMongo<K extends CompendiumKind>(
   kind: K,
   opts?: { source?: string },
 ): Promise<OverrideEntryMap[K][]> {
-  const field = OVERRIDE_FIELD[kind];
   const source = opts?.source?.trim();
   const fallbackEntries = readOverrideEntriesFromFallback(kind, source);
 
   if (isMongoCircuitOpen()) {
+    const typedEntries = await readTypedImportEntriesFromMongo(
+      kind,
+      source ? { source } : undefined,
+    );
+    if (typedEntries.length > 0) {
+      return mergeOverrideEntryLists(fallbackEntries, typedEntries);
+    }
     return fallbackEntries;
   }
 
@@ -72,6 +160,7 @@ export async function readOverrideEntriesFromMongo<K extends CompendiumKind>(
     const col = await getCollection<OwlbearRawGlobalDoc>('data');
     if (!col) return fallbackEntries;
 
+    const field = OVERRIDE_FIELD[kind];
     let entries: OverrideEntryMap[K][];
 
     if (source) {
@@ -111,13 +200,22 @@ export async function readOverrideEntriesFromMongo<K extends CompendiumKind>(
     if (entries.length === 0 && fallbackEntries.length > 0) {
       return fallbackEntries;
     }
+    const typedEntries = await readTypedImportEntriesFromMongo(
+      kind,
+      source ? { source } : undefined,
+    );
+    if (typedEntries.length > 0) {
+      entries = mergeOverrideEntryLists(entries, typedEntries);
+    }
     if (fallbackEntries.length > entries.length) {
       console.warn(
         `[Compendium] Mongo ${kind} overrides (${entries.length}) < local fallback (${fallbackEntries.length}) — merging`,
       );
       const { scheduleFallbackMongoSync } = await import('./compendiumFallbackMongoSync');
       scheduleFallbackMongoSync('override-read-merge');
-      return mergeOverrideEntriesByName(entries, fallbackEntries);
+      entries = mergeOverrideEntryLists(fallbackEntries, entries);
+    } else if (fallbackEntries.length > 0) {
+      entries = mergeOverrideEntryLists(entries, fallbackEntries);
     }
     return entries;
   } catch (err) {
@@ -125,6 +223,11 @@ export async function readOverrideEntriesFromMongo<K extends CompendiumKind>(
       `[Compendium] Mongo override read (${kind}${source ? `, source=${source}` : ''}) failed:`,
       err instanceof Error ? err.message : err,
     );
+    const typedEntries = await readTypedImportEntriesFromMongo(
+      kind,
+      source ? { source } : undefined,
+    );
+    if (typedEntries.length > 0) return typedEntries;
     return fallbackEntries;
   }
 }
@@ -204,6 +307,20 @@ export async function collectImportedSourceLabelsFromMongo(): Promise<string[]> 
     add(buckets.monsterSources);
     add(buckets.itemSources);
     add(buckets.spellSources);
+  }
+  for (const kind of ['monster', 'item', 'spell'] as const) {
+    if (isMongoCircuitOpen()) break;
+    try {
+      const col = await getCollection(TYPED_IMPORT_COLLECTION[kind]);
+      if (!col) continue;
+      const sources = await withMongoTimeout(
+        col.distinct('source', { source: { $exists: true, $nin: ['Custom', ''] } }),
+        15_000,
+      );
+      add(sources.map((s) => String(s)));
+    } catch {
+      // ignore — global buckets may still have labels
+    }
   }
   return [...labels];
 }
