@@ -4,7 +4,16 @@ import { itemCenterXZ } from './coords';
 import { useThreeTexture } from './useThreeTexture';
 import { CLAY, clayMaterialProps } from './clayMaterials';
 
-export function Map3DGround({ map, clayMode = false }: { map: MapItem; clayMode?: boolean }) {
+export function Map3DGround({
+  map,
+  clayMode = false,
+  skipFloor = false,
+}: {
+  map: MapItem;
+  clayMode?: boolean;
+  /** When a 3D map model is present, skip the flat floor plane (avoids z-fighting). */
+  skipFloor?: boolean;
+}) {
   const { texture, status } = useThreeTexture(map.backgroundUrl);
   const [cx, cz] = itemCenterXZ(map);
 
@@ -39,12 +48,14 @@ export function Map3DGround({ map, clayMode = false }: { map: MapItem; clayMode?
 
   return (
     <group>
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[cx, 0, cz]} receiveShadow={false}>
-        <planeGeometry args={[map.width, map.height, 1, 1]} />
-        <meshStandardMaterial {...floorMaterial} />
-      </mesh>
+      {!skipFloor && (
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[cx, 0, cz]} receiveShadow={false}>
+          <planeGeometry args={[map.width, map.height, 1, 1]} />
+          <meshStandardMaterial {...floorMaterial} />
+        </mesh>
+      )}
 
-      {!texture && status !== 'loading' && !clayMode && (
+      {!skipFloor && !texture && status !== 'loading' && !clayMode && (
         <mesh rotation={[-Math.PI / 2, 0, 0]} position={[cx, 0.01, cz]}>
           <planeGeometry args={[map.width, map.height]} />
           <meshStandardMaterial color="#252532" wireframe transparent opacity={0.15} />

@@ -57,7 +57,7 @@ function Map3DSceneContent() {
 
       {maps.map((map) => (
         <group key={map.id}>
-          <Map3DGround map={map} clayMode={scanImageWalls} />
+          <Map3DGround map={map} clayMode={scanImageWalls} skipFloor={Boolean(map.modelUrl)} />
           {autoExtrudeWalls && scanImageWalls && (
             <Map3DScannedScene map={map} wallHeight={wallHeight} />
           )}

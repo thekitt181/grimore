@@ -6,6 +6,7 @@ import { useMapStore } from '@/systems/map/store/mapStore';
 import { itemCenterXZ, degToRad } from './coords';
 import { useThreeTexture } from './useThreeTexture';
 import { SceneModel } from './SceneModel';
+import { useTokenGroundY } from './useTokenGroundY';
 
 /** Keep drei Html name tags a consistent screen size as the 3D camera zooms in/out. */
 function useTokenLabelDistanceFactor(tokenSize: number): number {
@@ -30,13 +31,14 @@ function Token3DModel({
   orthographicLabels?: boolean;
 }) {
   const [cx, cz] = itemCenterXZ(token);
+  const groundY = useTokenGroundY(cx, cz);
   const targetSize = Math.min(token.width, token.height);
   const dynamicLabelFactor = useTokenLabelDistanceFactor(targetSize);
   const labelDistanceFactor = orthographicLabels ? 900 : dynamicLabelFactor;
 
   return (
-    <group position={[cx, 0, cz]} rotation={[0, degToRad(token.rotation), 0]}>
-      <SceneModel url={token.modelUrl!} targetSize={targetSize} groundAlign />
+    <group position={[cx, groundY, cz]} rotation={[0, degToRad(token.rotation), 0]}>
+      <SceneModel url={token.modelUrl!} targetSize={targetSize} groundAlign tokenRender />
 
       {activeTurn && (
         <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, targetSize * 0.05, 0]}>
@@ -89,6 +91,7 @@ function Token3DMesh({
 }) {
   const { texture } = useThreeTexture(token.imageUrl);
   const [cx, cz] = itemCenterXZ(token);
+  const groundY = useTokenGroundY(cx, cz);
   const radius = Math.min(token.width, token.height) / 2;
   const dynamicLabelFactor = useTokenLabelDistanceFactor(radius * 2);
   const labelDistanceFactor = orthographicLabels ? 900 : dynamicLabelFactor;
@@ -96,13 +99,13 @@ function Token3DMesh({
   const yTop = baseHeight + 0.5;
 
   return (
-    <group position={[cx, 0, cz]} rotation={[0, degToRad(token.rotation), 0]}>
-      <mesh position={[0, baseHeight / 2, 0]} castShadow receiveShadow>
+    <group position={[cx, groundY, cz]} rotation={[0, degToRad(token.rotation), 0]}>
+      <mesh position={[0, baseHeight / 2, 0]} castShadow receiveShadow={false} renderOrder={10}>
         <cylinderGeometry args={[radius, radius * 1.05, baseHeight, 32]} />
         <meshStandardMaterial color="#2a2018" roughness={0.7} metalness={0.25} />
       </mesh>
 
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, yTop, 0]} castShadow>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, yTop, 0]} castShadow receiveShadow={false} renderOrder={10}>
         <circleGeometry args={[radius * 0.92, 48]} />
         <meshStandardMaterial
           {...(texture ? { map: texture } : {})}

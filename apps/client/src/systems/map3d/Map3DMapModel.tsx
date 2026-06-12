@@ -9,7 +9,7 @@ export function Map3DMapModel({ map }: { map: MapItem }) {
 
   return (
     <group position={[cx, 0, cz]} rotation={[0, degToRad(map.rotation), 0]}>
-      <SceneModel url={map.modelUrl} targetSize={targetSize} groundAlign />
+      <SceneModel url={map.modelUrl} targetSize={targetSize} groundAlign registerRaycast />
     </group>
   );
 }
