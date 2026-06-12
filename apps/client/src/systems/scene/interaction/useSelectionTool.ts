@@ -242,27 +242,23 @@ export function useSelectionTool(appReady: boolean) {
         }
       }
 
-      // No token/drawing/text under the cursor. If a *selected* map sits here,
-      // dragging moves the current selection (lets you reposition maps).
+      // No token/drawing/text under the cursor — GM can click a map surface to select/move it.
       const mapAt = hitTestMap(selectableItems(), wx, wy);
-      const selMapHere = mapAt && store.selectedIds.includes(mapAt.id) && canManipulate(mapAt);
-      if (selMapHere) {
-        const ids = store.selectedIds.filter((id) => {
-          const it = store.items[id];
-          return it && canManipulate(it);
-        });
-        if (ids.length) { beginMove(ids); return; }
-      }
-
-      // GM: keep sidebar-selected locked map selected when clicking its surface.
-      if (gm && mapAt && store.selectedIds.includes(mapAt.id)) {
-        marquee = { startWX: wx, startWY: wy };
-        if (!marqueeGfx) {
-          marqueeGfx = new Graphics();
-          marqueeGfx.label = 'marquee';
-          overlay!.addChild(marqueeGfx);
+      if (!hit && gm && mapAt) {
+        const additive = e.shiftKey;
+        const alreadySelected = store.selectedIds.includes(mapAt.id);
+        if (additive) store.select([mapAt.id], 'toggle');
+        else if (!alreadySelected) {
+          store.select([mapAt.id], 'set');
+          store.clearWallSelection();
         }
-        canvas.setPointerCapture(e.pointerId);
+        if (canManipulate(mapAt) && useItemStore.getState().selectedIds.includes(mapAt.id)) {
+          const ids = useItemStore.getState().selectedIds.filter((id) => {
+            const it = store.items[id];
+            return it && canManipulate(it);
+          });
+          if (ids.length) beginMove(ids);
+        }
         return;
       }
 
