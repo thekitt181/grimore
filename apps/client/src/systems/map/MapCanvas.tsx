@@ -34,6 +34,7 @@ import {
 import { mergeSceneItems, sameSceneItemSnapshot, sanitizePersistedItems } from '@/systems/scene/mergeSceneItems';
 import { fileToAssetDataUrl, isMapAssetFile, isModelUrl, modelFormatFromUrl, type ModelFormat } from '@/lib/modelFormats';
 import { persistModelFileForItem } from '@/lib/modelAssetStore';
+import { isExternalFileDrag, isExternalUrlDrag } from '@/lib/fileDrag';
 import { useWallTool } from './hooks/useWallTool';
 import { useEraserTool } from './hooks/useEraserTool';
 import { useDeleteKey } from './hooks/useDeleteKey';
@@ -397,6 +398,30 @@ export function MapCanvas() {
     });
   }, [items]);
 
+  // Block native HTML drags on the Pixi canvas (marquee select) and clear stale drop overlay.
+  useEffect(() => {
+    if (!appReady) return;
+    const canvas = sceneRefs.app.current?.canvas;
+    if (!canvas) return;
+
+    canvas.draggable = false;
+
+    const clearOverlay = () => setIsDragOver(false);
+    const blockNativeDrag = (e: DragEvent) => {
+      if (!isExternalFileDrag(e.dataTransfer)) e.preventDefault();
+    };
+
+    canvas.addEventListener('pointerdown', clearOverlay, true);
+    canvas.addEventListener('dragstart', blockNativeDrag, true);
+    window.addEventListener('dragend', clearOverlay);
+
+    return () => {
+      canvas.removeEventListener('pointerdown', clearOverlay, true);
+      canvas.removeEventListener('dragstart', blockNativeDrag, true);
+      window.removeEventListener('dragend', clearOverlay);
+    };
+  }, [appReady]);
+
   // ── Drag-and-drop image placement ─────────────────────────────────────────
   function getWorldPos(sx: number, sy: number) {
     const world = sceneRefs.world.current;
@@ -409,20 +434,17 @@ export function MapCanvas() {
     };
   }
 
-  function isExternalAssetDrag(dt: DataTransfer | null): boolean {
-    if (!dt?.types?.length) return false;
-    const types = Array.from(dt.types);
-    if (types.includes('Files')) return true;
-    if (types.includes('application/x-moz-file')) return true;
-    if (types.includes('text/uri-list')) return true;
-    return false;
-  }
-
-  function acceptDrop(e: { preventDefault(): void; dataTransfer: DataTransfer | null; clientX: number; clientY: number }) {
-    if (!isExternalAssetDrag(e.dataTransfer)) return;
+  function acceptFileDrag(e: { preventDefault(): void; dataTransfer: DataTransfer | null }) {
+    if (!isExternalFileDrag(e.dataTransfer)) return;
     e.preventDefault();
     if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
     setIsDragOver(true);
+  }
+
+  function acceptFileDragOver(e: { preventDefault(): void; dataTransfer: DataTransfer | null }) {
+    if (!isExternalFileDrag(e.dataTransfer)) return;
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
   }
 
   function processDroppedFile(file: File, clientX: number, clientY: number) {
@@ -448,29 +470,25 @@ export function MapCanvas() {
       });
   }
 
-  function handleDragOver(e: React.DragEvent) {
-    acceptDrop(e);
-  }
-  function handleDragLeave(e: React.DragEvent) {
-    if (!dropZoneRef.current?.contains(e.relatedTarget as Node)) setIsDragOver(false);
-  }
-
   // Native capture listeners — WebGL / Pixi canvases otherwise block file drops.
   useEffect(() => {
     const el = dropZoneRef.current;
     if (!el) return;
 
-    const onDragStart = (e: DragEvent) => {
-      if (!isExternalAssetDrag(e.dataTransfer)) e.preventDefault();
+    const onDragEnter = (e: DragEvent) => {
+      acceptFileDrag(e);
     };
 
     const onDragOver = (e: DragEvent) => {
-      if (!isExternalAssetDrag(e.dataTransfer)) return;
-      acceptDrop(e);
+      acceptFileDragOver(e);
     };
+
     const onDragLeave = (e: DragEvent) => {
-      if (!el.contains(e.relatedTarget as Node)) setIsDragOver(false);
+      const rel = e.relatedTarget as Node | null;
+      if (rel && el.contains(rel)) return;
+      setIsDragOver(false);
     };
+
     const onDrop = (e: DragEvent) => {
       e.preventDefault();
       e.stopPropagation();
@@ -480,6 +498,7 @@ export function MapCanvas() {
         processDroppedFile(file, e.clientX, e.clientY);
         return;
       }
+      if (!isExternalUrlDrag(e.dataTransfer)) return;
       const droppedUrl = e.dataTransfer?.getData('text/uri-list') || e.dataTransfer?.getData('text/plain');
       if (droppedUrl && (/^https?:\/\//.test(droppedUrl) || isModelUrl(droppedUrl))) {
         const { x: worldX, y: worldY } = getWorldPos(e.clientX, e.clientY);
@@ -494,14 +513,20 @@ export function MapCanvas() {
       }
     };
 
-    el.addEventListener('dragstart', onDragStart, true);
+    const blockNativeDrag = (e: DragEvent) => {
+      if (!isExternalFileDrag(e.dataTransfer)) e.preventDefault();
+    };
+
+    el.addEventListener('dragstart', blockNativeDrag, true);
+    el.addEventListener('dragenter', onDragEnter, true);
     el.addEventListener('dragover', onDragOver, true);
-    el.addEventListener('dragleave', onDragLeave);
+    el.addEventListener('dragleave', onDragLeave, true);
     el.addEventListener('drop', onDrop, true);
     return () => {
-      el.removeEventListener('dragstart', onDragStart, true);
+      el.removeEventListener('dragstart', blockNativeDrag, true);
+      el.removeEventListener('dragenter', onDragEnter, true);
       el.removeEventListener('dragover', onDragOver, true);
-      el.removeEventListener('dragleave', onDragLeave);
+      el.removeEventListener('dragleave', onDragLeave, true);
       el.removeEventListener('drop', onDrop, true);
     };
   }, []);
@@ -517,9 +542,6 @@ export function MapCanvas() {
       ref={dropZoneRef}
       className="w-full h-full relative select-none"
       style={{ background: '#0a0a0f' }}
-      onDragOver={handleDragOver}
-      onDragEnter={handleDragOver}
-      onDragLeave={handleDragLeave}
     >
       {viewMode === '3d' && (
         <div className="absolute inset-0 z-0" style={{ pointerEvents: 'none' }}>
