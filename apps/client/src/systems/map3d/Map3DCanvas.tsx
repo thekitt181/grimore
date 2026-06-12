@@ -91,8 +91,8 @@ function MapPickGroup({ map }: { map: MapItem }) {
   );
 }
 
-function ViewportCamera({ span }: { span: number }) {
-  return <SyncedPixiPerspectiveCamera span={span} />;
+function ViewportCamera() {
+  return <SyncedPixiPerspectiveCamera />;
 }
 
 function TokenOverlayContent() {
@@ -143,19 +143,18 @@ export function MapSceneCanvas() {
       style={{
         position: 'absolute',
         inset: 0,
-        zIndex: is3d ? 0 : 3,
         touchAction: 'none',
         pointerEvents: 'none',
       }}
-      gl={{ antialias: true, alpha: !is3d }}
+      gl={{ antialias: true, alpha: true }}
       onCreated={({ gl }) => {
-        if (!is3d) gl.setClearColor(0x000000, 0);
+        gl.setClearColor(0x000000, 0);
       }}
     >
       {is3d ? (
         <>
           <color attach="background" args={['#1e1e22']} />
-          <ViewportCamera span={span} />
+          <ViewportCamera />
           <Suspense fallback={null}>
             <Map3DSceneContent />
           </Suspense>

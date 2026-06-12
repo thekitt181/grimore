@@ -6,10 +6,14 @@ import { tokenShowsHpBarToPlayer } from '../types';
 import { redrawGrid } from '@/systems/map/hooks/useMapGrid';
 import { loadTexture } from '@/lib/textureLoader';
 
+import { getTokenRenderType } from '../token/tokenRenderType';
+
 export interface RenderContext {
   gm: boolean;
   activeTurnItemId?: string;
   viewMode?: '2d' | '3d';
+  selectedIds?: string[];
+  moveModeTokenId?: string | null;
 }
 
 // Standard D&D 5e condition colours
@@ -24,7 +28,7 @@ function cssHex(hex: string): number { return parseInt(hex.replace('#', ''), 16)
 
 /** Base token visuals (image, aura, name) — stable during combat HP changes. */
 export function tokenBaseVisualSignature(item: TokenItem): string {
-  return `${item.name}|${item.imageUrl ?? ''}|${item.modelUrl ?? ''}|${item.sizeCells}|${item.auraRadius ?? 0}|${item.auraColor ?? ''}`;
+  return `${item.name}|${item.imageUrl ?? ''}|${item.modelUrl ?? ''}|${item.sizeCells}|${item.auraRadius ?? 0}|${item.auraColor ?? ''}|${item.renderType ?? ''}|${item.borderColour ?? ''}`;
 }
 
 /** HP, conditions, and turn ring — cheap to patch without rebuilding the whole token. */
@@ -177,8 +181,10 @@ function renderTokenBase(c: Container, item: TokenItem, ctx: RenderContext) {
   const cx = size / 2;
   const cy = size / 2;
   const radius = size / 2 - 4;
-  /** 3D view: Three.js only. 2D + modelUrl: Pixi fallback circle while GLB loads. */
-  const hidePixiBody = ctx.viewMode === '3d' || !item.modelUrl;
+  const renderType = getTokenRenderType(item);
+  /** Pixi body only for explicit 2D tokens — 3D tokens render in Three.js. */
+  const hidePixiBody = renderType === '3d';
+  const borderColor = item.borderColour ? cssHex(item.borderColour) : 0xc9a84c;
 
   if (item.auraRadius && item.auraRadius > 0 && !hidePixiBody) {
     const aura = new Graphics();
@@ -201,7 +207,7 @@ function renderTokenBase(c: Container, item: TokenItem, ctx: RenderContext) {
     circle.fill({ color: 0xffffff, alpha: 0.001 });
   } else {
     circle.fill({ color: 0x1c1c28 });
-    circle.setStrokeStyle({ width: 2, color: 0xc9a84c });
+    circle.setStrokeStyle({ width: 3, color: borderColor });
     circle.stroke();
   }
   c.addChild(circle);
@@ -254,6 +260,21 @@ function renderTokenOverlay(c: Container, item: TokenItem, ctx: RenderContext) {
     turn.setStrokeStyle({ width: 3, color: 0xffd700, alpha: 1 });
     turn.stroke();
     overlay.addChild(turn);
+  }
+
+  const selected = ctx.selectedIds?.includes(item.id);
+  const inMoveMode = ctx.moveModeTokenId === item.id;
+  if (selected || inMoveMode) {
+    const ring = new Graphics();
+    ring.label = 'select-ring';
+    ring.circle(cx, cy, radius + (inMoveMode ? 8 : 5));
+    ring.setStrokeStyle({
+      width: inMoveMode ? 4 : 3,
+      color: inMoveMode ? 0x4488ff : 0xc9a84c,
+      alpha: 1,
+    });
+    ring.stroke();
+    overlay.addChild(ring);
   }
 
   const showHpBar = ctx.gm || tokenShowsHpBarToPlayer(item);

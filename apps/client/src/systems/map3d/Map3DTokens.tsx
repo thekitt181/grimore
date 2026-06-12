@@ -1,5 +1,6 @@
 import { useMapStore } from '@/systems/map/store/mapStore';
 import type { TokenItem } from '@/systems/scene/types';
+import { is3dToken } from '@/systems/scene/token/tokenRenderType';
 import { degToRad } from './coords';
 import { useThreeTexture } from './useThreeTexture';
 import { SceneModel } from './SceneModel';
@@ -120,10 +121,11 @@ export function Map3DTokens({
   activeTurnItemId?: string;
 }) {
   const view2d = useMapStore((s) => s.viewMode) === '2d';
+  const threeDTokens = tokens.filter(is3dToken);
 
   return (
     <group>
-      {tokens.map((token) =>
+      {threeDTokens.map((token) =>
         token.modelUrl ? (
           <Token3DModel
             key={token.id}

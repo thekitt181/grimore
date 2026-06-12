@@ -14,6 +14,9 @@ import { sceneRefs, clientToWorld, pickSceneItem } from '../sceneRefs';
 import { screenDeltaToWorldDelta } from '@/systems/map3d/coords';
 import { apply3dScreenPan } from '@/systems/map3d/viewportPan';
 import { pickTokenAtScreen } from '@/systems/map3d/pickTokenScreen';
+import { is2dToken, is3dToken } from '@/systems/scene/token/tokenRenderType';
+import { worldToGridColRow } from '@/systems/scene/token/tokenGrid';
+import { useTokenStore } from '@/systems/scene/store/tokenStore';
 import { hitTest, hitTestMap, itemIntersectsRect, isInteriorClick } from '../hitTest';
 import { snapPoint } from '../snap';
 import { emitItemUpdate } from '../sceneSync';
@@ -196,29 +199,36 @@ export function useSelectionTool(appReady: boolean) {
       if (e.button !== 0) return;
       const { x: wx, y: wy } = clientToWorld(e.clientX, e.clientY);
       const store = useItemStore.getState();
-
-      let pickId = pickSceneItem(e.clientX, e.clientY);
-      const viewMode = useMapStore.getState().viewMode;
       const merged = itemsWithLiveTransforms(
         store.items,
         useLiveTransformStore.getState().byId,
       );
-      const rayPick = pickId ? merged[pickId] : undefined;
 
-      if (viewMode === '3d') {
-        const tokens = selectableItems().filter((i): i is TokenItem => i.type === 'token');
-        const screenToken = pickTokenAtScreen(e.clientX, e.clientY, tokens);
-        if (screenToken) pickId = screenToken;
-        else if (rayPick?.type === 'map') pickId = null;
+      const moveModeId = useTokenStore.getState().moveModeTokenId;
+      if (moveModeId) {
+        const snapped = snapPoint(wx, wy);
+        const { gridCol, gridRow } = worldToGridColRow(snapped.x, snapped.y);
+        useTokenStore.getState().moveTokenToGrid(moveModeId, gridCol, gridRow);
+        return;
       }
-      const pickedItem = pickId ? merged[pickId] : undefined;
 
-      // Maps are background items: they are NOT picked by clicking their body
-      // (so you can marquee tokens on top of them). Select maps via the sidebar.
       const clickable = selectableItems().filter((i) => i.type !== 'map');
-      let hit = pickedItem && pickedItem.type !== 'map'
-        ? pickedItem
-        : hitTest(clickable, wx, wy, { includeLocked: true });
+      const tokens3d = clickable.filter((i): i is TokenItem => i.type === 'token' && is3dToken(i));
+      const pick2dPool = clickable.filter((i) => i.type !== 'token' || is2dToken(i as TokenItem));
+
+      let hit: Item | undefined;
+      const pickId = pickSceneItem(e.clientX, e.clientY);
+      const rayHit = pickId ? merged[pickId] : undefined;
+      if (rayHit?.type === 'token' && is3dToken(rayHit as TokenItem)) {
+        hit = rayHit;
+      }
+      if (!hit && tokens3d.length) {
+        const screen3d = pickTokenAtScreen(e.clientX, e.clientY, tokens3d);
+        if (screen3d && merged[screen3d]) hit = merged[screen3d] as Item;
+      }
+      if (!hit) {
+        hit = hitTest(pick2dPool, wx, wy, { includeLocked: true }) ?? undefined;
+      }
 
       // Interior clicks move; only edge/corner clicks hit resize handles.
       const onHandle = !hit || !isInteriorClick(hit, wx, wy) ? pickHandle(wx, wy) : null;
@@ -248,7 +258,7 @@ export function useSelectionTool(appReady: boolean) {
           const it = store.items[id];
           return it && canManipulate(it);
         });
-        if (ids.length) beginMove(ids, e);
+        if (ids.length && hit.type !== 'token') beginMove(ids, e);
         return;
       }
 
@@ -289,6 +299,8 @@ export function useSelectionTool(appReady: boolean) {
 
       // GM: 3D map pick volume or ground hit selects the map.
       if (!hit && gm) {
+        const pickId = pickSceneItem(e.clientX, e.clientY);
+        const pickedItem = pickId ? merged[pickId] : undefined;
         const mapHit = pickedItem?.type === 'map'
           ? pickedItem
           : hitTestMap(selectableItems(), wx, wy);
@@ -313,6 +325,7 @@ export function useSelectionTool(appReady: boolean) {
 
       // Otherwise pan (3D empty drag) or marquee-select (2D, or Shift+drag in 3D).
       if (!e.shiftKey) store.clearSelection();
+      const viewMode = useMapStore.getState().viewMode;
       if (viewMode === '3d' && !e.shiftKey) {
         const world = sceneRefs.world.current;
         if (world) {

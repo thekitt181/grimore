@@ -4,6 +4,7 @@ import { useItemStore, getActiveMap } from '../store/itemStore';
 import { useSessionStore } from '@/store/sessionStore';
 import { useInitiativeStore } from '@/systems/map/store/initiativeStore';
 import { useMapStore } from '@/systems/map/store/mapStore';
+import { useTokenStore } from '../store/tokenStore';
 import { isFogOverlayVisible } from '@/systems/scene/fogActiveSync';
 import {
   isTokenVisibleToPlayer,
@@ -46,6 +47,7 @@ export function useItemRenderer(
     s.isActive && s.combatants[s.currentIndex] ? s.combatants[s.currentIndex]!.tokenId : undefined
   );
   const viewMode = useMapStore((s) => s.viewMode);
+  const moveModeTokenId = useTokenStore((s) => s.moveModeTokenId);
 
   const containers = useRef<Map<string, Container>>(new Map());
   const wallContainers = useRef<Map<string, Container>>(new Map());
@@ -73,6 +75,8 @@ export function useItemRenderer(
     const ctx: RenderContext = {
       gm,
       viewMode,
+      selectedIds,
+      moveModeTokenId,
       ...(activeTurnItemId ? { activeTurnItemId } : {}),
     };
     const itemsForVision = itemsWithLiveTransforms(items, liveById);
@@ -214,6 +218,7 @@ export function useItemRenderer(
     liveTick,
     activeTurnItemId,
     viewMode,
+    moveModeTokenId,
     appReady,
   ]);
 

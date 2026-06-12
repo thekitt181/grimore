@@ -4,7 +4,7 @@ import { useMapStore } from '@/systems/map/store/mapStore';
 import { sceneRefs } from '@/systems/scene/sceneRefs';
 import { sceneCameraRef } from './sceneCameraRef';
 import { viewportGroundCenter } from './viewportGroundCenter';
-import { minViewportScale } from '@/systems/map/viewportLimits';
+import { perspectiveOrbitRadius } from './perspectiveOrbitRadius';
 
 function pixiScreenSize(fallbackW: number, fallbackH: number): { w: number; h: number } {
   const app = sceneRefs.app.current;
@@ -49,21 +49,17 @@ export function SyncedPixiOrthographicCamera() {
 }
 
 /** Perspective camera synced to Pixi pan/zoom with user-controlled orbit angles. */
-export function SyncedPixiPerspectiveCamera({ span }: { span: number }) {
+export function SyncedPixiPerspectiveCamera() {
   const { camera, size } = useThree();
 
   useFrame(() => {
     if (!(camera instanceof THREE.PerspectiveCamera)) return;
 
-    const { viewMode, view3dOrbit, viewport } = useMapStore.getState();
+    const { view3dOrbit, viewport } = useMapStore.getState();
     const { w, h } = pixiScreenSize(size.width, size.height);
     const { cx, cz, scale: s } = viewportGroundCenter(viewport, w, h);
 
-    const orbitScale = Math.max(s, minViewportScale(viewMode));
-    const radius = (span * 0.85) / orbitScale;
-    const minRadius = span * 0.12;
-    const maxRadius = span * 2.8;
-    const orbitRadius = THREE.MathUtils.clamp(radius, minRadius, maxRadius);
+    const orbitRadius = perspectiveOrbitRadius(h, s, camera.fov, view3dOrbit.polar);
 
     const sinP = Math.sin(view3dOrbit.polar);
     const cosP = Math.cos(view3dOrbit.polar);
@@ -78,7 +74,7 @@ export function SyncedPixiPerspectiveCamera({ span }: { span: number }) {
     camera.up.set(0, 1, 0);
     camera.lookAt(cx, 0, cz);
     camera.near = Math.max(0.5, orbitRadius * 0.002);
-    camera.far = Math.max(orbitRadius * 20, span * 8);
+    camera.far = Math.max(orbitRadius * 24, h / s * 4);
     camera.updateProjectionMatrix();
 
     sceneCameraRef.current = {

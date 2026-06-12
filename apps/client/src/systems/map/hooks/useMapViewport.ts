@@ -104,6 +104,7 @@ export function useMapViewport(
   appRef: React.RefObject<Application | null>,
   worldContainerRef: React.RefObject<Container | null>,
   appReady: boolean,
+  mapAreaRef?: React.RefObject<HTMLElement | null>,
 ) {
   const setViewport = useMapStore((s) => s.setViewport);
   const activeToolRef = useRef(useMapStore.getState().activeTool);
@@ -163,16 +164,18 @@ export function useMapViewport(
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
 
+    function isOverMapArea(clientX: number, clientY: number): boolean {
+      const area = mapAreaRef?.current ?? canvas;
+      const rect = area.getBoundingClientRect();
+      return clientX >= rect.left && clientX <= rect.right
+        && clientY >= rect.top && clientY <= rect.bottom;
+    }
+
     function onWheel(e: WheelEvent) {
-      const rect = canvas.getBoundingClientRect();
-      if (
-        e.clientX < rect.left || e.clientX > rect.right
-        || e.clientY < rect.top || e.clientY > rect.bottom
-      ) {
-        return;
-      }
+      if (!isOverMapArea(e.clientX, e.clientY)) return;
       e.preventDefault();
       e.stopPropagation();
+      const rect = canvas.getBoundingClientRect();
       const mouseX = e.clientX - rect.left;
       const mouseY = e.clientY - rect.top;
       const zoomSpeed = useMapStore.getState().viewMode === '3d' ? ZOOM_SPEED_3D : ZOOM_SPEED;
@@ -181,7 +184,7 @@ export function useMapViewport(
       applyZoomAt(w, mouseX, mouseY, oldScale + delta * oldScale, setViewport);
     }
     canvas.addEventListener('wheel', onWheel, { passive: false });
-    window.addEventListener('wheel', onWheel, { passive: false, capture: true });
+    document.addEventListener('wheel', onWheel, { passive: false, capture: true });
 
     function onPointerDown(e: PointerEvent) {
       pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -195,8 +198,11 @@ export function useMapViewport(
       const isMiddle = e.button === 1;
       const isSpaceLeft = spaceDown.current && e.button === 0;
       const isPanTool = activeToolRef.current === 'pan' && e.button === 0;
+      const is3dLeftPan = useMapStore.getState().viewMode === '3d'
+        && e.button === 0
+        && activeToolRef.current !== 'select';
 
-      if (!isMiddle && !isSpaceLeft && !isPanTool) return;
+      if (!isMiddle && !isSpaceLeft && !isPanTool && !is3dLeftPan) return;
 
       isPanning.current = true;
       panStart.current = { x: e.clientX, y: e.clientY, vpX: w.x, vpY: w.y };
@@ -270,7 +276,7 @@ export function useMapViewport(
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
       canvas.removeEventListener('wheel', onWheel);
-      window.removeEventListener('wheel', onWheel, { capture: true } as AddEventListenerOptions);
+      document.removeEventListener('wheel', onWheel, { capture: true } as AddEventListenerOptions);
       canvas.removeEventListener('pointerdown', onPointerDown);
       canvas.removeEventListener('pointermove', onPointerMove);
       canvas.removeEventListener('pointerup', onPointerUp);
@@ -278,5 +284,5 @@ export function useMapViewport(
       pointers.current.clear();
       pinchStart.current = null;
     };
-  }, [appRef, worldContainerRef, appReady, setViewport]);
+  }, [appRef, worldContainerRef, appReady, setViewport, mapAreaRef]);
 }

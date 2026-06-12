@@ -85,6 +85,13 @@ export interface MapItem extends BaseItem {
 
 export interface TokenItem extends BaseItem {
   type: 'token';
+  /** 2D flat circle (Pixi) vs 3D cylinder miniature (Three.js). */
+  renderType?: '2d' | '3d';
+  /** Grid column / row on the active map (authoritative for move). */
+  gridCol?: number;
+  gridRow?: number;
+  /** CSS hex border / rim colour. */
+  borderColour?: string;
   name: string;
   imageUrl?: string;
   /** GLB/GLTF/STL mini (shown in 3D view; 2D shows a placeholder). */

@@ -1,6 +1,7 @@
 import { useMapStore } from '@/systems/map/store/mapStore';
 import { sceneCameraRef } from '@/systems/map3d/sceneCameraRef';
 import { screenToGroundXZ } from '@/systems/map3d/screenToGround';
+import { pixiClientToWorld } from '@/systems/map3d/pixiScreenCoords';
 import { pickSceneItemId } from '@/systems/map3d/scenePickRegistry';
 
 /**
@@ -28,6 +29,11 @@ export function pickSceneItem(clientX: number, clientY: number): string | null {
 
 /** Convert a DOM client point to world-space coordinates. */
 export function clientToWorld(clientX: number, clientY: number): { x: number; y: number } {
+  const viewMode = useMapStore.getState().viewMode;
+  if (viewMode === '3d') {
+    return pixiClientToWorld(clientX, clientY);
+  }
+
   const app = sceneRefs.app.current;
   const world = sceneRefs.world.current;
   if (!app || !world) return { x: 0, y: 0 };
@@ -39,8 +45,5 @@ export function clientToWorld(clientX: number, clientY: number): { x: number; y:
     if (ground) return ground;
   }
 
-  return {
-    x: (clientX - rect.left - world.x) / world.scale.x,
-    y: (clientY - rect.top - world.y) / world.scale.y,
-  };
+  return pixiClientToWorld(clientX, clientY);
 }

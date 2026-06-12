@@ -4,13 +4,6 @@ import type { CatalogRebuildProgress } from './compendium';
 
 // ─── Map events ───────────────────────────────────────────────────────────────
 
-export interface TokenMovePayload {
-  sessionId: string;
-  tokenId: string;
-  x: number;
-  y: number;
-}
-
 export interface FogUpdatePayload {
   sessionId: string;
   /** Full snapshot — used on join / GM flush. */
@@ -107,6 +100,58 @@ export interface ItemRemovePayload {
 export interface ItemsSyncPayload {
   sessionId: string;
   items: unknown[];
+}
+
+// ─── Token events (PROJECT.md) ────────────────────────────────────────────────
+
+export interface TokenPlacePayload {
+  sessionId: string;
+  token: Record<string, unknown>;
+}
+
+export interface TokenMovePayload {
+  sessionId: string;
+  tokenId: string;
+  gridCol: number;
+  gridRow: number;
+  x: number;
+  y: number;
+}
+
+export interface TokenHpPayload {
+  sessionId: string;
+  tokenId: string;
+  hp: number;
+  maxHp: number;
+}
+
+export interface TokenTypePayload {
+  sessionId: string;
+  tokenId: string;
+  type: '2d' | '3d';
+}
+
+export interface TokenRotatePayload {
+  sessionId: string;
+  tokenId: string;
+  rotation: number;
+}
+
+export interface TokenHidePayload {
+  sessionId: string;
+  tokenId: string;
+  hidden: boolean;
+}
+
+export interface TokenDeletePayload {
+  sessionId: string;
+  tokenId: string;
+}
+
+export interface TokenConditionPayload {
+  sessionId: string;
+  tokenId: string;
+  conditions: string[];
 }
 
 // ─── Drawing events ───────────────────────────────────────────────────────────
@@ -273,6 +318,14 @@ export interface ServerToClientEvents {
   'item:update':          (payload: ItemUpdatePayload)        => void;
   'item:remove':          (payload: ItemRemovePayload)        => void;
   'items:sync':           (payload: ItemsSyncPayload)         => void;
+  'token:place':          (payload: TokenPlacePayload)         => void;
+  'token:move':           (payload: TokenMovePayload)          => void;
+  'token:hp':             (payload: TokenHpPayload)            => void;
+  'token:type':           (payload: TokenTypePayload)          => void;
+  'token:rotate':         (payload: TokenRotatePayload)        => void;
+  'token:hide':           (payload: TokenHidePayload)          => void;
+  'token:delete':         (payload: TokenDeletePayload)        => void;
+  'token:condition':      (payload: TokenConditionPayload)     => void;
   'map:tokenMove':        (payload: TokenMovePayload)         => void;
   'map:fogUpdate':        (payload: FogUpdatePayload)         => void;
   'fog:sync':             (payload: FogSyncPayload)          => void;
@@ -321,6 +374,14 @@ export interface ClientToServerEvents {
   'item:update':          (payload: ItemUpdatePayload)        => void;
   'item:remove':          (payload: ItemRemovePayload)        => void;
   'items:sync':           (payload: ItemsSyncPayload)         => void;
+  'token:place':          (payload: TokenPlacePayload)         => void;
+  'token:move':           (payload: TokenMovePayload)          => void;
+  'token:hp':             (payload: TokenHpPayload)            => void;
+  'token:type':           (payload: TokenTypePayload)          => void;
+  'token:rotate':         (payload: TokenRotatePayload)        => void;
+  'token:hide':           (payload: TokenHidePayload)          => void;
+  'token:delete':         (payload: TokenDeletePayload)        => void;
+  'token:condition':      (payload: TokenConditionPayload)     => void;
   'map:tokenMove':        (payload: TokenMovePayload)         => void;
   'map:fogUpdate':        (payload: FogUpdatePayload)         => void;
   'fog:sync':             (payload: FogSyncPayload)          => void;

@@ -42,6 +42,13 @@ import { useMap3DPixiMode } from './hooks/useMap3DPixiMode';
 import { useMap3DOrbit } from './hooks/useMap3DOrbit';
 import type { Item, MapItem, TokenItem } from '@/systems/scene/types';
 import { MapCategoryWheel, type ImageCategory } from './MapCategoryWheel';
+import { TokenTypeChoicePopup } from './TokenTypeChoicePopup';
+import { MapCameraControls } from './MapCameraControls';
+import { useTokenSocket } from '@/systems/scene/token/useTokenSocket';
+import { TokenPropertiesPanel } from '@/systems/scene/TokenPropertiesPanel';
+import { emitTokenPlace } from '@/systems/scene/token/tokenSync';
+import { tokenBoundsFromGrid, worldToGridColRow } from '@/systems/scene/token/tokenGrid';
+import { snapPoint } from '@/systems/scene/snap';
 import { useSessionStore } from '@/store/sessionStore';
 import { getSocket } from '@/lib/socket';
 import { MapSceneCanvas } from '@/systems/map3d/Map3DCanvas';
@@ -55,6 +62,7 @@ interface PendingDrop {
   url: string;
   modelFormat?: ModelFormat | null;
   modelFile?: File;
+  category?: ImageCategory;
 }
 
 function createDefaultMap(): MapItem {
@@ -333,7 +341,7 @@ export function MapCanvas() {
   }, [appReady, sessionId, items]);
 
   // ── Hooks ───────────────────────────────────────────────────────────────
-  useMapViewport(appRef, sceneRefs.world, appReady);
+  useMapViewport(appRef, sceneRefs.world, appReady, dropZoneRef);
   useItemRenderer(sceneRefs.items, appReady);
   useMapFogOverlay(sceneRefs.items, appReady);
   useSelectionTool(appReady);
@@ -349,6 +357,7 @@ export function MapCanvas() {
   useDeleteKey(appReady);
   useMap3DPixiMode(appReady, viewMode);
   useMap3DOrbit(appReady, viewMode);
+  useTokenSocket(sessionId);
 
   // ── Fix maps that still use 96px after an image changed their dimensions ─
   const gridFixed = useRef(false);
@@ -531,10 +540,33 @@ export function MapCanvas() {
   }, []);
   function handleCategorySelect(category: ImageCategory) {
     if (!pendingDrop) return;
+    if (category === 'character' || category === 'item' || category === 'prop' || category === 'other') {
+      setPendingDrop({ ...pendingDrop, category });
+      return;
+    }
     const drop = pendingDrop;
     setPendingDrop(null);
     void placeByCategory(category, drop.url, drop.worldX, drop.worldY, drop.modelFormat, drop.modelFile);
   }
+
+  function handleTokenTypeSelect(renderType: '2d' | '3d') {
+    const category = pendingDrop?.category;
+    if (!pendingDrop || !category) return;
+    const drop = pendingDrop;
+    setPendingDrop(null);
+    void placeByCategory(
+      category,
+      drop.url,
+      drop.worldX,
+      drop.worldY,
+      drop.modelFormat,
+      drop.modelFile,
+      renderType,
+    );
+  }
+
+  const showTokenTypeChoice = pendingDrop?.category != null
+    && pendingDrop.category !== 'map';
 
   return (
     <div
@@ -542,15 +574,18 @@ export function MapCanvas() {
       className="w-full h-full relative select-none"
       style={{ background: '#0a0a0f' }}
     >
-      <div className="absolute inset-0 z-0" style={{ pointerEvents: 'none' }}>
+      <div
+        ref={containerRef}
+        className="absolute inset-0 w-full h-full z-0"
+        style={{ pointerEvents: 'auto' }}
+      />
+
+      <div className="absolute inset-0 z-[1] pointer-events-none">
         <MapSceneCanvas />
       </div>
 
-      <div
-        ref={containerRef}
-        className="absolute inset-0 w-full h-full z-[2]"
-        style={{ pointerEvents: 'auto' }}
-      />
+      <MapCameraControls />
+      <TokenPropertiesPanel />
 
       {(viewMode === '2d' || viewMode === '3d') && isDragOver && (
         <div
@@ -563,11 +598,19 @@ export function MapCanvas() {
           </p>
         </div>
       )}
-      {pendingDrop && (
+      {pendingDrop && !showTokenTypeChoice && (
         <MapCategoryWheel
           x={pendingDrop.screenX}
           y={pendingDrop.screenY}
           onSelect={handleCategorySelect}
+          onDismiss={() => setPendingDrop(null)}
+        />
+      )}
+      {pendingDrop && showTokenTypeChoice && (
+        <TokenTypeChoicePopup
+          x={pendingDrop.screenX}
+          y={pendingDrop.screenY}
+          onSelect={handleTokenTypeSelect}
           onDismiss={() => setPendingDrop(null)}
         />
       )}
@@ -584,12 +627,12 @@ async function placeByCategory(
   worldY: number,
   modelFormat?: ModelFormat | null,
   modelFile?: File,
+  renderType?: '2d' | '3d',
 ) {
-  const store = useItemStore.getState();
-  const asModel = modelFormat != null || isModelUrl(url, modelFormat);
   const sessionId = getPersistSessionId();
 
   if (category === 'map') {
+    const asModel = modelFormat != null || isModelUrl(url, modelFormat);
     if (asModel) {
       const active = getActiveMap();
       const mapId = active && !active.backgroundUrl && !active.modelUrl ? active.id : uuidv4();
@@ -608,26 +651,54 @@ async function placeByCategory(
     return;
   }
 
-  const grid = getActiveMap()?.gridSize ?? DEFAULT_MAP_GRID_SIZE;
   const nameMap: Record<string, string> = { character: 'Character', item: 'Item', prop: 'Prop', other: 'Object' };
   const tokenId = uuidv4();
+  const asModel = modelFormat != null || isModelUrl(url, modelFormat);
+  const type: '2d' | '3d' = renderType ?? (asModel ? '3d' : '2d');
   let modelUrl: string | undefined;
-  if (asModel) {
+  let imageUrl: string | undefined = url;
+  if (type === '3d' && asModel) {
     modelUrl = url;
     if (modelFile && sessionId) {
       modelUrl = await persistModelFileForItem(sessionId, tokenId, modelFile, url, modelFormat ?? 'glb');
     }
+    imageUrl = undefined;
+  } else if (type === '3d' && !asModel) {
+    imageUrl = url;
+  } else {
+    imageUrl = url;
+    modelUrl = undefined;
   }
+  const snapped = snapPoint(worldX, worldY);
+  const { gridCol, gridRow } = worldToGridColRow(snapped.x, snapped.y);
+  const bounds = tokenBoundsFromGrid({ sizeCells: 1 }, gridCol, gridRow);
   const token: TokenItem = {
-    id: tokenId, type: 'token', x: worldX - grid / 2, y: worldY - grid / 2, rotation: 0,
-    width: grid, height: grid, zIndex: 0, locked: false, visible: true,
+    id: tokenId,
+    type: 'token',
+    x: bounds.x,
+    y: bounds.y,
+    rotation: 0,
+    width: bounds.width,
+    height: bounds.height,
+    gridCol,
+    gridRow,
+    renderType: type,
+    borderColour: '#c9a84c',
+    zIndex: 0,
+    locked: false,
+    visible: true,
     name: nameMap[category] ?? 'Token',
-    ...(asModel && modelUrl ? { modelUrl } : { imageUrl: url }),
+    ...(modelUrl ? { modelUrl } : {}),
+    ...(imageUrl ? { imageUrl } : {}),
     sizeCells: 1,
-    hp: 10, maxHp: 10, tempHp: 0, ac: 10, visionRadius: 12, conditions: [],
+    hp: 10,
+    maxHp: 10,
+    tempHp: 0,
+    ac: 10,
+    visionRadius: 12,
+    conditions: [],
   };
-  store.addItem(token);
-  emitItemAdd(token);
+  emitTokenPlace(token);
 }
 
 function addMapItem(

@@ -17,16 +17,27 @@ export function useMap3DPixiMode(appReady: boolean, viewMode: MapViewMode) {
     const is3d = viewMode === '3d';
     const canvas = app.canvas;
 
+    if (sceneRefs.world.current) {
+      sceneRefs.world.current.eventMode = is3d ? 'none' : 'static';
+    }
+
     app.renderer.background.alpha = 0;
     canvas.style.background = 'transparent';
 
     for (const layer of [
-      sceneRefs.items.current,
       sceneRefs.fog.current,
       sceneRefs.measure.current,
       sceneRefs.drawPreview.current,
     ]) {
       if (layer) layer.alpha = is3d ? 0 : 1;
+    }
+
+    // Items + fog stay visible — 2D tokens render on Pixi in both map modes.
+    if (sceneRefs.items.current) {
+      sceneRefs.items.current.alpha = 1;
+    }
+    if (sceneRefs.fog.current) {
+      sceneRefs.fog.current.alpha = 1;
     }
 
     // Transform box/handles are Three.js outlines in 3D; keep other overlay UI (marquee, etc.) visible.

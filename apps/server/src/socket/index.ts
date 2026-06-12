@@ -18,6 +18,13 @@ import {
   type ClientToServerEvents,
   type SessionUser,
   TokenMovePayload,
+  TokenPlacePayload,
+  TokenHpPayload,
+  TokenTypePayload,
+  TokenRotatePayload,
+  TokenHidePayload,
+  TokenDeletePayload,
+  TokenConditionPayload,
   FogUpdatePayload,
   FogSyncPayload,
   FogActivePayload,
@@ -287,6 +294,21 @@ export function initSocket(httpServer: HttpServer): Server {
       }
       socket.to(payload.sessionId).emit('items:sync', payload);
     });
+
+    const relayToken = <T extends { sessionId: string }>(event: string) => {
+      socket.on(event as any, (payload: T) => {
+        if (!isJoinedSession(socket, payload.sessionId)) return;
+        socket.to(payload.sessionId).emit(event as any, payload);
+      });
+    };
+    relayToken<TokenPlacePayload>('token:place');
+    relayToken<TokenMovePayload>('token:move');
+    relayToken<TokenHpPayload>('token:hp');
+    relayToken<TokenTypePayload>('token:type');
+    relayToken<TokenRotatePayload>('token:rotate');
+    relayToken<TokenHidePayload>('token:hide');
+    relayToken<TokenDeletePayload>('token:delete');
+    relayToken<TokenConditionPayload>('token:condition');
 
     // ── Map ──────────────────────────────────────────────────────────────────
     socket.on('map:tokenMove', (payload: TokenMovePayload) => {
