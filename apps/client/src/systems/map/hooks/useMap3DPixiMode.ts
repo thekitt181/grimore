@@ -1,7 +1,6 @@
 import { useEffect } from 'react';
 import type { MapViewMode } from '@/systems/map/store/mapStore';
 import { sceneRefs } from '@/systems/scene/sceneRefs';
-import { sceneCameraRef } from '@/systems/map3d/sceneCameraRef';
 
 /** Pixi background stays transparent so 3D layers show through; hide item visuals in 3D view only. */
 export function useMap3DPixiMode(appReady: boolean, viewMode: MapViewMode) {
@@ -11,7 +10,6 @@ export function useMap3DPixiMode(appReady: boolean, viewMode: MapViewMode) {
     if (!app) return;
 
     const is3d = viewMode === '3d';
-    if (!is3d) sceneCameraRef.current = null;
     const canvas = app.canvas;
 
     app.renderer.background.alpha = 0;

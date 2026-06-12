@@ -160,7 +160,19 @@ export function SceneModel({
 }) {
   const resolvedUrl = useResolvedModelUrl(url);
   const format = modelFormatFromUrl(url);
-  if (!format || !resolvedUrl) return null;
+
+  if (!format) return null;
+
+  if (!resolvedUrl) {
+    const s = Math.max(targetSize * 0.35, 8);
+    return (
+      <mesh position={[0, s / 2, 0]}>
+        <boxGeometry args={[s, s, s]} />
+        <meshStandardMaterial color="#8a7a50" roughness={0.6} metalness={0.2} wireframe />
+      </mesh>
+    );
+  }
+
   if (format === 'stl') {
     return (
       <StlModel

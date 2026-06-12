@@ -5,6 +5,7 @@ import { prisma } from '../lib/prisma';
 import { requireAuth, type AuthenticatedRequest } from '../middleware/auth';
 import { INVITE_CODE_LENGTH } from '@grimoire/shared';
 import { getPrimaryClientUrl } from '../lib/clientOrigins';
+import { stopRollBridge } from '../services/ddb/ddbRollBridge';
 
 const router = Router();
 
@@ -209,6 +210,61 @@ router.post('/:id/sessions', requireAuth, async (req: AuthenticatedRequest, res)
   } catch (err) {
     console.error('[Campaigns] start session error:', err);
     res.status(500).json({ error: 'Failed to start session' });
+  }
+});
+
+// ─── DELETE /api/campaigns/:id ──────────────────────────────────────────────
+
+router.delete('/:id', requireAuth, async (req: AuthenticatedRequest, res) => {
+  try {
+    const userId = req.userId!;
+    const id = req.params['id'] as string;
+
+    const campaign = await prisma.campaign.findUnique({
+      where: { id },
+      select: { id: true, gmId: true },
+    });
+
+    if (!campaign) {
+      res.status(404).json({ error: 'Campaign not found' });
+      return;
+    }
+
+    if (campaign.gmId !== userId) {
+      res.status(403).json({ error: 'Only the GM can delete this campaign' });
+      return;
+    }
+
+    const sessions = await prisma.gameSession.findMany({
+      where: { campaignId: id },
+      select: { id: true },
+    });
+    const sessionIds = sessions.map((s) => s.id);
+
+    for (const sessionId of sessionIds) {
+      stopRollBridge(sessionId);
+    }
+
+    await prisma.$transaction([
+      ...(sessionIds.length > 0
+        ? [
+            prisma.chatMessage.deleteMany({ where: { sessionId: { in: sessionIds } } }),
+            prisma.sessionLog.deleteMany({ where: { sessionId: { in: sessionIds } } }),
+          ]
+        : []),
+      prisma.gameSession.deleteMany({ where: { campaignId: id } }),
+      prisma.scene.deleteMany({ where: { campaignId: id } }),
+      prisma.gameMap.deleteMany({ where: { campaignId: id } }),
+      prisma.encounter.deleteMany({ where: { campaignId: id } }),
+      prisma.handout.deleteMany({ where: { campaignId: id } }),
+      prisma.note.deleteMany({ where: { campaignId: id } }),
+      prisma.campaign.delete({ where: { id } }),
+    ]);
+
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[Campaigns] delete error:', err);
+    res.status(500).json({ error: 'Failed to delete campaign' });
   }
 });
 

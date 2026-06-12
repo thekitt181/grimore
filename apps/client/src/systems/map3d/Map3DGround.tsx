@@ -1,8 +1,9 @@
 import { useMemo } from 'react';
 import type { MapItem } from '@/systems/scene/types';
-import { itemCenterXZ } from './coords';
+import { degToRad } from './coords';
 import { useThreeTexture } from './useThreeTexture';
 import { CLAY, clayMaterialProps } from './clayMaterials';
+import { useLiveItemBounds } from './useLiveItemBounds';
 
 export function Map3DGround({
   map,
@@ -15,15 +16,15 @@ export function Map3DGround({
   skipFloor?: boolean;
 }) {
   const { texture, status } = useThreeTexture(map.backgroundUrl);
-  const [cx, cz] = itemCenterXZ(map);
+  const { cx, cz, x, y, rotation } = useLiveItemBounds(map);
 
   const gridLines = useMemo(() => {
     if (!map.showGrid || clayMode) return null;
     const cols = Math.ceil(map.width / map.gridSize);
     const rows = Math.ceil(map.height / map.gridSize);
     const points: number[] = [];
-    const ox = map.x + map.gridOffsetX;
-    const oz = map.y + map.gridOffsetY;
+    const ox = x + map.gridOffsetX;
+    const oz = y + map.gridOffsetY;
 
     for (let c = 0; c <= cols; c++) {
       const x = ox + c * map.gridSize;
@@ -34,7 +35,7 @@ export function Map3DGround({
       points.push(ox, 0.02, z, ox + cols * map.gridSize, 0.02, z);
     }
     return new Float32Array(points);
-  }, [map, clayMode]);
+  }, [map, clayMode, x, y]);
 
   const gridColor = `#${map.gridColor.toString(16).padStart(6, '0')}`;
 
@@ -49,14 +50,18 @@ export function Map3DGround({
   return (
     <group>
       {!skipFloor && (
-        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[cx, 0, cz]} receiveShadow={false}>
+        <mesh
+          rotation={[-Math.PI / 2, 0, degToRad(rotation)]}
+          position={[cx, 0, cz]}
+          receiveShadow={false}
+        >
           <planeGeometry args={[map.width, map.height, 1, 1]} />
           <meshStandardMaterial {...floorMaterial} />
         </mesh>
       )}
 
       {!skipFloor && !texture && status !== 'loading' && !clayMode && (
-        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[cx, 0.01, cz]}>
+        <mesh rotation={[-Math.PI / 2, 0, degToRad(rotation)]} position={[cx, 0.01, cz]}>
           <planeGeometry args={[map.width, map.height]} />
           <meshStandardMaterial color="#252532" wireframe transparent opacity={0.15} />
         </mesh>

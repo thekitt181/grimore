@@ -14,17 +14,15 @@ import { SyncedPixiOrthographicCamera, SyncedPixiPerspectiveCamera } from './Syn
 import { useVisibleSceneTokens } from './useVisibleSceneTokens';
 import { Map3DSelectionOutlines } from './Map3DSelectionOutlines';
 import { MapPickVolume } from './MapPickVolume';
+import { useLiveItemBounds } from './useLiveItemBounds';
 
 function TokenLayer() {
   const { tokens, activeTurnItemId } = useVisibleSceneTokens();
   return (
-    <>
-      <Map3DTokens
-        tokens={tokens}
-        {...(activeTurnItemId ? { activeTurnItemId } : {})}
-      />
-      <Map3DSelectionOutlines />
-    </>
+    <Map3DTokens
+      tokens={tokens}
+      {...(activeTurnItemId ? { activeTurnItemId } : {})}
+    />
   );
 }
 
@@ -78,6 +76,7 @@ function Map3DSceneContent() {
       ))}
 
       <TokenLayer />
+      <Map3DSelectionOutlines />
       <Map3DDrawings drawings={drawings} labels={labels} />
 
       <ViewportCamera span={span} />
@@ -86,9 +85,9 @@ function Map3DSceneContent() {
 }
 
 function MapPickGroup({ map }: { map: MapItem }) {
-  const [cx, cz] = itemCenterXZ(map);
+  const { cx, cz, rotation } = useLiveItemBounds(map);
   return (
-    <group position={[cx, 0, cz]} rotation={[0, (map.rotation * Math.PI) / 180, 0]}>
+    <group position={[cx, 0, cz]} rotation={[0, (rotation * Math.PI) / 180, 0]}>
       <MapPickVolume map={map} />
     </group>
   );

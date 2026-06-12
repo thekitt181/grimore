@@ -42,6 +42,29 @@ export function CampaignDetail() {
     },
   });
 
+  const deleteCampaignMutation = useMutation({
+    mutationFn: async () => {
+      await api.delete(`/campaigns/${id}`);
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['campaigns'] });
+      void qc.removeQueries({ queryKey: ['campaign', id] });
+      navigate('/');
+    },
+  });
+
+  const handleDeleteCampaign = () => {
+    if (!data) return;
+    const { campaign } = data;
+    const liveWarning = campaign.activeSession
+      ? ' There is a live session — anyone in it will be disconnected.'
+      : '';
+    const confirmed = window.confirm(
+      `Delete "${campaign.name}" permanently? All scenes, maps, sessions, and members will be removed.${liveWarning} This cannot be undone.`,
+    );
+    if (confirmed) deleteCampaignMutation.mutate();
+  };
+
   const joinLiveSession = (sessionId: string) => {
     navigate(`/session/${sessionId}`);
   };
@@ -211,6 +234,34 @@ export function CampaignDetail() {
             </div>
           )}
         </div>
+
+        {isGM && (
+          <>
+            <div className="gold-divider my-10" />
+            <section
+              className="rounded-lg p-5"
+              style={{ background: 'var(--color-bg-tertiary)', border: '1px solid var(--color-border)' }}
+            >
+              <h2
+                className="font-display text-base font-semibold tracking-wider mb-2"
+                style={{ color: 'var(--color-text-secondary)' }}
+              >
+                Danger zone
+              </h2>
+              <p className="font-ui text-sm mb-4" style={{ color: 'var(--color-text-secondary)' }}>
+                Permanently delete this campaign and all of its scenes, maps, sessions, and member links.
+              </p>
+              <button
+                type="button"
+                className="btn-danger"
+                onClick={handleDeleteCampaign}
+                disabled={deleteCampaignMutation.isPending}
+              >
+                {deleteCampaignMutation.isPending ? 'Deleting...' : 'Delete Campaign'}
+              </button>
+            </section>
+          </>
+        )}
       </div>
     </AppShell>
   );

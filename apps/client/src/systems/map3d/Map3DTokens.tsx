@@ -1,19 +1,36 @@
+import { useMapStore } from '@/systems/map/store/mapStore';
 import type { TokenItem } from '@/systems/scene/types';
-import { itemCenterXZ, degToRad } from './coords';
+import { degToRad } from './coords';
 import { useThreeTexture } from './useThreeTexture';
 import { SceneModel } from './SceneModel';
 import { useTokenGroundY } from './useTokenGroundY';
 import { TokenPickVolume } from './TokenPickVolume';
 import { TokenNameLabel } from './TokenNameLabel';
+import { useLiveItemBounds } from './useLiveItemBounds';
 
-function Token3DModel({ token, activeTurn }: { token: TokenItem; activeTurn: boolean }) {
-  const [cx, cz] = itemCenterXZ(token);
+/** Pitch imported GLB/STL so the miniature is visible in top-down 2D view. */
+const MODEL_2D_PITCH = -Math.PI / 3.2;
+
+function Token3DModel({
+  token,
+  activeTurn,
+  view2d,
+}: {
+  token: TokenItem;
+  activeTurn: boolean;
+  view2d: boolean;
+}) {
+  const { cx, cz, rotation } = useLiveItemBounds(token);
   const groundY = useTokenGroundY(cx, cz);
   const targetSize = Math.min(token.width, token.height);
+  const yaw = degToRad(rotation);
+  const pitch = view2d ? MODEL_2D_PITCH : 0;
 
   return (
-    <group position={[cx, groundY, cz]} rotation={[0, degToRad(token.rotation), 0]}>
-      <SceneModel url={token.modelUrl!} targetSize={targetSize} groundAlign tokenRender />
+    <group position={[cx, groundY, cz]} rotation={[0, yaw, 0]}>
+      <group rotation={[pitch, 0, 0]}>
+        <SceneModel url={token.modelUrl!} targetSize={targetSize} groundAlign tokenRender />
+      </group>
       <TokenPickVolume itemId={token.id} radius={targetSize / 2} height={targetSize} />
       <TokenNameLabel name={token.name} localY={targetSize * 0.92} />
 
@@ -41,7 +58,7 @@ function Token3DModel({ token, activeTurn }: { token: TokenItem; activeTurn: boo
 
 function Token3DMesh({ token, activeTurn }: { token: TokenItem; activeTurn: boolean }) {
   const { texture } = useThreeTexture(token.imageUrl);
-  const [cx, cz] = itemCenterXZ(token);
+  const { cx, cz, rotation } = useLiveItemBounds(token);
   const groundY = useTokenGroundY(cx, cz);
   const radius = Math.min(token.width, token.height) / 2;
   const baseHeight = Math.max(radius * 0.22, 4);
@@ -49,7 +66,7 @@ function Token3DMesh({ token, activeTurn }: { token: TokenItem; activeTurn: bool
   const pickHeight = yTop + radius * 0.5;
 
   return (
-    <group position={[cx, groundY, cz]} rotation={[0, degToRad(token.rotation), 0]}>
+    <group position={[cx, groundY, cz]} rotation={[0, degToRad(rotation), 0]}>
       <mesh position={[0, baseHeight / 2, 0]} castShadow receiveShadow={false} renderOrder={10}>
         <cylinderGeometry args={[radius, radius * 1.05, baseHeight, 32]} />
         <meshStandardMaterial color="#2a2018" roughness={0.7} metalness={0.25} />
@@ -102,6 +119,8 @@ export function Map3DTokens({
   tokens: TokenItem[];
   activeTurnItemId?: string;
 }) {
+  const view2d = useMapStore((s) => s.viewMode) === '2d';
+
   return (
     <group>
       {tokens.map((token) =>
@@ -109,6 +128,7 @@ export function Map3DTokens({
           <Token3DModel
             key={token.id}
             token={token}
+            view2d={view2d}
             activeTurn={token.id === activeTurnItemId}
           />
         ) : (

@@ -109,7 +109,12 @@ export function useSelectionTool(appReady: boolean) {
     }
 
     function selectableItems(): Item[] {
-      const all = Object.values(useItemStore.getState().items) as Item[];
+      const store = useItemStore.getState();
+      const merged = itemsWithLiveTransforms(
+        store.items,
+        useLiveTransformStore.getState().byId,
+      );
+      const all = Object.values(merged) as Item[];
       if (gm) return all;
       let tokens = all.filter((i) => i.visible && i.type === 'token');
       if (!isFogOverlayVisible()) return tokens;
