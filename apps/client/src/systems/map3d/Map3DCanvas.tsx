@@ -12,7 +12,7 @@ import { Map3DDrawings } from './Map3DDrawings';
 import { Map3DMapModel } from './Map3DMapModel';
 import { SyncedPixiPerspectiveCamera } from './SyncedPixiCamera';
 import { useVisibleSceneTokens } from './useVisibleSceneTokens';
-import { Map3DFog } from './Map3DFog';
+import { Map3DSelectionOutlines } from './Map3DSelectionOutlines';
 
 function ViewportCamera({ span }: { span: number }) {
   const viewport = useMapStore((s) => s.viewport);
@@ -50,9 +50,10 @@ function Map3DSceneContent() {
 
   return (
     <>
-      <ambientLight intensity={0.72} />
-      <directionalLight position={[800, 1400, 500]} intensity={0.95} castShadow shadow-mapSize={[2048, 2048]} />
-      <directionalLight position={[-400, 600, -300]} intensity={0.35} />
+      <ambientLight intensity={1.05} />
+      <directionalLight position={[800, 1400, 500]} intensity={1.35} castShadow shadow-mapSize={[2048, 2048]} />
+      <directionalLight position={[-400, 900, -400]} intensity={0.65} />
+      <hemisphereLight args={['#f0ece4', '#2a2520', 0.55]} />
 
       {maps.map((map) => (
         <group key={map.id}>
@@ -73,7 +74,7 @@ function Map3DSceneContent() {
       />
       <Map3DDrawings drawings={drawings} labels={labels} />
 
-      <Map3DFog span={span} />
+      <Map3DSelectionOutlines />
       <ViewportCamera span={span} />
     </>
   );

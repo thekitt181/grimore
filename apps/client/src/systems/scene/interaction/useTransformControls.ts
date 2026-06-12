@@ -72,6 +72,7 @@ export function useTransformControls(appReady: boolean) {
   const selectedIds = useItemStore((s) => s.selectedIds);
   const items       = useItemStore((s) => s.items);
   const activeTool  = useMapStore((s) => s.activeTool);
+  const viewMode    = useMapStore((s) => s.viewMode);
   const myRole      = useSessionStore((s) => s.myRole);
 
   useEffect(() => {
@@ -86,6 +87,19 @@ export function useTransformControls(appReady: boolean) {
     let handlesG = overlay.getChildByLabel('xf-handles') as Graphics | null;
     if (!handlesG) { handlesG = new Graphics(); handlesG.label = 'xf-handles'; overlay.addChild(handlesG); }
 
+    function clearControls() {
+      registry.mode = 'none';
+      registry.handles = [];
+      box!.clear();
+      handlesG!.clear();
+    }
+
+    // Pixi transform UI is top-down only — 3D view uses Map3DSelectionOutlines instead.
+    if (viewMode === '3d') {
+      clearControls();
+      return;
+    }
+
     const gm = myRole === 'GM';
     const sel = selectedIds.map((id) => items[id]).filter(Boolean) as Item[];
     const manipulable = sel.filter((it) => {
@@ -93,13 +107,6 @@ export function useTransformControls(appReady: boolean) {
       if (gm) return true;
       return it.type === 'token';
     });
-
-    function clearControls() {
-      registry.mode = 'none';
-      registry.handles = [];
-      box!.clear();
-      handlesG!.clear();
-    }
 
     // Only show transform UI with the select tool and an unlocked selection
     if (activeTool !== 'select' || manipulable.length === 0) {
@@ -428,5 +435,5 @@ export function useTransformControls(appReady: boolean) {
       canvas.removeEventListener('pointerup', onUp);
       canvas.removeEventListener('pointercancel', onUp);
     };
-  }, [appReady, selectedIds, items, activeTool, myRole]);
+  }, [appReady, selectedIds, items, activeTool, viewMode, myRole]);
 }

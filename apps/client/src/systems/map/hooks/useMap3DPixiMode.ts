@@ -24,9 +24,14 @@ export function useMap3DPixiMode(appReady: boolean, viewMode: MapViewMode) {
       if (layer) layer.alpha = is3d ? 0 : 1;
     }
 
-    // Selection handles, marquee, wall handles stay visible in 3D.
+    // Transform box/handles are Three.js outlines in 3D; keep other overlay UI (marquee, etc.) visible.
     if (sceneRefs.overlay.current) {
       sceneRefs.overlay.current.alpha = 1;
+      for (const child of sceneRefs.overlay.current.children) {
+        if (child.label === 'xf-box' || child.label === 'xf-handles') {
+          child.visible = !is3d;
+        }
+      }
     }
   }, [appReady, viewMode]);
 }

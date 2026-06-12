@@ -34,8 +34,8 @@ export function Map3DGround({ map, clayMode = false }: { map: MapItem; clayMode?
       ? { map: texture, color: '#ffffff', roughness: 0.94, metalness: 0.01 }
       : clayMaterialProps('floor')
     : texture
-      ? { map: texture, color: '#ffffff', roughness: 0.92, metalness: 0.02 }
-      : { color: status === 'error' ? '#3d2020' : '#14141c', roughness: 0.92, metalness: 0.02 };
+      ? { map: texture, color: '#ffffff', roughness: 0.88, metalness: 0.02, emissive: '#ffffff', emissiveIntensity: 0.12 }
+      : { color: status === 'error' ? '#3d2020' : '#252532', roughness: 0.92, metalness: 0.02 };
 
   return (
     <group>
