@@ -59,6 +59,9 @@ export function SyncedPixiPerspectiveCamera({
     );
     camera.up.set(0, 1, 0);
     camera.lookAt(cx, 0, cz);
+    camera.near = Math.max(0.5, radius * 0.002);
+    camera.far = Math.max(radius * 16, span * 4);
+    camera.updateProjectionMatrix();
   });
 
   return null;

@@ -195,7 +195,7 @@ function renderTokenBase(c: Container, item: TokenItem) {
   circle.label = 'circle';
   circle.circle(cx, cy, radius);
   if (isModelToken) {
-    // Invisible hit target — GLB/STL renders in Map2DTokenModels below this Pixi layer.
+    // Invisible hit target — GLB/STL renders in Map2DTokenModels above this Pixi layer.
     circle.fill({ color: 0xffffff, alpha: 0.001 });
   } else {
     circle.fill({ color: 0x1c1c28 });

@@ -14,13 +14,14 @@ export function Map2DTokenModels() {
 
   return (
     <div
-      className="absolute inset-0 z-[1]"
+      className="absolute inset-0"
       style={{ pointerEvents: 'none' }}
       aria-hidden
     >
       <Canvas
         orthographic
         gl={{ antialias: true, alpha: true }}
+        onCreated={({ gl }) => gl.setClearColor(0x000000, 0)}
         style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}
       >
         <ambientLight intensity={0.85} />

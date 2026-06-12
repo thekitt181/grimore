@@ -12,6 +12,7 @@ import { Map3DDrawings } from './Map3DDrawings';
 import { Map3DMapModel } from './Map3DMapModel';
 import { SyncedPixiPerspectiveCamera } from './SyncedPixiCamera';
 import { useVisibleSceneTokens } from './useVisibleSceneTokens';
+import { Map3DFog } from './Map3DFog';
 
 function ViewportCamera({ span }: { span: number }) {
   const viewport = useMapStore((s) => s.viewport);
@@ -72,6 +73,7 @@ function Map3DSceneContent() {
       />
       <Map3DDrawings drawings={drawings} labels={labels} />
 
+      <Map3DFog span={span} />
       <ViewportCamera span={span} />
     </>
   );
@@ -102,11 +104,10 @@ export function Map3DCanvas() {
         near: 1,
         far: Math.max(span * 8, 20000),
       }}
-      style={{ position: 'absolute', inset: 0, touchAction: 'none', pointerEvents: 'none' }}
+      style={{ position: 'absolute', inset: 0, zIndex: 0, touchAction: 'none', pointerEvents: 'none' }}
       gl={{ antialias: true, alpha: false }}
     >
       <color attach="background" args={['#1e1e22']} />
-      <fog attach="fog" args={['#1e1e22', span * 2, span * 6]} />
       <Suspense fallback={null}>
         <Map3DSceneContent />
       </Suspense>

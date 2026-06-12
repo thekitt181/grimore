@@ -506,13 +506,13 @@ export function MapCanvas() {
       onDragLeave={handleDragLeave}
     >
       {viewMode === '3d' && (
-        <div className="absolute inset-0" style={{ pointerEvents: 'none' }}>
+        <div className="absolute inset-0 z-0" style={{ pointerEvents: 'none' }}>
           <Map3DCanvas />
         </div>
       )}
 
       {viewMode === '2d' && (
-        <div className="absolute inset-0 z-[1]" style={{ pointerEvents: 'none' }}>
+        <div className="absolute inset-0 z-[3]" style={{ pointerEvents: 'none' }}>
           <Map2DTokenModels />
         </div>
       )}

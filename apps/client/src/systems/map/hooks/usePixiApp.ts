@@ -31,6 +31,7 @@ export function usePixiApp(
       const mobile = isMobileClient();
       await app.init({
         background: '#0a0a0f',
+        backgroundAlpha: 0,
         resizeTo: container,
         antialias: !mobile,
         resolution: mobile

@@ -1,10 +1,8 @@
 import { useEffect } from 'react';
-import type { MapViewMode } from '../store/mapStore';
+import type { MapViewMode } from '@/systems/map/store/mapStore';
 import { sceneRefs } from '@/systems/scene/sceneRefs';
 
-const BG_COLOR = 0x0a0a0f;
-
-/** In 3D view, hide Pixi visuals but keep the canvas interactive (select, drag, fog, measure). */
+/** Pixi background stays transparent so 3D layers show through; hide item visuals in 3D view only. */
 export function useMap3DPixiMode(appReady: boolean, viewMode: MapViewMode) {
   useEffect(() => {
     if (!appReady) return;
@@ -14,12 +12,8 @@ export function useMap3DPixiMode(appReady: boolean, viewMode: MapViewMode) {
     const is3d = viewMode === '3d';
     const canvas = app.canvas;
 
-    app.renderer.background.alpha = is3d ? 0 : 1;
-    if (!is3d) {
-      app.renderer.background.color = BG_COLOR;
-    }
-
-    canvas.style.background = is3d ? 'transparent' : '';
+    app.renderer.background.alpha = 0;
+    canvas.style.background = 'transparent';
 
     for (const layer of [
       sceneRefs.items.current,
