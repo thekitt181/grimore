@@ -14,3 +14,20 @@ export function itemCenterXZ(item: { x: number; y: number; width: number; height
 export function degToRad(deg: number): number {
   return (deg * Math.PI) / 180;
 }
+
+/** Screen drag → ground-plane (cx, cz) delta for 3D orbit view (matches 2D pan at azimuth 0). */
+export function screenPanToGroundDelta(
+  screenDx: number,
+  screenDy: number,
+  azimuth: number,
+  scale: number,
+): { dcx: number; dcz: number } {
+  const panX = -screenDx / scale;
+  const panZ = -screenDy / scale;
+  const cosA = Math.cos(azimuth);
+  const sinA = Math.sin(azimuth);
+  return {
+    dcx: panX * cosA - panZ * sinA,
+    dcz: panX * sinA + panZ * cosA,
+  };
+}

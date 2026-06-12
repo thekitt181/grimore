@@ -4,6 +4,7 @@ import { isMobileClient } from '@/lib/socket';
 import { useMapStore } from '../store/mapStore';
 import { getPersistSessionId, persistViewportLocal } from '@/systems/scene/sessionPersistence';
 import type { MapViewport } from '../store/mapStore';
+import { screenPanToGroundDelta } from '@/systems/map3d/coords';
 
 let viewportPersistTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -173,6 +174,9 @@ export function useMapViewport(
       canvas.setPointerCapture(e.pointerId);
     }
 
+    const screenW = app.screen.width;
+    const screenH = app.screen.height;
+
     function onPointerMove(e: PointerEvent) {
       if (pointers.current.has(e.pointerId)) {
         pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -189,8 +193,25 @@ export function useMapViewport(
       }
 
       if (!isPanning.current) return;
-      w.x = panStart.current.vpX + (e.clientX - panStart.current.x);
-      w.y = panStart.current.vpY + (e.clientY - panStart.current.y);
+      const screenDx = e.clientX - panStart.current.x;
+      const screenDy = e.clientY - panStart.current.y;
+      const { viewMode, view3dOrbit } = useMapStore.getState();
+      if (viewMode === '3d') {
+        const s = w.scale.x;
+        const { dcx, dcz } = screenPanToGroundDelta(
+          screenDx,
+          screenDy,
+          view3dOrbit.azimuth,
+          s,
+        );
+        const cx0 = (screenW / 2 - panStart.current.vpX) / s;
+        const cz0 = (screenH / 2 - panStart.current.vpY) / s;
+        w.x = screenW / 2 - (cx0 + dcx) * s;
+        w.y = screenH / 2 - (cz0 + dcz) * s;
+      } else {
+        w.x = panStart.current.vpX + screenDx;
+        w.y = panStart.current.vpY + screenDy;
+      }
       const vp = { x: w.x, y: w.y, scale: w.scale.x };
       setViewport(vp);
       scheduleViewportPersist(vp);
