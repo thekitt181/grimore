@@ -1,10 +1,9 @@
-import { Suspense, useEffect, useMemo } from 'react';
+import { Suspense, useMemo } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { useItemStore, selectSortedItems } from '@/systems/scene/store/itemStore';
 import { useMapStore } from '@/systems/map/store/mapStore';
 import type { DrawItem, MapItem, TextItem } from '@/systems/scene/types';
 import { itemCenterXZ } from './coords';
-import { sceneCameraRef } from './sceneCameraRef';
 import { Map3DGround } from './Map3DGround';
 import { Map3DScannedScene } from './Map3DScannedScene';
 import { Map3DWalls } from './Map3DWalls';
@@ -79,8 +78,6 @@ function Map3DSceneContent() {
       <TokenLayer />
       <Map3DSelectionOutlines />
       <Map3DDrawings drawings={drawings} labels={labels} />
-
-      <ViewportCamera span={span} />
     </>
   );
 }
@@ -128,14 +125,11 @@ export function MapSceneCanvas() {
   const camY = span * 0.55;
   const camDist = span * 0.85;
 
-  useEffect(() => {
-    sceneCameraRef.current = null;
-  }, [is3d]);
-
   return (
     <Canvas
       shadows={is3d}
       orthographic={!is3d}
+      frameloop="always"
       camera={
         is3d
           ? {
@@ -161,6 +155,7 @@ export function MapSceneCanvas() {
       {is3d ? (
         <>
           <color attach="background" args={['#1e1e22']} />
+          <ViewportCamera span={span} />
           <Suspense fallback={null}>
             <Map3DSceneContent />
           </Suspense>

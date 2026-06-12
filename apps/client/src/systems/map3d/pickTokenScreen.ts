@@ -13,7 +13,7 @@ export function pickTokenAtScreen(clientX: number, clientY: number, tokens: Toke
   }
 
   const rect = app.canvas.getBoundingClientRect();
-  const scale = Math.max(useMapStore.getState().viewport.scale, 0.08);
+  const scale = Math.max(sceneRefs.world.current?.scale.x ?? useMapStore.getState().viewport.scale, 0.08);
 
   let bestId: string | null = null;
   let bestDist = Infinity;

@@ -1,13 +1,18 @@
 import { useEffect } from 'react';
 import type { MapViewMode } from '@/systems/map/store/mapStore';
+import { useMapStore } from '@/systems/map/store/mapStore';
 import { sceneRefs } from '@/systems/scene/sceneRefs';
+import { fitMapToScreen } from './useMapViewport';
+import { clampViewportScale, minViewportScale } from '../viewportLimits';
+import { isMobileClient } from '@/lib/socket';
 
 /** Pixi background stays transparent so 3D layers show through; hide item visuals in 3D view only. */
 export function useMap3DPixiMode(appReady: boolean, viewMode: MapViewMode) {
   useEffect(() => {
     if (!appReady) return;
     const app = sceneRefs.app.current;
-    if (!app) return;
+    const world = sceneRefs.world.current;
+    if (!app || !world) return;
 
     const is3d = viewMode === '3d';
     const canvas = app.canvas;
@@ -30,6 +35,26 @@ export function useMap3DPixiMode(appReady: boolean, viewMode: MapViewMode) {
       for (const child of sceneRefs.overlay.current.children) {
         if (child.label === 'xf-box' || child.label === 'xf-handles') {
           child.visible = !is3d;
+        }
+      }
+    }
+
+    // Entering 3D: fix extreme zoom-out and re-frame if the camera would miss the map.
+    if (is3d) {
+      const maxScale = isMobileClient() ? 24 : 8;
+      const currentScale = world.scale.x;
+      if (currentScale < minViewportScale('3d') * 1.001) {
+        fitMapToScreen(app, world);
+      } else {
+        const clamped = clampViewportScale(currentScale, '3d', maxScale);
+        if (Math.abs(clamped - currentScale) > 1e-6) {
+          const ratio = clamped / currentScale;
+          const sw = app.screen.width;
+          const sh = app.screen.height;
+          world.scale.set(clamped);
+          world.x = sw / 2 - (sw / 2 - world.x) * ratio;
+          world.y = sh / 2 - (sh / 2 - world.y) * ratio;
+          useMapStore.getState().setViewport({ x: world.x, y: world.y, scale: clamped });
         }
       }
     }

@@ -4,8 +4,9 @@ import { isMobileClient } from '@/lib/socket';
 import { useMapStore } from '../store/mapStore';
 import { getPersistSessionId, persistViewportLocal } from '@/systems/scene/sessionPersistence';
 import type { MapViewport } from '../store/mapStore';
-import { screenPanToGroundDelta } from '@/systems/map3d/coords';
+import { apply3dScreenPan } from '@/systems/map3d/viewportPan';
 import { clampViewportScale } from '../viewportLimits';
+import { sceneRefs } from '@/systems/scene/sceneRefs';
 
 let viewportPersistTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -21,10 +22,27 @@ function scheduleViewportPersist(vp: MapViewport): void {
 
 /** Restore a saved pan/zoom onto the Pixi world container. */
 export function applyViewport(world: Container, vp: MapViewport): void {
-  world.scale.set(vp.scale);
-  world.x = vp.x;
-  world.y = vp.y;
-  useMapStore.getState().setViewport(vp);
+  const viewMode = useMapStore.getState().viewMode;
+  const maxScale = isMobileClient() ? MAX_SCALE_MOBILE : MAX_SCALE_DESKTOP;
+  let scale = clampViewportScale(vp.scale, viewMode, maxScale);
+  let x = vp.x;
+  let y = vp.y;
+
+  if (Math.abs(scale - vp.scale) > 1e-7) {
+    const app = sceneRefs.app.current;
+    if (app) {
+      const ratio = scale / vp.scale;
+      const sw = app.screen.width;
+      const sh = app.screen.height;
+      x = sw / 2 - (sw / 2 - vp.x) * ratio;
+      y = sh / 2 - (sh / 2 - vp.y) * ratio;
+    }
+  }
+
+  world.scale.set(scale);
+  world.x = x;
+  world.y = y;
+  useMapStore.getState().setViewport({ x, y, scale });
 }
 
 const MAX_SCALE_DESKTOP = 8;
@@ -86,7 +104,6 @@ export function useMapViewport(
   appRef: React.RefObject<Application | null>,
   worldContainerRef: React.RefObject<Container | null>,
   appReady: boolean,
-  wheelRootRef?: React.RefObject<HTMLElement | null>,
 ) {
   const setViewport = useMapStore((s) => s.setViewport);
   const activeToolRef = useRef(useMapStore.getState().activeTool);
@@ -107,8 +124,9 @@ export function useMapViewport(
     const app = appRef.current;
     const world = worldContainerRef.current;
     if (!app || !world) return;
+    const pixiApp = app;
     const w = world;
-    const canvas = app.canvas;
+    const canvas = pixiApp.canvas;
     canvas.style.touchAction = 'none';
 
     function pointerList(): { x: number; y: number }[] {
@@ -146,8 +164,15 @@ export function useMapViewport(
     window.addEventListener('keyup', onKeyUp);
 
     function onWheel(e: WheelEvent) {
-      e.preventDefault();
       const rect = canvas.getBoundingClientRect();
+      if (
+        e.clientX < rect.left || e.clientX > rect.right
+        || e.clientY < rect.top || e.clientY > rect.bottom
+      ) {
+        return;
+      }
+      e.preventDefault();
+      e.stopPropagation();
       const mouseX = e.clientX - rect.left;
       const mouseY = e.clientY - rect.top;
       const zoomSpeed = useMapStore.getState().viewMode === '3d' ? ZOOM_SPEED_3D : ZOOM_SPEED;
@@ -155,8 +180,8 @@ export function useMapViewport(
       const oldScale = w.scale.x;
       applyZoomAt(w, mouseX, mouseY, oldScale + delta * oldScale, setViewport);
     }
-    const wheelRoot = wheelRootRef?.current ?? canvas.parentElement ?? canvas;
-    wheelRoot.addEventListener('wheel', onWheel, { passive: false, capture: true });
+    canvas.addEventListener('wheel', onWheel, { passive: false });
+    window.addEventListener('wheel', onWheel, { passive: false, capture: true });
 
     function onPointerDown(e: PointerEvent) {
       pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -179,9 +204,6 @@ export function useMapViewport(
       canvas.setPointerCapture(e.pointerId);
     }
 
-    const screenW = app.screen.width;
-    const screenH = app.screen.height;
-
     function onPointerMove(e: PointerEvent) {
       if (pointers.current.has(e.pointerId)) {
         pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -202,24 +224,24 @@ export function useMapViewport(
       const screenDy = e.clientY - panStart.current.y;
       const { viewMode, view3dOrbit } = useMapStore.getState();
       if (viewMode === '3d') {
-        const s = w.scale.x;
-        const { dcx, dcz } = screenPanToGroundDelta(
+        const vp = apply3dScreenPan(
+          w,
+          pixiApp,
           screenDx,
           screenDy,
+          panStart.current.vpX,
+          panStart.current.vpY,
           view3dOrbit.azimuth,
-          s,
         );
-        const cx0 = (screenW / 2 - panStart.current.vpX) / s;
-        const cz0 = (screenH / 2 - panStart.current.vpY) / s;
-        w.x = screenW / 2 - (cx0 + dcx) * s;
-        w.y = screenH / 2 - (cz0 + dcz) * s;
+        setViewport(vp);
+        scheduleViewportPersist(vp);
       } else {
         w.x = panStart.current.vpX + screenDx;
         w.y = panStart.current.vpY + screenDy;
+        const vp = { x: w.x, y: w.y, scale: w.scale.x };
+        setViewport(vp);
+        scheduleViewportPersist(vp);
       }
-      const vp = { x: w.x, y: w.y, scale: w.scale.x };
-      setViewport(vp);
-      scheduleViewportPersist(vp);
     }
 
     function onPointerUp(e: PointerEvent) {
@@ -247,7 +269,8 @@ export function useMapViewport(
       canvas.style.touchAction = '';
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
-      wheelRoot.removeEventListener('wheel', onWheel, { capture: true } as AddEventListenerOptions);
+      canvas.removeEventListener('wheel', onWheel);
+      window.removeEventListener('wheel', onWheel, { capture: true } as AddEventListenerOptions);
       canvas.removeEventListener('pointerdown', onPointerDown);
       canvas.removeEventListener('pointermove', onPointerMove);
       canvas.removeEventListener('pointerup', onPointerUp);
@@ -255,5 +278,5 @@ export function useMapViewport(
       pointers.current.clear();
       pinchStart.current = null;
     };
-  }, [appRef, worldContainerRef, appReady, setViewport, wheelRootRef]);
+  }, [appRef, worldContainerRef, appReady, setViewport]);
 }

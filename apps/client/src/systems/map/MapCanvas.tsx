@@ -333,7 +333,7 @@ export function MapCanvas() {
   }, [appReady, sessionId, items]);
 
   // ── Hooks ───────────────────────────────────────────────────────────────
-  useMapViewport(appRef, sceneRefs.world, appReady, dropZoneRef);
+  useMapViewport(appRef, sceneRefs.world, appReady);
   useItemRenderer(sceneRefs.items, appReady);
   useMapFogOverlay(sceneRefs.items, appReady);
   useSelectionTool(appReady);

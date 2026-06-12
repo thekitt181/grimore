@@ -1,8 +1,16 @@
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { useMapStore } from '@/systems/map/store/mapStore';
+import { sceneRefs } from '@/systems/scene/sceneRefs';
 import { sceneCameraRef } from './sceneCameraRef';
-import { effectiveViewportScale } from '@/systems/map/viewportLimits';
+import { viewportGroundCenter } from './viewportGroundCenter';
+import { minViewportScale } from '@/systems/map/viewportLimits';
+
+function pixiScreenSize(fallbackW: number, fallbackH: number): { w: number; h: number } {
+  const app = sceneRefs.app.current;
+  if (app) return { w: app.screen.width, h: app.screen.height };
+  return { w: fallbackW, h: fallbackH };
+}
 
 /** Orthographic camera locked to the Pixi pan/zoom (top-down, Y-up ground on XZ). */
 export function SyncedPixiOrthographicCamera() {
@@ -11,12 +19,10 @@ export function SyncedPixiOrthographicCamera() {
   useFrame(() => {
     if (!(camera instanceof THREE.OrthographicCamera)) return;
     const { viewMode, viewport } = useMapStore.getState();
-    const { x, y, scale } = viewport;
-    const s = effectiveViewportScale(scale, viewMode);
-    const halfW = size.width / (2 * s);
-    const halfH = size.height / (2 * s);
-    const cx = (size.width / 2 - x) / s;
-    const cz = (size.height / 2 - y) / s;
+    const { w, h } = pixiScreenSize(size.width, size.height);
+    const { cx, cz, scale: s } = viewportGroundCenter(viewport, w, h);
+    const halfW = w / (2 * s);
+    const halfH = h / (2 * s);
 
     camera.left = cx - halfW;
     camera.right = cx + halfW;
@@ -50,13 +56,15 @@ export function SyncedPixiPerspectiveCamera({ span }: { span: number }) {
     if (!(camera instanceof THREE.PerspectiveCamera)) return;
 
     const { viewMode, view3dOrbit, viewport } = useMapStore.getState();
-    const { x, y, scale } = viewport;
-    const s = effectiveViewportScale(scale, viewMode);
-    const cx = (size.width / 2 - x) / s;
-    const cz = (size.height / 2 - y) / s;
-    const radius = (span * 1.15) / s;
-    const minRadius = (span * 0.04) / Math.max(s, 0.08);
-    const orbitRadius = Math.max(radius, minRadius);
+    const { w, h } = pixiScreenSize(size.width, size.height);
+    const { cx, cz, scale: s } = viewportGroundCenter(viewport, w, h);
+
+    const orbitScale = Math.max(s, minViewportScale(viewMode));
+    const radius = (span * 0.85) / orbitScale;
+    const minRadius = span * 0.12;
+    const maxRadius = span * 2.8;
+    const orbitRadius = THREE.MathUtils.clamp(radius, minRadius, maxRadius);
+
     const sinP = Math.sin(view3dOrbit.polar);
     const cosP = Math.cos(view3dOrbit.polar);
     const sinA = Math.sin(view3dOrbit.azimuth);
@@ -69,8 +77,8 @@ export function SyncedPixiPerspectiveCamera({ span }: { span: number }) {
     );
     camera.up.set(0, 1, 0);
     camera.lookAt(cx, 0, cz);
-    camera.near = Math.max(0.5, orbitRadius * 0.001);
-    camera.far = Math.max(orbitRadius * 24, span * 12);
+    camera.near = Math.max(0.5, orbitRadius * 0.002);
+    camera.far = Math.max(orbitRadius * 20, span * 8);
     camera.updateProjectionMatrix();
 
     sceneCameraRef.current = {

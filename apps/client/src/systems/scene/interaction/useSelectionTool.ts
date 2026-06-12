@@ -12,6 +12,7 @@ import { useSessionStore } from '@/store/sessionStore';
 import { itemsWithLiveTransforms } from '../store/liveTransformStore';
 import { sceneRefs, clientToWorld, pickSceneItem } from '../sceneRefs';
 import { screenDeltaToWorldDelta } from '@/systems/map3d/coords';
+import { apply3dScreenPan } from '@/systems/map3d/viewportPan';
 import { pickTokenAtScreen } from '@/systems/map3d/pickTokenScreen';
 import { hitTest, hitTestMap, itemIntersectsRect, isInteriorClick } from '../hitTest';
 import { snapPoint } from '../snap';
@@ -38,6 +39,13 @@ interface MoveState {
 interface MarqueeState {
   startWX: number;
   startWY: number;
+}
+
+interface ViewPanState {
+  startScreenX: number;
+  startScreenY: number;
+  vpX: number;
+  vpY: number;
 }
 
 interface WallMoveState {
@@ -80,6 +88,7 @@ export function useSelectionTool(appReady: boolean) {
     let wallMove: WallMoveState | null = null;
     let wallEndpoint: WallEndpointDrag | null = null;
     let marquee: MarqueeState | null = null;
+    let viewPan: ViewPanState | null = null;
     let marqueeGfx: Graphics | null = null;
     let wallHandleGfx: Graphics | null = null;
 
@@ -189,14 +198,19 @@ export function useSelectionTool(appReady: boolean) {
       const store = useItemStore.getState();
 
       let pickId = pickSceneItem(e.clientX, e.clientY);
-      if (!pickId && useMapStore.getState().viewMode === '3d') {
-        const tokens = selectableItems().filter((i): i is TokenItem => i.type === 'token');
-        pickId = pickTokenAtScreen(e.clientX, e.clientY, tokens);
-      }
+      const viewMode = useMapStore.getState().viewMode;
       const merged = itemsWithLiveTransforms(
         store.items,
         useLiveTransformStore.getState().byId,
       );
+      const rayPick = pickId ? merged[pickId] : undefined;
+
+      if (viewMode === '3d') {
+        const tokens = selectableItems().filter((i): i is TokenItem => i.type === 'token');
+        const screenToken = pickTokenAtScreen(e.clientX, e.clientY, tokens);
+        if (screenToken) pickId = screenToken;
+        else if (rayPick?.type === 'map') pickId = null;
+      }
       const pickedItem = pickId ? merged[pickId] : undefined;
 
       // Maps are background items: they are NOT picked by clicking their body
@@ -297,8 +311,21 @@ export function useSelectionTool(appReady: boolean) {
         }
       }
 
-      // Otherwise start a marquee.
+      // Otherwise pan (3D empty drag) or marquee-select (2D, or Shift+drag in 3D).
       if (!e.shiftKey) store.clearSelection();
+      if (viewMode === '3d' && !e.shiftKey) {
+        const world = sceneRefs.world.current;
+        if (world) {
+          viewPan = {
+            startScreenX: e.clientX,
+            startScreenY: e.clientY,
+            vpX: world.x,
+            vpY: world.y,
+          };
+          canvas.setPointerCapture(e.pointerId);
+          return;
+        }
+      }
       marquee = { startWX: wx, startWY: wy };
       if (!marqueeGfx) {
         marqueeGfx = new Graphics();
@@ -352,6 +379,25 @@ export function useSelectionTool(appReady: boolean) {
         return;
       }
 
+      if (viewPan) {
+        const world = sceneRefs.world.current;
+        const app = sceneRefs.app.current;
+        if (world && app) {
+          const { view3dOrbit } = useMapStore.getState();
+          const vp = apply3dScreenPan(
+            world,
+            app,
+            e.clientX - viewPan.startScreenX,
+            e.clientY - viewPan.startScreenY,
+            viewPan.vpX,
+            viewPan.vpY,
+            view3dOrbit.azimuth,
+          );
+          useMapStore.getState().setViewport(vp);
+        }
+        return;
+      }
+
       if (move) {
         const snap = useItemStore.getState().snapToGrid;
         let { dx, dy } = dragWorldDelta(e, move.startScreenX, move.startScreenY);
@@ -397,6 +443,10 @@ export function useSelectionTool(appReady: boolean) {
 
     function onUp(e: PointerEvent) {
       const { x: wx, y: wy } = clientToWorld(e.clientX, e.clientY);
+
+      if (viewPan) {
+        viewPan = null;
+      }
 
       if (wallMove) {
         const wm = wallMove;
