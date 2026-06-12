@@ -723,13 +723,10 @@ function tallyBooksSourceCountsForKind(
   policy: CompendiumVisibilityPolicy,
   counts: SourceCountMap = new Map(),
 ): SourceCountMap {
-  const bundled = bundledSourceLabelSet();
   for (const entry of entries) {
     if (isHomebrewEntry(true, entry.source)) continue;
     for (const part of splitSources(entry.source)) {
       if (part.toLowerCase() === 'custom') continue;
-      const norm = normalizeSourceLabel(part);
-      if (bundled.has(norm)) continue;
       if (policyIsSourceLocked(part, policy)) continue;
       const draft = isEntryDraft(kind, entry.name, entry.source, policy);
       const cur = counts.get(part) ?? { total: 0, public: 0, draft: 0 };
@@ -758,7 +755,6 @@ function tallyBooksFromSourceLabels(
   _policy: CompendiumVisibilityPolicy,
 ): SourceCountMap {
   if (!buckets) return new Map();
-  const bundled = bundledSourceLabelSet();
   const counts: SourceCountMap = new Map();
 
   const addSources = (sources: Array<string | undefined>) => {
@@ -766,8 +762,6 @@ function tallyBooksFromSourceLabels(
       if (!source?.trim()) continue;
       for (const part of splitSources(source)) {
         if (part.toLowerCase() === 'custom') continue;
-        const norm = normalizeSourceLabel(part);
-        if (bundled.has(norm)) continue;
         const cur = counts.get(part) ?? { total: 0, public: 0, draft: 0 };
         cur.total += 1;
         cur.public += 1;
@@ -861,9 +855,7 @@ function compendiumMonsterFromOverride(
   policy?: CompendiumVisibilityPolicy,
 ): CompendiumMonster | null {
   if (isHomebrewEntry(true, m.source)) return null;
-  const bundled = bundledSourceLabelSet();
   const parts = splitSources(m.source);
-  if (parts.some((p) => bundled.has(normalizeSourceLabel(p)))) return null;
   if (policy && parts.some((p) => policyIsSourceLocked(p, policy))) return null;
   return toMonster(
     { ...m, _id: slugify(m.name) } as StoredMonster,
@@ -878,9 +870,7 @@ function compendiumItemFromOverride(
   policy?: CompendiumVisibilityPolicy,
 ): CompendiumItem | null {
   if (isHomebrewEntry(true, i.source)) return null;
-  const bundled = bundledSourceLabelSet();
   const parts = splitSources(i.source);
-  if (parts.some((p) => bundled.has(normalizeSourceLabel(p)))) return null;
   if (policy && parts.some((p) => policyIsSourceLocked(p, policy))) return null;
   return {
     id: slugify(i.name),
@@ -900,9 +890,7 @@ function compendiumSpellFromOverride(
   policy?: CompendiumVisibilityPolicy,
 ): CompendiumSpell | null {
   if (isHomebrewEntry(true, s.source)) return null;
-  const bundled = bundledSourceLabelSet();
   const parts = splitSources(s.source);
-  if (parts.some((p) => bundled.has(normalizeSourceLabel(p)))) return null;
   if (policy && parts.some((p) => policyIsSourceLocked(p, policy))) return null;
   return {
     id: slugify(s.name),
@@ -1033,9 +1021,8 @@ function sourceListFilter(
 ): boolean {
   const normId = normalizeSourceLabel(id);
 
-  // Books tab: hide bundled PDFs only — imported DDB books stay listed (unlock runs on list).
+  // Books tab: counts come from override* arrays only — list every imported source book.
   if (excludeBundled) {
-    if (bundled?.has(normId)) return false;
     return c.total > 0;
   }
 

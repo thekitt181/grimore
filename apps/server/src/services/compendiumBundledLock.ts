@@ -46,12 +46,12 @@ export function isBundledSourceLabel(sourceId: string): boolean {
 
 /** Source book labels saved in Mongo/file overrides (DDB imports and manual edits). */
 export async function collectImportedSourceLabels(): Promise<string[]> {
-  const fromMongo = await collectImportedSourceLabelsFromMongo();
-  if (fromMongo.length > 0) return fromMongo;
-
+  const labels = new Set<string>();
+  for (const label of await collectImportedSourceLabelsFromMongo()) {
+    labels.add(label);
+  }
   const { readRawGlobalDoc } = await import('./compendiumOwlbearPersist');
   const raw = await readRawGlobalDoc({ includeImageData: false });
-  const labels = new Set<string>();
   for (const list of [raw.overrideMonsters, raw.overrideItems, raw.overrideSpells]) {
     collectSourcePartsFromEntries(list, labels);
   }
@@ -88,12 +88,14 @@ export async function ensureBundledSourcesLocked(reason: string): Promise<number
       return 0;
     }
 
+    const importedLabels = await collectImportedSourceLabels();
     const policy = await readVisibilityPolicyFast();
     const locked = [...policy.lockedSources];
     const toLock: string[] = [];
     for (const label of bundled) {
       const norm = normalizeLockLabel(label);
       if (!norm) continue;
+      if (importedLabels.some((imported) => sourceMatchesLocked(imported, label))) continue;
       if (locked.some((s) => sourceMatchesLocked(s, norm))) continue;
       locked.push(norm);
       toLock.push(norm);

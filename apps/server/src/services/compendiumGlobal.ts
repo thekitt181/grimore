@@ -550,11 +550,8 @@ export async function syncCompendiumStorageOnStartup(): Promise<void> {
       return;
     }
 
-    const mongo = await readMongoGlobalDoc();
-    const raw = await withMongoTimeout(col.findOne({ _id: 'global' }), MONGO_FULL_READ_MS);
-    if (mongo && raw) {
-      saveGlobalFallback(mongo, raw);
-    }
+    const { mirrorMongoOverridesToFallback } = await import('./compendiumFallbackMongoSync');
+    await mirrorMongoOverridesToFallback('startup');
     console.log('[Compendium] MongoDB compendium is up to date');
   } catch (err) {
     console.error('[Compendium] Startup sync failed:', err);

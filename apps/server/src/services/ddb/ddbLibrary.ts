@@ -25,7 +25,7 @@ import {
 import { getCatalogRevision, saveItemsBulkForImport, saveMonstersBulkForImport, saveSpellsBulkForImport } from '../compendiumSync';
 import { unlockCompendiumSource } from '../compendiumSourcePolicy';
 import { sourceMatchesLocked } from '../compendiumVisibility';
-import { collectOverrideOnlySourceLabels, ensureBundledSourcesLocked, ensureImportedSourcesUnlocked } from '../compendiumBundledLock';
+import { ensureBundledSourcesLocked, ensureImportedSourcesUnlocked } from '../compendiumBundledLock';
 import { ImportSkipIndex, loadImportSkipIndex } from '../compendiumImportIndex';
 import type { CompendiumKind } from '../compendiumOwlbearPersist';
 import { splitCompendiumSources } from '@grimoire/shared';
@@ -1176,18 +1176,10 @@ async function collectSourceLabelsFromCompendium(): Promise<string[]> {
     addSources(buckets.monsterSources);
     addSources(buckets.itemSources);
     addSources(buckets.spellSources);
-    return [...labels];
   }
   const { readRawGlobalDoc } = await import('../compendiumOwlbearPersist');
   const raw = await readRawGlobalDoc({ includeImageData: false });
-  for (const list of [
-    raw.monsters,
-    raw.overrideMonsters,
-    raw.items,
-    raw.overrideItems,
-    raw.spells,
-    raw.overrideSpells,
-  ]) {
+  for (const list of [raw.overrideMonsters, raw.overrideItems, raw.overrideSpells]) {
     if (!Array.isArray(list)) continue;
     for (const entry of list) {
       if (!entry || typeof entry !== 'object') continue;
@@ -1230,7 +1222,8 @@ export async function finishDdbLibraryImport(
 
   const catalog = await loadDdbCatalog(ctx);
   const compendiumLabels = await collectSourceLabelsFromCompendium();
-  const overrideOnlyLabels = await collectOverrideOnlySourceLabels();
+  const { collectImportedSourceLabels } = await import('../compendiumBundledLock');
+  const allImportedLabels = await collectImportedSourceLabels();
   const unlocked: string[] = [];
   if (opts?.sourceIds?.length) {
     unlocked.push(...await unlockImportedBookSources(catalog, opts.sourceIds));
@@ -1245,9 +1238,9 @@ export async function finishDdbLibraryImport(
   if (opts?.unlockAllImportedSources) {
     unlocked.push(...await unlockImportedBookSourceLabels(compendiumLabels));
   }
-  // DDB imports live in overrides — always unlock non-bundled override sources.
-  if (overrideOnlyLabels.length > 0) {
-    unlocked.push(...await unlockImportedBookSourceLabels(overrideOnlyLabels));
+  // Always unlock every override source (including PHB/MM names shared with bundled JSON).
+  if (allImportedLabels.length > 0) {
+    unlocked.push(...await unlockImportedBookSourceLabels(allImportedLabels));
   }
   const { finishBulkCompendiumImport } = await import('../compendiumSync');
   const result = await finishBulkCompendiumImport();
