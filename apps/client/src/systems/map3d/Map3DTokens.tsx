@@ -18,7 +18,7 @@ function useTokenLabelDistanceFactor(tokenSize: number): number {
     return Math.max(...maps.map((m) => Math.max(m.width, m.height)));
   }, [items]);
   const cameraDist = (span * 0.85) / Math.max(viewport.scale, 0.08);
-  return Math.max(cameraDist * 1.15, tokenSize * 2.5, 80);
+  return Math.min(Math.max(cameraDist * 1.15, tokenSize * 2.5, 80), 600);
 }
 
 function Token3DModel({

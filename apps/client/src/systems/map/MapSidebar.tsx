@@ -108,14 +108,20 @@ function GMSidebarContent() {
     applyMapAsset({ backgroundUrl: url, width: w, height: h });
   }
 
-  function applyModel(url: string, file?: File, w = DEFAULT_MAP_WIDTH, h = DEFAULT_MAP_HEIGHT) {
+  function applyModel(
+    url: string,
+    file?: File,
+    w = DEFAULT_MAP_WIDTH,
+    h = DEFAULT_MAP_HEIGHT,
+    format: 'glb' | 'gltf' | 'stl' = 'glb',
+  ) {
     void (async () => {
       const map = getActiveMap();
       const mapId = map?.id ?? uuidv4();
       const sessionId = getPersistSessionId();
       let modelUrl = url;
       if (file && sessionId) {
-        modelUrl = await persistModelFileForItem(sessionId, mapId, file, url);
+        modelUrl = await persistModelFileForItem(sessionId, mapId, file, url, format);
       }
       applyMapAsset({ modelUrl, width: w, height: h }, mapId);
     })();
@@ -192,8 +198,8 @@ function GMSidebarContent() {
     if (!file) return;
     try {
       if (isModelFile(file)) {
-        const { url } = await fileToAssetDataUrl(file);
-        applyModel(url, file);
+        const { url, format } = await fileToAssetDataUrl(file);
+        applyModel(url, file, DEFAULT_MAP_WIDTH, DEFAULT_MAP_HEIGHT, format ?? 'glb');
       } else {
         const url = await fileToDataUrl(file);
         const img = new Image();

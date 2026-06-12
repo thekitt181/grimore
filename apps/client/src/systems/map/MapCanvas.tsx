@@ -566,7 +566,7 @@ async function placeByCategory(
       const mapId = active && !active.backgroundUrl && !active.modelUrl ? active.id : uuidv4();
       let modelUrl = url;
       if (modelFile && sessionId) {
-        modelUrl = await persistModelFileForItem(sessionId, mapId, modelFile, url);
+        modelUrl = await persistModelFileForItem(sessionId, mapId, modelFile, url, modelFormat ?? 'glb');
       }
       addMapItem(null, modelUrl, 2560, 1920, worldX, worldY, mapId);
       return;
@@ -586,7 +586,7 @@ async function placeByCategory(
   if (asModel) {
     modelUrl = url;
     if (modelFile && sessionId) {
-      modelUrl = await persistModelFileForItem(sessionId, tokenId, modelFile, url);
+      modelUrl = await persistModelFileForItem(sessionId, tokenId, modelFile, url, modelFormat ?? 'glb');
     }
   }
   const token: TokenItem = {

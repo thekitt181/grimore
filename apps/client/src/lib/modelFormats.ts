@@ -1,4 +1,4 @@
-import { GRIMOIRE_MODEL_PREFIX } from '@/lib/modelAssetStore';
+import { isGrimoireModelRef, parseGrimoireModelRef } from '@/lib/modelAssetStore';
 
 export type ModelFormat = 'glb' | 'gltf' | 'stl';
 
@@ -16,7 +16,8 @@ export function modelFormatFromName(name: string): ModelFormat | null {
 }
 
 export function modelFormatFromUrl(url: string): ModelFormat | null {
-  if (url.startsWith(GRIMOIRE_MODEL_PREFIX)) return 'glb';
+  const grimoire = isGrimoireModelRef(url) ? parseGrimoireModelRef(url) : null;
+  if (grimoire) return grimoire.format;
 
   const fromName = modelFormatFromName(url.split('?')[0]?.split('#')[0]?.split('/').pop() ?? '');
   if (fromName) return fromName;

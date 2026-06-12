@@ -1,6 +1,8 @@
 /** Persist large GLB/STL blobs outside localStorage (refs stored on map/token items). */
 export const GRIMOIRE_MODEL_PREFIX = 'grimoire-model://';
 
+export type ModelAssetFormat = 'glb' | 'gltf' | 'stl';
+
 const DB_NAME = 'grimoire-model-assets';
 const STORE = 'assets';
 const DB_VERSION = 1;
@@ -63,20 +65,43 @@ export function isGrimoireModelRef(url: string | null | undefined): url is strin
   return !!url && url.startsWith(GRIMOIRE_MODEL_PREFIX);
 }
 
-export function toGrimoireModelRef(sessionId: string, itemId: string): string {
-  return `${GRIMOIRE_MODEL_PREFIX}${assetKey(sessionId, itemId)}`;
+const FORMAT_PREFIX_RE = /^(glb|gltf|stl)\//i;
+
+export function parseGrimoireModelRef(url: string): { format: ModelAssetFormat; key: string } | null {
+  if (!isGrimoireModelRef(url)) return null;
+  const rest = url.slice(GRIMOIRE_MODEL_PREFIX.length);
+  const match = rest.match(FORMAT_PREFIX_RE);
+  if (match) {
+    const format = match[1]!.toLowerCase() as ModelAssetFormat;
+    return { format, key: rest.slice(match[0].length) };
+  }
+  return { format: 'glb', key: rest };
 }
 
-export async function saveModelAsset(sessionId: string, itemId: string, file: File | Blob): Promise<string> {
+export function toGrimoireModelRef(
+  sessionId: string,
+  itemId: string,
+  format: ModelAssetFormat = 'glb',
+): string {
+  return `${GRIMOIRE_MODEL_PREFIX}${format}/${assetKey(sessionId, itemId)}`;
+}
+
+export async function saveModelAsset(
+  sessionId: string,
+  itemId: string,
+  file: File | Blob,
+  format: ModelAssetFormat = 'glb',
+): Promise<string> {
   const key = assetKey(sessionId, itemId);
   await idbPut(key, file instanceof File ? file : file);
-  return toGrimoireModelRef(sessionId, itemId);
+  return toGrimoireModelRef(sessionId, itemId, format);
 }
 
 export async function resolveModelAssetUrl(url: string): Promise<string> {
   if (!isGrimoireModelRef(url)) return url;
-  const key = url.slice(GRIMOIRE_MODEL_PREFIX.length);
-  const blob = await idbGet(key);
+  const parsed = parseGrimoireModelRef(url);
+  if (!parsed) return url;
+  const blob = await idbGet(parsed.key);
   if (!blob) throw new Error('3D model asset not found in browser storage');
   return URL.createObjectURL(blob);
 }
@@ -91,10 +116,11 @@ export async function persistModelFileForItem(
   itemId: string,
   file: File,
   inlineDataUrl: string,
+  format: ModelAssetFormat = 'glb',
 ): Promise<string> {
   if (!sessionId || !shouldUseModelAssetStore(file)) return inlineDataUrl;
   try {
-    return await saveModelAsset(sessionId, itemId, file);
+    return await saveModelAsset(sessionId, itemId, file, format);
   } catch {
     return inlineDataUrl;
   }

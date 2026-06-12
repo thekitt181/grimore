@@ -1,4 +1,4 @@
-import { useMemo, useEffect } from 'react';
+import { useMemo, useEffect, useLayoutEffect } from 'react';
 import { useLoader } from '@react-three/fiber';
 import { useGLTF } from '@react-three/drei';
 import * as THREE from 'three';
@@ -6,6 +6,7 @@ import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
 import { modelFormatFromUrl } from '@/lib/modelFormats';
 import { useResolvedModelUrl } from './useResolvedModelUrl';
 import { registerMapRaycastRoot } from './mapGroundRaycast';
+import { applyModelNormalization, applyFallbackModelNormalization } from './normalizeModelRoot';
 
 function brightenMeshMaterials(root: THREE.Object3D) {
   root.traverse((child) => {
@@ -23,22 +24,27 @@ function brightenMeshMaterials(root: THREE.Object3D) {
   });
 }
 
-function normalizeRoot(root: THREE.Object3D, targetSize: number, groundAlign: boolean) {
-  const box = new THREE.Box3().setFromObject(root);
-  const size = box.getSize(new THREE.Vector3());
-  const maxDim = Math.max(size.x, size.y, size.z, 1e-6);
-  root.scale.multiplyScalar(targetSize / maxDim);
+function useNormalizedModel(
+  root: THREE.Object3D,
+  targetSize: number,
+  groundAlign: boolean,
+) {
+  useLayoutEffect(() => {
+    if (applyModelNormalization(root, targetSize, groundAlign)) return;
 
-  box.setFromObject(root);
-  const center = box.getCenter(new THREE.Vector3());
-  root.position.x -= center.x;
-  root.position.z -= center.z;
-  if (groundAlign) {
-    box.setFromObject(root);
-    root.position.y -= box.min.y;
-  } else {
-    root.position.y -= center.y;
-  }
+    let attempts = 0;
+    let frameId = 0;
+    const retry = () => {
+      if (applyModelNormalization(root, targetSize, groundAlign)) return;
+      if (attempts++ >= 8) {
+        applyFallbackModelNormalization(root, targetSize, groundAlign);
+        return;
+      }
+      frameId = requestAnimationFrame(retry);
+    };
+    frameId = requestAnimationFrame(retry);
+    return () => cancelAnimationFrame(frameId);
+  }, [root, targetSize, groundAlign]);
 }
 
 function GltfModel({
@@ -68,14 +74,15 @@ function GltfModel({
       }
     });
     if (tokenRender) brightenMeshMaterials(root);
-    normalizeRoot(root, targetSize, groundAlign);
     return root;
-  }, [scene, targetSize, groundAlign, tokenRender]);
+  }, [scene, tokenRender]);
+
+  useNormalizedModel(clone, targetSize, groundAlign);
 
   useEffect(() => {
-    if (!registerRaycast) return;
+    if (!registerRaycast || tokenRender) return;
     return registerMapRaycastRoot(clone);
-  }, [clone, registerRaycast]);
+  }, [clone, registerRaycast, tokenRender]);
 
   useEffect(() => () => {
     clone.traverse((child) => {
@@ -122,14 +129,15 @@ function StlModel({
     root.castShadow = true;
     root.receiveShadow = !tokenRender;
     if (tokenRender) root.renderOrder = 10;
-    normalizeRoot(root, targetSize, groundAlign);
     return root;
-  }, [geometry, targetSize, groundAlign, tokenRender]);
+  }, [geometry, tokenRender]);
+
+  useNormalizedModel(mesh, targetSize, groundAlign);
 
   useEffect(() => {
-    if (!registerRaycast) return;
+    if (!registerRaycast || tokenRender) return;
     return registerMapRaycastRoot(mesh);
-  }, [mesh, registerRaycast]);
+  }, [mesh, registerRaycast, tokenRender]);
 
   return <primitive object={mesh} />;
 }
