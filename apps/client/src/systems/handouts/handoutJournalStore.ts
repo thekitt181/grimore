@@ -50,8 +50,8 @@ export const useHandoutJournalStore = create<HandoutJournalState>((set) => ({
     const description = entry.content?.trim()
       || synthesizeCompendiumItemDescription({
         name: entry.title,
-        type: meta?.itemType,
-        description: entry.content ?? undefined,
+        ...(meta?.itemType ? { type: meta.itemType } : {}),
+        ...(entry.content ? { description: entry.content } : {}),
       })
       || '';
 

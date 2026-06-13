@@ -229,14 +229,25 @@ export function CompendiumSidebarList() {
 
   function prefetchSourceEntries(sourceId: string) {
     const params = buildSearchParams('sources', sourceId, '');
-    const queryFn = ({ pageParam }: { pageParam: number }) => {
-      if (tab === 'monsters') return searchMonsters({ ...params, page: pageParam });
-      if (tab === 'items') return searchItems({ ...params, page: pageParam });
-      return searchSpells({ ...params, page: pageParam });
-    };
+    if (tab === 'monsters') {
+      void qc.prefetchInfiniteQuery({
+        queryKey: ['compendium', 'monsters', params],
+        queryFn: ({ pageParam }) => searchMonsters({ ...params, page: pageParam }),
+        initialPageParam: 1,
+      });
+      return;
+    }
+    if (tab === 'items') {
+      void qc.prefetchInfiniteQuery({
+        queryKey: ['compendium', 'items', params],
+        queryFn: ({ pageParam }) => searchItems({ ...params, page: pageParam }),
+        initialPageParam: 1,
+      });
+      return;
+    }
     void qc.prefetchInfiniteQuery({
-      queryKey: ['compendium', tab === 'monsters' ? 'monsters' : tab === 'items' ? 'items' : 'spells', params],
-      queryFn,
+      queryKey: ['compendium', 'spells', params],
+      queryFn: ({ pageParam }) => searchSpells({ ...params, page: pageParam }),
       initialPageParam: 1,
     });
   }
