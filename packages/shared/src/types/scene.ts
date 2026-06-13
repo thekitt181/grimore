@@ -42,8 +42,21 @@ export interface SceneVideoPopup {
   loop: boolean;
   muted: boolean;
   autoplay: boolean;
-  /** Full-screen overlay vs corner popup card. */
+  /** Semi-transparent full-map ambience loop. */
   showAsOverlay: boolean;
+  /** Full-screen takeover — hides map/tokens until clip ends or dismissed. */
+  cinemaMode?: boolean;
+  volume?: number;
+}
+
+/** Tunable weather like Owlbear (direction, wind, density). */
+export interface WeatherSettings {
+  /** 0–100 intensity / cover */
+  cover: number;
+  /** 0–100 wind speed */
+  wind: number;
+  /** Wind direction in degrees (0 = down, 90 = right) */
+  direction: number;
 }
 
 export interface SceneMediaConfig {

@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
-import type { SceneChangePayload, SceneRecord, SceneMediaConfig, WeatherOverlay } from '@grimoire/shared';
-import { DEFAULT_SCENE_MEDIA_CONFIG } from '@grimoire/shared';
+import type { SceneAudioLayer, SceneChangePayload, SceneRecord, SceneMediaConfig, WeatherOverlay } from '@grimoire/shared';
+import { AMBIENT_SOUND_LIBRARY, DEFAULT_SCENE_MEDIA_CONFIG } from '@grimoire/shared';
 import { getSocket } from '@/lib/socket';
 import { useSessionStore } from '@/store/sessionStore';
 import {
@@ -85,6 +85,41 @@ function isWeatherOnlyPatch(prev: SceneRecord | null, next: SceneRecord): boolea
 function applyWeatherOverlay(weather: WeatherOverlay | null) {
   useSceneMediaStore.getState().setWeatherOverlay(weather);
   useSceneMediaStore.getState().setTransitioning(false);
+}
+
+const WEATHER_AMBIENT_LIBRARY: Partial<Record<Exclude<WeatherOverlay, 'none'>, string[]>> = {
+  rain: ['rain-light'],
+  'heavy-rain': ['rain-heavy'],
+  storm: ['rain-heavy', 'wind-howling'],
+  snow: ['winter-wind'],
+  fog: ['dungeon-wind'],
+  embers: ['fire-camp'],
+  leaves: ['forest-stream'],
+};
+
+function buildWeatherAmbientLayers(weather: WeatherOverlay | null): SceneAudioLayer[] {
+  if (!weather || weather === 'none') return [];
+  const libraryIds = WEATHER_AMBIENT_LIBRARY[weather] ?? [];
+  return libraryIds.flatMap((libraryId) => {
+    const entry = AMBIENT_SOUND_LIBRARY.find((e) => e.id === libraryId);
+    if (!entry) return [];
+    return [{
+      id: `weather-${libraryId}`,
+      name: entry.name,
+      url: entry.url,
+      volume: entry.defaultVolume * 0.75,
+      loop: true,
+      libraryId: entry.id,
+    }];
+  });
+}
+
+function mergeWeatherAmbientLayers(
+  cfg: SceneMediaConfig,
+  weather: WeatherOverlay | null,
+): SceneAudioLayer[] {
+  const withoutWeather = cfg.ambientLayers.filter((l) => !l.id.startsWith('weather-'));
+  return [...withoutWeather, ...buildWeatherAmbientLayers(weather)];
 }
 
 function buildMediaConfig(scene: SceneRecord): SceneMediaConfig {
@@ -212,11 +247,16 @@ export function emitSessionWeather(sessionId: string, weather: WeatherOverlay) {
   const normalized = weather === 'none' ? null : weather;
   const active = useSceneMediaStore.getState().activeScene;
   const campaignId = useSessionStore.getState().campaignId ?? 'local';
+  const baseCfg = active?.mediaConfig ?? DEFAULT_SCENE_MEDIA_CONFIG;
+  const mediaConfig = {
+    ...baseCfg,
+    ambientLayers: mergeWeatherAmbientLayers(baseCfg, normalized),
+  };
 
   if (active) {
-    const scene = { ...active, weatherOverlay: normalized };
+    const scene = { ...active, weatherOverlay: normalized, mediaConfig };
+    applySceneBundle(scene, 'none');
     applyWeatherOverlay(normalized);
-    useSceneMediaStore.getState().setActiveScene(scene, 'none');
     getSocket().emit('scene:change', {
       sessionId,
       sceneId: scene.id,
@@ -227,6 +267,8 @@ export function emitSessionWeather(sessionId: string, weather: WeatherOverlay) {
   }
 
   const scene = createSessionWeatherScene(campaignId, normalized);
+  scene.mediaConfig = mediaConfig;
+  applySceneBundle(scene, 'none');
   applyWeatherOverlay(normalized);
   getSocket().emit('scene:change', {
     sessionId,
@@ -268,5 +310,15 @@ export function emitSessionMediaPatch(sessionId: string, patch: SessionMediaPatc
     sceneId: scene.id,
     transition: 'none',
     scene,
+  });
+}
+
+/** Stop cinema / popup video for all clients (GM skip or clip ended). */
+export function emitClearSessionVideo(sessionId: string) {
+  const active = useSceneMediaStore.getState().activeScene;
+  const cfg = active?.mediaConfig ?? DEFAULT_SCENE_MEDIA_CONFIG;
+  emitSessionMediaPatch(sessionId, {
+    backgroundVideoUrl: null,
+    mediaConfig: { ...cfg, videoPopup: null },
   });
 }

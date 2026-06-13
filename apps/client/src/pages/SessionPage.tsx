@@ -281,7 +281,6 @@ export function SessionPage() {
           <LightingTintOverlay />
           <WeatherOverlay />
           <SceneTransitionOverlay />
-          <BackgroundVideoLayer />
           <MobileDdbTokenBar />
 
           {!isGM && !hasMapItems && !isConnected && (
@@ -433,6 +432,7 @@ export function SessionPage() {
         {/* Sidebar */}
         <MapSidebar />
       </div>
+      <BackgroundVideoLayer sessionId={sessionInfo.id} allowDismiss={isGM} />
       <CatalogRebuildBanner />
     </div>
   );

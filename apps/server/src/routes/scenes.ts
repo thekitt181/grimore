@@ -49,6 +49,8 @@ const mediaConfigSchema = z.object({
     muted: z.boolean(),
     autoplay: z.boolean(),
     showAsOverlay: z.boolean(),
+    cinemaMode: z.boolean().optional(),
+    volume: z.number().min(0).max(1).optional(),
   }).nullable().optional(),
 }).optional();
 

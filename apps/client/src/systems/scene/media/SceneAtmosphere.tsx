@@ -1,68 +1,57 @@
-import type { CSSProperties } from 'react';
 import { useMemo } from 'react';
 import type { WeatherOverlay } from '@grimoire/shared';
 import { useSceneMediaStore } from './sceneMediaStore';
+import { WeatherCanvas } from './WeatherCanvas';
 
-const WEATHER_STYLES: Record<Exclude<WeatherOverlay, 'none'>, CSSProperties> = {
-  rain: {
-    backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='4' height='40' viewBox='0 0 4 40'%3E%3Cline x1='2' y1='0' x2='2' y2='14' stroke='rgba(180,210,255,0.35)' stroke-width='1'/%3E%3C/svg%3E")`,
-    animation: 'grimoire-rain 0.45s linear infinite',
-  },
-  'heavy-rain': {
-    backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='6' height='50' viewBox='0 0 6 50'%3E%3Cline x1='3' y1='0' x2='3' y2='18' stroke='rgba(160,190,255,0.55)' stroke-width='1.5'/%3E%3C/svg%3E")`,
-    animation: 'grimoire-rain 0.25s linear infinite',
-  },
-  snow: {
-    backgroundImage: `radial-gradient(circle, rgba(255,255,255,0.9) 1px, transparent 1px)`,
-    backgroundSize: '18px 18px',
-    animation: 'grimoire-snow 6s linear infinite',
-  },
-  fog: {
-    background: 'radial-gradient(ellipse at center, rgba(200,210,220,0.15) 0%, rgba(120,130,140,0.35) 100%)',
-    animation: 'grimoire-fog 8s ease-in-out infinite alternate',
-  },
-  storm: {
-    backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='4' height='40' viewBox='0 0 4 40'%3E%3Cline x1='2' y1='0' x2='2' y2='14' stroke='rgba(180,210,255,0.45)' stroke-width='1'/%3E%3C/svg%3E")`,
-    animation: 'grimoire-rain 0.2s linear infinite',
-    boxShadow: 'inset 0 0 120px rgba(40,60,100,0.4)',
-  },
-  embers: {
-    backgroundImage: `radial-gradient(circle, rgba(255,120,40,0.8) 1px, transparent 2px)`,
-    backgroundSize: '24px 24px',
-    animation: 'grimoire-embers 4s linear infinite',
-  },
-  leaves: {
-    backgroundImage: `radial-gradient(ellipse, rgba(180,100,30,0.7) 2px, transparent 3px)`,
-    backgroundSize: '32px 32px',
-    animation: 'grimoire-leaves 5s linear infinite',
-  },
+const WEATHER_TINT: Partial<Record<Exclude<WeatherOverlay, 'none'>, string>> = {
+  rain: 'rgba(80, 100, 140, 0.06)',
+  'heavy-rain': 'rgba(60, 80, 120, 0.1)',
+  storm: 'rgba(40, 50, 90, 0.15)',
+  snow: 'rgba(200, 220, 255, 0.08)',
+  fog: 'rgba(120, 130, 145, 0.12)',
+  embers: 'rgba(80, 30, 10, 0.08)',
+  leaves: 'rgba(60, 40, 20, 0.05)',
+};
+
+const WEATHER_PRESETS: Partial<
+  Record<Exclude<WeatherOverlay, 'none'>, { cover: number; wind: number; direction: number }>
+> = {
+  rain: { cover: 55, wind: 35, direction: 195 },
+  'heavy-rain': { cover: 80, wind: 55, direction: 190 },
+  storm: { cover: 90, wind: 70, direction: 200 },
+  snow: { cover: 60, wind: 25, direction: 210 },
+  fog: { cover: 75, wind: 10, direction: 180 },
+  embers: { cover: 50, wind: 30, direction: 170 },
+  leaves: { cover: 45, wind: 50, direction: 90 },
 };
 
 export function WeatherOverlay() {
   const activeScene = useSceneMediaStore((s) => s.activeScene);
   const sessionWeather = useSceneMediaStore((s) => s.sessionWeather);
+  const sessionSettings = useSceneMediaStore((s) => s.sessionWeatherSettings);
   const weather = activeScene?.weatherOverlay ?? sessionWeather;
-  const style = useMemo(() => {
+  const tint = useMemo(() => {
     if (!weather || weather === 'none') return null;
-    return WEATHER_STYLES[weather];
+    return WEATHER_TINT[weather];
   }, [weather]);
 
-  if (!style) return null;
+  const settings = useMemo(() => {
+    if (!weather || weather === 'none') return sessionSettings;
+    return { ...sessionSettings, ...WEATHER_PRESETS[weather] };
+  }, [weather, sessionSettings]);
+
+  if (!weather || weather === 'none') return null;
 
   return (
     <>
-      <style>{`
-        @keyframes grimoire-rain { from { background-position: 0 0; } to { background-position: -12px 120px; } }
-        @keyframes grimoire-snow { from { background-position: 0 0; } to { background-position: 20px 200px; } }
-        @keyframes grimoire-fog { from { opacity: 0.35; } to { opacity: 0.65; } }
-        @keyframes grimoire-embers { from { background-position: 0 0; } to { background-position: 0 -120px; } }
-        @keyframes grimoire-leaves { from { background-position: 0 0; } to { background-position: 40px 160px; } }
-      `}</style>
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-0 z-[15]"
-        style={{ ...style, mixBlendMode: 'screen' }}
-      />
+      {tint && (
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-0 z-[14]"
+          style={{ background: tint }}
+        />
+      )}
+      <WeatherCanvas weather={weather} settings={settings} />
     </>
   );
 }

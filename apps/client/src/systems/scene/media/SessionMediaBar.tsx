@@ -40,7 +40,7 @@ export function SessionMediaBar({ sessionId, isGM }: SessionMediaBarProps) {
   const [libraryCategory, setLibraryCategory] = useState<MediaLibraryCategory | 'all'>('all');
   const [uploadUrl, setUploadUrl] = useState('');
   const [uploadKind, setUploadKind] = useState<'video' | 'ambient' | 'music'>('video');
-  const [videoOverlay, setVideoOverlay] = useState(true);
+  const [videoOverlay, setVideoOverlay] = useState(false);
   const barRef = useRef<HTMLDivElement>(null);
 
   const scene = useSceneMediaStore((s) => s.activeScene);
@@ -70,18 +70,42 @@ export function SessionMediaBar({ sessionId, isGM }: SessionMediaBarProps) {
     setOpenMenu((prev) => (prev === menu ? null : menu));
   }
 
-  function pushVideo(entry: VideoLibraryEntry, overlay = true) {
+  function pushVideo(entry: VideoLibraryEntry, mode: 'cinema' | 'overlay' | 'popup' = 'cinema') {
+    const videoPopup =
+      mode === 'cinema'
+        ? {
+            url: entry.url,
+            loop: false,
+            muted: false,
+            autoplay: true,
+            volume: 1,
+            showAsOverlay: false,
+            cinemaMode: true,
+          }
+        : mode === 'overlay'
+          ? {
+              url: entry.url,
+              loop: entry.loop,
+              muted: true,
+              autoplay: true,
+              showAsOverlay: true,
+              cinemaMode: false,
+            }
+          : {
+              url: entry.url,
+              loop: entry.loop,
+              muted: false,
+              autoplay: true,
+              volume: 1,
+              showAsOverlay: false,
+              cinemaMode: false,
+            };
+
     emitSessionMediaPatch(sessionId, {
       backgroundVideoUrl: entry.url,
       mediaConfig: {
         ...cfg,
-        videoPopup: {
-          url: entry.url,
-          loop: entry.loop,
-          muted: true,
-          autoplay: true,
-          showAsOverlay: overlay,
-        },
+        videoPopup,
       },
     });
     setOpenMenu(null);
@@ -146,17 +170,29 @@ export function SessionMediaBar({ sessionId, isGM }: SessionMediaBarProps) {
     const url = uploadUrl.trim();
     if (!url) return;
     if (uploadKind === 'video') {
-      emitSessionMediaPatch(sessionId, {
-        backgroundVideoUrl: url,
-        mediaConfig: {
-          ...cfg,
-          videoPopup: {
+      const videoPopup = videoOverlay
+        ? {
             url,
             loop: true,
             muted: true,
             autoplay: true,
-            showAsOverlay: videoOverlay,
-          },
+            showAsOverlay: true,
+            cinemaMode: false,
+          }
+        : {
+            url,
+            loop: false,
+            muted: false,
+            autoplay: true,
+            volume: 1,
+            showAsOverlay: false,
+            cinemaMode: true,
+          };
+      emitSessionMediaPatch(sessionId, {
+        backgroundVideoUrl: url,
+        mediaConfig: {
+          ...cfg,
+          videoPopup,
         },
       });
     } else if (uploadKind === 'ambient') {
@@ -290,13 +326,16 @@ export function SessionMediaBar({ sessionId, isGM }: SessionMediaBarProps) {
                 <div className="gold-divider my-1" />
                 {VIDEO_LIBRARY.map((v) => (
                   <div key={v.id} className="flex gap-1">
-                    <button type="button" className="btn-ghost text-[10px] py-0 px-1 shrink-0" onClick={() => pushVideo(v, true)} title="Overlay">
+                    <button type="button" className="btn-ghost text-[10px] py-0 px-1 shrink-0" onClick={() => pushVideo(v, 'cinema')} title="Cinema clip">
+                      ▶
+                    </button>
+                    <button type="button" className="btn-ghost text-[10px] py-0 px-1 shrink-0" onClick={() => pushVideo(v, 'overlay')} title="Ambient overlay">
                       ◐
                     </button>
-                    <button type="button" className="btn-ghost text-[10px] py-0 px-1 shrink-0" onClick={() => pushVideo(v, false)} title="Popup">
+                    <button type="button" className="btn-ghost text-[10px] py-0 px-1 shrink-0" onClick={() => pushVideo(v, 'popup')} title="Popup">
                       ▢
                     </button>
-                    <PickBtn label={v.name} onClick={() => pushVideo(v, true)} />
+                    <PickBtn label={v.name} onClick={() => pushVideo(v, 'cinema')} />
                   </div>
                 ))}
               </div>
@@ -335,7 +374,7 @@ export function SessionMediaBar({ sessionId, isGM }: SessionMediaBarProps) {
                 {uploadKind === 'video' && (
                   <label className="flex items-center gap-2 font-ui text-xs">
                     <input type="checkbox" checked={videoOverlay} onChange={(e) => setVideoOverlay(e.target.checked)} />
-                    Full-screen overlay (off = popup)
+                    Ambient overlay loop (off = fullscreen cinema clip with sound)
                   </label>
                 )}
                 <input
@@ -390,7 +429,7 @@ export function SessionMediaBar({ sessionId, isGM }: SessionMediaBarProps) {
                   Video
                 </p>
                 {filterCategory(VIDEO_LIBRARY).map((v) => (
-                  <PickBtn key={v.id} label={`▶ ${v.name}`} onClick={() => pushVideo(v, true)} />
+                  <PickBtn key={v.id} label={`▶ ${v.name}`} onClick={() => pushVideo(v, 'cinema')} />
                 ))}
               </div>
             )}
