@@ -75,10 +75,17 @@ function attachCollectionWatch(collectionName: typeof WATCH_COLLECTIONS[number])
 }
 
 export function startCompendiumMongoWatch(): void {
-  if (started || !isMongoConfigured() || isMongoCircuitOpen()) return;
+  if (started || !isMongoConfigured()) return;
   started = true;
 
   for (const name of WATCH_COLLECTIONS) {
     attachCollectionWatch(name);
   }
+}
+
+/** Re-attach change streams after Mongo recovery (e.g. heal / circuit reset). */
+export function resumeCompendiumMongoWatch(): void {
+  if (!isMongoConfigured()) return;
+  started = false;
+  startCompendiumMongoWatch();
 }

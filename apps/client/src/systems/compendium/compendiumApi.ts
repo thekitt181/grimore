@@ -23,10 +23,12 @@ export async function fetchSyncStatus(): Promise<CompendiumSyncStatus> {
 export async function reconcileCompendiumMongo(opts?: {
   reason?: string;
   deferCatalogRebuild?: boolean;
+  strict?: boolean;
 }): Promise<CompendiumSyncStatus> {
   const { data } = await api.post<CompendiumSyncStatus>('/compendium/reconcile-mongo', {
     reason: opts?.reason ?? 'client-reconcile',
-    deferCatalogRebuild: opts?.deferCatalogRebuild ?? false,
+    deferCatalogRebuild: opts?.deferCatalogRebuild ?? true,
+    strict: opts?.strict ?? false,
   });
   return data;
 }

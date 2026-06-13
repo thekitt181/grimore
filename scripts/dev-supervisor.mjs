@@ -29,10 +29,21 @@ function log(tag, message) {
 function freePort(port) {
   try {
     if (process.platform === 'win32') {
-      execSync(
-        `powershell -NoProfile -Command "Get-NetTCPConnection -LocalPort ${port} -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }"`,
-        { stdio: 'ignore' },
-      );
+      const out = execSync(`netstat -ano | findstr :${port}`, { encoding: 'utf8' });
+      const pids = new Set();
+      for (const line of out.split(/\r?\n/)) {
+        if (!line.includes('LISTENING')) continue;
+        const parts = line.trim().split(/\s+/);
+        const pid = Number(parts[parts.length - 1]);
+        if (Number.isFinite(pid) && pid > 0) pids.add(pid);
+      }
+      for (const pid of pids) {
+        try {
+          execSync(`taskkill /F /PID ${pid}`, { stdio: 'ignore' });
+        } catch {
+          /* best effort */
+        }
+      }
     } else {
       execSync(`lsof -ti:${port} | xargs kill -9 2>/dev/null || true`, { stdio: 'ignore', shell: true });
     }

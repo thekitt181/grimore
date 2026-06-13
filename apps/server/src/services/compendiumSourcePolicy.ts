@@ -36,8 +36,7 @@ async function readPolicyDoc(): Promise<{
   try {
     const col = await getCollection<OwlbearRawGlobalDoc>('data');
     if (col) {
-      const doc = await withMongoTimeout(
-        col.findOne(
+      const doc = await withMongoTimeout(() => col.findOne(
           { _id: 'global' },
           { projection: { lockedSources: 1, publishedEntryKeys: 1, lastUpdated: 1 } },
         ),
@@ -72,8 +71,7 @@ async function writePolicyDoc(
   if (col && !isMongoCircuitOpen()) {
     markCompendiumWritePending();
     try {
-      await withMongoTimeout(
-        col.updateOne(
+      await withMongoTimeout(() => col.updateOne(
           { _id: 'global' },
           {
             $set: {

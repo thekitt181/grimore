@@ -107,7 +107,7 @@ export type GlobalDocReadOptions = {
   includeImageData?: boolean;
 };
 
-const MONGO_LITE_READ_MS = 25_000;
+const MONGO_LITE_READ_MS = 60_000;
 const MONGO_FULL_READ_MS = 45_000;
 const MONGO_VERSION_READ_MS = 10_000;
 const MONGO_IMAGE_FIELD_READ_MS = 15_000;
@@ -163,8 +163,7 @@ export async function readMongoEntryImageSlice(
     try {
       const col = await getCollection<OwlbearRawGlobalDoc>('data');
       if (!col) return null;
-      const doc = await withMongoTimeout(
-        col.findOne(
+      const doc = await withMongoTimeout(() => col.findOne(
           { _id: 'global' },
           {
             projection: {
@@ -211,8 +210,7 @@ export async function readMongoImageRefKey(imageKey: string): Promise<string | n
     try {
       const col = await getCollection<OwlbearRawGlobalDoc>('data');
       if (!col) return null;
-      const doc = await withMongoTimeout(
-        col.findOne(
+      const doc = await withMongoTimeout(() => col.findOne(
           { _id: 'global' },
           { projection: { [`images.${imageKey}`]: 1 as const } },
         ),
@@ -249,8 +247,7 @@ export async function readMongoGlobalImageRefs(): Promise<{
     try {
       const col = await getCollection<OwlbearRawGlobalDoc>('data');
       if (!col) return null;
-      const doc = await withMongoTimeout(
-        col.findOne(
+      const doc = await withMongoTimeout(() => col.findOne(
           { _id: 'global' },
           { projection: { images: 1, entryImages: 1, lastUpdated: 1 } },
         ),
@@ -291,8 +288,7 @@ export async function readMongoImageDataKey(key: string): Promise<string | null>
     try {
       const col = await getCollection<OwlbearRawGlobalDoc>('data');
       if (!col) return null;
-      const doc = await withMongoTimeout(
-        col.findOne(
+      const doc = await withMongoTimeout(() => col.findOne(
           { _id: 'global' },
           { projection: { [`imagesData.${key}`]: 1 as const } },
         ),
@@ -319,8 +315,7 @@ export async function readMongoEntryImageHistory(entryName: string): Promise<str
   try {
     const col = await getCollection<OwlbearRawGlobalDoc>('data');
     if (!col) return [];
-    const doc = await withMongoTimeout(
-      col.findOne(
+    const doc = await withMongoTimeout(() => col.findOne(
         { _id: 'global' },
         { projection: { [`entryImages.${entryName}`]: 1 as const } },
       ),
@@ -338,8 +333,7 @@ export async function readMongoGlobalVersion(): Promise<string | null> {
   try {
     const col = await getCollection<OwlbearRawGlobalDoc>('data');
     if (!col) return null;
-    const doc = await withMongoTimeout(
-      col.findOne({ _id: 'global' }, { projection: { lastUpdated: 1 } }),
+    const doc = await withMongoTimeout(() => col.findOne({ _id: 'global' }, { projection: { lastUpdated: 1 } }),
       MONGO_VERSION_READ_MS,
     );
     if (!doc?.lastUpdated) return null;
@@ -362,8 +356,7 @@ async function readMongoGlobalDocInner(
     const projection = opts.includeImageData
       ? undefined
       : { imagesData: 0 as const, images: 0 as const, entryImages: 0 as const };
-    const doc = await withMongoTimeout(
-      col.findOne({ _id: 'global' }, projection ? { projection } : undefined),
+    const doc = await withMongoTimeout(() => col.findOne({ _id: 'global' }, projection ? { projection } : undefined),
       opts.includeImageData ? MONGO_FULL_READ_MS : MONGO_LITE_READ_MS,
     );
     if (!doc) return null;
@@ -463,7 +456,7 @@ async function persistGlobalDoc(next: CompendiumGlobalDoc): Promise<CompendiumGl
   const col = await getCollection<OwlbearRawGlobalDoc>('data');
   if (col) {
     markCompendiumWritePending();
-    const existing = await withMongoTimeout(col.findOne({ _id: 'global' }), 15_000);
+    const existing = await withMongoTimeout(() => col.findOne({ _id: 'global' }), 15_000);
     const mongoPayload: OwlbearRawGlobalDoc = {
       _id: 'global',
       monsters: existing?.monsters ?? [],
@@ -478,8 +471,7 @@ async function persistGlobalDoc(next: CompendiumGlobalDoc): Promise<CompendiumGl
       entryImages: next.entryImages ?? existing?.entryImages ?? {},
       lastUpdated: next.lastUpdated,
     };
-    await withMongoTimeout(
-      col.updateOne({ _id: 'global' }, { $set: mongoPayload }, { upsert: true }),
+    await withMongoTimeout(() => col.updateOne({ _id: 'global' }, { $set: mongoPayload }, { upsert: true }),
       15_000,
     );
     saveGlobalFallback(normalizeOwlbearGlobalDoc(mongoPayload), mongoPayload);

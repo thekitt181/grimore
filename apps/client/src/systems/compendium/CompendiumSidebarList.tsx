@@ -19,6 +19,7 @@ import { useSessionStore } from '@/store/sessionStore';
 import { useCompendiumEditor } from './useCompendiumEditor';
 import { CompendiumAdminUnlock } from './CompendiumAdminUnlock';
 import { CompendiumMongoStatus } from './CompendiumMongoStatus';
+import { getPersistedBookSources, useCompendiumBookSourcesStore } from './compendiumBookSourcesStore';
 
 const PAGE_SIZE = 50;
 const GOLD = 'var(--color-accent-gold)';
@@ -161,13 +162,27 @@ export function CompendiumSidebarList() {
   const showEntryList = browseMode !== 'sources' || Boolean(selectedSource);
   const inBookView = browseMode === 'sources' && Boolean(selectedSource);
 
+  const persistedBookSources = useCompendiumBookSourcesStore((s) => s.sources);
+  const setPersistedBookSources = useCompendiumBookSourcesStore((s) => s.setSources);
+
   const sourcesQ = useQuery({
     queryKey: ['compendium', 'sources', 'books', isAdmin],
-    queryFn: () => fetchBookSources(),
+    queryFn: async () => {
+      const data = await fetchBookSources();
+      if (data.length > 0) setPersistedBookSources(data);
+      return data;
+    },
     enabled: compendiumReady && browseMode === 'sources',
-    staleTime: 5_000,
-    refetchOnMount: 'always',
-    retry: 2,
+    initialData: (() => {
+      const cached = getPersistedBookSources();
+      return cached.length > 0 ? cached : undefined;
+    })(),
+    staleTime: 24 * 60 * 60 * 1000,
+    gcTime: 7 * 24 * 60 * 60 * 1000,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
+    placeholderData: (previous) => previous ?? (persistedBookSources.length > 0 ? persistedBookSources : undefined),
+    retry: 1,
   });
 
   const monsterQ = useInfiniteQuery({

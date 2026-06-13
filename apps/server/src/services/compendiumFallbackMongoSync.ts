@@ -104,7 +104,7 @@ async function readMongoRawGlobalDoc(): Promise<OwlbearRawGlobalDoc | null> {
   const col = await getCollection<OwlbearRawGlobalDoc>('data');
   if (!col) return null;
   try {
-    const doc = await withMongoTimeout(col.findOne({ _id: 'global' }), 15_000);
+    const doc = await withMongoTimeout(() => col.findOne({ _id: 'global' }), 15_000);
     return doc ? normalizeOwlbearRawDoc(doc) : null;
   } catch {
     return null;

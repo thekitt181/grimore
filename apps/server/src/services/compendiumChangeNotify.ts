@@ -37,6 +37,9 @@ export function notifyCompendiumChanged(lastUpdated: string | Date | undefined):
   invalidateExtensionGlobalCache();
   clearGlobalFallbackCache();
   clearRawGlobalDocInflight();
+  void import('./compendiumBookSourcesCache')
+    .then(({ invalidateBookSourcesCache }) => invalidateBookSourcesCache())
+    .catch(() => undefined);
   broadcastCompendiumUpdated(isoTimestamp(lastUpdated));
 }
 

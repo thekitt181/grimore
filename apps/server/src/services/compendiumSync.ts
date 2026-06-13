@@ -11,7 +11,18 @@ import type {
 } from '@grimoire/shared';
 import { isHomebrewEntry, normalizeOwlbearGlobalDoc, splitCompendiumSources } from '@grimoire/shared';
 import { isLikelyValidItem, parseCr, slugify } from '@grimoire/monster-dex';
-import { getCollection, getMongoHealthSnapshot, isMongoConfigured, isMongoCircuitOpen, pingMongo, withMongoTimeout, resetMongoClient } from '../lib/mongo';
+import {
+  getCollection,
+  getMongoHealthSnapshot,
+  getLastMongoConnectError,
+  isMongoConfigured,
+  attemptMongoRecovery,
+  beginMongoRecoveryWindow,
+  endMongoRecoveryWindow,
+  pingMongo,
+  withMongoTimeout,
+  resetMongoClient,
+} from '../lib/mongo';
 import { resolveCompendiumEntryImageUrl, resolveEntryImageUrl } from './compendiumImages';
 import {
   isLocalCatalogAvailable,
@@ -331,7 +342,7 @@ async function loadBaseMonsters(): Promise<StoredMonster[]> {
   try {
     const col = await getCollection<StoredMonster>('monsters');
     if (!col) return [];
-    return await withMongoTimeout(col.find({}).limit(10_000).toArray());
+    return await withMongoTimeout(() => col.find({}).limit(10_000).toArray());
   } catch {
     resetMongoClient();
     return loadLocalMonsters();
@@ -344,7 +355,7 @@ async function loadBaseItems(): Promise<StoredItem[]> {
   try {
     const col = await getCollection<StoredItem>('items');
     if (!col) return [];
-    return await withMongoTimeout(col.find({}).limit(10_000).toArray());
+    return await withMongoTimeout(() => col.find({}).limit(10_000).toArray());
   } catch {
     resetMongoClient();
     return loadLocalItems();
@@ -357,7 +368,7 @@ async function loadBaseSpells(): Promise<StoredSpell[]> {
   try {
     const col = await getCollection<StoredSpell>('spells');
     if (!col) return [];
-    return await withMongoTimeout(col.find({}).limit(10_000).toArray());
+    return await withMongoTimeout(() => col.find({}).limit(10_000).toArray());
   } catch {
     resetMongoClient();
     return loadLocalSpells();
@@ -899,12 +910,37 @@ function tallyBooksSourceCounts(
 export async function listAllBookSources(): Promise<
   Array<{ id: string; label: string; count: number; locked?: boolean; draftCount?: number }>
 > {
+  const {
+    getMemoryBookSources,
+    loadPersistedBookSources,
+    savePersistedBookSources,
+    setMemoryBookSources,
+  } = await import('./compendiumBookSourcesCache');
+
+  const cached = getMemoryBookSources();
+  if (cached) return cached;
+
+  const persisted = loadPersistedBookSources();
   const policy = await readVisibilityPolicyFast();
   let counts: SourceCountMap = new Map();
 
-  for (const kind of ['monster', 'item', 'spell'] as const) {
-    const overrides = await readOverrideEntriesFromMongo(kind);
-    counts = tallyBooksSourceCountsForKind(overrides, kind, policy, counts);
+  // Local data.json mirror — survives Mongo outages and restarts without refetch.
+  const rawFallback = loadRawGlobalFallback();
+  if (rawFallback) {
+    counts = tallyBooksSourceCounts(rawFallback, policy);
+  }
+
+  if (counts.size === 0) {
+    const { loadImportSkipIndex } = await import('./compendiumImportIndex');
+    const index = await loadImportSkipIndex();
+    for (const kind of ['monster', 'item', 'spell'] as const) {
+      counts = tallyBooksSourceCountsForKind(
+        index.rowsForKind(kind).map((row) => ({ name: row.name, source: row.source })),
+        kind,
+        policy,
+        counts,
+      );
+    }
   }
 
   if (counts.size === 0) {
@@ -916,13 +952,27 @@ export async function listAllBookSources(): Promise<
     }
   }
 
-  return mapSourceListResults(
+  if (counts.size === 0 && persisted) {
+    setMemoryBookSources(persisted);
+    return persisted;
+  }
+
+  const result = mapSourceListResults(
     counts,
     policy,
     true,
     true,
     null,
   );
+
+  if (result.length > 0) {
+    savePersistedBookSources(result);
+  } else if (persisted) {
+    setMemoryBookSources(persisted);
+    return persisted;
+  }
+
+  return result;
 }
 
 function compendiumMonsterFromOverride(
@@ -1458,8 +1508,7 @@ async function upsertCollectionMonstersBulk(entries: Array<{ entry: OwlbearMonst
   if (!col) {
     throw new Error('MongoDB unavailable — monster bulk write skipped');
   }
-  await withMongoTimeout(
-    col.bulkWrite(
+  await withMongoTimeout(() => col.bulkWrite(
       entries.map(({ entry, isCustom }) => {
         const _id = slugify(entry.name);
         return {
@@ -1483,8 +1532,7 @@ async function upsertCollectionItemsBulk(entries: Array<{ entry: OwlbearItem; is
   if (!col) {
     throw new Error('MongoDB unavailable — item bulk write skipped');
   }
-  await withMongoTimeout(
-    col.bulkWrite(
+  await withMongoTimeout(() => col.bulkWrite(
       entries.map(({ entry, isCustom }) => {
         const _id = slugify(entry.name);
         return {
@@ -1508,8 +1556,7 @@ async function upsertCollectionSpellsBulk(entries: Array<{ entry: OwlbearSpell; 
   if (!col) {
     throw new Error('MongoDB unavailable — spell bulk write skipped');
   }
-  await withMongoTimeout(
-    col.bulkWrite(
+  await withMongoTimeout(() => col.bulkWrite(
       entries.map(({ entry, isCustom }) => {
         const _id = slugify(entry.name);
         return {
@@ -1720,19 +1767,45 @@ export async function finishBulkCompendiumImport(opts?: {
 /** Promote fallback JSON, warm catalog, and rebuild after Mongo/import drift. */
 export async function reconcileCompendiumMongo(
   reason: string,
-  opts?: { deferCatalogRebuild?: boolean },
+  opts?: { deferCatalogRebuild?: boolean; strict?: boolean },
 ): Promise<CompendiumSyncStatus> {
-  const { promoteFallbackToMongo } = await import('./compendiumFallbackMongoSync');
-  const { ensureBundledSourcesLocked, ensureImportedSourcesUnlocked } = await import('./compendiumBundledLock');
-  await promoteFallbackToMongo(reason);
-  await pingMongo();
-  await ensureBundledSourcesLocked(reason);
-  await ensureImportedSourcesUnlocked(reason);
-  clearRawGlobalDocInflight();
-  invalidateSyncStatusCache();
-  await warmCompendiumCatalog();
-  await finishBulkCompendiumImport({ deferCatalogRebuild: opts?.deferCatalogRebuild });
-  return getSyncStatus();
+  beginMongoRecoveryWindow();
+  let recovery: Awaited<ReturnType<typeof attemptMongoRecovery>>;
+  try {
+    recovery = await attemptMongoRecovery(reason);
+
+    const { promoteFallbackToMongo } = await import('./compendiumFallbackMongoSync');
+    const { ensureBundledSourcesLocked, ensureImportedSourcesUnlocked } = await import('./compendiumBundledLock');
+    await promoteFallbackToMongo(reason);
+    await ensureBundledSourcesLocked(reason);
+    await ensureImportedSourcesUnlocked(reason);
+    clearRawGlobalDocInflight();
+    invalidateSyncStatusCache();
+    await warmCompendiumCatalog();
+    await finishBulkCompendiumImport({ deferCatalogRebuild: opts?.deferCatalogRebuild ?? true });
+
+    if (recovery.state === 'connected') {
+      const { resumeCompendiumMongoWatch } = await import('./compendiumMongoWatch');
+      resumeCompendiumMongoWatch();
+    }
+  } finally {
+    endMongoRecoveryWindow();
+  }
+
+  const status = await getSyncStatus();
+  const mongoDown = status.mongoHealth?.configured && status.mongoHealth.state !== 'connected';
+  if (mongoDown && opts?.strict !== false) {
+    const detail =
+      status.mongoHealth?.lastError
+      ?? getLastMongoConnectError()
+      ?? recovery.lastError
+      ?? `MongoDB still ${status.mongoHealth?.state ?? 'unavailable'} after heal`;
+    const hint = detail.includes('querySrv') || detail.includes('ECONNREFUSED')
+      ? `${detail} — DNS blocked SRV lookup; server uses 8.8.8.8/1.1.1.1 but VPN/firewall may still block MongoDB Atlas`
+      : detail;
+    throw new Error(hint);
+  }
+  return status;
 }
 
 async function saveEntriesBulkForImport<T extends OwlbearMonster | OwlbearItem | OwlbearSpell, R>(

@@ -59,8 +59,7 @@ export async function readTypedImportEntriesFromMongo<K extends CompendiumKind>(
       filter.source = { $regex: escapeRegex(source), $options: 'i' };
     }
 
-    const rows = await withMongoTimeout(
-      col.find(filter as never, { projection: { _id: 0 } }).limit(25_000).toArray(),
+    const rows = await withMongoTimeout(() => col.find(filter as never, { projection: { _id: 0 } }).limit(25_000).toArray(),
       MONGO_OVERRIDE_READ_MS,
     );
     return rows.filter((entry) => !source || entryMatchesSource(entry.source, source)) as OverrideEntryMap[K][];
@@ -107,8 +106,7 @@ export async function readOverrideCountsFromTypedCollections(): Promise<{
     for (const kind of ['monster', 'item', 'spell'] as const) {
       const col = await getCollection(TYPED_IMPORT_COLLECTION[kind]);
       if (!col) continue;
-      counts[kind === 'monster' ? 'monsters' : kind === 'item' ? 'items' : 'spells'] = await withMongoTimeout(
-        col.countDocuments({ source: { $exists: true, $nin: ['Custom', ''] } }),
+      counts[kind === 'monster' ? 'monsters' : kind === 'item' ? 'items' : 'spells'] = await withMongoTimeout(() => col.countDocuments({ source: { $exists: true, $nin: ['Custom', ''] } }),
         15_000,
       );
     }
@@ -164,8 +162,7 @@ export async function readOverrideEntriesFromMongo<K extends CompendiumKind>(
     let entries: OverrideEntryMap[K][];
 
     if (source) {
-      const rows = await withMongoTimeout(
-        col.aggregate([
+      const rows = await withMongoTimeout(() => col.aggregate([
           { $match: { _id: 'global' } },
           {
             $project: {
@@ -190,8 +187,7 @@ export async function readOverrideEntriesFromMongo<K extends CompendiumKind>(
       entries = ((rows[0] as { entries?: OverrideEntryMap[K][] } | undefined)?.entries ?? []);
       entries = entries.filter((e) => entryMatchesSource(e.source, source));
     } else {
-      const doc = await withMongoTimeout(
-        col.findOne({ _id: 'global' }, { projection: { [field]: 1 } }),
+      const doc = await withMongoTimeout(() => col.findOne({ _id: 'global' }, { projection: { [field]: 1 } }),
         MONGO_OVERRIDE_READ_MS,
       );
       entries = (doc?.[field] as OverrideEntryMap[K][] | undefined) ?? [];
@@ -245,8 +241,7 @@ async function readKindSourceLabelsFromMongo(
   try {
     const col = await getCollection<OwlbearRawGlobalDoc>('data');
     if (!col) return [];
-    const rows = await withMongoTimeout(
-      col.aggregate([
+    const rows = await withMongoTimeout(() => col.aggregate([
         { $match: { _id: 'global' } },
         {
           $project: {
@@ -313,8 +308,7 @@ export async function collectImportedSourceLabelsFromMongo(): Promise<string[]> 
     try {
       const col = await getCollection(TYPED_IMPORT_COLLECTION[kind]);
       if (!col) continue;
-      const sources = await withMongoTimeout(
-        col.distinct('source', { source: { $exists: true, $nin: ['Custom', ''] } }),
+      const sources = await withMongoTimeout(() => col.distinct('source', { source: { $exists: true, $nin: ['Custom', ''] } }),
         15_000,
       );
       add(sources.map((s) => String(s)));
@@ -332,8 +326,7 @@ async function readOverrideEntryNamesFromMongo(kind: CompendiumKind): Promise<st
   try {
     const col = await getCollection<OwlbearRawGlobalDoc>('data');
     if (!col) return [];
-    const rows = await withMongoTimeout(
-      col.aggregate([
+    const rows = await withMongoTimeout(() => col.aggregate([
         { $match: { _id: 'global' } },
         {
           $project: {
@@ -366,8 +359,7 @@ export async function readOverrideEntryByNameFromMongo<K extends CompendiumKind>
   try {
     const col = await getCollection<OwlbearRawGlobalDoc>('data');
     if (!col) return null;
-    const rows = await withMongoTimeout(
-      col.aggregate([
+    const rows = await withMongoTimeout(() => col.aggregate([
         { $match: { _id: 'global' } },
         {
           $project: {
@@ -431,8 +423,7 @@ export async function readOverrideCountsFromMongo(): Promise<{
   try {
     const col = await getCollection<OwlbearRawGlobalDoc>('data');
     if (!col) return null;
-    const rows = await withMongoTimeout(
-      col.aggregate([
+    const rows = await withMongoTimeout(() => col.aggregate([
         { $match: { _id: 'global' } },
         {
           $project: {

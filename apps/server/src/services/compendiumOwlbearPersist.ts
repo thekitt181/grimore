@@ -260,7 +260,7 @@ export async function reconcileRawGlobalStorage(): Promise<void> {
   try {
     const col = await getCollection<OwlbearRawGlobalDoc>('data');
     if (!col) return;
-    const doc = await withMongoTimeout(col.findOne({ _id: 'global' }), 12_000);
+    const doc = await withMongoTimeout(() => col.findOne({ _id: 'global' }), 12_000);
     if (!doc) return;
 
     const cleaned = normalizeRawDoc(doc);
@@ -291,7 +291,7 @@ export type RawGlobalDocReadOptions = {
 };
 
 const RAW_GLOBAL_LITE_PROJECTION = { imagesData: 0 as const, images: 0 as const, entryImages: 0 as const };
-const RAW_GLOBAL_LITE_READ_MS = 25_000;
+const RAW_GLOBAL_LITE_READ_MS = 60_000;
 const RAW_GLOBAL_FULL_READ_MS = 45_000;
 
 let rawGlobalInflight: { key: string; promise: Promise<OwlbearRawGlobalDoc> } | null = null;
@@ -332,8 +332,7 @@ export async function readBookSourceLabelsFromMongo(): Promise<BookSourceLabelBu
   try {
     const col = await getCollection<OwlbearRawGlobalDoc>('data');
     if (!col) return null;
-    const rows = await withMongoTimeout(
-      col.aggregate([
+    const rows = await withMongoTimeout(() => col.aggregate([
         { $match: { _id: 'global' } },
         {
           $project: {
@@ -386,8 +385,7 @@ export async function readOverrideSlicesForBookList(): Promise<{
     try {
       const col = await getCollection<OwlbearRawGlobalDoc>('data');
       if (col) {
-        const doc = await withMongoTimeout(
-          col.findOne({ _id: 'global' }, { projection: OVERRIDE_SLICES_PROJECTION }),
+        const doc = await withMongoTimeout(() => col.findOne({ _id: 'global' }, { projection: OVERRIDE_SLICES_PROJECTION }),
           45_000,
         );
         if (doc) {
@@ -456,8 +454,7 @@ async function readRawGlobalDocInner(opts: RawGlobalDocReadOptions = {}): Promis
     const col = await getCollection<OwlbearRawGlobalDoc>('data');
     if (col) {
       const projection = includeImageData ? undefined : RAW_GLOBAL_LITE_PROJECTION;
-      const doc = await withMongoTimeout(
-        col.findOne({ _id: 'global' }, projection ? { projection } : undefined),
+      const doc = await withMongoTimeout(() => col.findOne({ _id: 'global' }, projection ? { projection } : undefined),
         includeImageData ? RAW_GLOBAL_FULL_READ_MS : RAW_GLOBAL_LITE_READ_MS,
       );
       if (doc) {
@@ -546,8 +543,7 @@ export async function persistRawGlobalDoc(
     markCompendiumWritePending();
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
-        const result = await withMongoTimeout(
-          col.updateOne({ _id: 'global' }, { $set: payload }, { upsert: true }),
+        const result = await withMongoTimeout(() => col.updateOne({ _id: 'global' }, { $set: payload }, { upsert: true }),
           12_000,
         );
         mongoPersisted = result.acknowledged;
@@ -738,8 +734,7 @@ export async function patchOwlbearEntriesBulk(
     if (opts?.typedCollectionsOnly) {
       markCompendiumWritePending();
       try {
-        await withMongoTimeout(
-          col.updateOne(
+        await withMongoTimeout(() => col.updateOne(
             { _id: 'global' },
             { $set: { lastUpdated } },
             { upsert: true },
@@ -793,7 +788,7 @@ export async function patchOwlbearEntriesBulk(
     }
 
     try {
-      await withMongoTimeout(col.bulkWrite(ops, { ordered: true }), 30_000);
+      await withMongoTimeout(() => col.bulkWrite(ops, { ordered: true }), 30_000);
       clearRawGlobalDocInflight();
       const { invalidateImportSkipIndex } = await import('./compendiumImportIndex');
       invalidateImportSkipIndex();
@@ -900,7 +895,7 @@ export async function applyMongoGlobalImagePatch(
     if (Object.keys($unset).length > 0) updateDoc.$unset = $unset;
 
     markCompendiumWritePending();
-    await withMongoTimeout(col.updateOne({ _id: 'global' }, updateDoc), 60_000);
+    await withMongoTimeout(() => col.updateOne({ _id: 'global' }, updateDoc), 60_000);
 
     notifyCompendiumChanged(lastUpdated);
     invalidateCompendiumCaches();

@@ -18,8 +18,7 @@ async function readKindNameSourceRows(kind: CompendiumKind): Promise<NameSourceR
   try {
     const col = await getCollection<OwlbearRawGlobalDoc>('data');
     if (!col) return [];
-    const rows = await withMongoTimeout(
-      col.aggregate([
+    const rows = await withMongoTimeout(() => col.aggregate([
         { $match: { _id: 'global' } },
         {
           $project: {
@@ -76,6 +75,11 @@ export class ImportSkipIndex {
         entryMatchesSource(r.source, sourceLabel) &&
         !r.brokenDuration,
     );
+  }
+
+  /** Lightweight name+source rows for book list tallies (no stat blocks). */
+  rowsForKind(kind: CompendiumKind): readonly NameSourceRow[] {
+    return this.byKind[kind];
   }
 }
 

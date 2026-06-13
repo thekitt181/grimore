@@ -110,8 +110,7 @@ export async function loadOverrideShardsIntoRawDoc(
     const loaded: unknown[] = [];
     for (let i = 0; i < shardCount; i++) {
       try {
-        const doc = await withMongoTimeout(
-          col.findOne({ _id: shardDocId(field, i) }, { projection: { entries: 1 } }),
+        const doc = await withMongoTimeout(() => col.findOne({ _id: shardDocId(field, i) }, { projection: { entries: 1 } }),
           20_000,
         );
         if (doc?.entries?.length) loaded.push(...doc.entries);
@@ -164,6 +163,6 @@ export async function persistOverrideShards(
     }
   }
 
-  await withMongoTimeout(col.bulkWrite(ops, { ordered: false }), 60_000);
+  await withMongoTimeout(() => col.bulkWrite(ops, { ordered: false }), 60_000);
   return true;
 }

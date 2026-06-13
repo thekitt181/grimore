@@ -43,8 +43,7 @@ export async function readVisibilityPolicyFast(): Promise<CompendiumVisibilityPo
   try {
     const col = await getCollection<OwlbearRawGlobalDoc>('data');
     if (col) {
-      const doc = await withMongoTimeout(
-        col.findOne(
+      const doc = await withMongoTimeout(() => col.findOne(
           { _id: 'global' },
           { projection: { lockedSources: 1, publishedEntryKeys: 1, lastUpdated: 1 } },
         ),

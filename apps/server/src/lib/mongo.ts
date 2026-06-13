@@ -5,6 +5,7 @@ const DB_NAME = 'owlbear-extension';
 const MONGO_OP_TIMEOUT_MS = 8_000;
 const CIRCUIT_FAIL_THRESHOLD = 2;
 const CIRCUIT_OPEN_MS = 120_000;
+const CLIENT_CLOSE_DELAY_MS = 10_000;
 
 // Some VPN/corporate DNS (e.g. 10.x resolvers) refuse SRV lookups for mongodb+srv URIs.
 dns.setServers(['8.8.8.8', '1.1.1.1', ...dns.getServers().filter((s) => s !== '8.8.8.8' && s !== '1.1.1.1')]);
@@ -42,6 +43,30 @@ let healthSnapshot: MongoHealthSnapshot = {
 
 let healthProbeStarted = false;
 let lastHealthState: MongoHealthState = 'disabled';
+let lastConnectError: string | null = null;
+/** While active, Mongo failures update health but do not open the circuit (heal / reconcile). */
+let recoverySuppressUntil = 0;
+
+function ensureMongoDns(): void {
+  dns.setServers(['8.8.8.8', '1.1.1.1', ...dns.getServers().filter((s) => s !== '8.8.8.8' && s !== '1.1.1.1')]);
+}
+
+export function beginMongoRecoveryWindow(ms = 180_000): void {
+  recoverySuppressUntil = Date.now() + ms;
+  resetMongoCircuit('recovery-window');
+}
+
+export function endMongoRecoveryWindow(): void {
+  recoverySuppressUntil = 0;
+}
+
+function isRecoveryWindowActive(): boolean {
+  return Date.now() < recoverySuppressUntil;
+}
+
+export function getLastMongoConnectError(): string | null {
+  return lastConnectError;
+}
 
 export function isMongoConfigured(): boolean {
   return Boolean(process.env['MONGODB_URI']) && process.env['MONGODB_DISABLED'] !== '1';
@@ -56,6 +81,18 @@ export function getMongoCircuitStatus(): { open: boolean; openUntil: number | nu
   return { open, openUntil: open ? circuitOpenUntil : null };
 }
 
+function scheduleClientClose(toClose: MongoClient): void {
+  setTimeout(() => {
+    void toClose.close().catch(() => undefined);
+  }, CLIENT_CLOSE_DELAY_MS);
+}
+
+/** Drop cached Db handle without tearing down an in-use client pool. */
+function softInvalidateMongoDb(): void {
+  db = null;
+  connectPromise = null;
+}
+
 function openMongoCircuit(reason: string): void {
   circuitOpenUntil = Date.now() + CIRCUIT_OPEN_MS;
   const now = Date.now();
@@ -63,13 +100,14 @@ function openMongoCircuit(reason: string): void {
     lastCircuitLogAt = now;
     console.warn(`[Mongo] Circuit open (${CIRCUIT_OPEN_MS / 1000}s) — ${reason}`);
   }
-  resetMongoClient();
+  resetMongoClient(true);
 }
 
 function recordMongoSuccess(): void {
   const recovering = Date.now() < circuitOpenUntil;
   consecutiveFailures = 0;
   circuitOpenUntil = 0;
+  lastConnectError = null;
   if (recovering) {
     void import('../services/compendiumFallbackMongoSync')
       .then(({ scheduleFallbackMongoSync }) => scheduleFallbackMongoSync('mongo-circuit-recovered'))
@@ -77,23 +115,147 @@ function recordMongoSuccess(): void {
   }
 }
 
+function isMongoOperationTimeout(err: unknown): boolean {
+  return err instanceof Error && err.message.includes('Mongo operation timed out');
+}
+
+function isDisconnectedClientError(err: unknown): boolean {
+  if (!err || typeof err !== 'object') return false;
+  const msg = (err as Error).message ?? '';
+  return msg.includes('Client must be connected')
+    || msg.includes('Topology is closed')
+    || msg.includes('connection closed')
+    || msg.includes('Pool is closed');
+}
+
+function isRetryableMongoError(err: unknown): boolean {
+  return isDisconnectedClientError(err) || isMongoOperationTimeout(err);
+}
+
 function recordMongoFailure(err: unknown): void {
-  consecutiveFailures += 1;
   const msg = err instanceof Error ? err.message : String(err);
-  const network = isMongoNetworkError(err);
-  // Require repeated failures — a single slow query must not trip the circuit.
-  if (consecutiveFailures >= CIRCUIT_FAIL_THRESHOLD || network) {
+  lastConnectError = msg;
+  const now = new Date().toISOString();
+
+  if (isDisconnectedClientError(err)) {
+    softInvalidateMongoDb();
+  }
+
+  if (isMongoOperationTimeout(err)) {
+    healthSnapshot = buildHealthSnapshot({
+      state: 'degraded',
+      lastCheckedAt: now,
+      lastFailureAt: now,
+      lastError: msg,
+      latencyMs: null,
+    });
+    return;
+  }
+
+  consecutiveFailures += 1;
+  healthSnapshot = buildHealthSnapshot({
+    state: isMongoCircuitOpen() ? 'circuit-open' : 'unavailable',
+    lastCheckedAt: now,
+    lastFailureAt: now,
+    lastError: msg,
+    latencyMs: null,
+  });
+  if (isRecoveryWindowActive()) {
+    return;
+  }
+  if (consecutiveFailures >= CIRCUIT_FAIL_THRESHOLD) {
     openMongoCircuit(msg);
   }
 }
 
-export function resetMongoClient(): void {
-  if (client) {
-    void client.close().catch(() => undefined);
+/** @param force When true, close the underlying client (heal, circuit reset, shutdown). */
+export function resetMongoClient(force = false): void {
+  softInvalidateMongoDb();
+  if (force && client) {
+    const toClose = client;
+    client = null;
+    scheduleClientClose(toClose);
   }
-  client = null;
-  db = null;
+}
+
+/** Clear the circuit breaker and drop the pooled client so the next op reconnects. */
+export function resetMongoCircuit(reason?: string): void {
+  const wasOpen = isMongoCircuitOpen();
+  circuitOpenUntil = 0;
+  consecutiveFailures = 0;
+  resetMongoClient(true);
+  if (wasOpen || reason) {
+    console.log(`[Mongo] Circuit reset${reason ? ` (${reason})` : ''}`);
+  }
+}
+
+function swapMongoClient(nextClient: MongoClient, database: Db): void {
+  const previous = client;
+  client = nextClient;
+  db = database;
   connectPromise = null;
+  if (previous && previous !== nextClient) {
+    scheduleClientClose(previous);
+  }
+}
+
+async function connectMongoDbWithRetries(maxAttempts = 3): Promise<Db | null> {
+  ensureMongoDns();
+  const uri = process.env['MONGODB_URI']!;
+  let lastErr: unknown;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    let probeClient: MongoClient | null = null;
+    try {
+      probeClient = new MongoClient(uri, {
+        serverSelectionTimeoutMS: 12_000,
+        socketTimeoutMS: 45_000,
+        connectTimeoutMS: 12_000,
+        maxPoolSize: Number(process.env['MONGODB_POOL_SIZE'] ?? 20),
+        family: 4,
+      });
+      await probeClient.connect();
+      const database = probeClient.db(DB_NAME);
+      await database.command({ ping: 1 }, { timeoutMS: 5_000 });
+      swapMongoClient(probeClient, database);
+      recordMongoSuccess();
+      return database;
+    } catch (err) {
+      lastErr = err;
+      lastConnectError = err instanceof Error ? err.message : String(err);
+      if (probeClient) {
+        void probeClient.close().catch(() => undefined);
+      }
+      if (attempt < maxAttempts) {
+        await new Promise((resolve) => setTimeout(resolve, 750 * attempt));
+      }
+    }
+  }
+
+  recordMongoFailure(lastErr);
+  return null;
+}
+
+async function attachExistingClientDb(): Promise<Db | null> {
+  if (!client) return null;
+  try {
+    const database = client.db(DB_NAME);
+    await database.command({ ping: 1 }, { timeoutMS: 4_000 });
+    db = database;
+    recordMongoSuccess();
+    return database;
+  } catch (err) {
+    lastConnectError = err instanceof Error ? err.message : String(err);
+    resetMongoClient(true);
+    return null;
+  }
+}
+
+/** Manual / heal recovery — bypasses an open circuit and probes Mongo immediately. */
+export async function attemptMongoRecovery(reason: string): Promise<MongoHealthSnapshot> {
+  resetMongoCircuit(reason);
+  ensureMongoDns();
+  return pingMongo({ forceReconnect: true });
 }
 
 export function isMongoNetworkError(err: unknown): boolean {
@@ -102,58 +264,84 @@ export function isMongoNetworkError(err: unknown): boolean {
   return name.includes('MongoNetwork') || name.includes('MongoServerSelection') || name.includes('MongoTimeout');
 }
 
-/** Reset the client only on connection failures — not on slow queries (timeouts). */
+/** Reset the client on connection failures — not on slow queries (timeouts). */
 export function shouldResetMongoClient(err: unknown): boolean {
+  if (isDisconnectedClientError(err)) return true;
   if (err instanceof Error && err.message.includes('timed out')) return false;
   return isMongoNetworkError(err);
 }
 
-export async function withMongoTimeout<T>(promise: Promise<T>, ms = MONGO_OP_TIMEOUT_MS): Promise<T> {
-  if (isMongoCircuitOpen()) {
-    throw new Error('MongoDB temporarily unavailable (circuit open)');
-  }
+async function raceWithTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_, reject) => {
     timer = setTimeout(() => reject(new Error(`Mongo operation timed out after ${ms}ms`)), ms);
   });
   try {
-    const result = await Promise.race([promise, timeout]);
-    recordMongoSuccess();
-    return result;
-  } catch (err) {
-    recordMongoFailure(err);
-    throw err;
+    return await Promise.race([promise, timeout]);
   } finally {
     if (timer) clearTimeout(timer);
   }
 }
 
+type MongoWork<T> = (() => Promise<T>) | Promise<T>;
+
+export async function withMongoTimeout<T>(work: MongoWork<T>, ms = MONGO_OP_TIMEOUT_MS): Promise<T> {
+  if (isMongoCircuitOpen()) {
+    throw new Error('MongoDB temporarily unavailable (circuit open)');
+  }
+
+  const canRetry = typeof work === 'function';
+  const maxAttempts = canRetry ? 2 : 1;
+  let lastErr: unknown;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      const promise = typeof work === 'function' ? work() : work;
+      const result = await raceWithTimeout(promise, ms);
+      recordMongoSuccess();
+      return result;
+    } catch (err) {
+      lastErr = err;
+      if (attempt < maxAttempts && canRetry && isRetryableMongoError(err)) {
+        softInvalidateMongoDb();
+        if (isDisconnectedClientError(err)) {
+          resetMongoClient(true);
+        }
+        await getMongoDb();
+        continue;
+      }
+      recordMongoFailure(err);
+      throw err;
+    }
+  }
+
+  recordMongoFailure(lastErr);
+  throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
+}
+
 export async function getMongoDb(): Promise<Db | null> {
   if (!isMongoConfigured() || isMongoCircuitOpen()) return null;
 
-  if (db) return db;
+  if (db && client) return db;
+  if (client && !db) {
+    const attached = await attachExistingClientDb();
+    if (attached) return attached;
+  }
   if (connectPromise) return connectPromise;
 
   connectPromise = (async () => {
-    const uri = process.env['MONGODB_URI']!;
     try {
-      client = new MongoClient(uri, {
-        serverSelectionTimeoutMS: 8_000,
-        socketTimeoutMS: 20_000,
-        connectTimeoutMS: 8_000,
-        maxPoolSize: Number(process.env['MONGODB_POOL_SIZE'] ?? 20),
-        family: 4,
-      });
-      await client.connect();
-      db = client.db(DB_NAME);
-      console.log('[Mongo] Connected to', DB_NAME);
-      recordMongoSuccess();
-      return db;
-    } catch (err) {
-      console.error('[Mongo] Connection failed — compendium will use local JSON fallback:', err);
-      recordMongoFailure(err);
-      resetMongoClient();
-      return null;
+      ensureMongoDns();
+      const connected = await connectMongoDbWithRetries(3);
+      if (connected) {
+        console.log('[Mongo] Connected to', DB_NAME);
+      } else {
+        console.error(
+          '[Mongo] Connection failed — compendium will use local JSON fallback:',
+          lastConnectError ?? 'unknown error',
+        );
+      }
+      return connected;
     } finally {
       connectPromise = null;
     }
@@ -174,18 +362,18 @@ export async function runMongo<T>(op: (database: Db) => Promise<T>): Promise<T |
   const database = await getMongoDb();
   if (!database) return null;
   try {
-    return await withMongoTimeout(op(database));
+    return await withMongoTimeout(() => op(database));
   } catch (err) {
     if (shouldResetMongoClient(err)) {
       console.warn('[Mongo] Operation failed, resetting client:', err instanceof Error ? err.message : err);
-      resetMongoClient();
+      resetMongoClient(true);
     }
     throw err;
   }
 }
 
 export async function closeMongo(): Promise<void> {
-  resetMongoClient();
+  resetMongoClient(true);
 }
 
 function buildHealthSnapshot(partial: Partial<MongoHealthSnapshot>): MongoHealthSnapshot {
@@ -219,24 +407,28 @@ export function getMongoHealthSnapshot(): MongoHealthSnapshot {
     return buildHealthSnapshot({ state: 'disabled', circuitOpen: false });
   }
   if (isMongoCircuitOpen()) {
-    return buildHealthSnapshot({ state: 'circuit-open', circuitOpen: true });
+    return buildHealthSnapshot({
+      state: 'circuit-open',
+      circuitOpen: true,
+      lastError: lastConnectError ?? healthSnapshot.lastError,
+    });
   }
   return healthSnapshot;
 }
 
 /** Active ping — updates health snapshot and may open/close the circuit via withMongoTimeout. */
-export async function pingMongo(): Promise<MongoHealthSnapshot> {
+export async function pingMongo(options?: { forceReconnect?: boolean }): Promise<MongoHealthSnapshot> {
   const now = new Date().toISOString();
   if (!isMongoConfigured()) {
     healthSnapshot = buildHealthSnapshot({ state: 'disabled', lastCheckedAt: now });
     await bumpSyncStatusOnHealthChange('disabled');
     return healthSnapshot;
   }
-  if (isMongoCircuitOpen()) {
+  if (isMongoCircuitOpen() && !options?.forceReconnect && !isRecoveryWindowActive()) {
     healthSnapshot = buildHealthSnapshot({
       state: 'circuit-open',
       lastCheckedAt: now,
-      lastError: healthSnapshot.lastError,
+      lastError: lastConnectError ?? healthSnapshot.lastError,
     });
     await bumpSyncStatusOnHealthChange('circuit-open');
     return healthSnapshot;
@@ -244,11 +436,14 @@ export async function pingMongo(): Promise<MongoHealthSnapshot> {
 
   const started = Date.now();
   try {
-    const database = await getMongoDb();
+    ensureMongoDns();
+    const database = options?.forceReconnect
+      ? await connectMongoDbWithRetries(3)
+      : await getMongoDb();
     if (!database) {
-      throw new Error('MongoDB connection unavailable');
+      throw new Error(lastConnectError ?? 'MongoDB connection unavailable');
     }
-    await withMongoTimeout(database.command({ ping: 1 }), 5_000);
+    await withMongoTimeout(() => database.command({ ping: 1 }), 5_000);
     const latencyMs = Date.now() - started;
     healthSnapshot = buildHealthSnapshot({
       state: 'connected',

@@ -231,8 +231,9 @@ router.get('/sync-status', ...auth, async (_req, res) => {
 router.post('/reconcile-mongo', ...auth, async (req: AuthenticatedRequest, res) => {
   const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim() : 'client-reconcile';
   const deferCatalogRebuild = req.body?.deferCatalogRebuild === true;
+  const strict = req.body?.strict !== false;
   try {
-    res.json(await reconcileCompendiumMongo(reason || 'client-reconcile', { deferCatalogRebuild }));
+    res.json(await reconcileCompendiumMongo(reason || 'client-reconcile', { deferCatalogRebuild, strict }));
   } catch (err) {
     console.error('[Compendium] reconcile-mongo error:', err);
     res.status(500).json({ error: err instanceof Error ? err.message : 'Failed to reconcile MongoDB' });

@@ -110,6 +110,8 @@ const io = initSocket(httpServer);
 
 async function startCompendiumBackground(): Promise<void> {
   try {
+    const { warmBookSourcesCacheFromDisk } = await import('./services/compendiumBookSourcesCache');
+    warmBookSourcesCacheFromDisk();
     startMongoHealthProbe(Number(process.env['MONGO_HEALTH_INTERVAL_MS'] ?? 20_000));
     await syncCompendiumStorageOnStartup();
     const { ensureBundledSourcesLocked, ensureImportedSourcesUnlocked } = await import('./services/compendiumBundledLock');

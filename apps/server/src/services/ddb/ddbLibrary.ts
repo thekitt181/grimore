@@ -1229,7 +1229,13 @@ export async function finishDdbLibraryImport(
   }
 
   const { reconcileCompendiumMongo } = await import('../compendiumSync');
-  const status = await reconcileCompendiumMongo('ddb-finish-import', { deferCatalogRebuild: true });
+  const status = await reconcileCompendiumMongo('ddb-finish-import', {
+    deferCatalogRebuild: true,
+    strict: false,
+  });
+  void import('../compendiumSync')
+    .then(({ listAllBookSources }) => listAllBookSources())
+    .catch(() => undefined);
   return {
     catalogRev: status.catalogRev ?? null,
     sourcesUnlocked: [...new Set(unlocked)],

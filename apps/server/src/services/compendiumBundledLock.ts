@@ -109,8 +109,7 @@ export async function ensureBundledSourcesLocked(reason: string): Promise<number
     if (col && !isMongoCircuitOpen()) {
       markCompendiumWritePending();
       try {
-        await withMongoTimeout(
-          col.updateOne(
+        await withMongoTimeout(() => col.updateOne(
             { _id: 'global' },
             {
               $set: {
@@ -175,8 +174,7 @@ export async function ensureImportedSourcesUnlocked(reason: string): Promise<num
     if (col && !isMongoCircuitOpen()) {
       markCompendiumWritePending();
       try {
-        await withMongoTimeout(
-          col.updateOne(
+        await withMongoTimeout(() => col.updateOne(
             { _id: 'global' },
             {
               $set: {
