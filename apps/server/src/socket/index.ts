@@ -569,5 +569,12 @@ export function initSocket(httpServer: HttpServer): Server {
   });
 
   setCompendiumSocketServer(io);
+  socketServer = io;
   return io;
+}
+
+let socketServer: Server<ClientToServerEvents, ServerToClientEvents> | null = null;
+
+export function getSocketServer(): Server<ClientToServerEvents, ServerToClientEvents> | null {
+  return socketServer;
 }

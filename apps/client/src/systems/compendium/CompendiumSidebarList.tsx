@@ -195,7 +195,8 @@ export function CompendiumSidebarList() {
     },
     enabled: compendiumReady && tab === 'monsters' && showEntryList,
     retry: 1,
-    staleTime: 5_000,
+    staleTime: 30_000,
+    refetchOnWindowFocus: false,
   });
 
   const itemQ = useInfiniteQuery({
@@ -208,7 +209,8 @@ export function CompendiumSidebarList() {
     },
     enabled: compendiumReady && tab === 'items' && showEntryList,
     retry: 1,
-    staleTime: 5_000,
+    staleTime: 30_000,
+    refetchOnWindowFocus: false,
   });
 
   const spellQ = useInfiniteQuery({
@@ -221,14 +223,15 @@ export function CompendiumSidebarList() {
     },
     enabled: compendiumReady && tab === 'spells' && showEntryList,
     retry: 1,
-    staleTime: 5_000,
+    staleTime: 30_000,
+    refetchOnWindowFocus: false,
   });
 
   const activeQ = tab === 'monsters' ? monsterQ : tab === 'items' ? itemQ : spellQ;
   const loading = showSourcePicker
     ? sourcesQ.isLoading
     : activeQ.isPending && !activeQ.isError && !activeQ.data;
-  const fetching = showSourcePicker ? sourcesQ.isFetching : activeQ.isFetching;
+  const backgroundRefresh = showSourcePicker ? sourcesQ.isRefetching : activeQ.isRefetching;
   const unavailable = showSourcePicker ? sourcesQ.isError : activeQ.isError;
 
   const activeError = showSourcePicker ? sourcesQ.error : activeQ.error;
@@ -397,7 +400,7 @@ export function CompendiumSidebarList() {
         {loading && (
           <p className="font-ui text-xs" style={{ color: 'var(--color-text-secondary)' }}>Loading…</p>
         )}
-        {!loading && fetching && (
+        {!loading && backgroundRefresh && (
           <p className="font-ui text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>Updating…</p>
         )}
 

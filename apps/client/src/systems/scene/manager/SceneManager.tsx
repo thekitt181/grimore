@@ -1,18 +1,14 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { v4 as uuidv4 } from 'uuid';
 import type { SceneRecord, SceneTransition } from '@grimoire/shared';
 import {
-  AMBIENT_SOUND_LIBRARY,
   gameTimeToInputValue,
   gameTimeToTimeOfDay,
   LIGHTING_PRESETS,
-  MUSIC_LIBRARY,
   normalizeGameTime,
   SCENE_TRANSITIONS,
   TIME_OF_DAY_PRESETS,
   TIME_OF_DAY_TO_GAME_TIME,
-  VIDEO_LIBRARY,
   WEATHER_PRESETS,
 } from '@grimoire/shared';
 import { fileToDataUrl } from '@/lib/imagePersistence';
@@ -85,24 +81,6 @@ export function SceneManager({ campaignId, isGM, liveSessionId, onSceneActivated
     await updateScene(scene.id, { mapId: map.id });
     void qc.invalidateQueries({ queryKey: ['scenes', campaignId] });
     void qc.invalidateQueries({ queryKey: ['campaign-maps', campaignId] });
-  }
-
-  async function addLibraryAmbient(scene: SceneRecord, libraryId: string) {
-    const entry = AMBIENT_SOUND_LIBRARY.find((e) => e.id === libraryId);
-    if (!entry) return;
-    const layers = [...scene.mediaConfig.ambientLayers];
-    if (layers.some((l) => l.libraryId === libraryId)) return;
-    layers.push({
-      id: uuidv4(),
-      name: entry.name,
-      url: entry.url,
-      volume: entry.defaultVolume,
-      loop: entry.loop,
-      libraryId: entry.id,
-      category: entry.category,
-    });
-    await updateScene(scene.id, { mediaConfig: { ...scene.mediaConfig, ambientLayers: layers } });
-    void qc.invalidateQueries({ queryKey: ['scenes', campaignId] });
   }
 
   async function setSceneField(scene: SceneRecord, patch: Parameters<typeof updateScene>[1]) {
@@ -250,86 +228,14 @@ export function SceneManager({ campaignId, isGM, liveSessionId, onSceneActivated
                 <input
                   className="input mt-1 w-full"
                   defaultValue={scene.backgroundVideoUrl ?? ''}
-                  placeholder="https://… or pick from library below"
+                  placeholder="https://… or use Upload during a live session"
                   onBlur={(e) => void setSceneField(scene, { backgroundVideoUrl: e.target.value || null })}
                 />
               </label>
 
-              <div className="md:col-span-2">
-                <p className="font-ui text-xs mb-1" style={{ color: 'var(--color-text-secondary)' }}>Video library</p>
-                <div className="flex flex-wrap gap-1">
-                  {VIDEO_LIBRARY.map((v) => (
-                    <button
-                      key={v.id}
-                      type="button"
-                      className="btn-ghost text-xs"
-                      onClick={() => void setSceneField(scene, { backgroundVideoUrl: v.url })}
-                    >
-                      {v.name}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="md:col-span-2">
-                <p className="font-ui text-xs mb-1" style={{ color: 'var(--color-text-secondary)' }}>
-                  Ambient layers ({scene.mediaConfig.ambientLayers.length})
-                </p>
-                {AMBIENT_SOUND_LIBRARY.length === 0 ? (
-                  <p className="font-ui text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                    Set a scene ambient URL above, or push custom audio from the live session Upload menu.
-                  </p>
-                ) : (
-                  <div className="flex flex-wrap gap-1 max-h-28 overflow-y-auto">
-                    {AMBIENT_SOUND_LIBRARY.map((a) => (
-                      <button
-                        key={a.id}
-                        type="button"
-                        className="btn-ghost text-xs"
-                        onClick={() => void addLibraryAmbient(scene, a.id)}
-                      >
-                        + {a.name}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              <div className="md:col-span-2">
-                <p className="font-ui text-xs mb-1" style={{ color: 'var(--color-text-secondary)' }}>Music playlist</p>
-                {MUSIC_LIBRARY.length === 0 ? (
-                  <p className="font-ui text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                    Add music tracks from the live session Upload menu during play.
-                  </p>
-                ) : (
-                  <div className="flex flex-wrap gap-1">
-                    {MUSIC_LIBRARY.map((m) => (
-                    <button
-                      key={m.id}
-                      type="button"
-                      className="btn-ghost text-xs"
-                      onClick={async () => {
-                        const playlist = [...scene.mediaConfig.musicPlaylist];
-                        if (!playlist.some((t) => t.libraryId === m.id)) {
-                          playlist.push({
-                            id: uuidv4(),
-                            name: m.name,
-                            url: m.url,
-                            volume: m.defaultVolume,
-                            libraryId: m.id,
-                          });
-                          await setSceneField(scene, {
-                            mediaConfig: { ...scene.mediaConfig, musicPlaylist: playlist, musicMode: 'crossfade' },
-                          });
-                        }
-                      }}
-                    >
-                      + {m.name}
-                    </button>
-                  ))}
-                  </div>
-                )}
-              </div>
+              <p className="font-ui text-xs md:col-span-2" style={{ color: 'var(--color-text-secondary)' }}>
+                Video, ambient audio, and music are added via the live session Upload menu — paste a URL or pick a file.
+              </p>
 
               <label className="font-ui text-xs block md:col-span-2">
                 Upload map image

@@ -14,7 +14,17 @@ export function revealHandoutToPlayers(handout: HandoutItem, sessionId: string):
     handoutId: handout.id,
     title: handout.name,
     content: handout.description,
+    type: 'ITEM_CARD',
+    itemMeta: {
+      name: handout.name,
+      ...(handout.itemType ? { itemType: handout.itemType } : {}),
+      ...(handout.rarity ? { rarity: handout.rarity } : {}),
+      ...(handout.source ? { source: handout.source } : {}),
+      compendiumItemId: handout.compendiumItemId,
+      isCustom: (handout.source ?? '').trim().toLowerCase() === 'custom',
+    },
     ...(handout.imageUrl ? { imageUrl: handout.imageUrl } : {}),
     targetUserIds: 'all',
+    animate: true,
   });
 }

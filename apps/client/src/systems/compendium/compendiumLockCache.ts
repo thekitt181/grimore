@@ -7,6 +7,7 @@ import type {
   CompendiumSearchResult,
   CompendiumSource,
   CompendiumSpell,
+  CompendiumSyncStatus,
   CompendiumVisibilityPolicy,
 } from '@grimoire/shared';
 
@@ -125,23 +126,37 @@ export async function refetchCompendiumAfterImport(
   if (isApiAuthBlocked()) return;
   await ensureApiAuthSession();
   if (isApiAuthBlocked()) return;
-  await qc.invalidateQueries({
-    predicate: (query) => query.queryKey[0] === 'compendium',
-  });
-  await qc.refetchQueries({
-    predicate: (query) => query.queryKey[0] === 'compendium',
-  });
 
-  if (!opts?.catalogRev && !opts?.catalogRebuildPending) return;
+  if (!opts?.catalogRev && !opts?.catalogRebuildPending) {
+    await qc.invalidateQueries({
+      predicate: (query) => query.queryKey[0] === 'compendium',
+    });
+    await qc.refetchQueries({
+      predicate: (query) => query.queryKey[0] === 'compendium',
+      type: 'active',
+    });
+    return;
+  }
 
   const deadline = Date.now() + (opts?.catalogRebuildPending ? 120_000 : 12_000);
   while (Date.now() < deadline) {
-    const status = qc.getQueryData<{ catalogRev?: string }>(['compendium', 'sync-status']);
-    if (opts?.catalogRev && status?.catalogRev === opts.catalogRev) return;
-    if (opts?.catalogRebuildPending && status?.catalogRev && status.catalogRev !== opts.catalogRev) {
-      return;
-    }
+    const status = qc.getQueryData<CompendiumSyncStatus>(['compendium', 'sync-status']);
+    if (opts?.catalogRev && status?.catalogRev === opts.catalogRev) break;
+    if (opts?.catalogRebuildPending && !status?.catalogRebuild?.active && status?.catalogRev) break;
     await qc.refetchQueries({ queryKey: ['compendium', 'sync-status'] });
-    await new Promise((r) => setTimeout(r, 400));
+    await new Promise((r) => setTimeout(r, 1_500));
   }
+
+  await qc.invalidateQueries({
+    predicate: (query) => query.queryKey[0] === 'compendium' && query.queryKey[1] !== 'sync-status',
+  });
+  await qc.refetchQueries({
+    predicate: (query) => {
+      const key = query.queryKey;
+      if (key[0] !== 'compendium') return false;
+      const scope = key[1];
+      return scope === 'monsters' || scope === 'items' || scope === 'spells' || scope === 'sources';
+    },
+    type: 'active',
+  });
 }

@@ -3,9 +3,9 @@ import { authHeaders, type DdbAuthContext } from './ddbAuthContext';
 import { fetchWithRetry } from './ddbFetchRetry';
 import { stripDdbHtml } from './ddbHtml';
 
-const MONSTER_BATCH_SIZE = 40;
-const MONSTER_BATCH_CONCURRENCY = 3;
-const MONSTER_DETAIL_CONCURRENCY = 4;
+const MONSTER_BATCH_SIZE = 50;
+const MONSTER_BATCH_CONCURRENCY = 4;
+const MONSTER_DETAIL_CONCURRENCY = 6;
 const MONSTER_DETAIL_RETRY_ATTEMPTS = 5;
 
 export async function runWithConcurrency<T>(
@@ -352,7 +352,7 @@ async function enrichMonsterRecord(
   return merged;
 }
 
-/** Batch-fetch monsters for import; always detail-fetches then merges batch seed. */
+/** Batch-fetch monsters for import; detail-fetches only when batch payload lacks a full stat block. */
 export async function fetchMonstersForImport(
   ctx: DdbAuthContext,
   ids: number[],
@@ -368,25 +368,15 @@ export async function fetchMonstersForImport(
     console.warn('[DDB] monster batch seed failed:', err instanceof Error ? err.message : err);
   }
 
-  await runWithConcurrency(unique, 2, async (id) => {
+  const needsDetail = unique.filter((id) => {
+    const raw = out.get(id);
+    return !raw || monsterNeedsDetailFetch(raw);
+  });
+
+  await runWithConcurrency(needsDetail, MONSTER_DETAIL_CONCURRENCY, async (id) => {
     try {
-      let merged: Record<string, unknown> | null = out.get(id) ?? null;
-      const detail = await fetchDdbMonsterDetailOnly(ctx, id);
-      if (detail) {
-        merged = merged ? mergeMonsterDetail(merged, detail) : detail;
-      }
-      if (!merged || monsterNeedsDetailFetch(merged)) {
-        try {
-          const batch = await fetchDdbMonstersByIds(ctx, [id]);
-          const richer = batch.get(id);
-          if (richer) {
-            merged = merged ? mergeMonsterDetail(merged, richer) : richer;
-          }
-        } catch (err) {
-          console.warn(`[DDB] monster ${id} batch fallback:`, err instanceof Error ? err.message : err);
-        }
-      }
-      if (merged) out.set(id, merged);
+      const enriched = await enrichMonsterRecord(ctx, id, out.get(id));
+      if (enriched) out.set(id, enriched);
     } catch (err) {
       console.warn(`[DDB] monster ${id} enrich failed:`, err instanceof Error ? err.message : err);
     }

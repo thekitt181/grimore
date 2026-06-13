@@ -44,10 +44,10 @@ export { fetchDdbMonsterDetail } from './ddbMonsterFetch';
 
 const SPELL_CACHE_TTL = 60 * 60;
 const ITEM_CACHE_TTL = 60 * 30;
-const FETCH_BATCH = 100;
-const MONSTER_IMPORT_BATCH = 15;
+const FETCH_BATCH = 150;
+const MONSTER_IMPORT_BATCH = 25;
 /** Typed Mongo collections — safe to write larger batches (no 16MB global doc RMW). */
-const SAVE_BATCH = 40;
+const SAVE_BATCH = 60;
 const CATALOG_CACHE_TTL = 60 * 60;
 
 async function loadDdbCatalog(ctx: DdbAuthContext): Promise<DdbCatalog> {
@@ -758,7 +758,7 @@ async function importSpellIds(
     const batchRaw = batchIds
       .map((id) => byId.get(id))
       .filter((raw): raw is Record<string, unknown> => Boolean(raw));
-    const enriched = await enrichEntitiesWithFullDefinitions(ctx, 'spell', batchRaw, campaignId, true);
+    const enriched = await enrichEntitiesWithFullDefinitions(ctx, 'spell', batchRaw, campaignId);
     const enrichedById = poolById(enriched);
 
     const pending: Array<{ entry: OwlbearSpell; ddbId: number }> = [];
@@ -847,7 +847,7 @@ async function importItemIds(
     const batchRaw = batchIds
       .map((id) => byId.get(id))
       .filter((raw): raw is Record<string, unknown> => Boolean(raw));
-    const enriched = await enrichEntitiesWithFullDefinitions(ctx, 'item', batchRaw, campaignId, true);
+    const enriched = await enrichEntitiesWithFullDefinitions(ctx, 'item', batchRaw, campaignId);
     const enrichedById = poolById(enriched);
 
     const pending: Array<{ entry: OwlbearItem; ddbId: number }> = [];
@@ -1090,22 +1090,24 @@ export async function importAllDdbHomebrew(
   const spellIds = spellPool.map((raw) => ddbEntityId(raw)).filter((id): id is number => id != null);
   const itemIds = itemPool.map((raw) => ddbEntityId(raw)).filter((id): id is number => id != null);
 
-  const spellResult = await importSpellIds(
-    ctx,
-    spellIds,
-    catalog,
-    opts.campaignId,
-    DDB_HOMEBREW_SOURCE_ID,
-    runOpts,
-  );
-  const itemResult = await importItemIds(
-    ctx,
-    itemIds,
-    catalog,
-    opts.campaignId,
-    DDB_HOMEBREW_SOURCE_ID,
-    runOpts,
-  );
+  const [spellResult, itemResult] = await Promise.all([
+    importSpellIds(
+      ctx,
+      spellIds,
+      catalog,
+      opts.campaignId,
+      DDB_HOMEBREW_SOURCE_ID,
+      runOpts,
+    ),
+    importItemIds(
+      ctx,
+      itemIds,
+      catalog,
+      opts.campaignId,
+      DDB_HOMEBREW_SOURCE_ID,
+      runOpts,
+    ),
+  ]);
 
   return mergeImportResults(monsterResult, spellResult, itemResult);
 }
@@ -1158,16 +1160,17 @@ export async function importAllDdbLibraryFromSources(
     );
   }
   for (const sourceId of books) {
-    for (const kind of kinds) {
-      results.push(
-        await importAllDdbLibraryFromSource(ctx, {
+    const kindResults = await Promise.all(
+      kinds.map((kind) =>
+        importAllDdbLibraryFromSource(ctx, {
           kind,
           sourceId,
           campaignId: opts.campaignId,
           ...(opts.skipExisting ? { skipExisting: true, skipIndex } : {}),
         }),
-      );
-    }
+      ),
+    );
+    results.push(...kindResults);
   }
   const merged = mergeImportResults(...results);
   if (merged.imported.length === 0 && !opts.skipExisting) return merged;
@@ -1241,6 +1244,8 @@ export async function finishDdbLibraryImport(
     sourceLabels?: string[];
     /** Unlock every book source found in saved compendium entries (recovery after interrupted import). */
     unlockAllImportedSources?: boolean;
+    /** Wait for catalog rebuild to finish (default: background rebuild). */
+    awaitCatalogRebuild?: boolean;
   },
 ): Promise<{
   catalogRev: string | null;
@@ -1274,7 +1279,7 @@ export async function finishDdbLibraryImport(
 
   const { reconcileCompendiumMongo } = await import('../compendiumSync');
   const status = await reconcileCompendiumMongo('ddb-finish-import', {
-    deferCatalogRebuild: true,
+    deferCatalogRebuild: !opts?.awaitCatalogRebuild,
     strict: false,
   });
   void import('../compendiumSync')

@@ -12,7 +12,8 @@ const POLL_CONNECTED_MS = 120_000;
 const POLL_MS = 45_000;
 const POLL_DEGRADED_MS = 15_000;
 const POLL_SLOW_MS = 120_000;
-const POLL_REBUILD_MS = 1_000;
+const POLL_REBUILD_MS = 2_000;
+const REFETCH_DEBOUNCE_MS = 1_000;
 
 function isMongoDegraded(status?: CompendiumSyncStatus): boolean {
   const state = status?.mongoHealth?.state;
@@ -47,10 +48,12 @@ export function useCompendiumSyncPoll(enabled = true) {
   const [socketConnected, setSocketConnected] = useState(() => getSocket().connected);
 
   const scheduleRefetch = () => {
+    const status = queryClient.getQueryData<CompendiumSyncStatus>(['compendium', 'sync-status']);
+    if (status?.catalogRebuild?.active) return;
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
       void refetchAllCompendium(queryClient);
-    }, 150);
+    }, REFETCH_DEBOUNCE_MS);
   };
 
   const { data, isError } = useQuery({
@@ -95,6 +98,9 @@ export function useCompendiumSyncPoll(enabled = true) {
         const { catalogRebuild: _removed, ...rest } = old;
         return rest;
       });
+      if (!payload.active) {
+        void refetchAllCompendium(queryClient);
+      }
     };
 
     const onConnect = () => setSocketConnected(true);

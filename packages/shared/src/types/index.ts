@@ -5,3 +5,4 @@ export * from './socket';
 export * from './compendium';
 export * from './ddb';
 export * from './scene';
+export * from './handout';

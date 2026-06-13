@@ -1542,6 +1542,10 @@ async function upsertCollectionMonstersBulk(
   opts?: { skipNotify?: boolean },
 ) {
   if (entries.length === 0) return;
+  if (opts?.skipNotify) {
+    const { markCompendiumWritePending } = await import('./compendiumMongoWatch');
+    markCompendiumWritePending();
+  }
   const col = await getCollection<StoredMonster>('monsters');
   if (!col) {
     throw new Error('MongoDB unavailable — monster bulk write skipped');
@@ -1569,6 +1573,10 @@ async function upsertCollectionItemsBulk(
   opts?: { skipNotify?: boolean },
 ) {
   if (entries.length === 0) return;
+  if (opts?.skipNotify) {
+    const { markCompendiumWritePending } = await import('./compendiumMongoWatch');
+    markCompendiumWritePending();
+  }
   const col = await getCollection<StoredItem>('items');
   if (!col) {
     throw new Error('MongoDB unavailable — item bulk write skipped');
@@ -1596,6 +1604,10 @@ async function upsertCollectionSpellsBulk(
   opts?: { skipNotify?: boolean },
 ) {
   if (entries.length === 0) return;
+  if (opts?.skipNotify) {
+    const { markCompendiumWritePending } = await import('./compendiumMongoWatch');
+    markCompendiumWritePending();
+  }
   const col = await getCollection<StoredSpell>('spells');
   if (!col) {
     throw new Error('MongoDB unavailable — spell bulk write skipped');
@@ -1618,7 +1630,7 @@ async function upsertCollectionSpellsBulk(
   if (!opts?.skipNotify) await notifyTypedCollectionsChanged();
 }
 
-const TYPED_SYNC_BATCH = 250;
+const TYPED_SYNC_BATCH = 500;
 
 /** Push unified override arrays into per-entry Mongo collections (keeps typed + global + local aligned). */
 export async function syncTypedCollectionsFromOverrides(raw: OwlbearRawGlobalDoc): Promise<void> {

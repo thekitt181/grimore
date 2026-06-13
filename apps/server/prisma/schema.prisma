@@ -325,17 +325,43 @@ model Encounter {
 // ─── Handouts ─────────────────────────────────────────────────────────────────
 
 model Handout {
-  id         String      @id @default(cuid())
-  campaignId String
-  title      String
-  content    String?
-  imageUrl   String?
-  type       HandoutType @default(TEXT)
-  createdAt  DateTime    @default(now())
+  id               String      @id @default(cuid())
+  campaignId       String
+  title            String
+  content          String?
+  imageUrl         String?
+  type             HandoutType @default(TEXT)
+  compendiumItemId String?
+  ddbDefinitionId  Int?
+  itemMeta         Json?
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
 
-  campaign Campaign @relation(fields: [campaignId], references: [id])
+  campaign Campaign         @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  receipts HandoutReceipt[]
 
   @@index([campaignId])
+}
+
+model HandoutReceipt {
+  id               String      @id @default(cuid())
+  handoutId        String
+  userId           String
+  sessionId        String?
+  title            String
+  content          String?
+  imageUrl         String?
+  type             HandoutType
+  itemMeta         Json?
+  compendiumItemId String?
+  ddbDefinitionId  Int?
+  receivedAt       DateTime    @default(now())
+
+  handout Handout @relation(fields: [handoutId], references: [id], onDelete: Cascade)
+
+  @@unique([handoutId, userId])
+  @@index([userId])
+  @@index([sessionId])
 }
 
 enum HandoutType {

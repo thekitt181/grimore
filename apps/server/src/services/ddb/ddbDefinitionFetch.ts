@@ -5,8 +5,8 @@ import { stripDdbHtml } from './ddbHtml';
 import { fetchWithRetry } from './ddbFetchRetry';
 import { runWithConcurrency } from './ddbMonsterFetch';
 
-const DEFINITION_BATCH_SIZE = 40;
-const DEFINITION_BATCH_CONCURRENCY = 4;
+const DEFINITION_BATCH_SIZE = 60;
+const DEFINITION_BATCH_CONCURRENCY = 6;
 
 const COLLECTION_PATHS: Record<'spell' | 'item', string[]> = {
   spell: ['spell/collection', 'spells/collection'],

@@ -1,35 +1,17 @@
 import { useEffect, useRef, useState } from 'react';
 import { v4 as uuidv4 } from 'uuid';
-import type { LightingPreset, MediaLibraryCategory, MediaLibraryEntry, TimeOfDay, VideoLibraryEntry } from '@grimoire/shared';
+import type { LightingPreset, TimeOfDay } from '@grimoire/shared';
 import {
-  AMBIENT_SOUND_LIBRARY,
   DEFAULT_SCENE_MEDIA_CONFIG,
   LIGHTING_PRESETS,
-  MUSIC_LIBRARY,
   TIME_OF_DAY_PRESETS,
-  VIDEO_LIBRARY,
 } from '@grimoire/shared';
 import { fileToDataUrl } from '@/lib/imagePersistence';
 import { skipMusicTrack } from './audioEngine';
 import { useSceneMediaStore } from './sceneMediaStore';
 import { emitSessionMediaPatch, emitSessionTimeOfDay } from './useSceneMedia';
 
-type MenuId = 'media' | 'video' | 'audio' | 'upload' | 'libraries';
-
-const LIBRARY_CATEGORIES: Array<{ id: MediaLibraryCategory | 'all'; label: string }> = [
-  { id: 'all', label: 'All' },
-  { id: 'tavern', label: 'Tavern' },
-  { id: 'dungeon', label: 'Dungeon' },
-  { id: 'forest', label: 'Forest' },
-  { id: 'combat', label: 'Combat' },
-  { id: 'ocean', label: 'Ocean' },
-  { id: 'temple', label: 'Temple' },
-  { id: 'city', label: 'City' },
-  { id: 'horror', label: 'Horror' },
-  { id: 'winter', label: 'Winter' },
-  { id: 'camp', label: 'Camp' },
-  { id: 'library', label: 'Library' },
-];
+type MenuId = 'media' | 'video' | 'audio' | 'upload';
 
 interface SessionMediaBarProps {
   sessionId: string;
@@ -38,7 +20,6 @@ interface SessionMediaBarProps {
 
 export function SessionMediaBar({ sessionId, isGM }: SessionMediaBarProps) {
   const [openMenu, setOpenMenu] = useState<MenuId | null>(null);
-  const [libraryCategory, setLibraryCategory] = useState<MediaLibraryCategory | 'all'>('all');
   const [uploadUrl, setUploadUrl] = useState('');
   const [uploadKind, setUploadKind] = useState<'video' | 'ambient' | 'music'>('video');
   const [videoOverlay, setVideoOverlay] = useState(false);
@@ -69,81 +50,6 @@ export function SessionMediaBar({ sessionId, isGM }: SessionMediaBarProps) {
 
   function toggle(menu: MenuId) {
     setOpenMenu((prev) => (prev === menu ? null : menu));
-  }
-
-  function pushVideo(entry: VideoLibraryEntry, mode: 'cinema' | 'overlay' | 'popup' = 'cinema') {
-    const videoPopup =
-      mode === 'cinema'
-        ? {
-            url: entry.url,
-            loop: false,
-            muted: false,
-            autoplay: true,
-            volume: 1,
-            showAsOverlay: false,
-            cinemaMode: true,
-          }
-        : mode === 'overlay'
-          ? {
-              url: entry.url,
-              loop: entry.loop,
-              muted: true,
-              autoplay: true,
-              showAsOverlay: true,
-              cinemaMode: false,
-            }
-          : {
-              url: entry.url,
-              loop: entry.loop,
-              muted: false,
-              autoplay: true,
-              volume: 1,
-              showAsOverlay: false,
-              cinemaMode: false,
-            };
-
-    emitSessionMediaPatch(sessionId, {
-      backgroundVideoUrl: entry.url,
-      mediaConfig: {
-        ...cfg,
-        videoPopup,
-      },
-    });
-    setOpenMenu(null);
-  }
-
-  function pushAmbient(entry: MediaLibraryEntry) {
-    const layers = [...cfg.ambientLayers];
-    if (!layers.some((l) => l.libraryId === entry.id)) {
-      layers.push({
-        id: uuidv4(),
-        name: entry.name,
-        url: entry.url,
-        volume: entry.defaultVolume,
-        loop: entry.loop,
-        libraryId: entry.id,
-        category: entry.category,
-      });
-    }
-    emitSessionMediaPatch(sessionId, { mediaConfig: { ...cfg, ambientLayers: layers } });
-    setOpenMenu(null);
-  }
-
-  function pushMusic(entry: MediaLibraryEntry) {
-    emitSessionMediaPatch(sessionId, {
-      mediaConfig: {
-        ...cfg,
-        musicMode: 'crossfade',
-        musicPlaylist: [{
-          id: uuidv4(),
-          name: entry.name,
-          url: entry.url,
-          volume: entry.defaultVolume,
-          libraryId: entry.id,
-        }],
-      },
-    });
-    setOpenMenu(null);
   }
 
   function pushLighting(preset: LightingPreset) {
@@ -233,11 +139,6 @@ export function SessionMediaBar({ sessionId, isGM }: SessionMediaBarProps) {
     }
   }
 
-  function filterCategory<T extends { category: MediaLibraryCategory }>(items: T[]): T[] {
-    if (libraryCategory === 'all') return items;
-    return items.filter((i) => i.category === libraryCategory);
-  }
-
   const TabBtn = ({ id, label }: { id: MenuId; label: string }) => (
     <button
       type="button"
@@ -274,7 +175,6 @@ export function SessionMediaBar({ sessionId, isGM }: SessionMediaBarProps) {
       <TabBtn id="video" label="Video" />
       <TabBtn id="audio" label="Audio" />
       <TabBtn id="upload" label="Upload" />
-      <TabBtn id="libraries" label="Libraries" />
 
       {openMenu && (
         <div
@@ -282,7 +182,7 @@ export function SessionMediaBar({ sessionId, isGM }: SessionMediaBarProps) {
           style={{
             background: 'var(--color-bg-secondary)',
             border: '1px solid var(--color-border)',
-            minWidth: openMenu === 'libraries' ? 320 : 260,
+            minWidth: 260,
             maxWidth: 360,
             maxHeight: 'min(70vh, 420px)',
           }}
@@ -334,23 +234,11 @@ export function SessionMediaBar({ sessionId, isGM }: SessionMediaBarProps) {
             )}
 
             {openMenu === 'video' && (
-              <div className="space-y-1">
+              <div className="space-y-2">
                 <PickBtn label="✕ Clear video" onClick={clearVideo} />
-                <div className="gold-divider my-1" />
-                {VIDEO_LIBRARY.map((v) => (
-                  <div key={v.id} className="flex gap-1">
-                    <button type="button" className="btn-ghost text-[10px] py-0 px-1 shrink-0" onClick={() => pushVideo(v, 'cinema')} title="Cinema clip">
-                      ▶
-                    </button>
-                    <button type="button" className="btn-ghost text-[10px] py-0 px-1 shrink-0" onClick={() => pushVideo(v, 'overlay')} title="Ambient overlay">
-                      ◐
-                    </button>
-                    <button type="button" className="btn-ghost text-[10px] py-0 px-1 shrink-0" onClick={() => pushVideo(v, 'popup')} title="Popup">
-                      ▢
-                    </button>
-                    <PickBtn label={v.name} onClick={() => pushVideo(v, 'cinema')} />
-                  </div>
-                ))}
+                <p className="px-1 font-ui text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
+                  Use Upload to paste a URL or pick a video file.
+                </p>
               </div>
             )}
 
@@ -358,29 +246,8 @@ export function SessionMediaBar({ sessionId, isGM }: SessionMediaBarProps) {
               <div className="space-y-2">
                 <PickBtn label="✕ Clear all audio" onClick={clearAudio} />
                 <p className="px-1 font-ui text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
-                  Paste or upload your own tracks via Upload — no built-in soundboard (old presets were inaccurate).
+                  Use Upload to add ambient layers or music tracks.
                 </p>
-                {AMBIENT_SOUND_LIBRARY.length > 0 && (
-                  <>
-                    <p className="px-1 font-ui text-[10px] uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>
-                      Ambient layers
-                    </p>
-                    {AMBIENT_SOUND_LIBRARY.slice(0, 12).map((a) => (
-                      <PickBtn key={a.id} label={`+ ${a.name}`} onClick={() => pushAmbient(a)} />
-                    ))}
-                  </>
-                )}
-                {MUSIC_LIBRARY.length > 0 && (
-                  <>
-                    <div className="gold-divider my-1" />
-                    <p className="px-1 font-ui text-[10px] uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>
-                      Music
-                    </p>
-                    {MUSIC_LIBRARY.map((m) => (
-                      <PickBtn key={m.id} label={`♫ ${m.name}`} onClick={() => pushMusic(m)} />
-                    ))}
-                  </>
-                )}
               </div>
             )}
 
@@ -416,53 +283,6 @@ export function SessionMediaBar({ sessionId, isGM }: SessionMediaBarProps) {
                 <button type="button" className="btn-primary w-full text-xs py-1" onClick={applyUpload} disabled={!uploadUrl.trim()}>
                   Push live
                 </button>
-              </div>
-            )}
-
-            {openMenu === 'libraries' && (
-              <div className="space-y-2">
-                <div className="flex flex-wrap gap-1 px-1">
-                  {LIBRARY_CATEGORIES.map((c) => (
-                    <button
-                      key={c.id}
-                      type="button"
-                      className="text-[10px] px-1.5 py-0.5 rounded font-ui"
-                      style={{
-                        background: libraryCategory === c.id ? 'rgba(201,168,76,0.2)' : 'var(--color-bg-tertiary)',
-                        color: libraryCategory === c.id ? 'var(--color-accent-gold)' : 'var(--color-text-secondary)',
-                      }}
-                      onClick={() => setLibraryCategory(c.id)}
-                    >
-                      {c.label}
-                    </button>
-                  ))}
-                </div>
-                <p className="px-1 font-ui text-[10px] uppercase tracking-wider" style={{ color: 'var(--color-accent-gold)' }}>
-                  Ambient
-                </p>
-                {filterCategory(AMBIENT_SOUND_LIBRARY).length === 0 ? (
-                  <p className="px-1 font-ui text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
-                    Use Upload to add ambient audio URLs.
-                  </p>
-                ) : filterCategory(AMBIENT_SOUND_LIBRARY).map((a) => (
-                  <PickBtn key={a.id} label={`+ ${a.name}`} onClick={() => pushAmbient(a)} />
-                ))}
-                <p className="px-1 font-ui text-[10px] uppercase tracking-wider" style={{ color: 'var(--color-accent-gold)' }}>
-                  Music
-                </p>
-                {filterCategory(MUSIC_LIBRARY).length === 0 ? (
-                  <p className="px-1 font-ui text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
-                    Use Upload to add music URLs.
-                  </p>
-                ) : filterCategory(MUSIC_LIBRARY).map((m) => (
-                  <PickBtn key={m.id} label={`♫ ${m.name}`} onClick={() => pushMusic(m)} />
-                ))}
-                <p className="px-1 font-ui text-[10px] uppercase tracking-wider" style={{ color: 'var(--color-accent-gold)' }}>
-                  Video
-                </p>
-                {filterCategory(VIDEO_LIBRARY).map((v) => (
-                  <PickBtn key={v.id} label={`▶ ${v.name}`} onClick={() => pushVideo(v, 'cinema')} />
-                ))}
               </div>
             )}
           </div>

@@ -1,6 +1,4 @@
-import type { OwlbearRawGlobalDoc } from '@grimoire/shared';
 import { DDB_HOMEBREW_SOURCE_LABEL } from '@grimoire/shared';
-import { getCollection, isMongoCircuitOpen, withMongoTimeout } from '../lib/mongo';
 import type { CompendiumKind } from './compendiumOwlbearPersist';
 import { entryNameKey } from './compendiumMerge';
 import { readTypedImportNameSourceRows } from './compendiumMongoReads';
@@ -16,12 +14,6 @@ type NameSourceRow = {
   descEqualsName?: boolean;
 };
 
-const OVERRIDE_FIELD: Record<CompendiumKind, keyof OwlbearRawGlobalDoc> = {
-  monster: 'overrideMonsters',
-  item: 'overrideItems',
-  spell: 'overrideSpells',
-};
-
 /**
  * An imported entry is "complete" only when it carries real detail text. Entries that
  * fell back to just their name (failed detail fetch) or contain `[object Object]` are
@@ -35,70 +27,6 @@ function rowIsComplete(kind: CompendiumKind, row: NameSourceRow): boolean {
   if (row.descEqualsName) return false;
   if (kind === 'monster' && row.descLen < 150) return false;
   return true;
-}
-
-async function readKindNameSourceRows(kind: CompendiumKind): Promise<NameSourceRow[]> {
-  if (isMongoCircuitOpen()) return [];
-  const field = OVERRIDE_FIELD[kind];
-  try {
-    const col = await getCollection<OwlbearRawGlobalDoc>('data');
-    if (!col) return [];
-    const rows = await withMongoTimeout(() => col.aggregate([
-        { $match: { _id: 'global' } },
-        {
-          $project: {
-            rows: {
-              $map: {
-                input: { $ifNull: [`$${field}`, []] },
-                as: 'e',
-                in: {
-                  name: '$$e.name',
-                  source: '$$e.source',
-                  brokenDuration: {
-                    $regexMatch: {
-                      input: { $ifNull: ['$$e.description', ''] },
-                      regex: '\\[object Object\\]',
-                    },
-                  },
-                  descLen: {
-                    $strLenCP: { $trim: { input: { $ifNull: ['$$e.description', ''] } } },
-                  },
-                  descEqualsName: {
-                    $eq: [
-                      { $toLower: { $trim: { input: { $ifNull: ['$$e.description', ''] } } } },
-                      { $toLower: { $trim: { input: { $ifNull: ['$$e.name', ''] } } } },
-                    ],
-                  },
-                },
-              },
-            },
-          },
-        },
-      ]).toArray(),
-      20_000,
-    );
-    const list = (rows[0] as { rows?: NameSourceRow[] } | undefined)?.rows ?? [];
-    return list
-      .filter((r) => Boolean(r?.name?.trim()))
-      .map((r) => ({ ...r, descEqualsName: r.descEqualsName && (r.descLen ?? 0) > 0 }));
-  } catch {
-    return [];
-  }
-}
-
-function nameSourceRowKey(row: NameSourceRow): string {
-  return `${entryNameKey(row.name)}|${(row.source ?? '').trim().toLowerCase()}`;
-}
-
-function mergeNameSourceRows(global: NameSourceRow[], typed: NameSourceRow[]): NameSourceRow[] {
-  const map = new Map<string, NameSourceRow>();
-  for (const row of global) {
-    if (row.name?.trim()) map.set(nameSourceRowKey(row), row);
-  }
-  for (const row of typed) {
-    if (row.name?.trim()) map.set(nameSourceRowKey(row), row);
-  }
-  return Array.from(map.values());
 }
 
 /** In-memory index of Mongo override entries for fast skip-during-reimport checks. */
@@ -138,33 +66,23 @@ export class ImportSkipIndex {
 }
 
 let cachedIndex: { at: number; index: ImportSkipIndex } | null = null;
-const INDEX_TTL_MS = 30_000;
+const INDEX_TTL_MS = 120_000;
 
-/** Load name+source rows from Mongo overrides + typed collections (lightweight — no stat blocks). */
+/** Load name+source rows from typed Mongo collections (lightweight — no stat blocks). */
 export async function loadImportSkipIndex(force = false): Promise<ImportSkipIndex> {
   const now = Date.now();
   if (!force && cachedIndex && now - cachedIndex.at < INDEX_TTL_MS) {
     return cachedIndex.index;
   }
-  const [
-    globalMonster,
-    globalItem,
-    globalSpell,
-    typedMonster,
-    typedItem,
-    typedSpell,
-  ] = await Promise.all([
-    readKindNameSourceRows('monster'),
-    readKindNameSourceRows('item'),
-    readKindNameSourceRows('spell'),
+  const [typedMonster, typedItem, typedSpell] = await Promise.all([
     readTypedImportNameSourceRows('monster'),
     readTypedImportNameSourceRows('item'),
     readTypedImportNameSourceRows('spell'),
   ]);
   const index = new ImportSkipIndex({
-    monster: mergeNameSourceRows(globalMonster, typedMonster),
-    item: mergeNameSourceRows(globalItem, typedItem),
-    spell: mergeNameSourceRows(globalSpell, typedSpell),
+    monster: typedMonster,
+    item: typedItem,
+    spell: typedSpell,
   });
   cachedIndex = { at: now, index };
   return index;

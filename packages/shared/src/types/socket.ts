@@ -1,6 +1,7 @@
 import type { SessionUser } from './user';
 import type { DdbCharacterSyncPayload, DdbHpUpdatePayload, DdbRollBridgePayload } from './ddb';
 import type { CatalogRebuildProgress } from './compendium';
+import type { HandoutItemMeta, HandoutType } from './handout';
 
 // ─── Map events ───────────────────────────────────────────────────────────────
 
@@ -269,10 +270,15 @@ export interface SceneChangePayload {
 export interface HandoutRevealPayload {
   sessionId: string;
   handoutId: string;
+  receiptId?: string;
   title: string;
   content: string;
   imageUrl?: string;
+  type?: HandoutType;
+  itemMeta?: HandoutItemMeta;
   targetUserIds: string[] | 'all';
+  /** Play reveal animation on player clients. */
+  animate?: boolean;
 }
 
 // ─── Chat events ──────────────────────────────────────────────────────────────

@@ -9,10 +9,43 @@ let started = false;
 let lastNotifiedMs = 0;
 /** Ignore change-stream echoes of our own write for this window (ms). */
 const SELF_ECHO_MS = 400;
+/** Coalesce rapid typed-collection writes (bulk import) into one client push. */
+const CHANGE_NOTIFY_DEBOUNCE_MS = 2_500;
+let bulkImportDepth = 0;
+let pendingChangeNotify: ReturnType<typeof setTimeout> | null = null;
+let pendingChangeLastUpdated: string | Date = new Date();
 
 /** Call before a VTT-originated Mongo write to suppress duplicate socket push. */
 export function markCompendiumWritePending(): void {
   lastNotifiedMs = Date.now();
+}
+
+/** Suppress change-stream client pushes while bulk DDB import is running. */
+export function beginCompendiumBulkImport(): void {
+  bulkImportDepth += 1;
+}
+
+/** Resume change-stream pushes and notify clients once when the outermost import finishes. */
+export function endCompendiumBulkImport(): void {
+  bulkImportDepth = Math.max(0, bulkImportDepth - 1);
+  if (bulkImportDepth === 0) {
+    if (pendingChangeNotify) {
+      clearTimeout(pendingChangeNotify);
+      pendingChangeNotify = null;
+    }
+    notifyCompendiumChanged(new Date());
+  }
+}
+
+function flushPendingChangeNotify(): void {
+  pendingChangeNotify = null;
+  notifyCompendiumChanged(pendingChangeLastUpdated);
+}
+
+function scheduleChangeNotify(lastUpdated: string | Date): void {
+  pendingChangeLastUpdated = lastUpdated;
+  if (pendingChangeNotify) return;
+  pendingChangeNotify = setTimeout(flushPendingChangeNotify, CHANGE_NOTIFY_DEBOUNCE_MS);
 }
 
 function onCollectionChange(
@@ -20,6 +53,7 @@ function onCollectionChange(
   change: ChangeStreamDocument,
 ): void {
   const now = Date.now();
+  if (bulkImportDepth > 0) return;
   if (now - lastNotifiedMs < SELF_ECHO_MS) return;
 
   const doc = 'fullDocument' in change ? change.fullDocument : undefined;
@@ -27,8 +61,7 @@ function onCollectionChange(
     collectionName === 'data' && doc && 'lastUpdated' in doc
       ? (doc as OwlbearRawGlobalDoc).lastUpdated ?? new Date()
       : new Date();
-  notifyCompendiumChanged(lastUpdated);
-  console.log(`[Compendium] Mongo change stream (${collectionName}) — clients notified`);
+  scheduleChangeNotify(lastUpdated);
 }
 
 function attachCollectionWatch(collectionName: typeof WATCH_COLLECTIONS[number]): void {

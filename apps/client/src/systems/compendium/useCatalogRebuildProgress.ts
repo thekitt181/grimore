@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { CatalogRebuildProgress, CompendiumSyncStatus } from '@grimoire/shared';
 import { getSocket } from '@/lib/socket';
 
@@ -41,12 +41,26 @@ export function useCatalogRebuildProgress(watch = true) {
   const [live, setLive] = useState<CatalogRebuildProgress | null>(null);
   const [tick, setTick] = useState(0);
 
+  const { data: syncStatus } = useQuery<CompendiumSyncStatus>({
+    queryKey: ['compendium', 'sync-status'],
+    enabled: watch,
+    staleTime: 2_000,
+  });
+
   useEffect(() => {
-    if (!watch) return;
+    if (!watch) {
+      setLive(null);
+      return;
+    }
     const socket = getSocket();
     const onRebuild = (payload: CatalogRebuildProgress) => {
-      setLive(payload.active ? payload : null);
-      patchSyncStatus(qc, payload.active ? payload : undefined);
+      if (payload.active) {
+        setLive(payload);
+        patchSyncStatus(qc, payload);
+        return;
+      }
+      setLive(null);
+      patchSyncStatus(qc, undefined);
     };
     socket.on('compendium:catalog-rebuild', onRebuild);
     return () => {
@@ -54,8 +68,14 @@ export function useCatalogRebuildProgress(watch = true) {
     };
   }, [watch, qc]);
 
-  const syncStatus = qc.getQueryData<CompendiumSyncStatus>(['compendium', 'sync-status']);
-  const progress = live ?? syncStatus?.catalogRebuild ?? null;
+  useEffect(() => {
+    if (!syncStatus?.catalogRebuild?.active) {
+      setLive(null);
+    }
+  }, [syncStatus?.catalogRebuild?.active]);
+
+  const serverRebuild = syncStatus?.catalogRebuild;
+  const progress = serverRebuild?.active ? (live ?? serverRebuild) : null;
   const active = Boolean(progress?.active);
 
   useEffect(() => {

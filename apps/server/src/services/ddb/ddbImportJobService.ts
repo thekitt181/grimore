@@ -96,9 +96,6 @@ async function isJobCancelled(jobId: string): Promise<boolean> {
 const STANDARD_KINDS = ['monster', 'spell', 'item'] as const;
 type ImportKind = (typeof STANDARD_KINDS)[number];
 
-function kindToPhase(kind: ImportKind): DdbLibraryImportJobProgress['phase'] {
-  return kind === 'monster' ? 'monsters' : kind === 'spell' ? 'spells' : 'items';
-}
 
 function normalizeSourceId(id: unknown): number | null {
   const n = Number(id);
@@ -283,6 +280,8 @@ async function runDdbLibraryImportJob(jobId: string): Promise<void> {
   if (runningJobs.has(jobId)) return;
   runningJobs.add(jobId);
   let merged: DdbLibraryImportResult = { imported: [], errors: [] };
+  const { beginCompendiumBulkImport, endCompendiumBulkImport } = await import('../compendiumMongoWatch');
+  beginCompendiumBulkImport();
   try {
     const job = await prisma.ddbLibraryImportJob.findUnique({ where: { id: jobId } });
     if (!job || job.status !== 'RUNNING') return;
@@ -400,52 +399,64 @@ async function runDdbLibraryImportJob(jobId: string): Promise<void> {
         }
 
         const kindsDone: ImportKind[] = [...completedKinds];
+        const kindsToRun = STANDARD_KINDS.slice(startKindIndex);
 
-        for (let kindIdx = startKindIndex; kindIdx < STANDARD_KINDS.length; kindIdx++) {
-          if (await isJobCancelled(jobId)) return;
-          const kind = STANDARD_KINDS[kindIdx]!;
-          const phase = kindToPhase(kind);
-
-          await updateJobProgress(jobId, {
-            ...progressBase,
-            phase,
-            done: 0,
-            total: 0,
-            completedKinds: kindsDone,
-          });
-
+        if (kindsToRun.length > 0) {
+          const kindProgress: Record<ImportKind, { done: number; total: number }> = {
+            monster: { done: 0, total: 0 },
+            spell: { done: 0, total: 0 },
+            item: { done: 0, total: 0 },
+          };
           let lastKindProgressAt = 0;
-          const onProgress = (done: number, total: number) => {
-            const now = Date.now();
-            if (done < total && now - lastKindProgressAt < 1500) return;
-            lastKindProgressAt = now;
+
+          const flushKindProgress = () => {
+            const done = kindProgress.monster.done + kindProgress.spell.done + kindProgress.item.done;
+            const total = kindProgress.monster.total + kindProgress.spell.total + kindProgress.item.total;
             void updateJobProgress(jobId, {
               ...progressBase,
-              phase,
+              phase: kindsToRun.includes('monster') ? 'monsters' : kindsToRun.includes('spell') ? 'spells' : 'items',
               done,
               total,
               completedKinds: kindsDone,
             });
           };
 
-          const chunk = await importAllDdbLibraryFromSource(ctx, {
-            kind,
-            sourceId,
-            campaignId: job.campaignId ?? undefined,
-            ...(job.skipExisting ? { skipExisting: true, skipIndex } : {}),
-            onProgress,
-          });
-          bookMerged = mergeImportResults(bookMerged, chunk);
-          merged = mergeImportResults(merged, chunk);
-          kindsDone.push(kind);
-
           await updateJobProgress(jobId, {
             ...progressBase,
-            phase,
+            phase: 'monsters',
             done: 0,
             total: 0,
             completedKinds: kindsDone,
           });
+
+          const kindResults = await Promise.all(
+            kindsToRun.map(async (kind) => {
+              if (await isJobCancelled(jobId)) {
+                return { imported: [], errors: [] } satisfies DdbLibraryImportResult;
+              }
+              const onProgress = (done: number, total: number) => {
+                kindProgress[kind] = { done, total };
+                const now = Date.now();
+                if (done < total && now - lastKindProgressAt < 1500) return;
+                lastKindProgressAt = now;
+                flushKindProgress();
+              };
+              return importAllDdbLibraryFromSource(ctx, {
+                kind,
+                sourceId,
+                campaignId: job.campaignId ?? undefined,
+                ...(job.skipExisting ? { skipExisting: true, skipIndex } : {}),
+                onProgress,
+              });
+            }),
+          );
+
+          for (const chunk of kindResults) {
+            bookMerged = mergeImportResults(bookMerged, chunk);
+            merged = mergeImportResults(merged, chunk);
+          }
+          kindsDone.push(...kindsToRun);
+          flushKindProgress();
           await persistPartialResult(jobId, merged);
         }
       }
@@ -487,41 +498,14 @@ async function runDdbLibraryImportJob(jobId: string): Promise<void> {
       const fin = await finishDdbLibraryImport(ctx, {
         sourceIds: accessible.filter((id) => id > 0),
         unlockAllImportedSources: true,
+        awaitCatalogRebuild: true,
       });
       merged = {
         ...merged,
         catalogRev: fin.catalogRev ?? merged.catalogRev,
         sourcesUnlocked: [...new Set([...(merged.sourcesUnlocked ?? []), ...(fin.sourcesUnlocked ?? [])])],
       };
-    } catch (err) {
-      console.warn(`[DDB] finish-import after job ${jobId} failed:`, err);
-    }
-
-    const { invalidateImportSkipIndex } = await import('../compendiumImportIndex');
-    invalidateImportSkipIndex();
-
-    // Guarantee every imported entry is live in the shared catalog all users read from.
-    // The typed Mongo collections are the source of truth (no 16MB cap); rebuild from them
-    // and verify the in-memory catalog actually reflects them, retrying once if it lags.
-    try {
-      const { rebuildCatalogCacheAtomic, getCatalogEntryCounts } = await import('../compendiumSync');
-      const { readOverrideCountsFromTypedCollections } = await import('../compendiumMongoReads');
-
-      await rebuildCatalogCacheAtomic();
-
-      const typed = await readOverrideCountsFromTypedCollections();
-      const catalog = getCatalogEntryCounts();
-      if (typed && catalog) {
-        const typedTotal = typed.monsters + typed.items + typed.spells;
-        const catalogTotal = catalog.monsters + catalog.items + catalog.spells;
-        // Allow a small slack for bundled/base entries vs. override counts.
-        if (typedTotal > 0 && catalogTotal + 5 < typedTotal) {
-          console.warn(
-            `[DDB] Catalog (${catalogTotal}) trails imported entries (${typedTotal}) — rebuilding once more`,
-          );
-          await rebuildCatalogCacheAtomic();
-        }
-      }
+      const { getCatalogEntryCounts } = await import('../compendiumSync');
       console.log(
         `[DDB] Import job ${jobId} catalog ready: `
         + `${getCatalogEntryCounts()?.monsters ?? 0} monsters, `
@@ -529,8 +513,11 @@ async function runDdbLibraryImportJob(jobId: string): Promise<void> {
         + `${getCatalogEntryCounts()?.spells ?? 0} spells`,
       );
     } catch (err) {
-      console.warn(`[DDB] final catalog rebuild after job ${jobId} failed:`, err);
+      console.warn(`[DDB] finish-import after job ${jobId} failed:`, err);
     }
+
+    const { invalidateImportSkipIndex } = await import('../compendiumImportIndex');
+    invalidateImportSkipIndex();
 
     await finishJob(jobId, 'COMPLETED', { result: merged });
   } catch (err) {
@@ -538,6 +525,7 @@ async function runDdbLibraryImportJob(jobId: string): Promise<void> {
     console.error(`[DDB] import job ${jobId} failed:`, err);
     await finishJob(jobId, 'FAILED', { errorMessage: message, result: merged });
   } finally {
+    endCompendiumBulkImport();
     runningJobs.delete(jobId);
   }
 }

@@ -39,6 +39,9 @@ import { MobileSessionDock } from '@/components/MobileSessionDock';
 import { MonsterDexPanel } from '@/systems/compendium/MonsterDexPanel';
 import { ItemHandoutViewer } from '@/systems/compendium/ItemHandoutViewer';
 import { useHandoutRevealSocket } from '@/systems/compendium/useHandoutRevealSocket';
+import { HandoutManagerPanel } from '@/systems/handouts/HandoutManagerPanel';
+import { HandoutJournalPanel } from '@/systems/handouts/HandoutJournalPanel';
+import { useHandoutJournalStore } from '@/systems/handouts/handoutJournalStore';
 import { useCompendiumSyncPoll } from '@/systems/compendium/useCompendiumSync';
 import { CatalogRebuildBanner } from '@/systems/compendium/CatalogRebuildBanner';
 import { useCompendiumAuthRecovery } from '@/systems/compendium/useCompendiumAuthRecovery';
@@ -82,6 +85,9 @@ export function SessionPage() {
   const [socketReady, setSocketReady] = useState(false);
   const [showDice, setShowDice] = useState(false);
   const [showInitiative, setShowInitiative] = useState(false);
+  const [handoutManagerOpen, setHandoutManagerOpen] = useState(false);
+  const [journalOpen, setJournalOpen] = useState(false);
+  const loadHandoutJournal = useHandoutJournalStore((s) => s.loadJournal);
   const panelOpen = useCompendiumUiStore((s) => s.panelOpen);
   const setPanelOpen = useCompendiumUiStore((s) => s.setPanelOpen);
   const tokenActionsToken = useCombatStore((s) => s.tokenActionsToken);
@@ -161,6 +167,12 @@ export function SessionPage() {
   );
   useHandoutRevealSocket(socketReady ? (sessionId ?? null) : null);
   useSceneMedia(socketReady ? sessionId : undefined);
+
+  useEffect(() => {
+    if (sessionInfo?.campaignId) {
+      void loadHandoutJournal(sessionInfo.campaignId);
+    }
+  }, [sessionInfo?.campaignId, loadHandoutJournal]);
 
   const combatActive = useInitiativeStore((s) => s.isActive);
   const hasCombatants = useInitiativeStore((s) => s.combatants.length > 0);
@@ -340,6 +352,19 @@ export function SessionPage() {
           {sceneManagerOpen && isGM && (
             <SceneManagerPanel onClose={() => setSceneManagerOpen(false)} />
           )}
+          {handoutManagerOpen && isGM && sessionInfo && sessionId && (
+            <HandoutManagerPanel
+              campaignId={sessionInfo.campaignId}
+              sessionId={sessionId}
+              onClose={() => setHandoutManagerOpen(false)}
+            />
+          )}
+          {journalOpen && sessionInfo && (
+            <HandoutJournalPanel
+              campaignId={sessionInfo.campaignId}
+              onClose={() => setJournalOpen(false)}
+            />
+          )}
           {importModalOpen && (
             <CharacterImportModal
               {...(importLinkTokenId ? { linkTokenId: importLinkTokenId } : {})}
@@ -372,6 +397,32 @@ export function SessionPage() {
 
               <div className="flex gap-2">
                 <MapViewModeToggle variant="dock" />
+                {isGM && (
+                  <button
+                    onClick={() => setHandoutManagerOpen(!handoutManagerOpen)}
+                    className="w-10 h-10 rounded-lg flex items-center justify-center text-lg shadow-panel transition-all"
+                    style={{
+                      background: handoutManagerOpen ? 'rgba(201,168,76,0.2)' : 'var(--color-bg-secondary)',
+                      border: `1px solid ${handoutManagerOpen ? 'var(--color-accent-gold)' : 'var(--color-border)'}`,
+                      color: handoutManagerOpen ? 'var(--color-accent-gold)' : 'var(--color-text-secondary)',
+                    }}
+                    title="Handouts"
+                  >
+                    📜
+                  </button>
+                )}
+                <button
+                  onClick={() => setJournalOpen(!journalOpen)}
+                  className="w-10 h-10 rounded-lg flex items-center justify-center text-lg shadow-panel transition-all"
+                  style={{
+                    background: journalOpen ? 'rgba(201,168,76,0.2)' : 'var(--color-bg-secondary)',
+                    border: `1px solid ${journalOpen ? 'var(--color-accent-gold)' : 'var(--color-border)'}`,
+                    color: journalOpen ? 'var(--color-accent-gold)' : 'var(--color-text-secondary)',
+                  }}
+                  title="Handout journal"
+                >
+                  📖
+                </button>
                 {isGM && (
                   <button
                     onClick={() => setSceneManagerOpen(!sceneManagerOpen)}
