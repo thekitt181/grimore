@@ -10,40 +10,46 @@ interface BackgroundVideoLayerProps {
 
 export function BackgroundVideoLayer({ sessionId, allowDismiss = false }: BackgroundVideoLayerProps) {
   const scene = useSceneMediaStore((s) => s.activeScene);
-  const cinemaTakeover = useSceneMediaStore((s) => s.cinemaTakeover);
   const setCinemaTakeover = useSceneMediaStore((s) => s.setCinemaTakeover);
   const clearVideoPlayback = useSceneMediaStore((s) => s.clearVideoPlayback);
   const videoRef = useRef<HTMLVideoElement>(null);
   const [needsUnmute, setNeedsUnmute] = useState(false);
+  const [loadError, setLoadError] = useState(false);
 
   const popup = scene?.mediaConfig?.videoPopup;
   const url = popup?.url ?? scene?.backgroundVideoUrl ?? null;
   const cinemaMode = popup?.cinemaMode ?? false;
   const showAsOverlay = !cinemaMode && (popup?.showAsOverlay ?? false);
+  const showPopup = Boolean(url && !cinemaMode && !showAsOverlay);
 
   useEffect(() => {
-    if (url && cinemaMode) setCinemaTakeover(true);
-    else if (!url) setCinemaTakeover(false);
+    setCinemaTakeover(Boolean(url && cinemaMode));
+    if (!url) setLoadError(false);
   }, [url, cinemaMode, setCinemaTakeover]);
 
   useEffect(() => {
     const el = videoRef.current;
     if (!el || !url) return;
+
+    setLoadError(false);
     el.load();
-    if (popup?.autoplay !== false) {
-      el.muted = popup?.muted ?? (cinemaMode ? false : true);
-      el.volume = Math.max(0, Math.min(1, popup?.volume ?? 1));
-      void el.play()
-        .then(() => setNeedsUnmute(false))
-        .catch(() => {
-          if (!el.muted) {
-            el.muted = true;
-            void el.play().catch(() => undefined);
-            setNeedsUnmute(true);
-          }
-        });
-    }
-  }, [url, popup?.autoplay, popup?.muted, popup?.volume, cinemaMode]);
+
+    if (popup?.autoplay === false) return;
+
+    const wantSound = cinemaMode ? !(popup?.muted ?? false) : !(popup?.muted ?? showAsOverlay);
+    el.muted = !wantSound;
+    el.volume = Math.max(0, Math.min(1, popup?.volume ?? 1));
+
+    void el.play()
+      .then(() => setNeedsUnmute(false))
+      .catch(() => {
+        if (!el.muted) {
+          el.muted = true;
+          void el.play().catch(() => undefined);
+          if (cinemaMode || showPopup) setNeedsUnmute(true);
+        }
+      });
+  }, [url, popup?.autoplay, popup?.muted, popup?.volume, cinemaMode, showAsOverlay, showPopup]);
 
   const stopPlayback = useCallback(() => {
     if (allowDismiss) {
@@ -68,7 +74,7 @@ export function BackgroundVideoLayer({ sessionId, allowDismiss = false }: Backgr
 
   if (!url) return null;
 
-  if (cinemaMode && cinemaTakeover) {
+  if (cinemaMode) {
     return (
       <div
         className="fixed inset-0 z-[9999] flex items-center justify-center bg-black"
@@ -83,7 +89,13 @@ export function BackgroundVideoLayer({ sessionId, allowDismiss = false }: Backgr
           playsInline
           autoPlay
           onEnded={handleEnded}
+          onError={() => setLoadError(true)}
         />
+        {loadError && (
+          <p className="absolute bottom-20 left-1/2 -translate-x-1/2 font-ui text-sm text-red-300 px-4 text-center">
+            Video failed to load — try Upload with a direct MP4 link.
+          </p>
+        )}
         {needsUnmute && (
           <button
             type="button"
@@ -117,6 +129,7 @@ export function BackgroundVideoLayer({ sessionId, allowDismiss = false }: Backgr
           muted={popup?.muted ?? true}
           playsInline
           autoPlay
+          onError={() => setLoadError(true)}
         />
       </div>
     );
@@ -141,7 +154,13 @@ export function BackgroundVideoLayer({ sessionId, allowDismiss = false }: Backgr
           autoPlay
           controls
           onEnded={handleEnded}
+          onError={() => setLoadError(true)}
         />
+        {loadError && (
+          <p className="absolute bottom-3 left-3 right-12 font-ui text-xs text-red-300">
+            Video failed to load — URL may be blocked or invalid.
+          </p>
+        )}
         <button
           type="button"
           className="absolute top-3 right-3 btn-ghost text-sm"

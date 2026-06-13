@@ -670,34 +670,48 @@ async function executeCatalogBuild(previousCache: CatalogCache | null): Promise<
   }
 }
 
+let catalogRebuildInflight: Promise<CatalogCache> | null = null;
+
 /** Rebuild catalog after a write while keeping the previous cache if rebuild fails. */
 export async function rebuildCatalogCacheAtomic(): Promise<CatalogCache> {
-  const previousCache = catalogCache;
-  catalogBuildPromise = null;
+  // Coalesce concurrent rebuilds (e.g. background change-notify + an explicit post-import
+  // rebuild) so they share one pass instead of racing to overwrite the catalog cache.
+  if (catalogRebuildInflight) return catalogRebuildInflight;
 
-  const [mongoCounts, typedCounts] = await Promise.all([
-    readOverrideCountsFromMongo(),
-    readOverrideCountsFromTypedCollections(),
-  ]);
-  const pickCounts = (
-    a: { monsters: number; items: number; spells: number } | null,
-    b: typeof a,
-  ) => {
-    if (!a) return b ?? undefined;
-    if (!b) return a;
-    const aTotal = a.monsters + a.items + a.spells;
-    const bTotal = b.monsters + b.items + b.spells;
-    return bTotal > aTotal ? b : a;
-  };
-  startCatalogRebuild(pickCounts(mongoCounts, typedCounts));
+  catalogRebuildInflight = (async () => {
+    const previousCache = catalogCache;
+    catalogBuildPromise = null;
+
+    const [mongoCounts, typedCounts] = await Promise.all([
+      readOverrideCountsFromMongo(),
+      readOverrideCountsFromTypedCollections(),
+    ]);
+    const pickCounts = (
+      a: { monsters: number; items: number; spells: number } | null,
+      b: typeof a,
+    ) => {
+      if (!a) return b ?? undefined;
+      if (!b) return a;
+      const aTotal = a.monsters + a.items + a.spells;
+      const bTotal = b.monsters + b.items + b.spells;
+      return bTotal > aTotal ? b : a;
+    };
+    startCatalogRebuild(pickCounts(mongoCounts, typedCounts));
+
+    try {
+      const built = await executeCatalogBuild(previousCache);
+      catalogCache = built;
+      invalidateSyncStatusCache();
+      return built;
+    } finally {
+      finishCatalogRebuild(getCatalogEntryCounts() ?? undefined);
+    }
+  })();
 
   try {
-    const built = await executeCatalogBuild(previousCache);
-    catalogCache = built;
-    invalidateSyncStatusCache();
-    return built;
+    return await catalogRebuildInflight;
   } finally {
-    finishCatalogRebuild(getCatalogEntryCounts() ?? undefined);
+    catalogRebuildInflight = null;
   }
 }
 

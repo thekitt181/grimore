@@ -1,6 +1,6 @@
 import type { LightingPreset, SceneTransition, TimeOfDay, WeatherOverlay } from '../types/scene';
 
-/** Curated royalty-free ambient audio + video loops (Mixkit CDN). */
+/** Curated royalty-free ambient audio + video loops. */
 
 export type MediaLibraryCategory =
   | 'tavern'
@@ -44,14 +44,14 @@ export const AMBIENT_SOUND_LIBRARY: MediaLibraryEntry[] = [];
 /** Music tracks — add your own via Upload or scene media config. */
 export const MUSIC_LIBRARY: MediaLibraryEntry[] = [];
 
-/** Looping background videos for scene pop-ups / overlays. */
+/** Looping background videos for scene pop-ups / overlays (Coverr CDN — hotlink-friendly). */
 export const VIDEO_LIBRARY: VideoLibraryEntry[] = [
-  { id: 'vid-fireplace', name: 'Fireplace', category: 'tavern', url: 'https://assets.mixkit.co/videos/preview/mixkit-fireplace-burning-4267-large.mp4', loop: true, tags: ['warm', 'indoor'] },
-  { id: 'vid-rain-window', name: 'Rain on Window', category: 'city', url: 'https://assets.mixkit.co/videos/preview/mixkit-rain-falling-on-the-water-1536-large.mp4', loop: true, tags: ['rain', 'mood'] },
-  { id: 'vid-fog-forest', name: 'Foggy Forest', category: 'forest', url: 'https://assets.mixkit.co/videos/preview/mixkit-fog-in-the-forest-1243-large.mp4', loop: true, tags: ['fog', 'nature'] },
-  { id: 'vid-storm-sea', name: 'Stormy Sea', category: 'ocean', url: 'https://assets.mixkit.co/videos/preview/mixkit-waves-in-the-water-1164-large.mp4', loop: true, tags: ['storm', 'ocean'] },
-  { id: 'vid-torch-dungeon', name: 'Torch Flicker', category: 'dungeon', url: 'https://assets.mixkit.co/videos/preview/mixkit-flames-burning-in-the-dark-4268-large.mp4', loop: true, tags: ['fire', 'dark'] },
-  { id: 'vid-snow', name: 'Falling Snow', category: 'winter', url: 'https://assets.mixkit.co/videos/preview/mixkit-snowfall-in-a-pine-forest-4290-large.mp4', loop: true, tags: ['snow', 'cold'] },
+  { id: 'vid-fireplace', name: 'Fireplace', category: 'tavern', url: 'https://cdn.coverr.co/videos/coverr-a-fireplace-with-burning-wood-1577/1080p.mp4', loop: true, tags: ['warm', 'indoor'] },
+  { id: 'vid-rain-window', name: 'Rain on Window', category: 'city', url: 'https://cdn.coverr.co/videos/coverr-rain-falling-on-the-window-4765/1080p.mp4', loop: true, tags: ['rain', 'mood'] },
+  { id: 'vid-fog-forest', name: 'Foggy Forest', category: 'forest', url: 'https://cdn.coverr.co/videos/coverr-foggy-forest-4296/1080p.mp4', loop: true, tags: ['fog', 'nature'] },
+  { id: 'vid-storm-sea', name: 'Stormy Sea', category: 'ocean', url: 'https://cdn.coverr.co/videos/coverr-ocean-waves-1564/1080p.mp4', loop: true, tags: ['storm', 'ocean'] },
+  { id: 'vid-torch-dungeon', name: 'Torch Flicker', category: 'dungeon', url: 'https://cdn.coverr.co/videos/coverr-flames-burning-in-the-dark-4268/1080p.mp4', loop: true, tags: ['fire', 'dark'] },
+  { id: 'vid-snow', name: 'Falling Snow', category: 'winter', url: 'https://cdn.coverr.co/videos/coverr-snow-falling-in-a-pine-forest-4290/1080p.mp4', loop: true, tags: ['snow', 'cold'] },
 ];
 
 export const LIGHTING_PRESETS: Array<{ id: LightingPreset; label: string; description: string }> = [

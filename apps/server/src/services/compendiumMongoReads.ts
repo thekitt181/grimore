@@ -112,7 +112,15 @@ export async function readTypedImportOverrideSlices(): Promise<{
   return { overrideMonsters, overrideItems, overrideSpells };
 }
 
-export type TypedImportNameSourceRow = { name: string; source?: string; brokenDuration?: boolean };
+export type TypedImportNameSourceRow = {
+  name: string;
+  source?: string;
+  brokenDuration?: boolean;
+  /** Trimmed description length — used to detect incomplete (partial-fetch) imports. */
+  descLen?: number;
+  /** True when the stored description is just the entry name (normalize fallback = no real detail). */
+  descEqualsName?: boolean;
+};
 
 /** Lightweight name+source scan of typed collections (for skip index / book tallies). */
 export async function readTypedImportNameSourceRows(kind: CompendiumKind): Promise<TypedImportNameSourceRow[]> {
@@ -129,11 +137,17 @@ export async function readTypedImportNameSourceRows(kind: CompendiumKind): Promi
     const rows = await readAllFromTypedCursor(col, { ...TYPED_NAMED_ENTRY_FILTER }, {
       projection: { name: 1, source: 1, description: 1, _id: 0 },
     });
-    return rows.map((row) => ({
-      name: row.name!,
-      source: row.source,
-      brokenDuration: /\[object Object\]/.test(row.description ?? ''),
-    }));
+    return rows.map((row) => {
+      const desc = (row.description ?? '').trim();
+      const name = row.name!.trim();
+      return {
+        name: row.name!,
+        source: row.source,
+        brokenDuration: /\[object Object\]/.test(row.description ?? ''),
+        descLen: desc.length,
+        descEqualsName: desc.length > 0 && desc.toLowerCase() === name.toLowerCase(),
+      };
+    });
   } catch (err) {
     console.warn(
       `[Compendium] Typed ${kind} name scan failed:`,

@@ -6,13 +6,36 @@ import { entryNameKey } from './compendiumMerge';
 import { readTypedImportNameSourceRows } from './compendiumMongoReads';
 import { entryMatchesSource } from './compendiumVisibility';
 
-type NameSourceRow = { name: string; source?: string; brokenDuration?: boolean };
+type NameSourceRow = {
+  name: string;
+  source?: string;
+  brokenDuration?: boolean;
+  /** Trimmed description length — used to detect incomplete (partial-fetch) imports. */
+  descLen?: number;
+  /** True when the stored description is just the entry name (normalize fallback = no real detail). */
+  descEqualsName?: boolean;
+};
 
 const OVERRIDE_FIELD: Record<CompendiumKind, keyof OwlbearRawGlobalDoc> = {
   monster: 'overrideMonsters',
   item: 'overrideItems',
   spell: 'overrideSpells',
 };
+
+/**
+ * An imported entry is "complete" only when it carries real detail text. Entries that
+ * fell back to just their name (failed detail fetch) or contain `[object Object]` are
+ * treated as missing so a re-import repairs them in full. `descLen === undefined` means
+ * we never measured it (legacy/partial read) — assume complete to avoid needless re-fetch.
+ */
+function rowIsComplete(kind: CompendiumKind, row: NameSourceRow): boolean {
+  if (row.brokenDuration) return false;
+  if (row.descLen === undefined) return true;
+  if (row.descLen <= 0) return false;
+  if (row.descEqualsName) return false;
+  if (kind === 'monster' && row.descLen < 150) return false;
+  return true;
+}
 
 async function readKindNameSourceRows(kind: CompendiumKind): Promise<NameSourceRow[]> {
   if (isMongoCircuitOpen()) return [];
@@ -37,6 +60,15 @@ async function readKindNameSourceRows(kind: CompendiumKind): Promise<NameSourceR
                       regex: '\\[object Object\\]',
                     },
                   },
+                  descLen: {
+                    $strLenCP: { $trim: { input: { $ifNull: ['$$e.description', ''] } } },
+                  },
+                  descEqualsName: {
+                    $eq: [
+                      { $toLower: { $trim: { input: { $ifNull: ['$$e.description', ''] } } } },
+                      { $toLower: { $trim: { input: { $ifNull: ['$$e.name', ''] } } } },
+                    ],
+                  },
                 },
               },
             },
@@ -46,7 +78,9 @@ async function readKindNameSourceRows(kind: CompendiumKind): Promise<NameSourceR
       20_000,
     );
     const list = (rows[0] as { rows?: NameSourceRow[] } | undefined)?.rows ?? [];
-    return list.filter((r) => Boolean(r?.name?.trim()));
+    return list
+      .filter((r) => Boolean(r?.name?.trim()))
+      .map((r) => ({ ...r, descEqualsName: r.descEqualsName && (r.descLen ?? 0) > 0 }));
   } catch {
     return [];
   }
@@ -84,10 +118,10 @@ export class ImportSkipIndex {
     if (!key) return false;
     const rows = this.byKind[kind];
     if (!sourceLabel?.trim()) {
-      return rows.some((r) => entryNameKey(r.name) === key && !r.brokenDuration);
+      return rows.some((r) => entryNameKey(r.name) === key && rowIsComplete(kind, r));
     }
     return rows.some((r) => {
-      if (entryNameKey(r.name) !== key || r.brokenDuration) return false;
+      if (entryNameKey(r.name) !== key || !rowIsComplete(kind, r)) return false;
       if (entryMatchesSource(r.source, sourceLabel)) return true;
       // Legacy homebrew rows stored as source "Custom" before label preservation fix.
       return (

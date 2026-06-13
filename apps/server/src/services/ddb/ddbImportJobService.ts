@@ -500,6 +500,38 @@ async function runDdbLibraryImportJob(jobId: string): Promise<void> {
     const { invalidateImportSkipIndex } = await import('../compendiumImportIndex');
     invalidateImportSkipIndex();
 
+    // Guarantee every imported entry is live in the shared catalog all users read from.
+    // The typed Mongo collections are the source of truth (no 16MB cap); rebuild from them
+    // and verify the in-memory catalog actually reflects them, retrying once if it lags.
+    try {
+      const { rebuildCatalogCacheAtomic, getCatalogEntryCounts } = await import('../compendiumSync');
+      const { readOverrideCountsFromTypedCollections } = await import('../compendiumMongoReads');
+
+      await rebuildCatalogCacheAtomic();
+
+      const typed = await readOverrideCountsFromTypedCollections();
+      const catalog = getCatalogEntryCounts();
+      if (typed && catalog) {
+        const typedTotal = typed.monsters + typed.items + typed.spells;
+        const catalogTotal = catalog.monsters + catalog.items + catalog.spells;
+        // Allow a small slack for bundled/base entries vs. override counts.
+        if (typedTotal > 0 && catalogTotal + 5 < typedTotal) {
+          console.warn(
+            `[DDB] Catalog (${catalogTotal}) trails imported entries (${typedTotal}) — rebuilding once more`,
+          );
+          await rebuildCatalogCacheAtomic();
+        }
+      }
+      console.log(
+        `[DDB] Import job ${jobId} catalog ready: `
+        + `${getCatalogEntryCounts()?.monsters ?? 0} monsters, `
+        + `${getCatalogEntryCounts()?.items ?? 0} items, `
+        + `${getCatalogEntryCounts()?.spells ?? 0} spells`,
+      );
+    } catch (err) {
+      console.warn(`[DDB] final catalog rebuild after job ${jobId} failed:`, err);
+    }
+
     await finishJob(jobId, 'COMPLETED', { result: merged });
   } catch (err) {
     const message = stripNullBytes(err instanceof Error ? err.message : 'Import failed');
