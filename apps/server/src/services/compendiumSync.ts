@@ -7,6 +7,7 @@ import type {
   CompendiumSaveAs,
   OwlbearItem,
   OwlbearMonster,
+  OwlbearRawGlobalDoc,
   OwlbearSpell,
 } from '@grimoire/shared';
 import { isHomebrewEntry, normalizeOwlbearGlobalDoc, splitCompendiumSources } from '@grimoire/shared';
@@ -916,9 +917,15 @@ export async function listAllBookSources(): Promise<
     savePersistedBookSources,
     setMemoryBookSources,
   } = await import('./compendiumBookSourcesCache');
+  const { ensureCompendiumStorageReconciled } = await import('./compendiumFallbackMongoSync');
 
   const cached = getMemoryBookSources();
-  if (cached) return cached;
+  if (!cached) {
+    await ensureCompendiumStorageReconciled('book-list');
+  }
+
+  const cachedAfterSync = getMemoryBookSources();
+  if (cachedAfterSync) return cachedAfterSync;
 
   const persisted = loadPersistedBookSources();
   const policy = await readVisibilityPolicyFast();
@@ -1574,6 +1581,34 @@ async function upsertCollectionSpellsBulk(entries: Array<{ entry: OwlbearSpell; 
   await notifyTypedCollectionsChanged();
 }
 
+const TYPED_SYNC_BATCH = 250;
+
+/** Push unified override arrays into per-entry Mongo collections (keeps typed + global + local aligned). */
+export async function syncTypedCollectionsFromOverrides(raw: OwlbearRawGlobalDoc): Promise<void> {
+  const isBookImport = (source?: string) =>
+    Boolean(source?.trim()) && source!.trim().toLowerCase() !== 'custom';
+
+  const monsters = (raw.overrideMonsters ?? [])
+    .filter((e: OwlbearMonster) => isBookImport(e.source))
+    .map((entry: OwlbearMonster) => ({ entry, isCustom: false }));
+  const items = (raw.overrideItems ?? [])
+    .filter((e: OwlbearItem) => isBookImport(e.source))
+    .map((entry: OwlbearItem) => ({ entry, isCustom: false }));
+  const spells = (raw.overrideSpells ?? [])
+    .filter((e: OwlbearSpell) => isBookImport(e.source))
+    .map((entry: OwlbearSpell) => ({ entry, isCustom: false }));
+
+  for (let i = 0; i < monsters.length; i += TYPED_SYNC_BATCH) {
+    await upsertCollectionMonstersBulk(monsters.slice(i, i + TYPED_SYNC_BATCH));
+  }
+  for (let i = 0; i < items.length; i += TYPED_SYNC_BATCH) {
+    await upsertCollectionItemsBulk(items.slice(i, i + TYPED_SYNC_BATCH));
+  }
+  for (let i = 0; i < spells.length; i += TYPED_SYNC_BATCH) {
+    await upsertCollectionSpellsBulk(spells.slice(i, i + TYPED_SYNC_BATCH));
+  }
+}
+
 async function upsertCollectionMonster(entry: OwlbearMonster, isCustom: boolean) {
   await upsertCollectionMonstersBulk([{ entry, isCustom }]);
 }
@@ -1744,6 +1779,8 @@ export async function finishBulkCompendiumImport(opts?: {
   /** Respond before catalog rebuild finishes — clients wait for compendium:updated. */
   deferCatalogRebuild?: boolean;
 }): Promise<{ catalogRev: string | null; catalogRebuildPending?: boolean }> {
+  const { reconcileCompendiumStorage } = await import('./compendiumFallbackMongoSync');
+  await reconcileCompendiumStorage('bulk-import-finish');
   clearRawGlobalDocInflight();
   invalidateSyncStatusCache();
   const catalogRev = getCatalogRevision();
@@ -1774,9 +1811,9 @@ export async function reconcileCompendiumMongo(
   try {
     recovery = await attemptMongoRecovery(reason);
 
-    const { promoteFallbackToMongo } = await import('./compendiumFallbackMongoSync');
+    const { reconcileCompendiumStorage } = await import('./compendiumFallbackMongoSync');
     const { ensureBundledSourcesLocked, ensureImportedSourcesUnlocked } = await import('./compendiumBundledLock');
-    await promoteFallbackToMongo(reason);
+    await reconcileCompendiumStorage(reason);
     await ensureBundledSourcesLocked(reason);
     await ensureImportedSourcesUnlocked(reason);
     clearRawGlobalDocInflight();

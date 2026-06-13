@@ -37,6 +37,7 @@ import {
   normalizeOwlbearRawDoc,
 } from './compendiumMerge';
 import { readTypedImportOverrideSlices } from './compendiumMongoReads';
+import { scheduleFallbackMongoSync } from './compendiumFallbackMongoSync';
 
 export type CompendiumKind = 'monster' | 'item' | 'spell';
 
@@ -792,8 +793,7 @@ export async function patchOwlbearEntriesBulk(
       clearRawGlobalDocInflight();
       const { invalidateImportSkipIndex } = await import('./compendiumImportIndex');
       invalidateImportSkipIndex();
-      const { mirrorMongoOverridesToFallback } = await import('./compendiumFallbackMongoSync');
-      void mirrorMongoOverridesToFallback('bulk-patch').catch(() => {});
+      scheduleFallbackMongoSync('bulk-patch');
       return { mongoPersisted: true, lastUpdated };
     } catch (err) {
       console.warn(

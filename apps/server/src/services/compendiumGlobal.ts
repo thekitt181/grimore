@@ -529,8 +529,8 @@ export async function syncCompendiumStorageOnStartup(): Promise<void> {
     invalidateExtensionGlobalCache();
     clearGlobalFallbackCache();
 
-    const { promoteFallbackToMongo } = await import('./compendiumFallbackMongoSync');
-    await promoteFallbackToMongo('startup');
+    const { reconcileCompendiumStorage } = await import('./compendiumFallbackMongoSync');
+    await reconcileCompendiumStorage('startup');
 
     if (mongoOnly) {
       const version = await readMongoGlobalVersion();
@@ -542,8 +542,6 @@ export async function syncCompendiumStorageOnStartup(): Promise<void> {
       return;
     }
 
-    const { mirrorMongoOverridesToFallback } = await import('./compendiumFallbackMongoSync');
-    await mirrorMongoOverridesToFallback('startup');
     console.log('[Compendium] MongoDB compendium is up to date');
   } catch (err) {
     console.error('[Compendium] Startup sync failed:', err);
