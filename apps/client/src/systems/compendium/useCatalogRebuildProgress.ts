@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQueryClient } from '@tanstack/react-query';
 import type { CatalogRebuildProgress, CompendiumSyncStatus } from '@grimoire/shared';
 import { getSocket } from '@/lib/socket';
 
@@ -39,13 +39,27 @@ function patchSyncStatus(
 export function useCatalogRebuildProgress(watch = true) {
   const qc = useQueryClient();
   const [live, setLive] = useState<CatalogRebuildProgress | null>(null);
+  const [syncStatus, setSyncStatus] = useState<CompendiumSyncStatus | undefined>(
+    () => qc.getQueryData<CompendiumSyncStatus>(['compendium', 'sync-status']),
+  );
   const [tick, setTick] = useState(0);
 
-  const { data: syncStatus } = useQuery<CompendiumSyncStatus>({
-    queryKey: ['compendium', 'sync-status'],
-    enabled: watch,
-    staleTime: 2_000,
-  });
+  useEffect(() => {
+    if (!watch) {
+      setSyncStatus(undefined);
+      return;
+    }
+    const readSyncStatus = () => {
+      setSyncStatus(qc.getQueryData<CompendiumSyncStatus>(['compendium', 'sync-status']));
+    };
+    readSyncStatus();
+    return qc.getQueryCache().subscribe((event) => {
+      const key = event.query.queryKey;
+      if (key[0] === 'compendium' && key[1] === 'sync-status') {
+        readSyncStatus();
+      }
+    });
+  }, [watch, qc]);
 
   useEffect(() => {
     if (!watch) {
