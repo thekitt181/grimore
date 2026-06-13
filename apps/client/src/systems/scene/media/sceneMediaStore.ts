@@ -1,0 +1,63 @@
+import { create } from 'zustand';
+import type {
+  LightingPreset,
+  SceneMediaConfig,
+  SceneRecord,
+  SceneTransition,
+  WeatherOverlay,
+} from '@grimoire/shared';
+import { DEFAULT_SCENE_MEDIA_CONFIG } from '@grimoire/shared';
+
+interface SceneMediaState {
+  activeScene: SceneRecord | null;
+  transition: SceneTransition;
+  transitioning: boolean;
+  masterVolume: number;
+  ambientMuted: boolean;
+  musicMuted: boolean;
+  /** GM-only local preview before pushing to session. */
+  previewMode: boolean;
+  setActiveScene: (scene: SceneRecord | null, transition?: SceneTransition) => void;
+  setTransitioning: (v: boolean) => void;
+  setMasterVolume: (v: number) => void;
+  setAmbientMuted: (v: boolean) => void;
+  setMusicMuted: (v: boolean) => void;
+  setPreviewMode: (v: boolean) => void;
+  patchMediaConfig: (patch: Partial<SceneMediaConfig>) => void;
+}
+
+export const useSceneMediaStore = create<SceneMediaState>((set, get) => ({
+  activeScene: null,
+  transition: 'fade',
+  transitioning: false,
+  masterVolume: DEFAULT_SCENE_MEDIA_CONFIG.masterVolume,
+  ambientMuted: false,
+  musicMuted: false,
+  previewMode: false,
+  setActiveScene: (scene, transition = 'fade') =>
+    set({ activeScene: scene, transition, transitioning: true }),
+  setTransitioning: (transitioning) => set({ transitioning }),
+  setMasterVolume: (masterVolume) => set({ masterVolume }),
+  setAmbientMuted: (ambientMuted) => set({ ambientMuted }),
+  setMusicMuted: (musicMuted) => set({ musicMuted }),
+  setPreviewMode: (previewMode) => set({ previewMode }),
+  patchMediaConfig: (patch) => {
+    const scene = get().activeScene;
+    if (!scene) return;
+    set({
+      activeScene: {
+        ...scene,
+        mediaConfig: { ...scene.mediaConfig, ...patch },
+      },
+    });
+  },
+}));
+
+export function getActiveLighting(): LightingPreset {
+  return useSceneMediaStore.getState().activeScene?.lightingPreset ?? 'default';
+}
+
+export function getActiveWeather(): WeatherOverlay | null {
+  const w = useSceneMediaStore.getState().activeScene?.weatherOverlay;
+  return w && w !== 'none' ? w : null;
+}

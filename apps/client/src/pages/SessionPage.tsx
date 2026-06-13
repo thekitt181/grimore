@@ -47,6 +47,11 @@ import { getSocket, isMobileClient } from '@/lib/socket';
 import type { InitiativeSyncPayload } from '@grimoire/shared';
 import { loadInitiativeLocal, persistInitiativeLocal } from '@/systems/scene/sessionPersistence';
 import { useItemStore } from '@/systems/scene/store/itemStore';
+import { useSceneMedia } from '@/systems/scene/media/useSceneMedia';
+import { BackgroundVideoLayer } from '@/systems/scene/media/BackgroundVideoLayer';
+import { LightingTintOverlay, SceneTransitionOverlay, WeatherOverlay } from '@/systems/scene/media/SceneAtmosphere';
+import { SessionMediaControls } from '@/systems/scene/media/SessionMediaControls';
+import { SessionSceneBar } from '@/systems/scene/manager/SessionSceneBar';
 
 interface SessionInfo {
   id: string;
@@ -150,6 +155,7 @@ export function SessionPage() {
     retrySocket,
   );
   useHandoutRevealSocket(socketReady ? (sessionId ?? null) : null);
+  useSceneMedia(socketReady ? sessionId : undefined);
 
   const combatActive = useInitiativeStore((s) => s.isActive);
   const hasCombatants = useInitiativeStore((s) => s.combatants.length > 0);
@@ -206,7 +212,15 @@ export function SessionPage() {
           </span>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 flex-wrap justify-end">
+          {isGM && (
+            <SessionSceneBar
+              campaignId={sessionInfo.campaignId}
+              sessionId={sessionInfo.id}
+              isGM={isGM}
+            />
+          )}
+          <SessionMediaControls />
           <div className="flex items-center gap-2">
             <div className="flex items-center gap-1.5">
               <div
@@ -258,6 +272,10 @@ export function SessionPage() {
         {/* Map canvas + overlay panels */}
         <div className="flex-1 relative overflow-hidden">
           <MapCanvas />
+          <LightingTintOverlay />
+          <WeatherOverlay />
+          <SceneTransitionOverlay />
+          <BackgroundVideoLayer />
           <MobileDdbTokenBar />
 
           {!isGM && !hasMapItems && !isConnected && (

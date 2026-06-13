@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE "Scene" ADD COLUMN IF NOT EXISTS "mediaConfig" JSONB NOT NULL DEFAULT '{}';

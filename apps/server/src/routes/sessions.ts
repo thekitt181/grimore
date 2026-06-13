@@ -46,6 +46,7 @@ router.get('/:id', requireAuth, async (req: AuthenticatedRequest, res) => {
         campaignName: session.campaign.name,
         isActive: session.isActive,
         startedAt: session.startedAt,
+        activeSceneId: session.activeSceneId,
         myRole,
         myUserId: userId,
       },

@@ -15,6 +15,7 @@ import sessionRoutes from './routes/sessions';
 import compendiumRoutes from './routes/compendium';
 import ddbRoutes from './routes/ddb';
 import mapsRoutes from './routes/maps';
+import sceneRoutes from './routes/scenes';
 import { closeMongo } from './lib/mongo';
 import { getClientOrigins, getPrimaryClientUrl } from './lib/clientOrigins';
 import { toNodeHandler } from 'better-auth/node';
@@ -102,6 +103,7 @@ app.use('/api/sessions', sessionRoutes);
 app.use('/api/compendium', compendiumRoutes);
 app.use('/api/ddb', ddbRoutes);
 app.use('/api/maps', mapsRoutes);
+app.use('/api/scenes', sceneRoutes);
 
 mountClientSpa(app);
 

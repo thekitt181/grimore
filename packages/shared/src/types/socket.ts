@@ -260,6 +260,8 @@ export interface SceneChangePayload {
   sessionId: string;
   sceneId: string;
   transition: 'fade' | 'fire' | 'page-turn' | 'none';
+  /** Full scene bundle for media engine + map hydration. */
+  scene?: import('./scene').SceneRecord;
 }
 
 // ─── Handout events ───────────────────────────────────────────────────────────
