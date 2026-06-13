@@ -6,6 +6,7 @@ export function extractApiError(err: unknown, fallback = 'Request failed'): stri
     const serverMsg = data?.error ?? data?.message;
     if (serverMsg) return serverMsg;
     const status = err.response?.status;
+    if (!err.response) return 'Cannot reach the server — check your connection or wait for Render to wake up';
     if (status === 400) return 'Bad request — check D&D Beyond link and import selection';
     if (status === 401) return 'Session expired — sign in again';
     if (status === 503) return 'Server is starting — retry in a moment';

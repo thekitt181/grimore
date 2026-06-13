@@ -91,9 +91,11 @@ api.interceptors.request.use(async (config) => {
 type RetriableConfig = InternalAxiosRequestConfig & {
   __authRetried?: boolean;
   __wakeRetryCount?: number;
+  __networkRetryCount?: number;
 };
 
-const WAKE_RETRY_MAX = 8;
+const WAKE_RETRY_MAX = 5;
+const NETWORK_RETRY_MAX = 3;
 const WAKE_RETRY_STATUSES = new Set([502, 503, 504]);
 
 function wakeRetryDelayMs(attempt: number): number {
@@ -115,6 +117,19 @@ api.interceptors.response.use(
 
     const config = err.config as RetriableConfig;
     const status = err.response?.status;
+    const isNetworkError = !err.response && (
+      err.code === 'ERR_NETWORK'
+      || err.message === 'Network Error'
+    );
+
+    if (isNetworkError) {
+      const attempt = config.__networkRetryCount ?? 0;
+      if (attempt < NETWORK_RETRY_MAX) {
+        config.__networkRetryCount = attempt + 1;
+        await new Promise((r) => setTimeout(r, wakeRetryDelayMs(attempt)));
+        return api.request(config);
+      }
+    }
 
     if (status != null && WAKE_RETRY_STATUSES.has(status)) {
       const attempt = config.__wakeRetryCount ?? 0;
