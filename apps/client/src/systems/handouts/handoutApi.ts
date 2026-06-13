@@ -1,5 +1,5 @@
 import { api } from '@/lib/axios';
-import type { HandoutRecord, HandoutReceiptRecord, HandoutType } from '@grimoire/shared';
+import type { HandoutRecord, HandoutReceiptRecord, HandoutType, HandoutInventoryTarget } from '@grimoire/shared';
 
 export type HandoutWriteInput = {
   title: string;
@@ -47,13 +47,77 @@ export async function revealCampaignHandout(
   return data.receipts;
 }
 
+export type SceneItemHandoutRevealInput = {
+  sessionId: string;
+  sceneItemId: string;
+  title: string;
+  content?: string | null;
+  imageUrl?: string | null;
+  compendiumItemId?: string | null;
+  itemMeta?: HandoutRecord['itemMeta'];
+  targetUserIds?: string[] | 'all';
+  pushToDdb?: {
+    ddbCharacterId: number;
+    target: HandoutInventoryTarget;
+    targetUserId: string;
+  };
+};
+
+export type SceneItemHandoutRevealResult = {
+  receipts: HandoutReceiptRecord[];
+  pushResult?: { ok: boolean; mode: string; message: string } | null;
+};
+
+export async function revealSceneItemHandout(
+  input: SceneItemHandoutRevealInput,
+): Promise<SceneItemHandoutRevealResult> {
+  const { data } = await api.post<SceneItemHandoutRevealResult>('/handouts/scene-reveal', {
+    targetUserIds: 'all',
+    ...input,
+  });
+  return data;
+}
+
+export async function gmPushHandoutReceiptToInventory(
+  receiptId: string,
+  ddbCharacterId: number,
+  target: HandoutInventoryTarget = 'character',
+): Promise<{ ok: boolean; mode: string; message: string; target?: HandoutInventoryTarget }> {
+  const { data } = await api.post<{ ok: boolean; mode: string; message: string; target?: HandoutInventoryTarget }>(
+    `/handouts/receipts/${receiptId}/gm-push-inventory`,
+    { ddbCharacterId, target },
+  );
+  return data;
+}
+
+export type HandoutInventoryManualFallback = {
+  characterUrl: string;
+  itemName: string;
+  isCustom: boolean;
+  target: 'character' | 'party';
+};
+
 export async function addHandoutReceiptToInventory(
   receiptId: string,
   ddbCharacterId: number,
-): Promise<{ ok: boolean; mode: string; message: string }> {
-  const { data } = await api.post<{ ok: boolean; mode: string; message: string }>(
+  target: HandoutInventoryTarget = 'character',
+  description?: string,
+): Promise<{
+  ok: boolean;
+  mode: string;
+  message: string;
+  target?: HandoutInventoryTarget;
+  manualFallback?: HandoutInventoryManualFallback;
+}> {
+  const { data } = await api.post<{
+    ok: boolean;
+    mode: string;
+    message: string;
+    target?: HandoutInventoryTarget;
+    manualFallback?: HandoutInventoryManualFallback;
+  }>(
     `/handouts/receipts/${receiptId}/add-to-inventory`,
-    { ddbCharacterId },
+    { ddbCharacterId, target, ...(description?.trim() ? { description: description.trim() } : {}) },
   );
   return data;
 }

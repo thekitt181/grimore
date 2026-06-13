@@ -4,7 +4,7 @@ import { useGrimoireAuth } from '@/hooks/useGrimoireAuth';
 import { useInfiniteQuery, useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import type { CompendiumItem, CompendiumMonster, CompendiumSource, CompendiumSpell } from '@grimoire/shared';
 import { isHomebrewEntry } from '@grimoire/shared';
-import { deleteItem, deleteMonster, deleteSpell, fetchBookSources, fetchSources, lockCompendiumSource, searchItems, searchMonsters, searchSpells, unlockCompendiumSource } from './compendiumApi';
+import { deleteItem, deleteMonster, deleteSpell, fetchSources, lockCompendiumSource, searchItems, searchMonsters, searchSpells, unlockCompendiumSource } from './compendiumApi';
 import {
   applyCompendiumLockPolicy,
   patchCompendiumSourceLock,
@@ -19,7 +19,6 @@ import { useSessionStore } from '@/store/sessionStore';
 import { useCompendiumEditor } from './useCompendiumEditor';
 import { CompendiumAdminUnlock } from './CompendiumAdminUnlock';
 import { CompendiumMongoStatus } from './CompendiumMongoStatus';
-import { getPersistedBookSources, useCompendiumBookSourcesStore } from './compendiumBookSourcesStore';
 
 const PAGE_SIZE = 50;
 const GOLD = 'var(--color-accent-gold)';
@@ -162,26 +161,14 @@ export function CompendiumSidebarList() {
   const showEntryList = browseMode !== 'sources' || Boolean(selectedSource);
   const inBookView = browseMode === 'sources' && Boolean(selectedSource);
 
-  const persistedBookSources = useCompendiumBookSourcesStore((s) => s.sources);
-  const setPersistedBookSources = useCompendiumBookSourcesStore((s) => s.setSources);
-
   const sourcesQ = useQuery({
-    queryKey: ['compendium', 'sources', 'books', isAdmin],
-    queryFn: async () => {
-      const data = await fetchBookSources();
-      if (data.length > 0) setPersistedBookSources(data);
-      return data;
-    },
+    queryKey: ['compendium', 'sources', 'books', tab, isAdmin],
+    queryFn: () => fetchSources(tab, { books: true }),
     enabled: compendiumReady && browseMode === 'sources',
-    initialData: (() => {
-      const cached = getPersistedBookSources();
-      return cached.length > 0 ? cached : undefined;
-    })(),
-    staleTime: 24 * 60 * 60 * 1000,
+    staleTime: 30_000,
     gcTime: 7 * 24 * 60 * 60 * 1000,
-    refetchOnMount: false,
-    refetchOnWindowFocus: false,
-    placeholderData: (previous) => previous ?? (persistedBookSources.length > 0 ? persistedBookSources : undefined),
+    refetchOnMount: true,
+    refetchOnWindowFocus: true,
     retry: 1,
   });
 
@@ -195,8 +182,9 @@ export function CompendiumSidebarList() {
     },
     enabled: compendiumReady && tab === 'monsters' && showEntryList,
     retry: 1,
-    staleTime: 30_000,
+    staleTime: 120_000,
     refetchOnWindowFocus: false,
+    placeholderData: (previousData) => previousData,
   });
 
   const itemQ = useInfiniteQuery({
@@ -209,8 +197,9 @@ export function CompendiumSidebarList() {
     },
     enabled: compendiumReady && tab === 'items' && showEntryList,
     retry: 1,
-    staleTime: 30_000,
+    staleTime: 120_000,
     refetchOnWindowFocus: false,
+    placeholderData: (previousData) => previousData,
   });
 
   const spellQ = useInfiniteQuery({
@@ -223,8 +212,9 @@ export function CompendiumSidebarList() {
     },
     enabled: compendiumReady && tab === 'spells' && showEntryList,
     retry: 1,
-    staleTime: 30_000,
+    staleTime: 120_000,
     refetchOnWindowFocus: false,
+    placeholderData: (previousData) => previousData,
   });
 
   const activeQ = tab === 'monsters' ? monsterQ : tab === 'items' ? itemQ : spellQ;
@@ -236,6 +226,20 @@ export function CompendiumSidebarList() {
 
   const activeError = showSourcePicker ? sourcesQ.error : activeQ.error;
   const authBlocked = isApiAuthError(activeError) || (showSourcePicker && isApiAuthError(sourcesQ.error));
+
+  function prefetchSourceEntries(sourceId: string) {
+    const params = buildSearchParams('sources', sourceId, '');
+    const queryFn = ({ pageParam }: { pageParam: number }) => {
+      if (tab === 'monsters') return searchMonsters({ ...params, page: pageParam });
+      if (tab === 'items') return searchItems({ ...params, page: pageParam });
+      return searchSpells({ ...params, page: pageParam });
+    };
+    void qc.prefetchInfiniteQuery({
+      queryKey: ['compendium', tab === 'monsters' ? 'monsters' : tab === 'items' ? 'items' : 'spells', params],
+      queryFn,
+      initialPageParam: 1,
+    });
+  }
 
   async function handleReloadCompendium() {
     setReloadingCatalog(true);
@@ -398,7 +402,9 @@ export function CompendiumSidebarList() {
 
       <div className="flex-1 min-h-[5rem] overflow-y-auto space-y-0.5">
         {loading && (
-          <p className="font-ui text-xs" style={{ color: 'var(--color-text-secondary)' }}>Loading…</p>
+          <p className="font-ui text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+            {inBookView && selectedSourceLabel ? `Loading ${selectedSourceLabel}…` : 'Loading…'}
+          </p>
         )}
         {!loading && backgroundRefresh && (
           <p className="font-ui text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>Updating…</p>
@@ -440,9 +446,10 @@ export function CompendiumSidebarList() {
           <SourceRow
             key={source.id}
             source={source}
+            tab={tab}
             isAdmin={isAdmin}
             lockPending={sourceLockMut.isPending}
-            onSelect={() => { setSelectedSource(source.id); setQuery(''); }}
+            onSelect={() => { prefetchSourceEntries(source.id); setSelectedSource(source.id); setQuery(''); }}
             onToggleLock={() => {
               sourceLockMut.mutate({ sourceLabel: source.id, locked: Boolean(source.locked) });
             }}
@@ -534,14 +541,21 @@ export function CompendiumSidebarList() {
   );
 }
 
+function sourceEntryLabel(tab: CompendiumTab, count: number): string {
+  const noun = tab === 'monsters' ? 'monster' : tab === 'items' ? 'item' : 'spell';
+  return `${count} ${count === 1 ? noun : `${noun}s`}`;
+}
+
 function SourceRow({
   source,
+  tab,
   isAdmin,
   lockPending,
   onSelect,
   onToggleLock,
 }: {
   source: CompendiumSource;
+  tab: CompendiumTab;
   isAdmin: boolean;
   lockPending: boolean;
   onSelect: () => void;
@@ -562,7 +576,7 @@ function SourceRow({
           )}
         </span>
         <span style={{ color: 'var(--color-text-secondary)', fontSize: 9 }}>
-          {source.count} entries
+          {sourceEntryLabel(tab, source.count)}
           {source.draftCount ? ` · ${source.draftCount} draft` : ''}
         </span>
       </button>

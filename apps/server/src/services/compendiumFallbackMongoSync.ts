@@ -1,6 +1,6 @@
 import type { OwlbearItem, OwlbearMonster, OwlbearRawGlobalDoc, OwlbearSpell } from '@grimoire/shared';
 import { normalizeOwlbearGlobalDoc } from '@grimoire/shared';
-import { getCollection, isMongoCircuitOpen, isMongoConfigured, withMongoTimeout } from '../lib/mongo';
+import { isCompendiumStorageUnavailable, readRawGlobalDocFromPostgres } from './compendiumPostgres';
 import { entryNameKey, normalizeOwlbearRawDoc } from './compendiumMerge';
 import {
   clearGlobalFallbackCache,
@@ -105,11 +105,9 @@ export function needsFallbackPromotion(
 }
 
 async function readMongoRawGlobalDoc(): Promise<OwlbearRawGlobalDoc | null> {
-  if (!isMongoConfigured() || isMongoCircuitOpen()) return null;
-  const col = await getCollection<OwlbearRawGlobalDoc>('data');
-  if (!col) return null;
+  if (isCompendiumStorageUnavailable()) return null;
   try {
-    const doc = await withMongoTimeout(() => col.findOne({ _id: 'global' }), 15_000);
+    const doc = await readRawGlobalDocFromPostgres({ includeImageData: false });
     return doc ? normalizeOwlbearRawDoc(doc) : null;
   } catch {
     return null;
@@ -161,7 +159,7 @@ export async function detectCompendiumStorageDrift(): Promise<boolean> {
   const normalizedFallback = fallback ? normalizeOwlbearRawDoc(fallback) : null;
   const mongoGlobal = await readMongoRawGlobalDoc();
   let typed = { overrideMonsters: [] as OwlbearMonster[], overrideItems: [] as OwlbearItem[], overrideSpells: [] as OwlbearSpell[] };
-  if (isMongoConfigured() && !isMongoCircuitOpen()) {
+  if (!isCompendiumStorageUnavailable()) {
     typed = await readTypedImportOverrideSlices();
   }
   const typedCount = typedImportOverrideCount(typed);
@@ -196,7 +194,7 @@ export async function reconcileCompendiumStorage(reason: string): Promise<Fallba
 
     const mongoGlobal = await readMongoRawGlobalDoc();
     let typed = { overrideMonsters: [] as OwlbearMonster[], overrideItems: [] as OwlbearItem[], overrideSpells: [] as OwlbearSpell[] };
-    if (isMongoConfigured() && !isMongoCircuitOpen()) {
+    if (!isCompendiumStorageUnavailable()) {
       typed = await readTypedImportOverrideSlices();
     }
 
@@ -229,7 +227,7 @@ export async function reconcileCompendiumStorage(reason: string): Promise<Fallba
 
     const result = await persistRawGlobalDoc(merged, { notify: 'none' });
 
-    if (isMongoConfigured() && !isMongoCircuitOpen()) {
+    if (!isCompendiumStorageUnavailable()) {
       try {
         const { syncTypedCollectionsFromOverrides } = await import('./compendiumSync');
         await syncTypedCollectionsFromOverrides(merged);
@@ -276,8 +274,8 @@ export async function ensureCompendiumStorageReconciled(reason: string): Promise
  * Delegates to full storage reconcile (global + typed + local).
  */
 export async function promoteFallbackToMongo(reason: string): Promise<FallbackMongoSyncResult> {
-  if (isMongoCircuitOpen()) {
-    return { promoted: false, reason: 'Mongo circuit open' };
+  if (isCompendiumStorageUnavailable()) {
+    return { promoted: false, reason: 'Postgres unavailable' };
   }
   return reconcileCompendiumStorage(reason);
 }

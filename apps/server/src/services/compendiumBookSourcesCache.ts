@@ -31,6 +31,12 @@ export function setMemoryBookSources(sources: CompendiumSource[]): void {
 
 export function invalidateBookSourcesCache(): void {
   memoryCache = null;
+  try {
+    const filePath = bookSourcesPath();
+    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+  } catch {
+    /* ignore */
+  }
 }
 
 export function loadPersistedBookSources(): CompendiumSource[] | null {

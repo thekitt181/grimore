@@ -7,7 +7,7 @@ import { hitTest, hitTestMap, isMapGroundHit, isCanvasContextEvent, isCanvasPoin
 import { emitItemAdd, emitItemUpdate } from './sceneSync';
 import { deleteCurrentSelection } from './deleteSelection';
 import { syncGridToMap } from './syncGridToMap';
-import type { SessionUser } from '@grimoire/shared';
+import type { HandoutInventoryTarget, SessionUser } from '@grimoire/shared';
 import type { Item, MapItem, TokenItem, HandoutItem } from './types';
 import { isHpHiddenFromPlayers } from './types';
 import { visionFeet, visionRadiusFromFeet } from '@/systems/map/fogLos';
@@ -28,6 +28,7 @@ import { TIME_OF_DAY_PRESETS, WEATHER_PRESETS } from '@grimoire/shared';
 import type { TimeOfDay, WeatherOverlay } from '@grimoire/shared';
 import { useSceneMediaStore } from './media/sceneMediaStore';
 import { emitSessionTimeOfDay, emitSessionWeather } from './media/useSceneMedia';
+import { extractApiError } from '@/lib/apiError';
 
 const CONDITIONS = [
   'Blinded', 'Charmed', 'Deafened', 'Frightened', 'Grappled', 'Incapacitated',
@@ -565,11 +566,11 @@ export function ItemContextMenu() {
             useCompendiumUiStore.getState().selectItem((single as HandoutItem).compendiumItemId);
             close();
           }} />
-          <Btn label="✨ Reveal to players" onClick={() => {
-            const sid = getPersistSessionId();
-            if (sid) revealHandoutToPlayers(single as HandoutItem, sid);
-            close();
-          }} />
+          <HandoutRevealMenu
+            handout={single as HandoutItem}
+            players={connectedUsers}
+            onDone={close}
+          />
         </>
       )}
 
@@ -710,6 +711,186 @@ function MapTimeMenuSection({ onDone }: { onDone: () => void }) {
 }
 
 // ─── Token-specific section ─────────────────────────────────────────────────
+
+function findAnyPcDdbCharacterId(): number | null {
+  for (const item of Object.values(useItemStore.getState().items)) {
+    if (item.type !== 'token') continue;
+    const token = item as TokenItem;
+    if (token.ddbCharacterId) return token.ddbCharacterId;
+  }
+  return null;
+}
+
+function findPlayerDdbCharacterId(userId: string): number | null {
+  for (const item of Object.values(useItemStore.getState().items)) {
+    if (item.type !== 'token') continue;
+    const token = item as TokenItem;
+    if (token.ownerId === userId && token.ddbCharacterId) return token.ddbCharacterId;
+  }
+  for (const item of Object.values(useItemStore.getState().items)) {
+    if (item.type !== 'token') continue;
+    const token = item as TokenItem;
+    if (token.isPc && token.ddbCharacterId && !token.ownerId) return token.ddbCharacterId;
+  }
+  return null;
+}
+
+function HandoutRevealMenu({
+  handout,
+  players,
+  onDone,
+}: {
+  handout: HandoutItem;
+  players: SessionUser[];
+  onDone: () => void;
+}) {
+  const sessionPlayers = players.filter((p) => p.role === 'PLAYER');
+  const [busy, setBusy] = useState(false);
+  const partyAnchorId = findAnyPcDdbCharacterId();
+
+  async function give(
+    targetUserIds: string[] | 'all',
+    push?: { ddbCharacterId: number; target: HandoutInventoryTarget; targetUserId: string },
+  ) {
+    const sid = getPersistSessionId();
+    if (!sid || busy) return;
+    setBusy(true);
+    try {
+      const result = await revealHandoutToPlayers(handout, sid, {
+        targetUserIds,
+        ...(push ? { pushToDdb: push } : {}),
+      });
+      const journalCount = result.receipts.length;
+      if (result.pushResult) {
+        window.alert(
+          result.pushResult.ok
+            ? `Journal updated (${journalCount}). ${result.pushResult.message}`
+            : `Journal updated (${journalCount}), but D&D Beyond sync failed: ${result.pushResult.message}`,
+        );
+      } else if (journalCount > 0) {
+        window.alert(`Item added to ${journalCount} player journal${journalCount === 1 ? '' : 's'}.`);
+      }
+    } catch (err) {
+      window.alert(extractApiError(err, 'Could not give handout'));
+    } finally {
+      setBusy(false);
+      onDone();
+    }
+  }
+
+  const Btn = ({ label, onClick, indent = false }: { label: string; onClick: () => void; indent?: boolean }) => (
+    <button
+      type="button"
+      disabled={busy}
+      onClick={onClick}
+      className="w-full text-left py-1.5 text-xs font-ui rounded transition-colors disabled:opacity-50"
+      style={{
+        color: 'var(--color-text-primary)',
+        paddingLeft: indent ? '1.5rem' : '0.75rem',
+        paddingRight: '0.75rem',
+      }}
+      onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.background = 'var(--color-bg-tertiary)')}
+      onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.background = 'transparent')}
+    >
+      {label}
+    </button>
+  );
+
+  return (
+    <>
+      <div className="gold-divider my-1" />
+      <div className="px-3 py-1 font-ui text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+        Give to players (journal)
+      </div>
+      <Btn label="✨ All players — journal only" onClick={() => void give('all')} />
+
+      {sessionPlayers.map((player) => (
+        <Btn
+          key={player.id}
+          label={`📜 ${player.username} — journal only`}
+          onClick={() => void give([player.id])}
+        />
+      ))}
+
+      <div className="gold-divider my-1" />
+      <div className="px-3 py-1 font-ui text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+        Journal + D&D Beyond
+      </div>
+
+      <div className="px-3 py-1 font-ui text-[10px] italic" style={{ color: 'var(--color-text-secondary)' }}>
+        Party stash uses D&D Beyond&apos;s unofficial API — item may land on the linked character first.
+      </div>
+
+      {partyAnchorId ? (
+        <Btn
+          label="🎒 All players + party inventory"
+          onClick={() => void give('all', {
+            ddbCharacterId: partyAnchorId,
+            target: 'party',
+            targetUserId: sessionPlayers[0]?.id ?? useSessionStore.getState().myUserId ?? '',
+          })}
+        />
+      ) : (
+        <div className="px-3 py-1 font-ui text-[10px] italic" style={{ color: 'var(--color-text-secondary)' }}>
+          Link a PC token to D&D Beyond for party inventory push.
+        </div>
+      )}
+
+      {sessionPlayers.map((player) => {
+        const ddbId = findPlayerDdbCharacterId(player.id);
+        if (!ddbId) return null;
+        return (
+          <div key={`ddb-${player.id}`}>
+            <Btn
+              label={`⚔ ${player.username} — character sheet`}
+              onClick={() => void give([player.id], {
+                ddbCharacterId: ddbId,
+                target: 'character',
+                targetUserId: player.id,
+              })}
+            />
+            {partyAnchorId && (
+              <Btn
+                label={`🎒 ${player.username} — party inventory`}
+                indent
+                onClick={() => void give([player.id], {
+                  ddbCharacterId: partyAnchorId,
+                  target: 'party',
+                  targetUserId: player.id,
+                })}
+              />
+            )}
+          </div>
+        );
+      })}
+
+      {partyAnchorId && (
+        <>
+          <div className="gold-divider my-1" />
+          <div className="px-3 py-1 font-ui text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+            DM direct (journal + D&D Beyond)
+          </div>
+          <Btn
+            label="⚔ My character sheet"
+            onClick={() => void give('all', {
+              ddbCharacterId: partyAnchorId,
+              target: 'character',
+              targetUserId: useSessionStore.getState().myUserId ?? '',
+            })}
+          />
+          <Btn
+            label="🎒 Party inventory"
+            onClick={() => void give('all', {
+              ddbCharacterId: partyAnchorId,
+              target: 'party',
+              targetUserId: useSessionStore.getState().myUserId ?? '',
+            })}
+          />
+        </>
+      )}
+    </>
+  );
+}
 
 function TokenOwnerAssign({
   token,

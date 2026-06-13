@@ -7,7 +7,7 @@ import cookieParser from 'cookie-parser';
 import { prisma } from './lib/prisma';
 import { connectRedisOptional, disconnectAllRedis, isRedisOperational } from './lib/redis';
 import { attachRedisSocketAdapter, isSocketRedisAdapterEnabled } from './lib/socketRedisAdapter';
-import { getMongoHealthSnapshot, isMongoConfigured, startMongoHealthProbe } from './lib/mongo';
+import { getCompendiumStorageHealthSnapshot, pingCompendiumStorage, seedBundledCompendiumIfEmpty } from './services/compendiumPostgres';
 import { initSocket } from './socket';
 import campaignRoutes from './routes/campaigns';
 import userRoutes from './routes/users';
@@ -17,7 +17,6 @@ import ddbRoutes from './routes/ddb';
 import mapsRoutes from './routes/maps';
 import sceneRoutes from './routes/scenes';
 import handoutRoutes from './routes/handouts';
-import { closeMongo } from './lib/mongo';
 import { getClientOrigins, getPrimaryClientUrl } from './lib/clientOrigins';
 import { toNodeHandler } from 'better-auth/node';
 import { auth, getAuthBaseUrl, isBetterAuthDashboardEnabled, isGoogleOAuthEnabled } from './lib/auth';
@@ -25,7 +24,6 @@ import { startCompendiumMongoWatch } from './services/compendiumMongoWatch';
 import { syncCompendiumStorageOnStartup } from './services/compendiumGlobal';
 import { reconcileRawGlobalStorage } from './services/compendiumOwlbearPersist';
 import { warmCompendiumCatalog } from './services/compendiumSync';
-import { startCompendiumExternalWatch } from './services/compendiumExternalWatch';
 import { mountClientSpa } from './lib/serveClient';
 import { isFloorplanScanConfigured } from './services/floorplan/floorplanScanService';
 
@@ -62,23 +60,21 @@ app.all('/api/auth/*', toNodeHandler(auth));
 app.use(express.json({ limit: '50mb' }));
 
 app.get('/health', (_req, res) => {
-  const mongoHealth = getMongoHealthSnapshot();
+  const compendiumHealth = getCompendiumStorageHealthSnapshot();
   res.json({
     status: servicesReady ? 'ok' : 'starting',
     ready: servicesReady,
     redis: isRedisOperational() ? 'connected' : 'degraded',
     socketAdapter: isSocketRedisAdapterEnabled() ? 'redis-when-available' : 'disabled',
-    mongo: isMongoConfigured() ? mongoHealth.state : 'disabled',
-    mongoHealth: isMongoConfigured()
-      ? {
-          state: mongoHealth.state,
-          circuitOpen: mongoHealth.circuitOpen,
-          lastCheckedAt: mongoHealth.lastCheckedAt,
-          lastSuccessAt: mongoHealth.lastSuccessAt,
-          lastError: mongoHealth.lastError,
-          latencyMs: mongoHealth.latencyMs,
-        }
-      : undefined,
+    compendium: compendiumHealth.state,
+    compendiumHealth: {
+      state: compendiumHealth.state,
+      circuitOpen: compendiumHealth.circuitOpen,
+      lastCheckedAt: compendiumHealth.lastCheckedAt,
+      lastSuccessAt: compendiumHealth.lastSuccessAt,
+      lastError: compendiumHealth.lastError,
+      latencyMs: compendiumHealth.latencyMs,
+    },
     auth: {
       baseUrl: getAuthBaseUrl(),
       googleOAuth: isGoogleOAuthEnabled(),
@@ -116,18 +112,20 @@ async function startCompendiumBackground(): Promise<void> {
   try {
     const { warmBookSourcesCacheFromDisk } = await import('./services/compendiumBookSourcesCache');
     warmBookSourcesCacheFromDisk();
-    startMongoHealthProbe(Number(process.env['MONGO_HEALTH_INTERVAL_MS'] ?? 20_000));
+    await pingCompendiumStorage();
+    const seeded = await seedBundledCompendiumIfEmpty();
+    if (seeded.seeded) {
+      console.log(
+        `[Compendium] Seeded bundled catalog to Postgres (${seeded.counts.monsters} monsters, ${seeded.counts.items} items, ${seeded.counts.spells} spells)`,
+      );
+    }
     await syncCompendiumStorageOnStartup();
     const { ensureBundledSourcesLocked, ensureImportedSourcesUnlocked } = await import('./services/compendiumBundledLock');
     await ensureBundledSourcesLocked('startup');
     await ensureImportedSourcesUnlocked('startup');
     await warmCompendiumCatalog();
     startCompendiumMongoWatch();
-    if (process.env['COMPENDIUM_MONGO_ONLY'] !== '1') {
-      startCompendiumExternalWatch();
-    } else {
-      console.log('[Compendium] Mongo-only mode — extension sync disabled');
-    }
+    console.log('[Compendium] PostgreSQL storage — MongoDB compendium disabled');
   } catch (err) {
     console.error('[Compendium] Background init failed:', err);
   }
@@ -243,7 +241,6 @@ process.on('SIGTERM', async () => {
   console.log('[Server] Shutting down...');
   servicesReady = false;
   await prisma.$disconnect();
-  await closeMongo();
   disconnectAllRedis();
   process.exit(0);
 });

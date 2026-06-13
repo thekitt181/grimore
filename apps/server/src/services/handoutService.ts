@@ -149,6 +149,7 @@ export async function getReceipt(id: string): Promise<HandoutReceiptRecord | nul
 export async function resolveRevealTargets(
   sessionId: string,
   targetUserIds: string[] | 'all',
+  opts?: { connectedPlayerIds?: string[] },
 ): Promise<string[]> {
   if (targetUserIds !== 'all') {
     return [...new Set(targetUserIds.filter(Boolean))];
@@ -159,14 +160,86 @@ export async function resolveRevealTargets(
       campaign: {
         select: {
           gmId: true,
-          members: { select: { userId: true } },
+          members: { select: { userId: true, role: true } },
         },
       },
     },
   });
   if (!session) return [];
-  const ids = session.campaign.members.map((m) => m.userId);
-  return [...new Set(ids.filter((id) => id !== session.campaign.gmId))];
+
+  const gmId = session.campaign.gmId;
+  let ids = session.campaign.members
+    .filter((m) => m.userId !== gmId && m.role === 'PLAYER')
+    .map((m) => m.userId);
+
+  if (ids.length === 0 && opts?.connectedPlayerIds?.length) {
+    ids = opts.connectedPlayerIds.filter((id) => id !== gmId);
+  }
+
+  // Solo prep or no roster yet — GM still gets a journal entry for testing.
+  if (ids.length === 0) {
+    ids = [gmId];
+  }
+
+  return [...new Set(ids.filter(Boolean))];
+}
+
+export type SceneHandoutRevealInput = {
+  campaignId: string;
+  sceneItemId: string;
+  title: string;
+  content?: string | null;
+  imageUrl?: string | null;
+  compendiumItemId?: string | null;
+  ddbDefinitionId?: number | null;
+  itemMeta?: HandoutItemMeta | null;
+};
+
+export async function findHandoutBySceneItemId(
+  campaignId: string,
+  sceneItemId: string,
+): Promise<HandoutRecord | null> {
+  const rows = await prisma.handout.findMany({
+    where: { campaignId, type: 'ITEM_CARD' },
+    orderBy: { updatedAt: 'desc' },
+  });
+  for (const row of rows) {
+    const meta = parseItemMeta(row.itemMeta);
+    if (meta?.sceneItemId === sceneItemId) return serializeHandout(row);
+  }
+  return null;
+}
+
+export async function upsertSceneItemHandout(input: SceneHandoutRevealInput): Promise<HandoutRecord> {
+  const itemMeta: HandoutItemMeta = {
+    ...(input.itemMeta ?? {}),
+    sceneItemId: input.sceneItemId,
+    ...(input.compendiumItemId ? { compendiumItemId: input.compendiumItemId } : {}),
+  };
+
+  const existing = await findHandoutBySceneItemId(input.campaignId, input.sceneItemId);
+  if (existing) {
+    const updated = await updateHandout(existing.id, {
+      title: input.title,
+      content: input.content,
+      imageUrl: input.imageUrl,
+      type: 'ITEM_CARD',
+      compendiumItemId: input.compendiumItemId,
+      ddbDefinitionId: input.ddbDefinitionId,
+      itemMeta,
+    });
+    return updated ?? existing;
+  }
+
+  return createHandout(input.campaignId, {
+    title: input.title,
+    content: input.content,
+    imageUrl: input.imageUrl,
+    type: 'ITEM_CARD',
+    compendiumItemId: input.compendiumItemId,
+    ddbDefinitionId: input.ddbDefinitionId,
+    itemMeta,
+  });
 }
 
 export async function revealHandoutToUsers(opts: {

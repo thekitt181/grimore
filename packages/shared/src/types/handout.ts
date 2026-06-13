@@ -1,5 +1,7 @@
 export type HandoutType = 'TEXT' | 'IMAGE' | 'MAP_FRAGMENT' | 'ITEM_CARD';
 
+export type HandoutInventoryTarget = 'character' | 'party';
+
 export interface HandoutItemMeta {
   name?: string;
   itemType?: string;
@@ -8,6 +10,8 @@ export interface HandoutItemMeta {
   isCustom?: boolean;
   compendiumItemId?: string;
   ddbDefinitionId?: number;
+  /** Scene map handout item id — links persisted handouts to canvas tokens. */
+  sceneItemId?: string;
 }
 
 export interface HandoutRecord {

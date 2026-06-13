@@ -127,6 +127,7 @@ async function fetchCampaignRoster(
         avatarUrl: ch.avatarUrl,
         campaignId: campaign.id,
         campaignName: campaign.name,
+        isCampaignCharacter: true,
       };
     })
     .filter((x): x is DdbCharacterSummary => x !== null);
@@ -167,6 +168,7 @@ async function fetchOwnedCharacterList(
         avatarUrl: ch.avatarUrl,
         campaignId: ch.campaignId,
         campaignName: ch.campaignName,
+        isOwned: true,
       };
     })
     .filter((x): x is DdbCharacterSummary => x !== null);
@@ -204,6 +206,7 @@ function parseLegacyInlineCharacters(
             avatarUrl: ch.avatarUrl,
             campaignId: campaign.id,
             campaignName: campaign.name,
+            isCampaignCharacter: true,
           });
         }
       }
@@ -229,6 +232,8 @@ function mergeCharacterLists(lists: DdbCharacterSummary[][]): DdbCharacterSummar
         avatarUrl: ch.avatarUrl ?? existing.avatarUrl,
         classLabel:
           ch.classLabel !== 'Adventurer' ? ch.classLabel : existing.classLabel,
+        isOwned: Boolean(existing.isOwned || ch.isOwned),
+        isCampaignCharacter: Boolean(existing.isCampaignCharacter || ch.isCampaignCharacter),
       });
     }
   }

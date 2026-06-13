@@ -13,17 +13,14 @@ import type {
 import { isHomebrewEntry, normalizeOwlbearGlobalDoc, splitCompendiumSources } from '@grimoire/shared';
 import { isLikelyValidItem, parseCr, slugify } from '@grimoire/monster-dex';
 import {
-  getCollection,
-  getMongoHealthSnapshot,
-  getLastMongoConnectError,
-  isMongoConfigured,
-  attemptMongoRecovery,
-  beginMongoRecoveryWindow,
-  endMongoRecoveryWindow,
-  pingMongo,
-  withMongoTimeout,
-  resetMongoClient,
-} from '../lib/mongo';
+  deleteCompendiumEntryBySlug,
+  getCompendiumStorageHealthSnapshot,
+  isCompendiumStorageUnavailable,
+  pingCompendiumStorage,
+  readPostgresGlobalVersion,
+  readTypedImportEntriesFromPostgres,
+  upsertTypedImportEntriesBulk,
+} from './compendiumPostgres';
 import { resolveCompendiumEntryImageUrl, resolveEntryImageUrl } from './compendiumImages';
 import {
   isLocalCatalogAvailable,
@@ -49,6 +46,7 @@ import {
   type PersistRawGlobalDocResult,
 } from './compendiumOwlbearPersist';
 import {
+  buildHiddenBuiltInKeys,
   dedupeByEntryName,
   entryNameKey,
   filterCustomEntries,
@@ -76,7 +74,7 @@ import {
   readTypedImportOverrideSlices,
   typedImportOverrideCount,
   readOverrideCountsFromTypedCollections,
-  collectImportedSourceLabelsFromMongo,
+  collectImportedSourceLabelListFromMongo,
 } from './compendiumMongoReads';
 import { getCompendiumVisibilityPolicy } from './compendiumSourcePolicy';
 import {
@@ -133,11 +131,14 @@ function mergeMonsters(
 ): CompendiumMonster[] {
   const activeOverrides = dedupeByEntryName(overrides);
   const activeCustoms = filterCustomEntries('monster', customs, activeOverrides, deleted);
+  const hiddenBuiltIns = buildHiddenBuiltInKeys(activeOverrides, deleted);
+  const deletedKeys = new Set(deleted.map((d) => entryNameKey(d)));
+  const overrideByName = new Map(activeOverrides.map((o) => [entryNameKey(o.name), o] as const));
   const out = new Map<string, CompendiumMonster>();
 
   for (const b of base) {
-    if (isHiddenBuiltIn(b.name, activeOverrides, deleted)) continue;
-    const ov = activeOverrides.find((o) => namesMatch(o.name, b.name));
+    if (isHiddenBuiltIn(b.name, hiddenBuiltIns)) continue;
+    const ov = overrideByName.get(entryNameKey(b.name));
     const merged = ov ? { ...b, ...ov } : b;
     out.set(entryNameKey(b.name), toMonster(
       { ...merged, _id: b._id },
@@ -159,7 +160,7 @@ function mergeMonsters(
   }
 
   for (const c of activeCustoms) {
-    if (deleted.some((d) => namesMatch(d, c.name))) continue;
+    if (deletedKeys.has(entryNameKey(c.name))) continue;
     const key = entryNameKey(c.name);
     if (out.has(key)) continue;
     out.set(key, toMonster(
@@ -183,11 +184,14 @@ function mergeItems(
 ): CompendiumItem[] {
   const activeOverrides = dedupeByEntryName(overrides);
   const activeCustoms = filterCustomEntries('item', customs, activeOverrides, deleted);
+  const hiddenBuiltIns = buildHiddenBuiltInKeys(activeOverrides, deleted);
+  const deletedKeys = new Set(deleted.map((d) => entryNameKey(d)));
+  const overrideByName = new Map(activeOverrides.map((o) => [entryNameKey(o.name), o] as const));
   const out = new Map<string, CompendiumItem>();
 
   for (const b of base) {
-    if (isHiddenBuiltIn(b.name, activeOverrides, deleted)) continue;
-    const ov = activeOverrides.find((o) => namesMatch(o.name, b.name));
+    if (isHiddenBuiltIn(b.name, hiddenBuiltIns)) continue;
+    const ov = overrideByName.get(entryNameKey(b.name));
     const merged = ov ? { ...b, ...ov } : b;
     const item: CompendiumItem = {
       id: b._id,
@@ -224,7 +228,7 @@ function mergeItems(
   }
 
   for (const c of activeCustoms) {
-    if (deleted.some((d) => namesMatch(d, c.name))) continue;
+    if (deletedKeys.has(entryNameKey(c.name))) continue;
     const key = entryNameKey(c.name);
     if (out.has(key)) continue;
     const item: CompendiumItem = {
@@ -252,11 +256,14 @@ function mergeSpells(
 ): CompendiumSpell[] {
   const activeOverrides = dedupeByEntryName(overrides);
   const activeCustoms = filterCustomEntries('spell', customs, activeOverrides, deleted);
+  const hiddenBuiltIns = buildHiddenBuiltInKeys(activeOverrides, deleted);
+  const deletedKeys = new Set(deleted.map((d) => entryNameKey(d)));
+  const overrideByName = new Map(activeOverrides.map((o) => [entryNameKey(o.name), o] as const));
   const out = new Map<string, CompendiumSpell>();
 
   for (const b of base) {
-    if (isHiddenBuiltIn(b.name, activeOverrides, deleted)) continue;
-    const ov = activeOverrides.find((o) => namesMatch(o.name, b.name));
+    if (isHiddenBuiltIn(b.name, hiddenBuiltIns)) continue;
+    const ov = overrideByName.get(entryNameKey(b.name));
     const merged = ov ? { ...b, ...ov } : b;
     const spell: CompendiumSpell = {
       id: b._id,
@@ -295,7 +302,7 @@ function mergeSpells(
   }
 
   for (const c of activeCustoms) {
-    if (deleted.some((d) => namesMatch(d, c.name))) continue;
+    if (deletedKeys.has(entryNameKey(c.name))) continue;
     const key = entryNameKey(c.name);
     if (out.has(key)) continue;
     const spell: CompendiumSpell = {
@@ -336,16 +343,26 @@ function paginate<T>(list: T[], page: number, limit: number) {
   };
 }
 
-/** Prefer fast local JSON catalog; Mongo collection is homebrew-only fallback. */
+async function filterCachedEntriesBySource<T extends { source?: string; name: string }>(
+  kind: CompendiumKind,
+  load: () => Promise<T[]>,
+  sourceFilter: string,
+  policy: CompendiumVisibilityPolicy,
+  includeDrafts: boolean,
+): Promise<T[]> {
+  await ensureCatalogIncludesOverrides();
+  const merged = filterVisible(kind, await load(), policy, includeDrafts);
+  return merged.filter((entry) => entryMatchesSource(entry.source, sourceFilter));
+}
+
+/** Prefer fast local JSON catalog; Postgres is fallback when bundled files are absent. */
 async function loadBaseMonsters(): Promise<StoredMonster[]> {
   const local = loadLocalMonsters();
   if (local.length > 0) return local;
   try {
-    const col = await getCollection<StoredMonster>('monsters');
-    if (!col) return [];
-    return await withMongoTimeout(() => col.find({}).limit(10_000).toArray());
+    const rows = await readTypedImportEntriesFromPostgres('monster');
+    return rows.map((entry) => ({ ...entry, _id: slugify(entry.name) })) as StoredMonster[];
   } catch {
-    resetMongoClient();
     return loadLocalMonsters();
   }
 }
@@ -354,11 +371,9 @@ async function loadBaseItems(): Promise<StoredItem[]> {
   const local = loadLocalItems();
   if (local.length > 0) return local;
   try {
-    const col = await getCollection<StoredItem>('items');
-    if (!col) return [];
-    return await withMongoTimeout(() => col.find({}).limit(10_000).toArray());
+    const rows = await readTypedImportEntriesFromPostgres('item');
+    return rows.map((entry) => ({ ...entry, _id: slugify(entry.name) })) as StoredItem[];
   } catch {
-    resetMongoClient();
     return loadLocalItems();
   }
 }
@@ -367,11 +382,9 @@ async function loadBaseSpells(): Promise<StoredSpell[]> {
   const local = loadLocalSpells();
   if (local.length > 0) return local;
   try {
-    const col = await getCollection<StoredSpell>('spells');
-    if (!col) return [];
-    return await withMongoTimeout(() => col.find({}).limit(10_000).toArray());
+    const rows = await readTypedImportEntriesFromPostgres('spell');
+    return rows.map((entry) => ({ ...entry, _id: slugify(entry.name) })) as StoredSpell[];
   } catch {
-    resetMongoClient();
     return loadLocalSpells();
   }
 }
@@ -387,6 +400,7 @@ type CatalogCache = {
 let catalogCache: CatalogCache | null = null;
 let catalogBuildPromise: Promise<CatalogCache> | null = null;
 let syncStatusCache: { at: number; value: CompendiumSyncStatus } | null = null;
+let overrideCheckCache: { at: number; missing: boolean } | null = null;
 
 function catalogEntryCount(cache: CatalogCache): number {
   return cache.monsters.length + cache.items.length + cache.spells.length;
@@ -395,6 +409,7 @@ function catalogEntryCount(cache: CatalogCache): number {
 function invalidateCatalogCache(): void {
   catalogCache = null;
   catalogBuildPromise = null;
+  overrideCheckCache = null;
 }
 
 function invalidateSyncStatusCache(): void {
@@ -451,13 +466,6 @@ async function buildCatalogCacheFromRaw(
   raw: Awaited<ReturnType<typeof readRawGlobalDoc>>,
   revSuffix?: string,
 ): Promise<CatalogCache> {
-  updateCatalogRebuild({
-    phase: 'merging-imports',
-    label: 'Merging imported book entries…',
-    percent: 12,
-    clearEntryCounts: true,
-  });
-  raw = await augmentRawWithTypedImports(raw);
   const importCounts = {
     monsters: raw.overrideMonsters?.length ?? 0,
     items: raw.overrideItems?.length ?? 0,
@@ -486,29 +494,38 @@ async function buildCatalogCacheFromRaw(
     label: `Building monster index (${importCounts.monsters.toLocaleString()} imports)…`,
     percent: 25,
   });
-  const monsters = mergeMonsters(
-    await loadBaseMonsters(),
-    raw.overrideMonsters ?? [],
-    raw.monsters ?? [],
-    deleted,
-    global,
-    true,
-  );
+  const [baseMonsters, baseItems, baseSpells] = await Promise.all([
+    loadBaseMonsters(),
+    loadBaseItems(),
+    loadBaseSpells(),
+  ]);
 
-  updateCatalogRebuild({
-    phase: 'building-items',
-    label: `Building item index (${importCounts.items.toLocaleString()} imports)…`,
-    percent: 50,
-    entryCounts: { monsters: monsters.length },
-  });
-  const items = mergeItems(
-    await loadBaseItems(),
-    raw.overrideItems ?? [],
-    raw.items ?? [],
-    deleted,
-    global,
-    true,
-  );
+  const [monsters, items, spells] = await Promise.all([
+    Promise.resolve(mergeMonsters(
+      baseMonsters,
+      raw.overrideMonsters ?? [],
+      raw.monsters ?? [],
+      deleted,
+      global,
+      true,
+    )),
+    Promise.resolve(mergeItems(
+      baseItems,
+      raw.overrideItems ?? [],
+      raw.items ?? [],
+      deleted,
+      global,
+      true,
+    )),
+    Promise.resolve(mergeSpells(
+      baseSpells,
+      raw.overrideSpells ?? [],
+      raw.spells ?? [],
+      deleted,
+      global,
+      true,
+    )),
+  ]);
 
   updateCatalogRebuild({
     phase: 'building-spells',
@@ -516,14 +533,6 @@ async function buildCatalogCacheFromRaw(
     percent: 75,
     entryCounts: { monsters: monsters.length, items: items.length },
   });
-  const spells = mergeSpells(
-    await loadBaseSpells(),
-    raw.overrideSpells ?? [],
-    raw.spells ?? [],
-    deleted,
-    global,
-    true,
-  );
 
   updateCatalogRebuild({
     phase: 'sorting',
@@ -551,7 +560,7 @@ async function executeCatalogBuild(previousCache: CatalogCache | null): Promise<
       label: 'Loading compendium data from database…',
       percent: 5,
     });
-    const raw = await readRawGlobalDoc({ includeImageData: false });
+    const raw = await readRawGlobalDoc({ includeImageData: false, skipImageMaps: true });
     let built = await buildCatalogCacheFromRaw(raw);
 
     const rawFallback = loadRawGlobalFallback();
@@ -763,7 +772,13 @@ async function catalogIsMissingOverrides(): Promise<boolean> {
 }
 
 async function ensureCatalogIncludesOverrides(): Promise<void> {
-  if (!(await catalogIsMissingOverrides())) return;
+  const now = Date.now();
+  if (overrideCheckCache && now - overrideCheckCache.at < 30_000 && !overrideCheckCache.missing) {
+    return;
+  }
+  const missing = await catalogIsMissingOverrides();
+  overrideCheckCache = { at: now, missing };
+  if (!missing) return;
   console.warn('[Compendium] Catalog cache missing Mongo overrides — rebuilding');
   await rebuildCatalogCacheAtomic();
 }
@@ -934,29 +949,26 @@ export async function listAllBookSources(): Promise<
   Array<{ id: string; label: string; count: number; locked?: boolean; draftCount?: number }>
 > {
   const {
-    getMemoryBookSources,
     loadPersistedBookSources,
     savePersistedBookSources,
-    setMemoryBookSources,
   } = await import('./compendiumBookSourcesCache');
-  const { ensureCompendiumStorageReconciled } = await import('./compendiumFallbackMongoSync');
 
-  const cached = getMemoryBookSources();
-  if (!cached) {
-    await ensureCompendiumStorageReconciled('book-list');
-  }
-
-  const cachedAfterSync = getMemoryBookSources();
-  if (cachedAfterSync) return cachedAfterSync;
-
-  const persisted = loadPersistedBookSources();
   const policy = await readVisibilityPolicyFast();
   let counts: SourceCountMap = new Map();
 
-  // Local data.json mirror — survives Mongo outages and restarts without refetch.
-  const rawFallback = loadRawGlobalFallback();
-  if (rawFallback) {
-    counts = tallyBooksSourceCounts(rawFallback, policy);
+  // Always tally from Postgres — book counts change during DDB import.
+  const { readImportedNameSourceRowsForBooks } = await import('./compendiumPostgres');
+  const imported = await readImportedNameSourceRowsForBooks();
+  for (const kind of ['monster', 'item', 'spell'] as const) {
+    counts = tallyBooksSourceCountsForKind(imported[kind], kind, policy, counts);
+  }
+
+  // Local data.json mirror when Postgres has no imports yet.
+  if (counts.size === 0) {
+    const rawFallback = loadRawGlobalFallback();
+    if (rawFallback) {
+      counts = tallyBooksSourceCounts(rawFallback, policy);
+    }
   }
 
   if (counts.size === 0) {
@@ -973,17 +985,12 @@ export async function listAllBookSources(): Promise<
   }
 
   if (counts.size === 0) {
-    const labels = await collectImportedSourceLabelsFromMongo();
+    const labels = await collectImportedSourceLabelListFromMongo();
     for (const label of labels) {
       if (!counts.has(label)) {
         counts.set(label, { total: 1, public: 1, draft: 0 });
       }
     }
-  }
-
-  if (counts.size === 0 && persisted) {
-    setMemoryBookSources(persisted);
-    return persisted;
   }
 
   const result = mapSourceListResults(
@@ -996,9 +1003,9 @@ export async function listAllBookSources(): Promise<
 
   if (result.length > 0) {
     savePersistedBookSources(result);
-  } else if (persisted) {
-    setMemoryBookSources(persisted);
-    return persisted;
+  } else {
+    const persisted = loadPersistedBookSources();
+    if (persisted) return persisted;
   }
 
   return result;
@@ -1191,8 +1198,9 @@ export async function listSources(
 
   if (excludeBundled) {
     const compendiumKind = kindToCompendiumKind(kind);
-    const overrides = await readOverrideEntriesFromMongo(compendiumKind);
-    const counts = tallyBooksSourceCountsForKind(overrides, compendiumKind, policy);
+    const { readImportedNameSourceRowsForBooks } = await import('./compendiumPostgres');
+    const imported = await readImportedNameSourceRowsForBooks();
+    const counts = tallyBooksSourceCountsForKind(imported[compendiumKind], compendiumKind, policy);
     return mapSourceListResults(counts, policy, true, true, null);
   }
 
@@ -1212,20 +1220,11 @@ export async function getSyncStatus(): Promise<CompendiumSyncStatus> {
 
   const stamps: string[] = [];
 
-  if (isMongoConfigured()) {
-    const health = getMongoHealthSnapshot();
-    const staleMs = health.lastCheckedAt
-      ? Date.now() - new Date(health.lastCheckedAt).getTime()
-      : Number.POSITIVE_INFINITY;
-    if (staleMs > 30_000) {
-      await pingMongo();
-    }
-  }
+  await pingCompendiumStorage();
+  const storageHealth = getCompendiumStorageHealthSnapshot();
 
-  const mongoHealth = getMongoHealthSnapshot();
-
-  const mongoVersion = await readMongoGlobalVersion();
-  if (mongoVersion) stamps.push(mongoVersion);
+  const dbVersion = await readPostgresGlobalVersion();
+  if (dbVersion) stamps.push(dbVersion);
 
   const extVersion = await fetchExtensionVersion();
   if (extVersion) stamps.push(extVersion);
@@ -1236,14 +1235,13 @@ export async function getSyncStatus(): Promise<CompendiumSyncStatus> {
   const fileRev = globalFallbackFileRevision();
   if (fileRev) stamps.push(fileRev);
 
-  const col = await getCollection<CompendiumGlobalDoc>('data');
-  const mongoConnected = mongoHealth.state === 'connected' && Boolean(col && mongoVersion);
+  const postgresConnected = storageHealth.state === 'connected' && Boolean(dbVersion);
   const hasLocal = isLocalCatalogAvailable() || Boolean(file);
   const hasExtension = Boolean(extVersion);
 
   let entryCounts = getCatalogEntryCounts() ?? undefined;
-  if (mongoConnected && (!entryCounts || entryCounts.monsters + entryCounts.items + entryCounts.spells === 0)) {
-    const mongoCounts = await readOverrideCountsFromMongo();
+  if (postgresConnected && (!entryCounts || entryCounts.monsters + entryCounts.items + entryCounts.spells === 0)) {
+    const postgresCounts = await readOverrideCountsFromMongo();
     const typedCounts = await readOverrideCountsFromTypedCollections();
     const pick = (a: { monsters: number; items: number; spells: number } | null, b: typeof a) => {
       if (!a) return b ?? undefined;
@@ -1252,7 +1250,7 @@ export async function getSyncStatus(): Promise<CompendiumSyncStatus> {
       const bTotal = b.monsters + b.items + b.spells;
       return bTotal > aTotal ? b : a;
     };
-    const best = pick(mongoCounts, typedCounts);
+    const best = pick(postgresCounts, typedCounts);
     if (best && best.monsters + best.items + best.spells > 0) {
       entryCounts = best;
     }
@@ -1260,17 +1258,16 @@ export async function getSyncStatus(): Promise<CompendiumSyncStatus> {
 
   const value: CompendiumSyncStatus = {
     lastUpdated: stamps.length ? newestIso(...stamps) : new Date(0).toISOString(),
-    storage: mongoConnected ? 'mongodb' : hasLocal || hasExtension ? 'local' : 'unavailable',
-    mongoConnected,
+    storage: postgresConnected ? 'postgresql' : hasLocal || hasExtension ? 'local' : 'unavailable',
+    mongoConnected: postgresConnected,
     mongoHealth: {
-      state: mongoHealth.state,
-      configured: mongoHealth.configured,
-      circuitOpen: mongoHealth.circuitOpen,
-      ...(mongoHealth.lastCheckedAt ? { lastCheckedAt: mongoHealth.lastCheckedAt } : {}),
-      ...(mongoHealth.lastSuccessAt ? { lastSuccessAt: mongoHealth.lastSuccessAt } : {}),
-      ...(mongoHealth.lastFailureAt ? { lastFailureAt: mongoHealth.lastFailureAt } : {}),
-      ...(mongoHealth.lastError ? { lastError: mongoHealth.lastError } : {}),
-      ...(mongoHealth.latencyMs != null ? { latencyMs: mongoHealth.latencyMs } : {}),
+      state: storageHealth.state,
+      configured: storageHealth.configured,
+      circuitOpen: storageHealth.circuitOpen,
+      ...(storageHealth.lastCheckedAt ? { lastCheckedAt: storageHealth.lastCheckedAt } : {}),
+      ...(storageHealth.lastSuccessAt ? { lastSuccessAt: storageHealth.lastSuccessAt } : {}),
+      ...(storageHealth.lastError ? { lastError: storageHealth.lastError } : {}),
+      ...(storageHealth.latencyMs != null ? { latencyMs: storageHealth.latencyMs } : {}),
     },
     catalogRev: getCatalogRevision() ?? undefined,
     entryCounts,
@@ -1298,9 +1295,14 @@ export async function searchMonsters(opts: {
   const sourceFilter = opts.source?.trim();
 
   if (sourceFilter) {
-    let fromMongo = await monstersFromRawOverrides(sourceFilter, policy);
-    fromMongo = filterVisible('monster', fromMongo, policy, opts.includeDrafts ?? false);
-    let filtered = filterMonsters(fromMongo, opts.q ?? '', opts.crMin, opts.crMax);
+    const fromCache = await filterCachedEntriesBySource(
+      'monster',
+      getCachedMonsters,
+      sourceFilter,
+      policy,
+      opts.includeDrafts ?? false,
+    );
+    let filtered = filterMonsters(fromCache, opts.q ?? '', opts.crMin, opts.crMax);
     if (opts.isCustom === true) {
       filtered = filtered.filter((m) => isHomebrewEntry(m.isCustom, m.source));
     } else if (opts.isCustom === false) {
@@ -1325,7 +1327,7 @@ export async function getMonsterById(id: string, opts?: { includeDrafts?: boolea
   let hit = (await getCachedMonsters()).find((m) => m.id === id);
   if (!hit) {
     const raw = await readOverrideEntryByIdFromMongo('monster', id);
-    if (raw) hit = compendiumMonsterFromOverride(raw, policy) ?? undefined;
+    if (raw) hit = compendiumMonsterFromOverride(raw as OwlbearMonster, policy) ?? undefined;
   }
   if (!hit) {
     const base = await loadBaseMonsters();
@@ -1370,9 +1372,14 @@ export async function searchItems(opts: {
   const lower = (opts.q ?? '').trim().toLowerCase();
 
   if (sourceFilter) {
-    let fromMongo = await itemsFromRawOverrides(sourceFilter, policy);
-    fromMongo = filterVisible('item', fromMongo, policy, opts.includeDrafts ?? false);
-    let filtered = fromMongo.filter((i) => {
+    const fromCache = await filterCachedEntriesBySource(
+      'item',
+      getCachedItems,
+      sourceFilter,
+      policy,
+      opts.includeDrafts ?? false,
+    );
+    let filtered = fromCache.filter((i) => {
       if (!lower) return true;
       return i.name.toLowerCase().includes(lower) || i.description.toLowerCase().includes(lower);
     });
@@ -1405,7 +1412,7 @@ export async function getItemById(id: string, opts?: { includeDrafts?: boolean }
   let hit = (await getCachedItems()).find((i) => i.id === id);
   if (!hit) {
     const raw = await readOverrideEntryByIdFromMongo('item', id);
-    if (raw) hit = compendiumItemFromOverride(raw, policy) ?? undefined;
+    if (raw) hit = compendiumItemFromOverride(raw as OwlbearItem, policy) ?? undefined;
   }
   if (!hit) {
     const base = await loadBaseItems();
@@ -1454,9 +1461,14 @@ export async function searchSpells(opts: {
   const lower = (opts.q ?? '').trim().toLowerCase();
 
   if (sourceFilter) {
-    let fromMongo = await spellsFromRawOverrides(sourceFilter, policy);
-    fromMongo = filterVisible('spell', fromMongo, policy, opts.includeDrafts ?? false);
-    let filtered = fromMongo.filter((s) => {
+    const fromCache = await filterCachedEntriesBySource(
+      'spell',
+      getCachedSpells,
+      sourceFilter,
+      policy,
+      opts.includeDrafts ?? false,
+    );
+    let filtered = fromCache.filter((s) => {
       if (!lower) return true;
       return s.name.toLowerCase().includes(lower);
     });
@@ -1489,7 +1501,7 @@ export async function getSpellById(id: string, opts?: { includeDrafts?: boolean 
   let hit = (await getCachedSpells()).find((s) => s.id === id);
   if (!hit) {
     const raw = await readOverrideEntryByIdFromMongo('spell', id);
-    if (raw) hit = compendiumSpellFromOverride(raw, policy) ?? undefined;
+    if (raw) hit = compendiumSpellFromOverride(raw as OwlbearSpell, policy) ?? undefined;
   }
   if (!hit) {
     const base = await loadBaseSpells();
@@ -1546,25 +1558,10 @@ async function upsertCollectionMonstersBulk(
     const { markCompendiumWritePending } = await import('./compendiumMongoWatch');
     markCompendiumWritePending();
   }
-  const col = await getCollection<StoredMonster>('monsters');
-  if (!col) {
-    throw new Error('MongoDB unavailable — monster bulk write skipped');
+  if (isCompendiumStorageUnavailable()) {
+    throw new Error('PostgreSQL unavailable — monster bulk write skipped');
   }
-  await withMongoTimeout(() => col.bulkWrite(
-      entries.map(({ entry, isCustom }) => {
-        const _id = slugify(entry.name);
-        return {
-          updateOne: {
-            filter: { _id },
-            update: { $set: { ...entry, _id, isCustom } },
-            upsert: true,
-          },
-        };
-      }),
-      { ordered: false },
-    ),
-    60_000,
-  );
+  await upsertTypedImportEntriesBulk('monster', entries);
   if (!opts?.skipNotify) await notifyTypedCollectionsChanged();
 }
 
@@ -1577,25 +1574,10 @@ async function upsertCollectionItemsBulk(
     const { markCompendiumWritePending } = await import('./compendiumMongoWatch');
     markCompendiumWritePending();
   }
-  const col = await getCollection<StoredItem>('items');
-  if (!col) {
-    throw new Error('MongoDB unavailable — item bulk write skipped');
+  if (isCompendiumStorageUnavailable()) {
+    throw new Error('PostgreSQL unavailable — item bulk write skipped');
   }
-  await withMongoTimeout(() => col.bulkWrite(
-      entries.map(({ entry, isCustom }) => {
-        const _id = slugify(entry.name);
-        return {
-          updateOne: {
-            filter: { _id },
-            update: { $set: { ...entry, _id, isCustom } },
-            upsert: true,
-          },
-        };
-      }),
-      { ordered: false },
-    ),
-    60_000,
-  );
+  await upsertTypedImportEntriesBulk('item', entries);
   if (!opts?.skipNotify) await notifyTypedCollectionsChanged();
 }
 
@@ -1608,25 +1590,10 @@ async function upsertCollectionSpellsBulk(
     const { markCompendiumWritePending } = await import('./compendiumMongoWatch');
     markCompendiumWritePending();
   }
-  const col = await getCollection<StoredSpell>('spells');
-  if (!col) {
-    throw new Error('MongoDB unavailable — spell bulk write skipped');
+  if (isCompendiumStorageUnavailable()) {
+    throw new Error('PostgreSQL unavailable — spell bulk write skipped');
   }
-  await withMongoTimeout(() => col.bulkWrite(
-      entries.map(({ entry, isCustom }) => {
-        const _id = slugify(entry.name);
-        return {
-          updateOne: {
-            filter: { _id },
-            update: { $set: { ...entry, _id, isCustom } },
-            upsert: true,
-          },
-        };
-      }),
-      { ordered: false },
-    ),
-    60_000,
-  );
+  await upsertTypedImportEntriesBulk('spell', entries);
   if (!opts?.skipNotify) await notifyTypedCollectionsChanged();
 }
 
@@ -1742,8 +1709,7 @@ export async function saveMonster(
   const payload = prepareSavePayload({ ...entry, source: entry.source || 'Custom' }, saveAs);
 
   if (opts?.previousName && opts.previousName !== payload.name) {
-    const col = await getCollection<StoredMonster>('monsters');
-    if (col) await col.deleteOne({ _id: slugify(opts.previousName) });
+    await deleteCompendiumEntryBySlug(slugify(opts.previousName));
   }
 
   await saveOwlbearEntry('monster', payload, {
@@ -1772,8 +1738,7 @@ export async function saveItem(
   const payload = prepareSavePayload({ ...entry, source: entry.source || 'Custom' }, saveAs);
 
   if (opts?.previousName && opts.previousName !== payload.name) {
-    const col = await getCollection<StoredItem>('items');
-    if (col) await col.deleteOne({ _id: slugify(opts.previousName) });
+    await deleteCompendiumEntryBySlug(slugify(opts.previousName));
   }
 
   await saveOwlbearEntry('item', payload, {
@@ -1797,8 +1762,7 @@ export async function saveSpell(
   const payload = prepareSavePayload({ ...entry, source: entry.source || 'Custom' }, saveAs);
 
   if (opts?.previousName && opts.previousName !== payload.name) {
-    const col = await getCollection<StoredSpell>('spells');
-    if (col) await col.deleteOne({ _id: slugify(opts.previousName) });
+    await deleteCompendiumEntryBySlug(slugify(opts.previousName));
   }
 
   await saveOwlbearEntry('spell', payload, {
@@ -1850,46 +1814,30 @@ export async function finishBulkCompendiumImport(opts?: {
   return { catalogRev: getCatalogRevision() };
 }
 
-/** Promote fallback JSON, warm catalog, and rebuild after Mongo/import drift. */
+/** Promote fallback JSON, warm catalog, and rebuild after Postgres/import drift. */
 export async function reconcileCompendiumMongo(
   reason: string,
   opts?: { deferCatalogRebuild?: boolean; strict?: boolean },
 ): Promise<CompendiumSyncStatus> {
-  beginMongoRecoveryWindow();
-  let recovery: Awaited<ReturnType<typeof attemptMongoRecovery>>;
-  try {
-    recovery = await attemptMongoRecovery(reason);
+  await pingCompendiumStorage();
 
-    const { reconcileCompendiumStorage } = await import('./compendiumFallbackMongoSync');
-    const { ensureBundledSourcesLocked, ensureImportedSourcesUnlocked } = await import('./compendiumBundledLock');
-    await reconcileCompendiumStorage(reason);
-    await ensureBundledSourcesLocked(reason);
-    await ensureImportedSourcesUnlocked(reason);
-    clearRawGlobalDocInflight();
-    invalidateSyncStatusCache();
-    await warmCompendiumCatalog();
-    await finishBulkCompendiumImport({ deferCatalogRebuild: opts?.deferCatalogRebuild ?? true });
-
-    if (recovery.state === 'connected') {
-      const { resumeCompendiumMongoWatch } = await import('./compendiumMongoWatch');
-      resumeCompendiumMongoWatch();
-    }
-  } finally {
-    endMongoRecoveryWindow();
-  }
+  const { reconcileCompendiumStorage } = await import('./compendiumFallbackMongoSync');
+  const { ensureBundledSourcesLocked, ensureImportedSourcesUnlocked } = await import('./compendiumBundledLock');
+  await reconcileCompendiumStorage(reason);
+  await ensureBundledSourcesLocked(reason);
+  await ensureImportedSourcesUnlocked(reason);
+  clearRawGlobalDocInflight();
+  invalidateSyncStatusCache();
+  await warmCompendiumCatalog();
+  await finishBulkCompendiumImport({ deferCatalogRebuild: opts?.deferCatalogRebuild ?? true });
 
   const status = await getSyncStatus();
-  const mongoDown = status.mongoHealth?.configured && status.mongoHealth.state !== 'connected';
-  if (mongoDown && opts?.strict !== false) {
+  const postgresDown = status.mongoHealth?.configured && status.mongoHealth.state !== 'connected';
+  if (postgresDown && opts?.strict !== false) {
     const detail =
       status.mongoHealth?.lastError
-      ?? getLastMongoConnectError()
-      ?? recovery.lastError
-      ?? `MongoDB still ${status.mongoHealth?.state ?? 'unavailable'} after heal`;
-    const hint = detail.includes('querySrv') || detail.includes('ECONNREFUSED')
-      ? `${detail} — DNS blocked SRV lookup; server uses 8.8.8.8/1.1.1.1 but VPN/firewall may still block MongoDB Atlas`
-      : detail;
-    throw new Error(hint);
+      ?? `PostgreSQL still ${status.mongoHealth?.state ?? 'unavailable'} after heal`;
+    throw new Error(detail);
   }
   return status;
 }
@@ -2156,19 +2104,8 @@ export async function deleteCompendiumEntry(
   const id = slugify(name);
 
   let inBaseCatalog = false;
-  if (kind === 'monster') {
-    const col = await getCollection<StoredMonster>('monsters');
-    const base = col ? await col.findOne({ _id: id }) : null;
-    inBaseCatalog = Boolean(base && !base.isCustom);
-  } else if (kind === 'item') {
-    const col = await getCollection<StoredItem>('items');
-    const base = col ? await col.findOne({ _id: id }) : null;
-    inBaseCatalog = Boolean(base && !base.isCustom);
-  } else {
-    const col = await getCollection<StoredSpell>('spells');
-    const base = col ? await col.findOne({ _id: id }) : null;
-    inBaseCatalog = Boolean(base && !base.isCustom);
-  }
+  const stored = await readOverrideEntryByIdFromMongo(kind, id);
+  inBaseCatalog = Boolean(stored && !('isCustom' in stored && stored.isCustom));
 
   let customOnly = false;
 
@@ -2189,16 +2126,7 @@ export async function deleteCompendiumEntry(
 
   if (!customOnly) return;
 
-  if (kind === 'monster') {
-    const col = await getCollection<StoredMonster>('monsters');
-    if (col) await col.deleteOne({ _id: id });
-  } else if (kind === 'item') {
-    const col = await getCollection<StoredItem>('items');
-    if (col) await col.deleteOne({ _id: id });
-  } else {
-    const col = await getCollection<StoredSpell>('spells');
-    if (col) await col.deleteOne({ _id: id });
-  }
+  await deleteCompendiumEntryBySlug(id);
 }
 
 export { isLikelyValidItem, slugify };

@@ -7,7 +7,14 @@ import type {
   OwlbearSpell,
 } from '@grimoire/shared';
 import { normalizeOwlbearGlobalDoc } from '@grimoire/shared';
-import { getCollection, isMongoCircuitOpen, withMongoTimeout } from '../lib/mongo';
+import {
+  applyPostgresGlobalImagePatch,
+  isCompendiumStorageUnavailable,
+  persistRawGlobalDocToPostgres,
+  readBookSourceLabelsFromPostgres,
+  readRawGlobalDocFromPostgres,
+  touchCompendiumMeta,
+} from './compendiumPostgres';
 import {
   clearGlobalFallbackCache,
   loadGlobalFallback,
@@ -255,23 +262,18 @@ function hideBuiltInOriginal(raw: OwlbearRawGlobalDoc, kind: CompendiumKind, ori
   addDeleted(raw, originName, kind);
 }
 
-/** Dedupe overrides and strip stale custom copies in Mongo/data.json. */
+/** Dedupe overrides and strip stale custom copies in Postgres/local mirror. */
 export async function reconcileRawGlobalStorage(): Promise<void> {
-  if (process.env['COMPENDIUM_MONGO_ONLY'] === '1' || isMongoCircuitOpen()) return;
+  if (isCompendiumStorageUnavailable()) return;
   try {
-    const col = await getCollection<OwlbearRawGlobalDoc>('data');
-    if (!col) return;
-    const doc = await withMongoTimeout(() => col.findOne({ _id: 'global' }), 12_000);
-    if (!doc) return;
-
+    const doc = await readRawGlobalDoc({ includeImageData: false });
     const cleaned = normalizeRawDoc(doc);
     if (rawPersistFingerprint(doc) === rawPersistFingerprint(cleaned)) return;
-
     await persistRawGlobalDoc(cleaned);
-    console.log('[Compendium] Reconciled compendium data in MongoDB');
+    console.log('[Compendium] Reconciled compendium data in PostgreSQL');
   } catch (err) {
     console.warn(
-      '[Compendium] Mongo reconcile skipped:',
+      '[Compendium] Postgres reconcile skipped:',
       err instanceof Error ? err.message : err,
     );
   }
@@ -289,6 +291,8 @@ export interface PersistRawGlobalDocResult {
 export type RawGlobalDocReadOptions = {
   /** When false, skip multi-MB image blobs (catalog/list only). Default true for writes. */
   includeImageData?: boolean;
+  /** When true, skip image ref/history queries (catalog rebuild only). */
+  skipImageMaps?: boolean;
 };
 
 const RAW_GLOBAL_LITE_PROJECTION = { imagesData: 0 as const, images: 0 as const, entryImages: 0 as const };
@@ -327,79 +331,49 @@ function bookSourceLabelCount(buckets: BookSourceLabelBuckets): number {
   return buckets.monsterSources.length + buckets.itemSources.length + buckets.spellSources.length;
 }
 
-/** Read only source fields via aggregation — avoids loading multi-MB stat blocks. */
+/** Read only source fields — avoids loading multi-MB stat blocks. */
 export async function readBookSourceLabelsFromMongo(): Promise<BookSourceLabelBuckets | null> {
-  if (isMongoCircuitOpen()) return null;
+  if (isCompendiumStorageUnavailable()) return null;
   try {
-    const col = await getCollection<OwlbearRawGlobalDoc>('data');
-    if (!col) return null;
-    const rows = await withMongoTimeout(() => col.aggregate([
-        { $match: { _id: 'global' } },
-        {
-          $project: {
-            _id: 0,
-            monsterSources: {
-              $map: {
-                input: { $ifNull: ['$overrideMonsters', []] },
-                as: 'm',
-                in: '$$m.source',
-              },
-            },
-            itemSources: {
-              $map: {
-                input: { $ifNull: ['$overrideItems', []] },
-                as: 'i',
-                in: '$$i.source',
-              },
-            },
-            spellSources: {
-              $map: {
-                input: { $ifNull: ['$overrideSpells', []] },
-                as: 's',
-                in: '$$s.source',
-              },
-            },
-          },
-        },
-      ]).toArray(),
-      45_000,
-    );
-    const doc = rows[0] as BookSourceLabelBuckets | undefined;
+    const doc = await readBookSourceLabelsFromPostgres();
     if (!doc || bookSourceLabelCount(doc) === 0) return null;
     return doc;
   } catch (err) {
     console.warn(
-      '[Compendium] Book source label aggregation failed:',
+      '[Compendium] Book source label read failed:',
       err instanceof Error ? err.message : err,
     );
     return null;
   }
 }
 
-/** Fast Mongo read of DDB import override arrays for Compendium → Books. */
+/** Fast Postgres read of DDB import override arrays for Compendium → Books. */
 export async function readOverrideSlicesForBookList(): Promise<{
   overrideMonsters: OwlbearMonster[];
   overrideItems: OwlbearItem[];
   overrideSpells: OwlbearSpell[];
 }> {
-  if (!isMongoCircuitOpen()) {
+  if (!isCompendiumStorageUnavailable()) {
     try {
-      const col = await getCollection<OwlbearRawGlobalDoc>('data');
-      if (col) {
-        const doc = await withMongoTimeout(() => col.findOne({ _id: 'global' }, { projection: OVERRIDE_SLICES_PROJECTION }),
-          45_000,
-        );
-        if (doc) {
-          let normalized = normalizeRawDoc(doc);
-          const { loadOverrideShardsIntoRawDoc } = await import('./compendiumGlobalShards');
-          normalized = await loadOverrideShardsIntoRawDoc(normalized);
-          const slices = {
-            overrideMonsters: normalized.overrideMonsters ?? [],
-            overrideItems: normalized.overrideItems ?? [],
-            overrideSpells: normalized.overrideSpells ?? [],
-          };
-          if (overrideSliceCount(slices) > 0) return slices;
-        }
+      const raw = await readRawGlobalDocFromPostgres({ includeImageData: false });
+      if (raw) {
+        const typed = await readTypedImportOverrideSlices();
+        const mergeList = <T extends { name: string }>(global: T[] | undefined, typedList: T[]): T[] => {
+          const map = new Map<string, T>();
+          for (const entry of global ?? []) {
+            if (entry?.name) map.set(entryNameKey(entry.name), entry);
+          }
+          for (const entry of typedList) {
+            if (entry?.name) map.set(entryNameKey(entry.name), entry);
+          }
+          return Array.from(map.values());
+        };
+        const slices = {
+          overrideMonsters: mergeList(raw.overrideMonsters, typed.overrideMonsters),
+          overrideItems: mergeList(raw.overrideItems, typed.overrideItems),
+          overrideSpells: mergeList(raw.overrideSpells, typed.overrideSpells),
+        };
+        if (overrideSliceCount(slices) > 0) return slices;
       }
     } catch (err) {
       console.warn(
@@ -445,42 +419,31 @@ export async function readOverrideSlicesForBookList(): Promise<{
 
 async function readRawGlobalDocInner(opts: RawGlobalDocReadOptions = {}): Promise<OwlbearRawGlobalDoc> {
   const includeImageData = opts.includeImageData !== false;
+  const skipImageMaps = opts.skipImageMaps === true;
 
-  if (isMongoCircuitOpen()) {
-    const fallbackRaw = loadRawGlobalFallback();
-    if (fallbackRaw) return normalizeRawDoc(fallbackRaw);
-  }
-
-  try {
-    const col = await getCollection<OwlbearRawGlobalDoc>('data');
-    if (col) {
-      const projection = includeImageData ? undefined : RAW_GLOBAL_LITE_PROJECTION;
-      const doc = await withMongoTimeout(() => col.findOne({ _id: 'global' }, projection ? { projection } : undefined),
-        includeImageData ? RAW_GLOBAL_FULL_READ_MS : RAW_GLOBAL_LITE_READ_MS,
-      );
-      if (doc) {
-        let normalizedMongo = normalizeRawDoc(doc);
-        const { loadOverrideShardsIntoRawDoc } = await import('./compendiumGlobalShards');
-        normalizedMongo = await loadOverrideShardsIntoRawDoc(normalizedMongo);
+  if (!isCompendiumStorageUnavailable()) {
+    try {
+      const postgresDoc = await readRawGlobalDocFromPostgres({ includeImageData, skipImageMaps });
+      if (postgresDoc) {
         const fallbackRaw = loadRawGlobalFallback();
         if (fallbackRaw) {
           const normalizedFallback = normalizeRawDoc(fallbackRaw);
           const { mergeRawGlobalDocs, rawOverrideEntryCount } = await import('./compendiumFallbackMongoSync');
-          if (rawOverrideEntryCount(normalizedFallback) > rawOverrideEntryCount(normalizedMongo)) {
+          if (rawOverrideEntryCount(normalizedFallback) > rawOverrideEntryCount(postgresDoc)) {
             console.warn(
-              '[Compendium] Local fallback has more imported entries than Mongo — merging for read',
+              '[Compendium] Local fallback has more imported entries than Postgres — merging for read',
             );
-            return mergeRawGlobalDocs(normalizedMongo, normalizedFallback);
+            return mergeRawGlobalDocs(postgresDoc, normalizedFallback);
           }
         }
-        return normalizedMongo;
+        return postgresDoc;
       }
+    } catch (err) {
+      console.warn(
+        '[Compendium] Raw Postgres read failed, trying fallback:',
+        err instanceof Error ? err.message : err,
+      );
     }
-  } catch (err) {
-    console.warn(
-      '[Compendium] Raw Mongo read failed, trying fallback:',
-      err instanceof Error ? err.message : err,
-    );
   }
 
   const fallbackRaw = loadRawGlobalFallback();
@@ -503,7 +466,7 @@ async function readRawGlobalDocInner(opts: RawGlobalDocReadOptions = {}): Promis
 }
 
 export async function readRawGlobalDoc(opts: RawGlobalDocReadOptions = {}): Promise<OwlbearRawGlobalDoc> {
-  const key = opts.includeImageData === false ? 'lite' : 'full';
+  const key = `${opts.includeImageData === false ? 'lite' : 'full'}:${opts.skipImageMaps ? 'noimg' : 'img'}`;
   if (rawGlobalInflight?.key === key) return rawGlobalInflight.promise;
 
   const promise = readRawGlobalDocInner(opts).finally(() => {
@@ -518,72 +481,17 @@ export async function persistRawGlobalDoc(
   opts?: { notify?: PersistNotifyMode },
 ): Promise<PersistRawGlobalDocResult> {
   const lastUpdated = new Date().toISOString();
-  let payload = normalizeRawDoc({ ...raw, lastUpdated });
+  const payload = normalizeRawDoc({ ...raw, lastUpdated });
   const notify = opts?.notify ?? 'full';
 
-  const {
-    rawDocNeedsSharding,
-    splitRawDocOverridesIntoShards,
-    persistOverrideShards,
-    isBsonTooLargeError,
-  } = await import('./compendiumGlobalShards');
+  markCompendiumWritePending();
+  const postgresPersisted = await persistRawGlobalDocToPostgres(payload, new Date(lastUpdated));
 
-  let shardWrite: ReturnType<typeof splitRawDocOverridesIntoShards> | null = null;
-  if (rawDocNeedsSharding(payload)) {
-    shardWrite = splitRawDocOverridesIntoShards(payload);
-    payload = normalizeRawDoc(shardWrite.global);
-    console.warn(
-      '[Compendium] Global doc exceeds BSON safe size — storing overrides in'
-      + ` ${shardWrite.shards.length} shard document(s)`,
-    );
-  }
+  const normalized = normalizeOwlbearGlobalDoc(payload);
+  const fallbackPersisted = Boolean(saveGlobalFallback(normalized, payload));
 
-  const col = await getCollection<OwlbearRawGlobalDoc>('data');
-  let mongoPersisted = false;
-  if (col && !isMongoCircuitOpen()) {
-    markCompendiumWritePending();
-    for (let attempt = 0; attempt < 3; attempt++) {
-      try {
-        const result = await withMongoTimeout(() => col.updateOne({ _id: 'global' }, { $set: payload }, { upsert: true }),
-          12_000,
-        );
-        mongoPersisted = result.acknowledged;
-        if (shardWrite && shardWrite.shards.length > 0) {
-          mongoPersisted = await persistOverrideShards(shardWrite.shards, shardWrite.meta) && mongoPersisted;
-        }
-        break;
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        if (!shardWrite && isBsonTooLargeError(err)) {
-          shardWrite = splitRawDocOverridesIntoShards(payload);
-          payload = normalizeRawDoc(shardWrite.global);
-          console.warn('[Compendium] Mongo rejected oversized global doc — retrying with shards');
-          continue;
-        }
-        if (attempt < 2) {
-          console.warn(`[Compendium] Mongo write retry ${attempt + 1}/3:`, msg);
-          await new Promise((r) => setTimeout(r, 600 * (attempt + 1)));
-          continue;
-        }
-        console.warn('[Compendium] Mongo write failed, saving locally:', msg);
-      }
-    }
-  }
-
-  const normalized = normalizeOwlbearGlobalDoc(
-    shardWrite ? normalizeRawDoc({ ...raw, lastUpdated: payload.lastUpdated }) : payload,
-  );
-  const fallbackPersisted = Boolean(
-    saveGlobalFallback(
-      normalized,
-      payload,
-      shardWrite && shardWrite.shards.length > 0
-        ? { shards: shardWrite.shards, meta: shardWrite.meta }
-        : undefined,
-    ),
-  );
-  if (!col && !fallbackPersisted && isMongoCircuitOpen()) {
-    throw new Error('MongoDB unavailable and failed to write local compendium mirror');
+  if (!postgresPersisted && !fallbackPersisted && isCompendiumStorageUnavailable()) {
+    throw new Error('PostgreSQL unavailable and failed to write local compendium mirror');
   }
 
   if (notify === 'rebuild') {
@@ -598,7 +506,7 @@ export async function persistRawGlobalDoc(
   return {
     doc: normalized,
     lastUpdated,
-    mongoPersisted: mongoPersisted || fallbackPersisted,
+    mongoPersisted: postgresPersisted || fallbackPersisted,
   };
 }
 
@@ -734,10 +642,9 @@ export async function patchOwlbearEntriesBulk(
 
   return enqueueCompendiumWrite(async () => {
     const lastUpdated = new Date().toISOString();
-    const col = await getCollection<OwlbearRawGlobalDoc>('data');
 
-    if (!col || isMongoCircuitOpen()) {
-      console.warn('[Compendium] Mongo unavailable — saving import via compendium doc fallback');
+    if (isCompendiumStorageUnavailable()) {
+      console.warn('[Compendium] Postgres unavailable — saving import via compendium doc fallback');
       const result = await persistEntriesToRawDoc(kind, entries, 'none');
       return { mongoPersisted: result.mongoPersisted, lastUpdated: result.lastUpdated };
     }
@@ -745,13 +652,7 @@ export async function patchOwlbearEntriesBulk(
     if (opts?.typedCollectionsOnly) {
       markCompendiumWritePending();
       try {
-        await withMongoTimeout(() => col.updateOne(
-            { _id: 'global' },
-            { $set: { lastUpdated } },
-            { upsert: true },
-          ),
-          8_000,
-        );
+        await touchCompendiumMeta(new Date(lastUpdated));
         clearRawGlobalDocInflight();
         return { mongoPersisted: true, lastUpdated };
       } catch (err) {
@@ -763,51 +664,16 @@ export async function patchOwlbearEntriesBulk(
       }
     }
 
-    const fields = KIND_FIELDS[kind];
-    markCompendiumWritePending();
-    const ops: import('mongodb').AnyBulkWriteOperation<OwlbearRawGlobalDoc>[] = [];
-
-    for (const { entry, opts } of entries) {
-      const prepared = normalizeEntryImageField({ ...entry } as OwlbearEntry);
-      const name = prepared.name;
-      const targetField = opts.saveAs === 'replace' ? fields.override : fields.custom;
-      const stored = opts.saveAs === 'replace'
-        ? prepared
-        : { ...prepared, source: 'Custom' };
-
-      ops.push({
-        updateOne: {
-          filter: { _id: 'global' },
-          update: {
-            $pull: {
-              [fields.override]: { name },
-              [fields.custom]: { name },
-            },
-          },
-        },
-      });
-      ops.push({
-        updateOne: {
-          filter: { _id: 'global' },
-          update: {
-            $push: { [targetField]: stored },
-            $set: { lastUpdated },
-          },
-          upsert: true,
-        },
-      });
-    }
-
     try {
-      await withMongoTimeout(() => col.bulkWrite(ops, { ordered: true }), 30_000);
+      const result = await persistEntriesToRawDoc(kind, entries, 'none');
       clearRawGlobalDocInflight();
       const { invalidateImportSkipIndex } = await import('./compendiumImportIndex');
       invalidateImportSkipIndex();
       scheduleFallbackMongoSync('bulk-patch');
-      return { mongoPersisted: true, lastUpdated };
+      return { mongoPersisted: result.mongoPersisted, lastUpdated: result.lastUpdated };
     } catch (err) {
       console.warn(
-        '[Compendium] patchOwlbearEntriesBulk failed, using doc fallback:',
+        '[Compendium] patchOwlbearEntriesBulk failed:',
         err instanceof Error ? err.message : err,
       );
       const result = await persistEntriesToRawDoc(kind, entries, 'none');
@@ -864,48 +730,26 @@ export type OwlbearImageFieldsPatch = Partial<Pick<CompendiumGlobalDoc, 'images'
   removeImageDataKeys?: string[];
 };
 
-/** Fast partial Mongo update for image fields (avoids rewriting the full global doc). */
+/** Fast partial Postgres update for image fields (avoids rewriting the full global doc). */
 export async function applyMongoGlobalImagePatch(
   patch: OwlbearImageFieldsPatch,
   entryPatch?: { kind: CompendiumKind; name: string; image?: string },
 ): Promise<CompendiumGlobalDoc> {
   return enqueueCompendiumWrite(async () => {
     invalidateWriteCaches();
-    const col = await getCollection<OwlbearRawGlobalDoc>('data');
-    if (!col) throw new Error('MongoDB unavailable');
+    if (isCompendiumStorageUnavailable()) {
+      throw new Error('PostgreSQL unavailable');
+    }
 
     const lastUpdated = new Date().toISOString();
-    const $set: Record<string, unknown> = { lastUpdated };
-    const $unset: Record<string, ''> = {};
-
-    if (patch.images) {
-      for (const [k, v] of Object.entries(patch.images)) {
-        $set[`images.${k}`] = v;
-      }
-    }
-    if (patch.imagesData) {
-      for (const [k, v] of Object.entries(patch.imagesData)) {
-        $set[`imagesData.${k}`] = v;
-      }
-    }
-    if (patch.entryImages) {
-      for (const [n, urls] of Object.entries(patch.entryImages)) {
-        $set[`entryImages.${n}`] = urls;
-      }
-    }
-    for (const k of patch.removeImageKeys ?? []) {
-      $unset[`images.${k}`] = '';
-    }
-    for (const k of patch.removeImageDataKeys ?? []) {
-      $unset[`imagesData.${k}`] = '';
-    }
-
-    const updateDoc: Record<string, unknown> = {};
-    if (Object.keys($set).length > 0) updateDoc.$set = $set;
-    if (Object.keys($unset).length > 0) updateDoc.$unset = $unset;
-
     markCompendiumWritePending();
-    await withMongoTimeout(() => col.updateOne({ _id: 'global' }, updateDoc), 60_000);
+    await applyPostgresGlobalImagePatch({
+      ...(patch.images ? { images: patch.images } : {}),
+      ...(patch.imagesData ? { imagesData: patch.imagesData } : {}),
+      ...(patch.entryImages ? { entryImages: patch.entryImages } : {}),
+      ...(patch.removeImageKeys?.length ? { unsetImageKeys: patch.removeImageKeys } : {}),
+      ...(patch.removeImageDataKeys?.length ? { unsetImageDataKeys: patch.removeImageDataKeys } : {}),
+    });
 
     notifyCompendiumChanged(lastUpdated);
     invalidateCompendiumCaches();
@@ -943,6 +787,23 @@ export async function applyMongoGlobalImagePatch(
           });
         }
       }
+    }
+
+    if (entryPatch?.image) {
+      const raw = await readRawGlobalDoc({ includeImageData: false });
+      const fields = KIND_FIELDS[entryPatch.kind];
+      const applyImage = (list: OwlbearEntry[]): OwlbearEntry[] => {
+        const idx = list.findIndex((e) => namesMatch(e.name, entryPatch.name));
+        if (idx < 0) return list;
+        const next = [...list];
+        const entry = { ...next[idx]! } as OwlbearEntry & { image?: string };
+        entry.image = toOwlbearMongoImageRef(entryPatch.image!);
+        next[idx] = entry;
+        return next;
+      };
+      setList(raw, fields.override, applyImage(getList(raw, fields.override)));
+      setList(raw, fields.custom, applyImage(getList(raw, fields.custom)));
+      await persistRawGlobalDoc(raw, { notify: 'none' });
     }
 
     return normalizeOwlbearGlobalDoc({

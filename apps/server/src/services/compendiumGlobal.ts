@@ -1,6 +1,17 @@
 import type { CompendiumGlobalDoc, OwlbearRawGlobalDoc } from '@grimoire/shared';
 import { normalizeOwlbearGlobalDoc } from '@grimoire/shared';
-import { getCollection, isMongoCircuitOpen, resetMongoClient, shouldResetMongoClient, withMongoTimeout } from '../lib/mongo';
+import { resetMongoClient, shouldResetMongoClient } from '../lib/mongo';
+import {
+  isCompendiumStorageUnavailable,
+  readPostgresEntryImageHistory,
+  readPostgresEntryImageSlice,
+  readPostgresGlobalImageRefs,
+  readPostgresGlobalVersion,
+  readPostgresImageDataKey,
+  readPostgresImageRefKey,
+  readRawGlobalDocFromPostgres,
+  persistRawGlobalDocToPostgres,
+} from './compendiumPostgres';
 import {
   clearGlobalFallbackCache,
   globalFallbackFileRevision,
@@ -161,32 +172,15 @@ export async function readMongoEntryImageSlice(
 
   const promise = (async () => {
     try {
-      const col = await getCollection<OwlbearRawGlobalDoc>('data');
-      if (!col) return null;
-      const doc = await withMongoTimeout(() => col.findOne(
-          { _id: 'global' },
-          {
-            projection: {
-              [`images.${imageKey}`]: 1 as const,
-              [`entryImages.${entryName}`]: 1 as const,
-              lastUpdated: 1,
-            },
-          },
-        ),
-        MONGO_IMAGE_FIELD_READ_MS,
-      );
-      if (!doc) return null;
-      const slice = {
-        imageRef: doc.images?.[imageKey] ?? null,
-        entryHistory: doc.entryImages?.[entryName] ?? [],
-        lastUpdated: doc.lastUpdated ? isoTimestamp(doc.lastUpdated) : null,
-      };
+      if (isCompendiumStorageUnavailable()) return null;
+      const slice = await readPostgresEntryImageSlice(imageKey, entryName);
+      if (!slice) return null;
       setCachedEntrySlice(imageKey, entryName, slice);
       if (slice.imageRef) setCachedImageRef(imageKey, slice.imageRef);
       return slice;
     } catch (err) {
       warnMongoRead(
-        `[Compendium] Mongo entry image read failed: ${err instanceof Error ? err.message : err}`,
+        `[Compendium] Postgres entry image read failed: ${err instanceof Error ? err.message : err}`,
       );
       return null;
     }
@@ -208,15 +202,8 @@ export async function readMongoImageRefKey(imageKey: string): Promise<string | n
 
   const promise = (async () => {
     try {
-      const col = await getCollection<OwlbearRawGlobalDoc>('data');
-      if (!col) return null;
-      const doc = await withMongoTimeout(() => col.findOne(
-          { _id: 'global' },
-          { projection: { [`images.${imageKey}`]: 1 as const } },
-        ),
-        MONGO_IMAGE_FIELD_READ_MS,
-      );
-      const value = doc?.images?.[imageKey] ?? null;
+      if (isCompendiumStorageUnavailable()) return null;
+      const value = await readPostgresImageRefKey(imageKey);
       setCachedImageRef(imageKey, value);
       return value;
     } catch {
@@ -245,27 +232,16 @@ export async function readMongoGlobalImageRefs(): Promise<{
 
   imageRefsInflight = (async () => {
     try {
-      const col = await getCollection<OwlbearRawGlobalDoc>('data');
-      if (!col) return null;
-      const doc = await withMongoTimeout(() => col.findOne(
-          { _id: 'global' },
-          { projection: { images: 1, entryImages: 1, lastUpdated: 1 } },
-        ),
-        MONGO_IMAGE_REFS_READ_MS,
-      );
-      if (!doc) return null;
-      const data = {
-        images: doc.images ?? {},
-        entryImages: doc.entryImages ?? {},
-        lastUpdated: isoTimestamp(doc.lastUpdated),
-      };
+      if (isCompendiumStorageUnavailable()) return null;
+      const data = await readPostgresGlobalImageRefs();
+      if (!data) return null;
       if (version) {
         imageRefsCache = { rev: version, at: Date.now(), data };
       }
       return data;
     } catch (err) {
       warnMongoRead(
-        `[Compendium] Mongo image refs read failed: ${err instanceof Error ? err.message : err}`,
+        `[Compendium] Postgres image refs read failed: ${err instanceof Error ? err.message : err}`,
       );
       return null;
     } finally {
@@ -286,15 +262,8 @@ export async function readMongoImageDataKey(key: string): Promise<string | null>
 
   const promise = (async () => {
     try {
-      const col = await getCollection<OwlbearRawGlobalDoc>('data');
-      if (!col) return null;
-      const doc = await withMongoTimeout(() => col.findOne(
-          { _id: 'global' },
-          { projection: { [`imagesData.${key}`]: 1 as const } },
-        ),
-        MONGO_IMAGE_DATA_READ_MS,
-      );
-      const value = doc?.imagesData?.[key];
+      if (isCompendiumStorageUnavailable()) return null;
+      const value = await readPostgresImageDataKey(key);
       if (typeof value === 'string') {
         setCachedImageBlob(key, value);
         return value;
@@ -313,15 +282,8 @@ export async function readMongoImageDataKey(key: string): Promise<string | null>
 export async function readMongoEntryImageHistory(entryName: string): Promise<string[]> {
   if (!entryName) return [];
   try {
-    const col = await getCollection<OwlbearRawGlobalDoc>('data');
-    if (!col) return [];
-    const doc = await withMongoTimeout(() => col.findOne(
-        { _id: 'global' },
-        { projection: { [`entryImages.${entryName}`]: 1 as const } },
-      ),
-      MONGO_IMAGE_FIELD_READ_MS,
-    );
-    return doc?.entryImages?.[entryName] ?? [];
+    if (isCompendiumStorageUnavailable()) return [];
+    return await readPostgresEntryImageHistory(entryName);
   } catch {
     return [];
   }
@@ -329,15 +291,9 @@ export async function readMongoEntryImageHistory(entryName: string): Promise<str
 
 /** Lightweight version probe — avoids loading the multi-MB global doc. */
 export async function readMongoGlobalVersion(): Promise<string | null> {
-  if (isMongoCircuitOpen()) return null;
+  if (isCompendiumStorageUnavailable()) return null;
   try {
-    const col = await getCollection<OwlbearRawGlobalDoc>('data');
-    if (!col) return null;
-    const doc = await withMongoTimeout(() => col.findOne({ _id: 'global' }, { projection: { lastUpdated: 1 } }),
-      MONGO_VERSION_READ_MS,
-    );
-    if (!doc?.lastUpdated) return null;
-    return isoTimestamp(doc.lastUpdated);
+    return await readPostgresGlobalVersion();
   } catch {
     return null;
   }
@@ -349,18 +305,10 @@ async function readMongoGlobalDocInner(
   opts: GlobalDocReadOptions = {},
 ): Promise<CompendiumGlobalDoc | null> {
   try {
-    const col = await getCollection<OwlbearRawGlobalDoc>('data');
-    if (!col) return null;
-    // Full read: all fields (images map is ~2MB — needs a longer timeout).
-    // Lite read: overrides only — skip image blobs/maps; catalog merge does not need them.
-    const projection = opts.includeImageData
-      ? undefined
-      : { imagesData: 0 as const, images: 0 as const, entryImages: 0 as const };
-    const doc = await withMongoTimeout(() => col.findOne({ _id: 'global' }, projection ? { projection } : undefined),
-      opts.includeImageData ? MONGO_FULL_READ_MS : MONGO_LITE_READ_MS,
-    );
-    if (!doc) return null;
-    const normalized = normalizeOwlbearGlobalDoc(doc);
+    if (isCompendiumStorageUnavailable()) return null;
+    const raw = await readRawGlobalDocFromPostgres({ includeImageData: opts.includeImageData !== false });
+    if (!raw) return null;
+    const normalized = normalizeOwlbearGlobalDoc(raw);
     if (!opts.includeImageData) {
       normalized.images = {};
       normalized.imagesData = {};
@@ -369,7 +317,7 @@ async function readMongoGlobalDocInner(
     return normalized;
   } catch (err) {
     warnMongoRead(
-      `[Compendium] Mongo global read failed, using fallback: ${err instanceof Error ? err.message : err}`,
+      `[Compendium] Postgres global read failed, using fallback: ${err instanceof Error ? err.message : err}`,
     );
     if (shouldResetMongoClient(err)) resetMongoClient();
     return null;
@@ -453,35 +401,35 @@ async function readAuthoritativeGlobal(includeImageData: boolean): Promise<Compe
 }
 
 async function persistGlobalDoc(next: CompendiumGlobalDoc): Promise<CompendiumGlobalDoc> {
-  const col = await getCollection<OwlbearRawGlobalDoc>('data');
-  if (col) {
+  if (!isCompendiumStorageUnavailable()) {
     markCompendiumWritePending();
-    const existing = await withMongoTimeout(() => col.findOne({ _id: 'global' }), 15_000);
-    const mongoPayload: OwlbearRawGlobalDoc = {
+    const { readRawGlobalDoc } = await import('./compendiumOwlbearPersist');
+    const existing = await readRawGlobalDoc({ includeImageData: true });
+    const postgresPayload: OwlbearRawGlobalDoc = {
       _id: 'global',
-      monsters: existing?.monsters ?? [],
-      items: existing?.items ?? [],
-      spells: existing?.spells ?? [],
-      overrideMonsters: next.monsters ?? existing?.overrideMonsters ?? [],
-      overrideItems: next.items ?? existing?.overrideItems ?? [],
-      overrideSpells: next.spells ?? existing?.overrideSpells ?? [],
-      deleted: next.deleted ?? existing?.deleted ?? [],
-      images: next.images ?? existing?.images ?? {},
-      imagesData: next.imagesData ?? existing?.imagesData ?? {},
-      entryImages: next.entryImages ?? existing?.entryImages ?? {},
+      monsters: existing.monsters ?? [],
+      items: existing.items ?? [],
+      spells: existing.spells ?? [],
+      overrideMonsters: next.monsters ?? existing.overrideMonsters ?? [],
+      overrideItems: next.items ?? existing.overrideItems ?? [],
+      overrideSpells: next.spells ?? existing.overrideSpells ?? [],
+      deleted: next.deleted ?? existing.deleted ?? [],
+      images: next.images ?? existing.images ?? {},
+      imagesData: next.imagesData ?? existing.imagesData ?? {},
+      entryImages: next.entryImages ?? existing.entryImages ?? {},
+      lockedSources: existing.lockedSources ?? [],
+      publishedEntryKeys: existing.publishedEntryKeys ?? [],
       lastUpdated: next.lastUpdated,
     };
-    await withMongoTimeout(() => col.updateOne({ _id: 'global' }, { $set: mongoPayload }, { upsert: true }),
-      15_000,
-    );
-    saveGlobalFallback(normalizeOwlbearGlobalDoc(mongoPayload), mongoPayload);
+    await persistRawGlobalDocToPostgres(postgresPayload, new Date(next.lastUpdated));
+    saveGlobalFallback(normalizeOwlbearGlobalDoc(postgresPayload), postgresPayload);
     notifyCompendiumChanged(next.lastUpdated);
-    return normalizeOwlbearGlobalDoc(mongoPayload);
+    return normalizeOwlbearGlobalDoc(postgresPayload);
   }
 
   const saved = saveGlobalFallback(next);
   if (!saved) {
-    throw new Error('MongoDB unavailable and no local data.json to write');
+    throw new Error('PostgreSQL unavailable and no local data.json to write');
   }
   notifyCompendiumChanged(saved.lastUpdated);
   return saved;
@@ -516,34 +464,28 @@ export async function saveGlobal(partial: Partial<CompendiumGlobalDoc>): Promise
   return mutateGlobal(() => partial);
 }
 
-/** On startup, promote newer local fallback into MongoDB, then mirror Mongo → file. */
+/** On startup, reconcile Postgres compendium storage with local fallback mirror. */
 export async function syncCompendiumStorageOnStartup(): Promise<void> {
   try {
-    const mongoOnly = process.env['COMPENDIUM_MONGO_ONLY'] === '1';
-    const col = await getCollection<OwlbearRawGlobalDoc>('data');
-    if (!col) {
-      console.log('[Compendium] MongoDB not available — writes will use local data.json');
+    if (isCompendiumStorageUnavailable()) {
+      console.log('[Compendium] PostgreSQL not available — writes will use local data.json');
       return;
     }
 
     invalidateExtensionGlobalCache();
     clearGlobalFallbackCache();
 
-    const { reconcileCompendiumStorage } = await import('./compendiumFallbackMongoSync');
-    await reconcileCompendiumStorage('startup');
+    const { scheduleFallbackMongoSync } = await import('./compendiumFallbackMongoSync');
+    scheduleFallbackMongoSync('startup');
 
-    if (mongoOnly) {
-      const version = await readMongoGlobalVersion();
-      console.log(
-        version
-          ? `[Compendium] MongoDB compendium ready (lastUpdated: ${version})`
-          : '[Compendium] MongoDB connected — global doc will load on first request',
-      );
-      return;
+    const version = await readMongoGlobalVersion();
+    if (version) {
+      console.log(`[Compendium] Postgres compendium ready (rev ${version})`);
     }
-
-    console.log('[Compendium] MongoDB compendium is up to date');
   } catch (err) {
-    console.error('[Compendium] Startup sync failed:', err);
+    console.warn(
+      '[Compendium] Startup storage sync failed:',
+      err instanceof Error ? err.message : err,
+    );
   }
 }

@@ -1,6 +1,5 @@
-import type { OwlbearRawGlobalDoc } from '@grimoire/shared';
-import { getCollection, isMongoCircuitOpen, withMongoTimeout } from '../lib/mongo';
 import { isoTimestamp } from './compendiumGlobal';
+import { isCompendiumStorageUnavailable, readCompendiumPolicyFields } from './compendiumPostgres';
 import {
   policyFromRaw,
   type CompendiumVisibilityPolicy,
@@ -29,7 +28,7 @@ function policyCacheRev(policy: CompendiumVisibilityPolicy): string {
 /** Read only visibility policy fields — avoids loading the full multi-MB global doc. */
 export async function readVisibilityPolicyFast(): Promise<CompendiumVisibilityPolicy> {
   if (policyCache) return policyCache.policy;
-  if (isMongoCircuitOpen()) {
+  if (isCompendiumStorageUnavailable()) {
     const { readRawGlobalDoc } = await import('./compendiumOwlbearPersist');
     const raw = await readRawGlobalDoc({ includeImageData: false });
     const policy = policyFromRaw(raw);
@@ -41,20 +40,15 @@ export async function readVisibilityPolicyFast(): Promise<CompendiumVisibilityPo
   }
 
   try {
-    const col = await getCollection<OwlbearRawGlobalDoc>('data');
-    if (col) {
-      const doc = await withMongoTimeout(() => col.findOne(
-          { _id: 'global' },
-          { projection: { lockedSources: 1, publishedEntryKeys: 1, lastUpdated: 1 } },
-        ),
-        10_000,
-      );
-      if (doc) {
-        const policy = policyFromRaw(doc);
-        const rev = `${isoTimestamp(doc.lastUpdated)}:${policyCacheRev(policy)}`;
-        policyCache = { rev, policy };
-        return policy;
-      }
+    const meta = await readCompendiumPolicyFields();
+    if (meta) {
+      const policy = {
+        lockedSources: meta.lockedSources,
+        publishedEntryKeys: meta.publishedEntryKeys,
+      };
+      const rev = `${isoTimestamp(meta.lastUpdated)}:${policyCacheRev(policy)}`;
+      policyCache = { rev, policy };
+      return policy;
     }
   } catch {
     // fall through to full raw read
@@ -74,13 +68,20 @@ export function applyVisibilityPolicyUpdate(
   policy: CompendiumVisibilityPolicy,
   lastUpdated: string,
 ): void {
+  setVisibilityPolicyCache(policy, lastUpdated);
+}
+
+export function setVisibilityPolicyCache(
+  policy: CompendiumVisibilityPolicy,
+  lastUpdated: string,
+): void {
   policyCache = {
-    rev: `${lastUpdated}:${policyCacheRev(policy)}`,
+    rev: `${isoTimestamp(lastUpdated)}:${policyCacheRev(policy)}`,
     policy,
   };
   catalogPolicySink?.patch(policy, lastUpdated);
 }
 
-export function setVisibilityPolicyCache(policy: CompendiumVisibilityPolicy, lastUpdated: string): void {
-  applyVisibilityPolicyUpdate(policy, lastUpdated);
+export function getCachedVisibilityPolicy(): CompendiumVisibilityPolicy | null {
+  return policyCache?.policy ?? null;
 }

@@ -88,12 +88,11 @@ export async function fetchSources(
   return data;
 }
 
-/** All imported DDB books (merged across monsters, items, and spells). */
-export async function fetchBookSources(): Promise<CompendiumSource[]> {
-  const { data } = await api.get<CompendiumSource[]>('/compendium/sources', {
-    params: { kind: 'books' },
-  });
-  return data;
+/** All imported DDB books for a single compendium kind (monsters, items, or spells). */
+export async function fetchBookSources(
+  kind: 'monsters' | 'items' | 'spells',
+): Promise<CompendiumSource[]> {
+  return fetchSources(kind, { books: true });
 }
 
 export async function searchMonsters(params: {

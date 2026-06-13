@@ -1,5 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import type { CompendiumItem } from '@grimoire/shared';
+import { synthesizeCompendiumItemDescription } from '@grimoire/shared';
 import { getActiveMap, useItemStore } from '@/systems/scene/store/itemStore';
 import { emitItemAdd } from '@/systems/scene/sceneSync';
 import { snapPoint } from '@/systems/scene/snap';
@@ -60,7 +61,7 @@ export async function placeItemHandout(item: CompendiumItem, at?: HandoutPositio
     visible: false,
     name: item.name,
     compendiumItemId: item.id,
-    description: item.description || item.flavor || '',
+    description: synthesizeCompendiumItemDescription(item) || item.description || item.flavor || '',
     ...(item.type ? { itemType: item.type } : {}),
     ...(item.rarity ? { rarity: item.rarity } : {}),
     ...(item.source ? { source: item.source } : {}),

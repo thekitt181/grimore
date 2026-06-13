@@ -981,6 +981,7 @@ export async function importAllDdbLibraryFromSource(
         if (items.length < take) break;
       }
       const namesById = new Map(summaries.map((m) => [m.ddbId, m.name]));
+      opts.onProgress?.(0, summaries.length);
       return importMonsterIds(
         ctx,
         summaries.map((m) => m.ddbId),

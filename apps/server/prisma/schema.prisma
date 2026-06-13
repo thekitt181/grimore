@@ -371,6 +371,64 @@ enum HandoutType {
   ITEM_CARD
 }
 
+// ─── Compendium (Postgres source of truth) ────────────────────────────────────
+
+enum CompendiumEntryKind {
+  MONSTER
+  ITEM
+  SPELL
+}
+
+model CompendiumMeta {
+  id                 String   @id @default("global")
+  deleted            String[] @default([])
+  lockedSources      String[] @default([])
+  publishedEntryKeys String[] @default([])
+  lastUpdated        DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+}
+
+model CompendiumEntry {
+  id               String             @id
+  kind             CompendiumEntryKind
+  name             String
+  nameKey          String
+  source           String             @default("")
+  payload          Json
+  isCustom         Boolean            @default(false)
+  originBookName   String?
+  inTypedImport    Boolean            @default(false)
+  inGlobalOverride Boolean            @default(false)
+  inGlobalHomebrew Boolean            @default(false)
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+
+  @@index([kind])
+  @@index([kind, inTypedImport])
+  @@index([kind, inGlobalOverride])
+  @@index([kind, inGlobalHomebrew])
+  @@index([kind, source])
+  @@index([nameKey])
+}
+
+model CompendiumImageRef {
+  key       String   @id
+  value     String   @db.Text
+  updatedAt DateTime @updatedAt
+}
+
+model CompendiumImageBlob {
+  key       String   @id
+  data      String   @db.Text
+  updatedAt DateTime @updatedAt
+}
+
+model CompendiumEntryImageHistory {
+  entryName String   @id
+  urls      String[] @default([])
+  updatedAt DateTime @updatedAt
+}
+
 // ─── Notes ────────────────────────────────────────────────────────────────────
 
 model Note {

@@ -389,9 +389,9 @@ export async function fetchDdbMonsterDetail(
   ctx: DdbAuthContext,
   ddbId: number,
 ): Promise<Record<string, unknown> | null> {
-  const res = await fetch(DDB_URLS.monsterById(ddbId), {
+  const res = await fetchWithRetry(DDB_URLS.monsterById(ddbId), {
     headers: monsterAuthHeaders(ctx, ddbId),
-  });
+  }, { label: `monster ${ddbId}` });
   if (res.status === 404) return null;
   if (!res.ok) throw new Error(`DDB monster fetch failed (${res.status})`);
 

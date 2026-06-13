@@ -31,26 +31,51 @@ export function dedupeByEntryName<T extends { name: string }>(entries: T[] | und
   return Array.from(map.values());
 }
 
+export function buildHiddenBuiltInKeys(
+  overrides: Array<{ name: string; originBookName?: string }>,
+  deleted: string[],
+): Set<string> {
+  const keys = new Set<string>();
+  for (const o of overrides) {
+    keys.add(entryNameKey(o.name));
+    if (o.originBookName) keys.add(entryNameKey(o.originBookName));
+  }
+  for (const d of deleted) keys.add(entryNameKey(d));
+  return keys;
+}
+
 export function isHiddenBuiltIn(
   builtInName: string,
-  overrides: OwlbearEntry[],
-  deleted: string[],
+  hiddenKeys: Set<string>,
 ): boolean {
-  return overrides.some(
-    (o) => namesMatch(o.name, builtInName)
-      || (o.originBookName && namesMatch(o.originBookName, builtInName)),
-  ) || deleted.some((d) => namesMatch(d, builtInName));
+  return hiddenKeys.has(entryNameKey(builtInName));
+}
+
+let monsterBuiltInKeys: Set<string> | null = null;
+let itemBuiltInKeys: Set<string> | null = null;
+let spellBuiltInKeys: Set<string> | null = null;
+
+function getBuiltInNameKeys(kind: 'monster' | 'item' | 'spell'): Set<string> {
+  if (kind === 'monster') {
+    if (!monsterBuiltInKeys) {
+      monsterBuiltInKeys = new Set(loadLocalMonsters().map((m) => entryNameKey(m.name)));
+    }
+    return monsterBuiltInKeys;
+  }
+  if (kind === 'item') {
+    if (!itemBuiltInKeys) {
+      itemBuiltInKeys = new Set(loadLocalItems().map((i) => entryNameKey(i.name)));
+    }
+    return itemBuiltInKeys;
+  }
+  if (!spellBuiltInKeys) {
+    spellBuiltInKeys = new Set(loadLocalSpells().map((s) => entryNameKey(s.name)));
+  }
+  return spellBuiltInKeys;
 }
 
 function isBuiltInName(kind: 'monster' | 'item' | 'spell', name: string): boolean {
-  const key = entryNameKey(name);
-  if (kind === 'monster') {
-    return loadLocalMonsters().some((m) => entryNameKey(m.name) === key);
-  }
-  if (kind === 'item') {
-    return loadLocalItems().some((i) => entryNameKey(i.name) === key);
-  }
-  return loadLocalSpells().some((s) => entryNameKey(s.name) === key);
+  return getBuiltInNameKeys(kind).has(entryNameKey(name));
 }
 
 /** Strip custom entries that duplicate overrides, deleted originals, or built-in catalog names. */

@@ -135,7 +135,7 @@ export interface CompendiumMongoHealth {
 
 export interface CompendiumSyncStatus {
   lastUpdated: string;
-  storage: 'mongodb' | 'local' | 'unavailable';
+  storage: 'mongodb' | 'postgresql' | 'local' | 'unavailable';
   mongoConnected?: boolean;
   mongoHealth?: CompendiumMongoHealth;
   /** In-memory catalog revision after last rebuild. */
@@ -210,4 +210,38 @@ export function isHomebrewEntry(isCustom: boolean, source?: string): boolean {
 /** True when an entry comes from a source book (not homebrew). */
 export function isFromSourceBook(isCustom: boolean, source?: string): boolean {
   return splitCompendiumSources(source).length > 0 && !isHomebrewEntry(isCustom, source);
+}
+
+function isStandardItemCategory(type: string): boolean {
+  const t = type.trim();
+  if (!t) return true;
+  if (/\bdamage\b|\babsorb|\battunement|\beffect\b/i.test(t)) return false;
+  if (/^[a-z]/.test(t) && !/^(very )?(rare|common|uncommon|legendary|artifact)/i.test(t)) return false;
+  if (/^(wondrous item|weapon|armor|potion|ring|rod|staff|wand|scroll)(\s|,|\(|$)/i.test(t) && t.length < 48) {
+    return true;
+  }
+  return false;
+}
+
+/** Build handout/push text when description fields are empty (common with PDF imports). */
+export function synthesizeCompendiumItemDescription(item: {
+  name?: string;
+  type?: string;
+  description?: string;
+  flavor?: string;
+  details?: string;
+}): string {
+  for (const field of [item.description, item.flavor, item.details]) {
+    const text = field?.trim();
+    if (text) return text;
+  }
+
+  const name = (item.name ?? '')
+    .replace(/^[\s•·▪▫◦‣⁃\-–—*+>]+/u, '')
+    .trim();
+  const type = item.type?.trim() ?? '';
+  const colonIdx = name.indexOf(':');
+  const suffixFromName = colonIdx >= 0 ? name.slice(colonIdx + 1).trim() : '';
+  const typeAsRules = type && !isStandardItemCategory(type) ? type : '';
+  return [suffixFromName, typeAsRules].filter(Boolean).join(' ').trim();
 }

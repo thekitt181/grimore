@@ -77,22 +77,29 @@ export function useDdbImportJob(enabled = true) {
     const bookTotal = progress.bookTotal ?? 0;
     const bookIndex = progress.bookIndex ?? 0;
     if (bookTotal <= 0) return null;
+
+    const phaseRange: Record<string, [number, number]> = {
+      'listing-monsters': [0, 0.08],
+      monsters: [0.08, 0.33],
+      'listing-spells': [0.33, 0.38],
+      spells: [0.38, 0.63],
+      'listing-items': [0.63, 0.68],
+      items: [0.68, 0.98],
+      complete: [1, 1],
+    };
+
     let within = 0;
     if (progress.phase === 'complete') {
       within = 1;
-    } else if (progress.phase === 'listing-monsters') {
-      within = 0.05;
-    } else if (progress.phase === 'monsters') {
-      within = 0.2;
-    } else if (progress.phase === 'listing-spells') {
-      within = 0.35;
-    } else if (progress.phase === 'spells') {
-      within = 0.5;
-    } else if (progress.phase === 'listing-items') {
-      within = 0.6;
-    } else if (progress.phase === 'items') {
-      within = 0.75;
+    } else {
+      const [start, end] = phaseRange[progress.phase] ?? [0, 0.25];
+      if (progress.total > 0) {
+        within = start + (Math.min(progress.done, progress.total) / progress.total) * (end - start);
+      } else {
+        within = start;
+      }
     }
+
     const completedBooks = Math.max(0, bookIndex - 1) + within;
     return Math.min(100, Math.round((completedBooks / bookTotal) * 100));
   }, [job?.progress]);

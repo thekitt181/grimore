@@ -109,6 +109,10 @@ export interface DdbCharacterSummary {
   avatarUrl?: string;
   campaignId?: number;
   campaignName?: string;
+  /** True when this character is owned by the linked D&D Beyond account. */
+  isOwned?: boolean;
+  /** True when listed from a linked D&D Beyond campaign roster (GM may have edit access). */
+  isCampaignCharacter?: boolean;
 }
 
 export interface DdbCampaignSummary {

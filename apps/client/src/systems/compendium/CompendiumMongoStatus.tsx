@@ -8,13 +8,16 @@ const GOLD = 'var(--color-accent-gold)';
 
 function mongoStatusLabel(status?: CompendiumSyncStatus): { text: string; tone: 'ok' | 'warn' | 'bad' | 'off' } {
   const health = status?.mongoHealth;
-  if (!health?.configured) {
-    return { text: 'Mongo off (local)', tone: 'off' };
+  const storage = status?.storage;
+  if (!health?.configured && storage !== 'postgresql') {
+    return { text: 'DB off (local)', tone: 'off' };
   }
-  switch (health.state) {
+  switch (health?.state) {
     case 'connected':
       return {
-        text: health.latencyMs != null ? `Mongo OK · ${health.latencyMs}ms` : 'Mongo OK',
+        text: health.latencyMs != null
+          ? `${storage === 'postgresql' ? 'Postgres' : 'Mongo'} OK · ${health.latencyMs}ms`
+          : storage === 'postgresql' ? 'Postgres OK' : 'Mongo OK',
         tone: 'ok',
       };
     case 'degraded':
@@ -24,7 +27,7 @@ function mongoStatusLabel(status?: CompendiumSyncStatus): { text: string; tone: 
     case 'unavailable':
       return { text: 'Mongo unreachable', tone: 'bad' };
     default:
-      return { text: status?.storage === 'mongodb' ? 'Mongo syncing…' : 'Local fallback', tone: 'warn' };
+      return { text: status?.storage === 'postgresql' ? 'Postgres syncing…' : 'Local fallback', tone: 'warn' };
   }
 }
 

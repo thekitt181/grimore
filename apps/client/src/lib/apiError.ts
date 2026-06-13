@@ -5,13 +5,22 @@ export function extractApiError(err: unknown, fallback = 'Request failed'): stri
     const data = err.response?.data as { error?: string; message?: string } | undefined;
     const serverMsg = data?.error ?? data?.message;
     if (serverMsg) return serverMsg;
-    const status = err.response?.status;
-    if (!err.response) return 'Cannot reach the server — check your connection or wait for Render to wake up';
-    if (status === 400) return 'Bad request — check D&D Beyond link and import selection';
+    if (!err.response) {
+      const code = err.code ?? '';
+      if (code === 'ECONNREFUSED' || code === 'ERR_NETWORK') {
+        return 'Cannot reach the API server — wait a moment and try again (dev server may be restarting).';
+      }
+      if (code === 'ECONNRESET') {
+        return 'Connection to the server was interrupted — retry in a moment.';
+      }
+      return 'Cannot reach the server — check your connection or wait for Render to wake up';
+    }
+    const status = err.response.status;
+    if (status === 400) return data?.error ?? 'D&D Beyond rejected the request — check your linked account and character.';
     if (status === 401) return 'Session expired — sign in again';
-    if (status === 503) return 'Server is starting — retry in a moment';
+    if (status === 503) return data?.error ?? 'Server is starting — retry in a moment';
     if (status === 502 || status === 504) {
-      return 'Server timed out — try importing fewer entries at a time';
+      return data?.error ?? 'Server timed out — retry in a moment';
     }
   }
   if (err instanceof Error && err.message && !err.message.startsWith('Request failed with status code')) {

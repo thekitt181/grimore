@@ -14,7 +14,8 @@
     "db:generate": "prisma generate",
     "db:studio": "prisma studio",
     "db:seed": "tsx src/seed.ts",
-    "import:compendium": "tsx scripts/import-compendium.ts"
+    "import:compendium": "tsx scripts/import-compendium.ts",
+    "migrate:compendium": "tsx scripts/migrate-compendium-mongo-to-postgres.ts"
   },
   "dependencies": {
     "@better-auth/infra": "^0.2.14",

@@ -13,6 +13,15 @@ export function useHandoutRevealSocket(sessionId: string | null) {
 
     function onReveal(payload: HandoutRevealPayload) {
       if (payload.sessionId !== sessionId) return;
+      const myUserId = useSessionStore.getState().myUserId;
+      if (
+        payload.targetUserIds !== 'all'
+        && myUserId
+        && !payload.targetUserIds.includes(myUserId)
+      ) {
+        return;
+      }
+
       useHandoutViewerStore.getState().openContent({
         ...(payload.receiptId ? { receiptId: payload.receiptId } : {}),
         handoutId: payload.handoutId,

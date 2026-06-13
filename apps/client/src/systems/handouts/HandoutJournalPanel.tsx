@@ -35,7 +35,7 @@ export function HandoutJournalPanel({ campaignId, onClose }: HandoutJournalPanel
         )}
         {!loading && entries.length === 0 && (
           <p className="font-ui text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-            No handouts yet. The GM will reveal scrolls, maps, and items here during play.
+            No handouts yet. The GM reveals items via right-click on a map handout → Give to players.
           </p>
         )}
         <ul className="space-y-2 max-h-[50vh] overflow-y-auto">
