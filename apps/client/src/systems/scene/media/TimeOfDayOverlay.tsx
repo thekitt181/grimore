@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef } from 'react';
 import type { TimeOfDay } from '@grimoire/shared';
-import { useSceneMediaStore } from './sceneMediaStore';
+import { getActiveTimeOfDay, useSceneMediaStore } from './sceneMediaStore';
 
 interface TimeLayer {
   background?: string;
@@ -148,7 +148,7 @@ function NightStarsCanvas() {
 }
 
 export function TimeOfDayOverlay() {
-  const timeOfDay = useSceneMediaStore((s) => s.activeScene?.timeOfDay ?? s.sessionTimeOfDay ?? 'day');
+  const timeOfDay = useSceneMediaStore(() => getActiveTimeOfDay());
   const layers = useMemo(() => TIME_LAYERS[timeOfDay], [timeOfDay]);
   const showStars = timeOfDay === 'night' || timeOfDay === 'midnight';
 

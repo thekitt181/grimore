@@ -45,9 +45,9 @@ export { fetchDdbMonsterDetail } from './ddbMonsterFetch';
 const SPELL_CACHE_TTL = 60 * 60;
 const ITEM_CACHE_TTL = 60 * 30;
 const FETCH_BATCH = 100;
-const MONSTER_IMPORT_BATCH = 2;
-/** Smaller Mongo writes — patch global doc arrays instead of full RMW. */
-const SAVE_BATCH = 5;
+const MONSTER_IMPORT_BATCH = 15;
+/** Typed Mongo collections — safe to write larger batches (no 16MB global doc RMW). */
+const SAVE_BATCH = 40;
 const CATALOG_CACHE_TTL = 60 * 60;
 
 async function loadDdbCatalog(ctx: DdbAuthContext): Promise<DdbCatalog> {
@@ -468,6 +468,26 @@ async function unlockImportedBookSourceLabels(sourceLabels: string[]): Promise<s
   }
 }
 
+/** Unlock compendium book sources after import — no full catalog reconcile. */
+export async function unlockDdbImportedBook(
+  ctx: DdbAuthContext,
+  sourceId: number,
+  sourceName: string | undefined,
+  savedEntries: Array<{ source?: string }>,
+): Promise<string[]> {
+  const catalog = await loadDdbCatalog(ctx);
+  const fromIds =
+    sourceId > 0 ? await unlockImportedBookSources(catalog, [sourceId]) : [];
+  const labels = [
+    ...new Set([
+      ...(sourceName ? [sourceName] : []),
+      ...sourceLabelsFromEntries(savedEntries),
+    ]),
+  ];
+  const fromLabels = await unlockImportedBookSourceLabels(labels);
+  return [...new Set([...fromIds, ...fromLabels])];
+}
+
 function sourceLabelsFromEntries(entries: Array<{ source?: string }>): string[] {
   const labels = new Set<string>();
   for (const entry of entries) {
@@ -492,6 +512,8 @@ export type DdbImportRunOptions = {
   skipIndex?: ImportSkipIndex;
   /** Monster id → name (from DDB search summaries) for skip checks before fetch. */
   namesById?: Map<number, string>;
+  /** Live progress for background import jobs (done/total within current kind). */
+  onProgress?: (done: number, total: number) => void;
 };
 
 function sourceLabelForBook(catalog: DdbCatalog, sourceId?: number): string {
@@ -633,7 +655,10 @@ async function importMonsterIds(
       skipped += filtered.skipped;
       batchIds = filtered.ids;
     }
-    if (batchIds.length === 0) continue;
+    if (batchIds.length === 0) {
+      runOpts?.onProgress?.(Math.min(i + MONSTER_IMPORT_BATCH, ids.length), ids.length);
+      continue;
+    }
 
     const rawById = await fetchMonstersForImport(ctx, batchIds);
 
@@ -683,6 +708,7 @@ async function importMonsterIds(
       meta,
       sourceId,
     );
+    runOpts?.onProgress?.(Math.min(i + MONSTER_IMPORT_BATCH, ids.length), ids.length);
   }
   return finalizeDdbImportResult(
     { imported, errors, ...(skipped > 0 ? { skipped } : {}) },
@@ -724,7 +750,10 @@ async function importSpellIds(
       skipped += filtered.skipped;
       batchIds = filtered.ids;
     }
-    if (batchIds.length === 0) continue;
+    if (batchIds.length === 0) {
+      runOpts?.onProgress?.(Math.min(i + FETCH_BATCH, ids.length), ids.length);
+      continue;
+    }
 
     const batchRaw = batchIds
       .map((id) => byId.get(id))
@@ -768,6 +797,7 @@ async function importSpellIds(
       meta,
       sourceId,
     );
+    runOpts?.onProgress?.(Math.min(i + FETCH_BATCH, ids.length), ids.length);
   }
   return finalizeDdbImportResult(
     { imported, errors, ...(skipped > 0 ? { skipped } : {}) },
@@ -809,7 +839,10 @@ async function importItemIds(
       skipped += filtered.skipped;
       batchIds = filtered.ids;
     }
-    if (batchIds.length === 0) continue;
+    if (batchIds.length === 0) {
+      runOpts?.onProgress?.(Math.min(i + FETCH_BATCH, ids.length), ids.length);
+      continue;
+    }
 
     const batchRaw = batchIds
       .map((id) => byId.get(id))
@@ -853,6 +886,7 @@ async function importItemIds(
       meta,
       sourceId,
     );
+    runOpts?.onProgress?.(Math.min(i + FETCH_BATCH, ids.length), ids.length);
   }
   return finalizeDdbImportResult(
     { imported, errors, ...(skipped > 0 ? { skipped } : {}) },
@@ -919,12 +953,16 @@ export async function importAllDdbLibraryFromSource(
     campaignId?: number;
     skipExisting?: boolean;
     skipIndex?: ImportSkipIndex;
+    onProgress?: (done: number, total: number) => void;
   },
 ): Promise<DdbLibraryImportResult> {
   if (opts.sourceId === DDB_HOMEBREW_SOURCE_ID) {
     const catalog = await loadDdbCatalog(ctx);
-    const runOpts: DdbImportRunOptions | undefined = opts.skipExisting
-      ? { skipExisting: true, skipIndex: opts.skipIndex }
+    const runOpts: DdbImportRunOptions | undefined = opts.skipExisting || opts.onProgress
+      ? {
+          ...(opts.skipExisting ? { skipExisting: true, skipIndex: opts.skipIndex } : {}),
+          ...(opts.onProgress ? { onProgress: opts.onProgress } : {}),
+        }
       : undefined;
 
     if (opts.kind === 'monster') {
@@ -964,8 +1002,11 @@ export async function importAllDdbLibraryFromSource(
   }
 
   const catalog = await loadDdbCatalog(ctx);
-  const runOpts: DdbImportRunOptions | undefined = opts.skipExisting
-    ? { skipExisting: true, skipIndex: opts.skipIndex }
+  const runOpts: DdbImportRunOptions | undefined = opts.skipExisting || opts.onProgress
+    ? {
+        ...(opts.skipExisting ? { skipExisting: true, skipIndex: opts.skipIndex } : {}),
+        ...(opts.onProgress ? { onProgress: opts.onProgress } : {}),
+      }
     : undefined;
 
   if (opts.kind === 'monster') {
@@ -985,6 +1026,7 @@ export async function importAllDdbLibraryFromSource(
       if (Number.isFinite(total) && total > 0 && skip >= total) break;
     }
     const namesById = new Map(summaries.map((m) => [m.ddbId, m.name]));
+    opts.onProgress?.(0, summaries.length);
     return importMonsterIds(
       ctx,
       summaries.map((m) => m.ddbId),
@@ -997,11 +1039,13 @@ export async function importAllDdbLibraryFromSource(
   if (opts.kind === 'spell') {
     const pool = filterPoolBySource(await loadSpellPool(ctx, opts.campaignId), opts.sourceId);
     const ids = pool.map((raw) => ddbEntityId(raw)).filter((id): id is number => id != null);
+    opts.onProgress?.(0, ids.length);
     return importSpellIds(ctx, ids, catalog, opts.campaignId, opts.sourceId, runOpts);
   }
 
   const pool = filterPoolBySource(await loadItemPool(ctx, opts.campaignId), opts.sourceId);
   const ids = pool.map((raw) => ddbEntityId(raw)).filter((id): id is number => id != null);
+  opts.onProgress?.(0, ids.length);
   return importItemIds(ctx, ids, catalog, opts.campaignId, opts.sourceId, runOpts);
 }
 

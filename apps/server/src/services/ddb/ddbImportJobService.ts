@@ -14,7 +14,9 @@ import {
   finishDdbLibraryImport,
   importAllDdbHomebrew,
   importAllDdbLibraryFromSource,
+  unlockDdbImportedBook,
 } from './ddbLibrary';
+import { loadImportSkipIndex } from '../compendiumImportIndex';
 
 const runningJobs = new Set<string>();
 
@@ -319,6 +321,8 @@ async function runDdbLibraryImportJob(jobId: string): Promise<void> {
       );
     }
 
+    const skipIndex = job.skipExisting ? await loadImportSkipIndex(true) : undefined;
+
     const bookTotal = accessible.length;
     const completedCount = completedSourceIds.size;
 
@@ -380,7 +384,7 @@ async function runDdbLibraryImportJob(jobId: string): Promise<void> {
           });
           bookMerged = await importAllDdbHomebrew(ctx, {
             campaignId: job.campaignId ?? undefined,
-            ...(job.skipExisting ? { skipExisting: true } : {}),
+            ...(job.skipExisting ? { skipExisting: true, skipIndex } : {}),
           });
           merged = mergeImportResults(merged, bookMerged);
           await persistPartialResult(jobId, merged);
@@ -410,11 +414,26 @@ async function runDdbLibraryImportJob(jobId: string): Promise<void> {
             completedKinds: kindsDone,
           });
 
+          let lastKindProgressAt = 0;
+          const onProgress = (done: number, total: number) => {
+            const now = Date.now();
+            if (done < total && now - lastKindProgressAt < 1500) return;
+            lastKindProgressAt = now;
+            void updateJobProgress(jobId, {
+              ...progressBase,
+              phase,
+              done,
+              total,
+              completedKinds: kindsDone,
+            });
+          };
+
           const chunk = await importAllDdbLibraryFromSource(ctx, {
             kind,
             sourceId,
             campaignId: job.campaignId ?? undefined,
-            ...(job.skipExisting ? { skipExisting: true } : {}),
+            ...(job.skipExisting ? { skipExisting: true, skipIndex } : {}),
+            onProgress,
           });
           bookMerged = mergeImportResults(bookMerged, chunk);
           merged = mergeImportResults(merged, chunk);
@@ -432,24 +451,19 @@ async function runDdbLibraryImportJob(jobId: string): Promise<void> {
       }
 
       try {
-        const sourceLabels = [
-          ...new Set([
-            ...(sourceName ? [sourceName] : []),
-            ...bookMerged.imported.map((e) => e.source).filter((s): s is string => Boolean(s)),
-          ]),
-        ];
-        const fin = await finishDdbLibraryImport(ctx, {
-          sourceIds: sourceId > 0 ? [sourceId] : [],
-          ...(sourceLabels.length > 0 ? { sourceLabels } : {}),
-        });
+        const unlocked = await unlockDdbImportedBook(
+          ctx,
+          sourceId,
+          sourceName,
+          bookMerged.imported,
+        );
         merged = {
           ...merged,
-          catalogRev: fin.catalogRev ?? merged.catalogRev,
-          sourcesUnlocked: [...new Set([...(merged.sourcesUnlocked ?? []), ...(fin.sourcesUnlocked ?? [])])],
+          sourcesUnlocked: [...new Set([...(merged.sourcesUnlocked ?? []), ...unlocked])],
         };
         await persistPartialResult(jobId, merged);
       } catch (err) {
-        console.warn(`[DDB] finish-import failed for job ${jobId} source ${sourceId}:`, err);
+        console.warn(`[DDB] unlock sources failed for job ${jobId} source ${sourceId}:`, err);
       }
 
       const doneIds = [...completedSourceIds, ...pendingAccessible.slice(0, pendingIdx + 1)];
@@ -470,11 +484,21 @@ async function runDdbLibraryImportJob(jobId: string): Promise<void> {
     if (await isJobCancelled(jobId)) return;
 
     try {
-      const { notifyCompendiumCatalogRebuilt } = await import('../compendiumChangeNotify');
-      await notifyCompendiumCatalogRebuilt(new Date());
+      const fin = await finishDdbLibraryImport(ctx, {
+        sourceIds: accessible.filter((id) => id > 0),
+        unlockAllImportedSources: true,
+      });
+      merged = {
+        ...merged,
+        catalogRev: fin.catalogRev ?? merged.catalogRev,
+        sourcesUnlocked: [...new Set([...(merged.sourcesUnlocked ?? []), ...(fin.sourcesUnlocked ?? [])])],
+      };
     } catch (err) {
-      console.warn('[DDB] compendium notify after import job failed:', err);
+      console.warn(`[DDB] finish-import after job ${jobId} failed:`, err);
     }
+
+    const { invalidateImportSkipIndex } = await import('../compendiumImportIndex');
+    invalidateImportSkipIndex();
 
     await finishJob(jobId, 'COMPLETED', { result: merged });
   } catch (err) {

@@ -1,6 +1,12 @@
 import { useEffect, useRef } from 'react';
-import type { SceneChangePayload, SceneRecord, SceneMediaConfig, SceneAudioLayer, TimeOfDay, WeatherOverlay } from '@grimoire/shared';
-import { DEFAULT_SCENE_MEDIA_CONFIG, WEATHER_AMBIENT_LIBRARY, WEATHER_AMBIENT_SOUNDS } from '@grimoire/shared';
+import type { GameTime, SceneChangePayload, SceneRecord, SceneMediaConfig, TimeOfDay, WeatherOverlay } from '@grimoire/shared';
+import {
+  DEFAULT_GAME_TIME,
+  DEFAULT_SCENE_MEDIA_CONFIG,
+  gameTimeToTimeOfDay,
+  normalizeGameTime,
+  TIME_OF_DAY_TO_GAME_TIME,
+} from '@grimoire/shared';
 import { getSocket } from '@/lib/socket';
 import { useSessionStore } from '@/store/sessionStore';
 import {
@@ -15,7 +21,19 @@ import { hydrateSceneMap } from '../manager/hydrateSceneMap';
 
 export const SESSION_WEATHER_SCENE_ID = 'session-live-weather';
 export const SESSION_TIME_SCENE_ID = 'session-live-time';
+export const SESSION_GAME_TIME_SCENE_ID = 'session-live-game-time';
 export const SESSION_MEDIA_SCENE_ID = 'session-live-media';
+
+function resolveGameTime(scene: SceneRecord): GameTime {
+  if (scene.gameTime) return normalizeGameTime(scene.gameTime);
+  if (scene.timeOfDay) return TIME_OF_DAY_TO_GAME_TIME[scene.timeOfDay];
+  return DEFAULT_GAME_TIME;
+}
+
+function gameTimeKey(time: GameTime | null | undefined): string {
+  if (!time) return '';
+  return `${time.hour}:${time.minute}`;
+}
 
 function createSessionLiveScene(
   id: string,
@@ -35,6 +53,7 @@ function createSessionLiveScene(
     lightingPreset: 'default',
     weatherOverlay: null,
     timeOfDay: 'day',
+    gameTime: DEFAULT_GAME_TIME,
     sortOrder: 0,
     createdAt: now,
     updatedAt: now,
@@ -68,6 +87,7 @@ function isMediaOnlyPatch(prev: SceneRecord | null, next: SceneRecord): boolean 
   return (
     prev.weatherOverlay === next.weatherOverlay
     && prev.timeOfDay === next.timeOfDay
+    && gameTimeKey(prev.gameTime) === gameTimeKey(next.gameTime)
     && prev.mapId === next.mapId
     && sceneMediaFingerprint(prev) !== sceneMediaFingerprint(next)
   );
@@ -81,13 +101,18 @@ function isAtmosphereOnlyPatch(prev: SceneRecord | null, next: SceneRecord): boo
     && prev.backgroundVideoUrl === next.backgroundVideoUrl
     && prev.mapId === next.mapId
     && JSON.stringify(prev.mediaConfig) === JSON.stringify(next.mediaConfig)
-    && (prev.weatherOverlay !== next.weatherOverlay || prev.timeOfDay !== next.timeOfDay)
+    && (prev.weatherOverlay !== next.weatherOverlay
+      || prev.timeOfDay !== next.timeOfDay
+      || gameTimeKey(prev.gameTime) !== gameTimeKey(next.gameTime))
   );
 }
 
 function applyAtmosphere(scene: SceneRecord) {
   useSceneMediaStore.getState().setWeatherOverlay(scene.weatherOverlay);
-  useSceneMediaStore.getState().setTimeOfDay(scene.timeOfDay ?? 'day');
+  const gameTime = resolveGameTime(scene);
+  const timeOfDay = scene.timeOfDay ?? gameTimeToTimeOfDay(gameTime);
+  useSceneMediaStore.getState().setGameTime(gameTime);
+  useSceneMediaStore.getState().setTimeOfDay(timeOfDay);
   useSceneMediaStore.getState().setTransitioning(false);
 }
 
@@ -97,39 +122,8 @@ function stripWeatherAmbientLayers(cfg: SceneMediaConfig): SceneMediaConfig {
   return { ...cfg, ambientLayers };
 }
 
-function buildWeatherAmbientLayers(weather: WeatherOverlay | null): SceneAudioLayer[] {
-  if (!weather || weather === 'none') return [];
-  const libraryIds = WEATHER_AMBIENT_LIBRARY[weather] ?? [];
-  return libraryIds.flatMap((libraryId) => {
-    const entry = WEATHER_AMBIENT_SOUNDS[libraryId];
-    if (!entry) return [];
-    return [{
-      id: `weather-${libraryId}`,
-      name: entry.name,
-      url: entry.url,
-      volume: entry.defaultVolume * 0.75,
-      loop: true,
-      libraryId: entry.id,
-    }];
-  });
-}
-
-function mergeWeatherAmbientLayers(
-  cfg: SceneMediaConfig,
-  weather: WeatherOverlay | null,
-): SceneMediaConfig {
-  const base = stripWeatherAmbientLayers(cfg);
-  return {
-    ...base,
-    ambientLayers: [...base.ambientLayers, ...buildWeatherAmbientLayers(weather)],
-  };
-}
-
 function buildMediaConfig(scene: SceneRecord): SceneMediaConfig {
-  const cfg = mergeWeatherAmbientLayers(
-    scene.mediaConfig ?? DEFAULT_SCENE_MEDIA_CONFIG,
-    scene.weatherOverlay,
-  );
+  const cfg = stripWeatherAmbientLayers(scene.mediaConfig ?? DEFAULT_SCENE_MEDIA_CONFIG);
   const layers = [...cfg.ambientLayers];
   if (scene.ambientAudioUrl && !layers.some((l) => l.url === scene.ambientAudioUrl)) {
     layers.unshift({
@@ -203,7 +197,8 @@ export function useSceneMedia(sessionId: string | undefined) {
       if (payload.sessionId !== sessionId || !payload.scene) return;
       const prev = useSceneMediaStore.getState().activeScene;
       if (payload.scene.id === SESSION_WEATHER_SCENE_ID) {
-        applySceneBundle(payload.scene, 'none');
+        applyAtmosphere(payload.scene);
+        useSceneMediaStore.getState().setActiveScene(payload.scene, 'none');
         return;
       }
       if (payload.scene.id === SESSION_TIME_SCENE_ID) {
@@ -211,8 +206,14 @@ export function useSceneMedia(sessionId: string | undefined) {
         useSceneMediaStore.getState().setActiveScene(payload.scene, 'none');
         return;
       }
+      if (payload.scene.id === SESSION_GAME_TIME_SCENE_ID) {
+        applyAtmosphere(payload.scene);
+        useSceneMediaStore.getState().setActiveScene(payload.scene, 'none');
+        return;
+      }
       if (prev && isAtmosphereOnlyPatch(prev, payload.scene)) {
-        applySceneBundle(payload.scene, 'none');
+        applyAtmosphere(payload.scene);
+        useSceneMediaStore.getState().setActiveScene(payload.scene, 'none');
         return;
       }
       if (
@@ -253,18 +254,23 @@ export function emitSceneChange(
   });
 }
 
-/** Push map weather live to all clients (right-click map menu). */
+/** Push map weather live to all clients (right-click map menu). Visual only — no auto audio. */
 export function emitSessionWeather(sessionId: string, weather: WeatherOverlay) {
   const normalized = weather === 'none' ? null : weather;
   const active = useSceneMediaStore.getState().activeScene;
   const campaignId = useSessionStore.getState().campaignId ?? 'local';
-  const baseCfg = active?.mediaConfig ?? DEFAULT_SCENE_MEDIA_CONFIG;
-  const mediaConfig = mergeWeatherAmbientLayers(baseCfg, normalized);
+  const prevCfg = active?.mediaConfig ?? DEFAULT_SCENE_MEDIA_CONFIG;
+  const mediaConfig = stripWeatherAmbientLayers(prevCfg);
+  const strippedWeatherAudio =
+    mediaConfig.ambientLayers.length !== prevCfg.ambientLayers.length;
 
   if (active) {
     const scene = { ...active, weatherOverlay: normalized, mediaConfig };
-    applySceneBundle(scene, 'none');
     applyAtmosphere(scene);
+    useSceneMediaStore.getState().setActiveScene(scene, 'none');
+    if (strippedWeatherAudio) {
+      applySceneMediaConfig(buildMediaConfig(scene));
+    }
     getSocket().emit('scene:change', {
       sessionId,
       sceneId: scene.id,
@@ -275,9 +281,8 @@ export function emitSessionWeather(sessionId: string, weather: WeatherOverlay) {
   }
 
   const scene = createSessionWeatherScene(campaignId, normalized);
-  scene.mediaConfig = mediaConfig;
-  applySceneBundle(scene, 'none');
   applyAtmosphere(scene);
+  useSceneMediaStore.getState().setActiveScene(scene, 'none');
   getSocket().emit('scene:change', {
     sessionId,
     sceneId: scene.id,
@@ -286,13 +291,15 @@ export function emitSessionWeather(sessionId: string, weather: WeatherOverlay) {
   });
 }
 
-/** Push map time-of-day live to all clients (right-click map menu / media bar). */
-export function emitSessionTimeOfDay(sessionId: string, timeOfDay: TimeOfDay) {
+/** Push in-game clock live to all clients; map lighting follows the hour. */
+export function emitSessionGameTime(sessionId: string, gameTime: GameTime) {
+  const normalized = normalizeGameTime(gameTime);
+  const timeOfDay = gameTimeToTimeOfDay(normalized);
   const active = useSceneMediaStore.getState().activeScene;
   const campaignId = useSessionStore.getState().campaignId ?? 'local';
 
   if (active) {
-    const scene = { ...active, timeOfDay };
+    const scene = { ...active, gameTime: normalized, timeOfDay };
     applyAtmosphere(scene);
     useSceneMediaStore.getState().setActiveScene(scene, 'none');
     getSocket().emit('scene:change', {
@@ -304,7 +311,10 @@ export function emitSessionTimeOfDay(sessionId: string, timeOfDay: TimeOfDay) {
     return;
   }
 
-  const scene = createSessionLiveScene(SESSION_TIME_SCENE_ID, 'Map time', campaignId, { timeOfDay });
+  const scene = createSessionLiveScene(SESSION_GAME_TIME_SCENE_ID, 'Map clock', campaignId, {
+    gameTime: normalized,
+    timeOfDay,
+  });
   applyAtmosphere(scene);
   useSceneMediaStore.getState().setActiveScene(scene, 'none');
   getSocket().emit('scene:change', {
@@ -313,6 +323,11 @@ export function emitSessionTimeOfDay(sessionId: string, timeOfDay: TimeOfDay) {
     transition: 'none',
     scene,
   });
+}
+
+/** Push map time-of-day preset — sets clock to a typical hour for that mood. */
+export function emitSessionTimeOfDay(sessionId: string, timeOfDay: TimeOfDay) {
+  emitSessionGameTime(sessionId, TIME_OF_DAY_TO_GAME_TIME[timeOfDay]);
 }
 
 export type SessionMediaPatch = Partial<

@@ -15,6 +15,13 @@ const OVERRIDE_FIELD: Record<CompendiumKind, keyof OwlbearRawGlobalDoc> = {
 };
 
 const MONGO_OVERRIDE_READ_MS = 45_000;
+const MONGO_TYPED_FULL_READ_MS = 120_000;
+const TYPED_READ_BATCH = 2_000;
+
+/** All named typed imports — includes homebrew (`Custom`) and `isCustom` rows. */
+const TYPED_NAMED_ENTRY_FILTER = {
+  name: { $exists: true, $type: 'string', $regex: /\S/ },
+} as const;
 
 type OverrideEntryMap = {
   monster: OwlbearMonster;
@@ -22,11 +29,35 @@ type OverrideEntryMap = {
   spell: OwlbearSpell;
 };
 
-const TYPED_IMPORT_COLLECTION: Record<CompendiumKind, string> = {
+export const TYPED_IMPORT_COLLECTION: Record<CompendiumKind, string> = {
   monster: 'monsters',
   item: 'items',
   spell: 'spells',
 };
+
+async function readAllFromTypedCursor<T extends { name?: string; source?: string }>(
+  col: Awaited<ReturnType<typeof getCollection<T>>>,
+  filter: Record<string, unknown>,
+  opts?: { source?: string; projection?: Record<string, 0 | 1> },
+): Promise<T[]> {
+  if (!col) return [];
+  const source = opts?.source?.trim();
+  const out: T[] = [];
+  const cursor = col.find(filter as never, {
+    projection: opts?.projection ?? { _id: 0 },
+  }).batchSize(TYPED_READ_BATCH);
+
+  await withMongoTimeout(async () => {
+    for await (const doc of cursor) {
+      const row = doc as T;
+      if (!row.name?.trim()) continue;
+      if (source && !entryMatchesSource(row.source, source)) continue;
+      out.push(row);
+    }
+  }, MONGO_TYPED_FULL_READ_MS);
+
+  return out;
+}
 
 function mergeOverrideEntryLists<T extends { name: string }>(base: T[], extra: T[]): T[] {
   if (extra.length === 0) return base;
@@ -52,17 +83,13 @@ export async function readTypedImportEntriesFromMongo<K extends CompendiumKind>(
     if (!col) return [];
 
     const source = opts?.source?.trim();
-    const filter: Record<string, unknown> = {
-      source: { $exists: true, $nin: ['Custom', ''] },
-    };
+    const filter: Record<string, unknown> = { ...TYPED_NAMED_ENTRY_FILTER };
     if (source) {
       filter.source = { $regex: escapeRegex(source), $options: 'i' };
     }
 
-    const rows = await withMongoTimeout(() => col.find(filter as never, { projection: { _id: 0 } }).limit(25_000).toArray(),
-      MONGO_OVERRIDE_READ_MS,
-    );
-    return rows.filter((entry) => !source || entryMatchesSource(entry.source, source)) as OverrideEntryMap[K][];
+    const rows = await readAllFromTypedCursor<OverrideEntryMap[K]>(col, filter, { source });
+    return rows;
   } catch (err) {
     console.warn(
       `[Compendium] Typed ${kind} import read failed:`,
@@ -83,6 +110,37 @@ export async function readTypedImportOverrideSlices(): Promise<{
     readTypedImportEntriesFromMongo('spell'),
   ]);
   return { overrideMonsters, overrideItems, overrideSpells };
+}
+
+export type TypedImportNameSourceRow = { name: string; source?: string; brokenDuration?: boolean };
+
+/** Lightweight name+source scan of typed collections (for skip index / book tallies). */
+export async function readTypedImportNameSourceRows(kind: CompendiumKind): Promise<TypedImportNameSourceRow[]> {
+  if (isMongoCircuitOpen()) return [];
+  const colName = TYPED_IMPORT_COLLECTION[kind];
+  try {
+    const col = await getCollection<{
+      name?: string;
+      source?: string;
+      description?: string;
+    }>(colName);
+    if (!col) return [];
+
+    const rows = await readAllFromTypedCursor(col, { ...TYPED_NAMED_ENTRY_FILTER }, {
+      projection: { name: 1, source: 1, description: 1, _id: 0 },
+    });
+    return rows.map((row) => ({
+      name: row.name!,
+      source: row.source,
+      brokenDuration: /\[object Object\]/.test(row.description ?? ''),
+    }));
+  } catch (err) {
+    console.warn(
+      `[Compendium] Typed ${kind} name scan failed:`,
+      err instanceof Error ? err.message : err,
+    );
+    return [];
+  }
 }
 
 export function typedImportOverrideCount(slices: {
@@ -106,7 +164,7 @@ export async function readOverrideCountsFromTypedCollections(): Promise<{
     for (const kind of ['monster', 'item', 'spell'] as const) {
       const col = await getCollection(TYPED_IMPORT_COLLECTION[kind]);
       if (!col) continue;
-      counts[kind === 'monster' ? 'monsters' : kind === 'item' ? 'items' : 'spells'] = await withMongoTimeout(() => col.countDocuments({ source: { $exists: true, $nin: ['Custom', ''] } }),
+      counts[kind === 'monster' ? 'monsters' : kind === 'item' ? 'items' : 'spells'] = await withMongoTimeout(() => col.countDocuments({ ...TYPED_NAMED_ENTRY_FILTER }),
         15_000,
       );
     }
@@ -308,7 +366,7 @@ export async function collectImportedSourceLabelsFromMongo(): Promise<string[]> 
     try {
       const col = await getCollection(TYPED_IMPORT_COLLECTION[kind]);
       if (!col) continue;
-      const sources = await withMongoTimeout(() => col.distinct('source', { source: { $exists: true, $nin: ['Custom', ''] } }),
+      const sources = await withMongoTimeout(() => col.distinct('source', { ...TYPED_NAMED_ENTRY_FILTER }),
         15_000,
       );
       add(sources.map((s) => String(s)));

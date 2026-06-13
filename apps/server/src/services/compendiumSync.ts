@@ -455,8 +455,21 @@ async function buildCatalogCacheFromRaw(
     phase: 'merging-imports',
     label: 'Merging imported book entries…',
     percent: 12,
+    clearEntryCounts: true,
   });
   raw = await augmentRawWithTypedImports(raw);
+  const importCounts = {
+    monsters: raw.overrideMonsters?.length ?? 0,
+    items: raw.overrideItems?.length ?? 0,
+    spells: raw.overrideSpells?.length ?? 0,
+  };
+  updateCatalogRebuild({
+    phase: 'merging-imports',
+    label: `Merging ${(importCounts.monsters + importCounts.items + importCounts.spells).toLocaleString()} imported entries…`,
+    percent: 15,
+    importCounts,
+    clearEntryCounts: true,
+  });
   const global = normalizeOwlbearGlobalDoc({
     ...raw,
     images: {},
@@ -467,11 +480,6 @@ async function buildCatalogCacheFromRaw(
   const effectiveRev = isoTimestamp(global.lastUpdated);
   const deleted = raw.deleted ?? [];
   const policy = policyFromRaw(raw);
-  const importCounts = {
-    monsters: raw.overrideMonsters?.length ?? 0,
-    items: raw.overrideItems?.length ?? 0,
-    spells: raw.overrideSpells?.length ?? 0,
-  };
 
   updateCatalogRebuild({
     phase: 'building-monsters',
@@ -1128,10 +1136,14 @@ function resolveSaveAs(entry: { source?: string }, opts?: CompendiumSaveOptions)
 }
 
 function prepareSavePayload<T extends { source?: string }>(entry: T, saveAs: CompendiumSaveAs): T {
+  const src = entry.source?.trim();
   if (saveAs === 'homebrew') {
+    if (src && src !== 'D&D Beyond') {
+      return { ...entry, source: src };
+    }
     return { ...entry, source: 'Custom' };
   }
-  return { ...entry, source: entry.source?.trim() ? entry.source : 'Custom' };
+  return { ...entry, source: src ? src : 'Custom' };
 }
 
 function sourceListFilter(
@@ -1505,11 +1517,16 @@ export async function findCatalogSpell(id: string): Promise<CompendiumSpell | nu
 async function notifyTypedCollectionsChanged(): Promise<void> {
   const { markCompendiumWritePending } = await import('./compendiumMongoWatch');
   const { notifyCompendiumChanged } = await import('./compendiumChangeNotify');
+  const { invalidateImportSkipIndex } = await import('./compendiumImportIndex');
   markCompendiumWritePending();
+  invalidateImportSkipIndex();
   notifyCompendiumChanged(new Date());
 }
 
-async function upsertCollectionMonstersBulk(entries: Array<{ entry: OwlbearMonster; isCustom: boolean }>) {
+async function upsertCollectionMonstersBulk(
+  entries: Array<{ entry: OwlbearMonster; isCustom: boolean }>,
+  opts?: { skipNotify?: boolean },
+) {
   if (entries.length === 0) return;
   const col = await getCollection<StoredMonster>('monsters');
   if (!col) {
@@ -1530,10 +1547,13 @@ async function upsertCollectionMonstersBulk(entries: Array<{ entry: OwlbearMonst
     ),
     60_000,
   );
-  await notifyTypedCollectionsChanged();
+  if (!opts?.skipNotify) await notifyTypedCollectionsChanged();
 }
 
-async function upsertCollectionItemsBulk(entries: Array<{ entry: OwlbearItem; isCustom: boolean }>) {
+async function upsertCollectionItemsBulk(
+  entries: Array<{ entry: OwlbearItem; isCustom: boolean }>,
+  opts?: { skipNotify?: boolean },
+) {
   if (entries.length === 0) return;
   const col = await getCollection<StoredItem>('items');
   if (!col) {
@@ -1554,10 +1574,13 @@ async function upsertCollectionItemsBulk(entries: Array<{ entry: OwlbearItem; is
     ),
     60_000,
   );
-  await notifyTypedCollectionsChanged();
+  if (!opts?.skipNotify) await notifyTypedCollectionsChanged();
 }
 
-async function upsertCollectionSpellsBulk(entries: Array<{ entry: OwlbearSpell; isCustom: boolean }>) {
+async function upsertCollectionSpellsBulk(
+  entries: Array<{ entry: OwlbearSpell; isCustom: boolean }>,
+  opts?: { skipNotify?: boolean },
+) {
   if (entries.length === 0) return;
   const col = await getCollection<StoredSpell>('spells');
   if (!col) {
@@ -1578,7 +1601,7 @@ async function upsertCollectionSpellsBulk(entries: Array<{ entry: OwlbearSpell; 
     ),
     60_000,
   );
-  await notifyTypedCollectionsChanged();
+  if (!opts?.skipNotify) await notifyTypedCollectionsChanged();
 }
 
 const TYPED_SYNC_BATCH = 250;
@@ -1848,7 +1871,7 @@ export async function reconcileCompendiumMongo(
 async function saveEntriesBulkForImport<T extends OwlbearMonster | OwlbearItem | OwlbearSpell, R>(
   kind: CompendiumKind,
   entries: Array<{ entry: T; opts?: CompendiumSaveOptions }>,
-  upsertCollection: (prepared: Array<{ entry: T; isCustom: boolean }>) => Promise<void>,
+  upsertCollection: (prepared: Array<{ entry: T; isCustom: boolean }>, opts?: { skipNotify?: boolean }) => Promise<void>,
   toResult: (payload: T, saveAs: CompendiumSaveAs) => R,
 ): Promise<CompendiumBulkSaveResult<R>> {
   if (entries.length === 0) {
@@ -1885,27 +1908,16 @@ async function saveEntriesBulkForImport<T extends OwlbearMonster | OwlbearItem |
     return { payload, saveAs, opts };
   });
 
-  const patch = await patchOwlbearEntriesBulk(
-    kind,
-    prepared.map(({ payload, saveAs, opts }) => ({
-      entry: payload,
-      opts: {
-        saveAs,
-        previousName: opts?.previousName,
-        hidePrevious: opts?.hidePrevious,
-      },
-    })),
-    { typedCollectionsOnly: true },
-  );
-
   let typedMongoOk = true;
   await upsertCollection(
     prepared.map(({ payload, saveAs }) => ({ entry: payload, isCustom: saveAs === 'homebrew' })),
+    { skipNotify: true },
   ).catch((err) => {
     typedMongoOk = false;
     console.error('[Compendium] Typed collection bulk write failed:', err instanceof Error ? err.message : err);
   });
 
+  const lastUpdated = new Date().toISOString();
   return {
     entries: prepared.map(({ payload, saveAs }) => toResult(payload, saveAs)),
     persist: {
@@ -1923,10 +1935,10 @@ async function saveEntriesBulkForImport<T extends OwlbearMonster | OwlbearItem |
         entryImages: {},
         lockedSources: [],
         publishedEntryKeys: [],
-        lastUpdated: patch.lastUpdated,
+        lastUpdated,
       }),
-      lastUpdated: patch.lastUpdated,
-      mongoPersisted: patch.mongoPersisted && typedMongoOk,
+      lastUpdated,
+      mongoPersisted: typedMongoOk,
     },
   };
 }
@@ -1937,8 +1949,8 @@ export async function saveMonstersBulkForImport(
   return saveEntriesBulkForImport(
     'monster',
     entries,
-    async (rows) => {
-      await upsertCollectionMonstersBulk(rows);
+    async (rows, opts) => {
+      await upsertCollectionMonstersBulk(rows, opts);
     },
     (payload, saveAs) => monsterPayloadFromSave(payload, saveAs),
   );
@@ -1950,8 +1962,8 @@ export async function saveItemsBulkForImport(
   return saveEntriesBulkForImport(
     'item',
     entries,
-    async (rows) => {
-      await upsertCollectionItemsBulk(rows);
+    async (rows, opts) => {
+      await upsertCollectionItemsBulk(rows, opts);
     },
     (payload, saveAs) => itemPayloadFromSave(payload, saveAs),
   );
@@ -1963,8 +1975,8 @@ export async function saveSpellsBulkForImport(
   return saveEntriesBulkForImport(
     'spell',
     entries,
-    async (rows) => {
-      await upsertCollectionSpellsBulk(rows);
+    async (rows, opts) => {
+      await upsertCollectionSpellsBulk(rows, opts);
     },
     (payload, saveAs) => spellPayloadFromSave(payload, saveAs),
   );

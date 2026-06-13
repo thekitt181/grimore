@@ -265,6 +265,8 @@ model Scene {
   lightingPreset  String  @default("default")
   weatherOverlay  String?
   timeOfDay       String  @default("day")
+  gameTimeHour    Int     @default(12)
+  gameTimeMinute  Int     @default(0)
   mediaConfig     Json     @default("{}")
   sortOrder       Int     @default(0)
   createdAt       DateTime @default(now())

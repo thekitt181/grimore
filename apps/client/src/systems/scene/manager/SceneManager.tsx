@@ -4,10 +4,14 @@ import { v4 as uuidv4 } from 'uuid';
 import type { SceneRecord, SceneTransition } from '@grimoire/shared';
 import {
   AMBIENT_SOUND_LIBRARY,
+  gameTimeToInputValue,
+  gameTimeToTimeOfDay,
   LIGHTING_PRESETS,
   MUSIC_LIBRARY,
+  normalizeGameTime,
   SCENE_TRANSITIONS,
   TIME_OF_DAY_PRESETS,
+  TIME_OF_DAY_TO_GAME_TIME,
   VIDEO_LIBRARY,
   WEATHER_PRESETS,
 } from '@grimoire/shared';
@@ -202,11 +206,38 @@ export function SceneManager({ campaignId, isGM, liveSessionId, onSceneActivated
               </label>
 
               <label className="font-ui text-xs block">
+                In-game time
+                <input
+                  type="time"
+                  className="input mt-1 w-full tabular-nums"
+                  value={gameTimeToInputValue(scene.gameTime ?? { hour: 12, minute: 0 })}
+                  onChange={(e) => {
+                    const [hRaw, mRaw] = e.target.value.split(':');
+                    const h = Number(hRaw);
+                    const m = Number(mRaw);
+                    if (Number.isFinite(h) && Number.isFinite(m)) {
+                      const gameTime = normalizeGameTime({ hour: h, minute: m });
+                      void setSceneField(scene, {
+                        gameTime,
+                        timeOfDay: gameTimeToTimeOfDay(gameTime),
+                      });
+                    }
+                  }}
+                />
+              </label>
+
+              <label className="font-ui text-xs block">
                 Time of day
                 <select
                   className="input mt-1 w-full"
                   value={scene.timeOfDay ?? 'day'}
-                  onChange={(e) => void setSceneField(scene, { timeOfDay: e.target.value as NonNullable<SceneRecord['timeOfDay']> })}
+                  onChange={(e) => {
+                    const timeOfDay = e.target.value as NonNullable<SceneRecord['timeOfDay']>;
+                    void setSceneField(scene, {
+                      timeOfDay,
+                      gameTime: TIME_OF_DAY_TO_GAME_TIME[timeOfDay],
+                    });
+                  }}
                 >
                   {TIME_OF_DAY_PRESETS.map((p) => (
                     <option key={p.id} value={p.id}>{p.label}</option>

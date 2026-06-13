@@ -47,11 +47,15 @@ export function startCatalogRebuild(importCounts?: {
 
 export function updateCatalogRebuild(
   patch: Partial<
-    Pick<CatalogRebuildProgress, 'phase' | 'label' | 'percent' | 'entryCounts'>
-  >,
+    Pick<CatalogRebuildProgress, 'phase' | 'label' | 'percent' | 'entryCounts' | 'importCounts'>
+  > & { clearEntryCounts?: boolean },
 ): void {
   if (!progress?.active) return;
-  progress = { ...progress, ...patch };
+  const { clearEntryCounts, ...rest } = patch;
+  progress = { ...progress, ...rest };
+  if (clearEntryCounts) {
+    delete progress.entryCounts;
+  }
   emit(false);
 }
 

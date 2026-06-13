@@ -1,3 +1,5 @@
+import type { GameTime } from '../gameTime';
+
 export type GridTypeApi = 'SQUARE' | 'HEX';
 export type SceneTransition = 'fade' | 'fire' | 'page-turn' | 'none';
 export type LightingPreset =
@@ -116,8 +118,10 @@ export interface SceneRecord {
   backgroundVideoUrl: string | null;
   lightingPreset: LightingPreset;
   weatherOverlay: WeatherOverlay | null;
-  /** Visual time-of-day tint on the map (defaults to midday). */
+  /** Visual time-of-day tint on the map (derived from gameTime when set). */
   timeOfDay?: TimeOfDay | null;
+  /** In-world clock shown in session (hour 0–23, minute 0–59). */
+  gameTime?: GameTime | null;
   mediaConfig: SceneMediaConfig;
   sortOrder: number;
   createdAt: string;
@@ -138,6 +142,7 @@ export interface CreateScenePayload {
   lightingPreset?: LightingPreset;
   weatherOverlay?: WeatherOverlay | null;
   timeOfDay?: TimeOfDay | null;
+  gameTime?: GameTime | null;
   mediaConfig?: Partial<SceneMediaConfig>;
 }
 

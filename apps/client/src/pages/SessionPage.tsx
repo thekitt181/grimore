@@ -51,6 +51,7 @@ import { useSceneMedia } from '@/systems/scene/media/useSceneMedia';
 import { BackgroundVideoLayer } from '@/systems/scene/media/BackgroundVideoLayer';
 import { SceneTransitionOverlay } from '@/systems/scene/media/SceneAtmosphere';
 import { SessionMediaBar } from '@/systems/scene/media/SessionMediaBar';
+import { GameClockWidget } from '@/systems/scene/media/GameClockWidget';
 import { SessionSceneBar } from '@/systems/scene/manager/SessionSceneBar';
 import { SceneManagerPanel } from '@/systems/scene/manager/SceneManagerPanel';
 import { useSceneUiStore } from '@/systems/scene/manager/sceneUiStore';
@@ -227,6 +228,7 @@ export function SessionPage() {
               <SessionMediaBar sessionId={sessionInfo.id} isGM={isGM} />
             </>
           )}
+          <GameClockWidget sessionId={sessionInfo.id} isGM={isGM} />
           <div className="flex items-center gap-2">
             <div className="flex items-center gap-1.5">
               <div

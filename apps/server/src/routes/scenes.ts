@@ -22,6 +22,10 @@ const weatherSchema = z.enum([
 const timeOfDaySchema = z.enum([
   'dawn', 'day', 'golden-hour', 'dusk', 'night', 'midnight',
 ]).nullable().optional();
+const gameTimeSchema = z.object({
+  hour: z.number().int().min(0).max(23),
+  minute: z.number().int().min(0).max(59),
+}).nullable().optional();
 const transitionSchema = z.enum(['fade', 'fire', 'page-turn', 'none']);
 
 const audioLayerSchema = z.object({
@@ -66,6 +70,7 @@ const createSceneSchema = z.object({
   lightingPreset: lightingPresetSchema.optional(),
   weatherOverlay: weatherSchema,
   timeOfDay: timeOfDaySchema,
+  gameTime: gameTimeSchema,
   mediaConfig: mediaConfigSchema,
 });
 
@@ -211,6 +216,8 @@ router.post('/campaign/:campaignId', requireAuth, async (req: AuthenticatedReque
         lightingPreset: data.lightingPreset ?? 'default',
         weatherOverlay: data.weatherOverlay ?? null,
         timeOfDay: data.timeOfDay ?? 'day',
+        gameTimeHour: data.gameTime?.hour ?? 12,
+        gameTimeMinute: data.gameTime?.minute ?? 0,
         mediaConfig: mediaConfigInput(data.mediaConfig),
         sortOrder: (maxOrder._max.sortOrder ?? -1) + 1,
       },
@@ -258,6 +265,10 @@ router.patch('/:id', requireAuth, async (req: AuthenticatedRequest, res) => {
         ...(data.lightingPreset !== undefined ? { lightingPreset: data.lightingPreset } : {}),
         ...(data.weatherOverlay !== undefined ? { weatherOverlay: data.weatherOverlay } : {}),
         ...(data.timeOfDay !== undefined ? { timeOfDay: data.timeOfDay ?? 'day' } : {}),
+        ...(data.gameTime !== undefined ? {
+          gameTimeHour: data.gameTime?.hour ?? 12,
+          gameTimeMinute: data.gameTime?.minute ?? 0,
+        } : {}),
         ...(data.sortOrder !== undefined ? { sortOrder: data.sortOrder } : {}),
         ...(data.mediaConfig !== undefined ? { mediaConfig: mediaConfigInput(data.mediaConfig) } : {}),
       },

@@ -61,6 +61,8 @@ export function serializeScene(scene: {
   lightingPreset: string;
   weatherOverlay: string | null;
   timeOfDay?: string | null;
+  gameTimeHour?: number;
+  gameTimeMinute?: number;
   mediaConfig: unknown;
   sortOrder: number;
   createdAt: Date;
@@ -77,6 +79,10 @@ export function serializeScene(scene: {
     lightingPreset: scene.lightingPreset as SceneRecord['lightingPreset'],
     weatherOverlay: (scene.weatherOverlay ?? null) as SceneRecord['weatherOverlay'],
     timeOfDay: (scene.timeOfDay ?? 'day') as SceneRecord['timeOfDay'],
+    gameTime: {
+      hour: scene.gameTimeHour ?? 12,
+      minute: scene.gameTimeMinute ?? 0,
+    },
     mediaConfig: parseMediaConfig(scene.mediaConfig),
     sortOrder: scene.sortOrder,
     createdAt: scene.createdAt.toISOString(),

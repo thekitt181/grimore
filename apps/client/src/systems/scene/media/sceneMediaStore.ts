@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type {
+  GameTime,
   LightingPreset,
   SceneMediaConfig,
   SceneRecord,
@@ -8,7 +9,7 @@ import type {
   WeatherOverlay,
   WeatherSettings,
 } from '@grimoire/shared';
-import { DEFAULT_SCENE_MEDIA_CONFIG } from '@grimoire/shared';
+import { DEFAULT_GAME_TIME, DEFAULT_SCENE_MEDIA_CONFIG, gameTimeToTimeOfDay, normalizeGameTime, TIME_OF_DAY_TO_GAME_TIME } from '@grimoire/shared';
 
 export const DEFAULT_WEATHER_SETTINGS: WeatherSettings = {
   cover: 65,
@@ -21,6 +22,7 @@ interface SceneMediaState {
   /** Live weather when no scene is active (map context menu). */
   sessionWeather: WeatherOverlay | null;
   sessionTimeOfDay: TimeOfDay | null;
+  sessionGameTime: GameTime | null;
   sessionWeatherSettings: WeatherSettings;
   cinemaTakeover: boolean;
   transition: SceneTransition;
@@ -33,6 +35,7 @@ interface SceneMediaState {
   setActiveScene: (scene: SceneRecord | null, transition?: SceneTransition) => void;
   setWeatherOverlay: (weather: WeatherOverlay | null) => void;
   setTimeOfDay: (time: TimeOfDay | null) => void;
+  setGameTime: (time: GameTime | null) => void;
   setWeatherSettings: (settings: Partial<WeatherSettings>) => void;
   setCinemaTakeover: (active: boolean) => void;
   clearVideoPlayback: () => void;
@@ -48,6 +51,7 @@ export const useSceneMediaStore = create<SceneMediaState>((set, get) => ({
   activeScene: null,
   sessionWeather: null,
   sessionTimeOfDay: null,
+  sessionGameTime: null,
   sessionWeatherSettings: DEFAULT_WEATHER_SETTINGS,
   cinemaTakeover: false,
   transition: 'fade',
@@ -72,6 +76,14 @@ export const useSceneMediaStore = create<SceneMediaState>((set, get) => ({
       set({ activeScene: { ...scene, timeOfDay: time } });
     } else {
       set({ sessionTimeOfDay: time });
+    }
+  },
+  setGameTime: (time) => {
+    const scene = get().activeScene;
+    if (scene) {
+      set({ activeScene: { ...scene, gameTime: time } });
+    } else {
+      set({ sessionGameTime: time });
     }
   },
   setWeatherSettings: (patch) =>
@@ -122,6 +134,18 @@ export function getActiveWeather(): WeatherOverlay | null {
 }
 
 export function getActiveTimeOfDay(): TimeOfDay {
-  const { activeScene, sessionTimeOfDay } = useSceneMediaStore.getState();
-  return activeScene?.timeOfDay ?? sessionTimeOfDay ?? 'day';
+  const { activeScene, sessionTimeOfDay, sessionGameTime } = useSceneMediaStore.getState();
+  const gt = activeScene?.gameTime ?? sessionGameTime;
+  if (gt) return gameTimeToTimeOfDay(normalizeGameTime(gt));
+  if (activeScene?.timeOfDay) return activeScene.timeOfDay;
+  if (sessionTimeOfDay) return sessionTimeOfDay;
+  return 'day';
+}
+
+export function getActiveGameTime(): GameTime {
+  const { activeScene, sessionGameTime } = useSceneMediaStore.getState();
+  const gt = activeScene?.gameTime ?? sessionGameTime;
+  if (gt) return normalizeGameTime(gt);
+  if (activeScene?.timeOfDay) return TIME_OF_DAY_TO_GAME_TIME[activeScene.timeOfDay];
+  return DEFAULT_GAME_TIME;
 }

@@ -10,8 +10,15 @@ export function formatCatalogRebuildLabel(p: CatalogRebuildProgress): string {
   const indexed = p.entryCounts
     ? (p.entryCounts.monsters ?? 0) + (p.entryCounts.items ?? 0) + (p.entryCounts.spells ?? 0)
     : 0;
-  if (indexed > 0 && p.active) {
+  const imported = p.importCounts
+    ? p.importCounts.monsters + p.importCounts.items + p.importCounts.spells
+    : 0;
+  const showIndexed = indexed > 0 && ['building-items', 'building-spells', 'sorting', 'complete'].includes(p.phase);
+  if (showIndexed && p.active) {
     return `${p.label}${elapsed} — ${indexed.toLocaleString()} entries indexed`;
+  }
+  if (imported > 0 && p.active && (p.phase === 'merging-imports' || p.phase === 'building-monsters')) {
+    return `${p.label}${elapsed} — ${imported.toLocaleString()} imports in database`;
   }
   return `${p.label}${elapsed}`;
 }

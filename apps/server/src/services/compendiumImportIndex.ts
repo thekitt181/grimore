@@ -1,7 +1,9 @@
 import type { OwlbearRawGlobalDoc } from '@grimoire/shared';
+import { DDB_HOMEBREW_SOURCE_LABEL } from '@grimoire/shared';
 import { getCollection, isMongoCircuitOpen, withMongoTimeout } from '../lib/mongo';
 import type { CompendiumKind } from './compendiumOwlbearPersist';
 import { entryNameKey } from './compendiumMerge';
+import { readTypedImportNameSourceRows } from './compendiumMongoReads';
 import { entryMatchesSource } from './compendiumVisibility';
 
 type NameSourceRow = { name: string; source?: string; brokenDuration?: boolean };
@@ -50,6 +52,21 @@ async function readKindNameSourceRows(kind: CompendiumKind): Promise<NameSourceR
   }
 }
 
+function nameSourceRowKey(row: NameSourceRow): string {
+  return `${entryNameKey(row.name)}|${(row.source ?? '').trim().toLowerCase()}`;
+}
+
+function mergeNameSourceRows(global: NameSourceRow[], typed: NameSourceRow[]): NameSourceRow[] {
+  const map = new Map<string, NameSourceRow>();
+  for (const row of global) {
+    if (row.name?.trim()) map.set(nameSourceRowKey(row), row);
+  }
+  for (const row of typed) {
+    if (row.name?.trim()) map.set(nameSourceRowKey(row), row);
+  }
+  return Array.from(map.values());
+}
+
 /** In-memory index of Mongo override entries for fast skip-during-reimport checks. */
 export class ImportSkipIndex {
   private readonly byKind: Record<CompendiumKind, NameSourceRow[]>;
@@ -69,12 +86,15 @@ export class ImportSkipIndex {
     if (!sourceLabel?.trim()) {
       return rows.some((r) => entryNameKey(r.name) === key && !r.brokenDuration);
     }
-    return rows.some(
-      (r) =>
-        entryNameKey(r.name) === key &&
-        entryMatchesSource(r.source, sourceLabel) &&
-        !r.brokenDuration,
-    );
+    return rows.some((r) => {
+      if (entryNameKey(r.name) !== key || r.brokenDuration) return false;
+      if (entryMatchesSource(r.source, sourceLabel)) return true;
+      // Legacy homebrew rows stored as source "Custom" before label preservation fix.
+      return (
+        sourceLabel === DDB_HOMEBREW_SOURCE_LABEL
+        && (r.source === 'Custom' || !r.source?.trim())
+      );
+    });
   }
 
   /** Lightweight name+source rows for book list tallies (no stat blocks). */
@@ -86,18 +106,32 @@ export class ImportSkipIndex {
 let cachedIndex: { at: number; index: ImportSkipIndex } | null = null;
 const INDEX_TTL_MS = 30_000;
 
-/** Load name+source rows from Mongo overrides (lightweight — no stat blocks). */
+/** Load name+source rows from Mongo overrides + typed collections (lightweight — no stat blocks). */
 export async function loadImportSkipIndex(force = false): Promise<ImportSkipIndex> {
   const now = Date.now();
   if (!force && cachedIndex && now - cachedIndex.at < INDEX_TTL_MS) {
     return cachedIndex.index;
   }
-  const [monster, item, spell] = await Promise.all([
+  const [
+    globalMonster,
+    globalItem,
+    globalSpell,
+    typedMonster,
+    typedItem,
+    typedSpell,
+  ] = await Promise.all([
     readKindNameSourceRows('monster'),
     readKindNameSourceRows('item'),
     readKindNameSourceRows('spell'),
+    readTypedImportNameSourceRows('monster'),
+    readTypedImportNameSourceRows('item'),
+    readTypedImportNameSourceRows('spell'),
   ]);
-  const index = new ImportSkipIndex({ monster, item, spell });
+  const index = new ImportSkipIndex({
+    monster: mergeNameSourceRows(globalMonster, typedMonster),
+    item: mergeNameSourceRows(globalItem, typedItem),
+    spell: mergeNameSourceRows(globalSpell, typedSpell),
+  });
   cachedIndex = { at: now, index };
   return index;
 }

@@ -44,39 +44,6 @@ export const AMBIENT_SOUND_LIBRARY: MediaLibraryEntry[] = [];
 /** Music tracks — add your own via Upload or scene media config. */
 export const MUSIC_LIBRARY: MediaLibraryEntry[] = [];
 
-/** Weather-linked ambient loops (auto-applied with map weather, not shown in soundboard). */
-export const WEATHER_AMBIENT_SOUNDS: Record<string, MediaLibraryEntry> = {
-  'rain-light': { id: 'rain-light', name: 'Light Rain', category: 'forest', url: 'https://assets.mixkit.co/active_storage/sfx/2392/2392-preview.mp3', loop: true, defaultVolume: 0.5, tags: ['weather', 'rain'] },
-  'rain-heavy': { id: 'rain-heavy', name: 'Heavy Rain', category: 'forest', url: 'https://assets.mixkit.co/active_storage/sfx/2393/2393-preview.mp3', loop: true, defaultVolume: 0.55, tags: ['weather', 'storm'] },
-  'wind-howling': { id: 'wind-howling', name: 'Howling Wind', category: 'wind', url: 'https://assets.mixkit.co/active_storage/sfx/2394/2394-preview.mp3', loop: true, defaultVolume: 0.45, tags: ['weather', 'mountain'] },
-  'winter-wind': { id: 'winter-wind', name: 'Winter Wind', category: 'winter', url: 'https://assets.mixkit.co/active_storage/sfx/2391/2391-preview.mp3', loop: true, defaultVolume: 0.5, tags: ['weather', 'cold'] },
-  'dungeon-wind': { id: 'dungeon-wind', name: 'Deep Wind', category: 'dungeon', url: 'https://assets.mixkit.co/active_storage/sfx/2018/2018-preview.mp3', loop: true, defaultVolume: 0.4, tags: ['weather', 'fog'] },
-  'fire-camp': { id: 'fire-camp', name: 'Campfire', category: 'camp', url: 'https://assets.mixkit.co/active_storage/sfx/2469/2469-preview.mp3', loop: true, defaultVolume: 0.5, tags: ['weather', 'embers'] },
-  'forest-stream': { id: 'forest-stream', name: 'Forest Stream', category: 'forest', url: 'https://assets.mixkit.co/active_storage/sfx/2433/2433-preview.mp3', loop: true, defaultVolume: 0.45, tags: ['weather', 'leaves'] },
-  'ocean-waves': { id: 'ocean-waves', name: 'Ocean Waves', category: 'ocean', url: 'https://assets.mixkit.co/active_storage/sfx/2390/2390-preview.mp3', loop: true, defaultVolume: 0.55, tags: ['weather', 'coast'] },
-  'swamp-night': { id: 'swamp-night', name: 'Swamp Night', category: 'swamp', url: 'https://assets.mixkit.co/active_storage/sfx/2434/2434-preview.mp3', loop: true, defaultVolume: 0.45, tags: ['weather', 'swamp'] },
-  'forest-birds': { id: 'forest-birds', name: 'Forest Birds', category: 'forest', url: 'https://assets.mixkit.co/active_storage/sfx/2432/2432-preview.mp3', loop: true, defaultVolume: 0.35, tags: ['weather', 'nature'] },
-};
-
-/** Which weather ambient clips to layer for each overlay. */
-export const WEATHER_AMBIENT_LIBRARY: Partial<Record<Exclude<WeatherOverlay, 'none'>, string[]>> = {
-  rain: ['rain-light'],
-  'heavy-rain': ['rain-heavy'],
-  storm: ['rain-heavy', 'wind-howling'],
-  hail: ['rain-heavy', 'wind-howling'],
-  snow: ['winter-wind'],
-  blizzard: ['winter-wind', 'wind-howling'],
-  fog: ['dungeon-wind'],
-  mist: ['dungeon-wind', 'forest-stream'],
-  sandstorm: ['wind-howling'],
-  swamp: ['swamp-night', 'dungeon-wind'],
-  ash: ['wind-howling', 'fire-camp'],
-  embers: ['fire-camp'],
-  leaves: ['forest-stream', 'forest-birds'],
-  fireflies: ['forest-stream', 'swamp-night'],
-  aurora: ['winter-wind', 'dungeon-wind'],
-};
-
 /** Looping background videos for scene pop-ups / overlays. */
 export const VIDEO_LIBRARY: VideoLibraryEntry[] = [
   { id: 'vid-fireplace', name: 'Fireplace', category: 'tavern', url: 'https://assets.mixkit.co/videos/preview/mixkit-fireplace-burning-4267-large.mp4', loop: true, tags: ['warm', 'indoor'] },
