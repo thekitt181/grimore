@@ -1,4 +1,4 @@
-import type { LightingPreset, SceneTransition, WeatherOverlay } from '../types/scene';
+import type { LightingPreset, SceneTransition, TimeOfDay, WeatherOverlay } from '../types/scene';
 
 /** Curated royalty-free ambient audio + video loops (Mixkit CDN). */
 
@@ -38,39 +38,44 @@ export interface VideoLibraryEntry {
   tags: string[];
 }
 
-/** Ambient loops — stack multiple layers for rich soundscapes. */
-export const AMBIENT_SOUND_LIBRARY: MediaLibraryEntry[] = [
-  { id: 'tavern-crowd', name: 'Tavern Crowd', category: 'tavern', url: 'https://assets.mixkit.co/active_storage/sfx/2570/2570-preview.mp3', loop: true, defaultVolume: 0.55, tags: ['social', 'indoor'] },
-  { id: 'tavern-fire', name: 'Crackling Hearth', category: 'tavern', url: 'https://assets.mixkit.co/active_storage/sfx/2468/2468-preview.mp3', loop: true, defaultVolume: 0.45, tags: ['fire', 'warm'] },
-  { id: 'dungeon-drips', name: 'Dungeon Drips', category: 'dungeon', url: 'https://assets.mixkit.co/active_storage/sfx/2019/2019-preview.mp3', loop: true, defaultVolume: 0.5, tags: ['water', 'cave'] },
-  { id: 'dungeon-wind', name: 'Deep Wind', category: 'dungeon', url: 'https://assets.mixkit.co/active_storage/sfx/2018/2018-preview.mp3', loop: true, defaultVolume: 0.4, tags: ['wind', 'eerie'] },
-  { id: 'forest-birds', name: 'Forest Birds', category: 'forest', url: 'https://assets.mixkit.co/active_storage/sfx/2432/2432-preview.mp3', loop: true, defaultVolume: 0.5, tags: ['nature', 'day'] },
-  { id: 'forest-stream', name: 'Forest Stream', category: 'forest', url: 'https://assets.mixkit.co/active_storage/sfx/2433/2433-preview.mp3', loop: true, defaultVolume: 0.45, tags: ['water', 'peaceful'] },
-  { id: 'cave-rumble', name: 'Cave Rumble', category: 'cave', url: 'https://assets.mixkit.co/active_storage/sfx/2016/2016-preview.mp3', loop: true, defaultVolume: 0.35, tags: ['deep', 'rumble'] },
-  { id: 'combat-drums', name: 'Battle Drums', category: 'combat', url: 'https://assets.mixkit.co/active_storage/sfx/2571/2571-preview.mp3', loop: true, defaultVolume: 0.6, tags: ['fight', 'tension'] },
-  { id: 'combat-clash', name: 'Distant Clash', category: 'combat', url: 'https://assets.mixkit.co/active_storage/sfx/2572/2572-preview.mp3', loop: true, defaultVolume: 0.5, tags: ['swords', 'war'] },
-  { id: 'ocean-waves', name: 'Ocean Waves', category: 'ocean', url: 'https://assets.mixkit.co/active_storage/sfx/2390/2390-preview.mp3', loop: true, defaultVolume: 0.55, tags: ['coast', 'sea'] },
-  { id: 'temple-chant', name: 'Temple Ambience', category: 'temple', url: 'https://assets.mixkit.co/active_storage/sfx/2569/2569-preview.mp3', loop: true, defaultVolume: 0.4, tags: ['sacred', 'mystic'] },
-  { id: 'city-market', name: 'Busy Market', category: 'city', url: 'https://assets.mixkit.co/active_storage/sfx/2568/2568-preview.mp3', loop: true, defaultVolume: 0.5, tags: ['crowd', 'urban'] },
-  { id: 'swamp-frogs', name: 'Swamp Night', category: 'swamp', url: 'https://assets.mixkit.co/active_storage/sfx/2434/2434-preview.mp3', loop: true, defaultVolume: 0.45, tags: ['wetland', 'night'] },
-  { id: 'winter-wind', name: 'Winter Wind', category: 'winter', url: 'https://assets.mixkit.co/active_storage/sfx/2391/2391-preview.mp3', loop: true, defaultVolume: 0.5, tags: ['cold', 'howl'] },
-  { id: 'fire-camp', name: 'Campfire', category: 'camp', url: 'https://assets.mixkit.co/active_storage/sfx/2469/2469-preview.mp3', loop: true, defaultVolume: 0.5, tags: ['outdoor', 'rest'] },
-  { id: 'horror-whispers', name: 'Eerie Whispers', category: 'horror', url: 'https://assets.mixkit.co/active_storage/sfx/2017/2017-preview.mp3', loop: true, defaultVolume: 0.35, tags: ['scary', 'undead'] },
-  { id: 'library-quiet', name: 'Quiet Library', category: 'library', url: 'https://assets.mixkit.co/active_storage/sfx/2567/2567-preview.mp3', loop: true, defaultVolume: 0.3, tags: ['study', 'indoor'] },
-  { id: 'rain-light', name: 'Light Rain', category: 'forest', url: 'https://assets.mixkit.co/active_storage/sfx/2392/2392-preview.mp3', loop: true, defaultVolume: 0.5, tags: ['weather', 'rain'] },
-  { id: 'rain-heavy', name: 'Heavy Rain', category: 'forest', url: 'https://assets.mixkit.co/active_storage/sfx/2393/2393-preview.mp3', loop: true, defaultVolume: 0.55, tags: ['weather', 'storm'] },
-  { id: 'wind-howling', name: 'Howling Wind', category: 'wind', url: 'https://assets.mixkit.co/active_storage/sfx/2394/2394-preview.mp3', loop: true, defaultVolume: 0.45, tags: ['weather', 'mountain'] },
-];
+/** Ambient loops — add your own via Upload or scene ambient URL. */
+export const AMBIENT_SOUND_LIBRARY: MediaLibraryEntry[] = [];
 
-/** Music tracks for playlist / crossfade mode. */
-export const MUSIC_LIBRARY: MediaLibraryEntry[] = [
-  { id: 'music-explore', name: 'Exploration Theme', category: 'forest', url: 'https://assets.mixkit.co/active_storage/sfx/2560/2560-preview.mp3', loop: true, defaultVolume: 0.5, tags: ['travel'] },
-  { id: 'music-tension', name: 'Rising Tension', category: 'combat', url: 'https://assets.mixkit.co/active_storage/sfx/2561/2561-preview.mp3', loop: true, defaultVolume: 0.55, tags: ['suspense'] },
-  { id: 'music-boss', name: 'Boss Encounter', category: 'combat', url: 'https://assets.mixkit.co/active_storage/sfx/2562/2562-preview.mp3', loop: true, defaultVolume: 0.6, tags: ['boss'] },
-  { id: 'music-tavern', name: 'Tavern Lute', category: 'tavern', url: 'https://assets.mixkit.co/active_storage/sfx/2563/2563-preview.mp3', loop: true, defaultVolume: 0.45, tags: ['social'] },
-  { id: 'music-mystery', name: 'Mystery Motif', category: 'temple', url: 'https://assets.mixkit.co/active_storage/sfx/2564/2564-preview.mp3', loop: true, defaultVolume: 0.45, tags: ['investigation'] },
-  { id: 'music-victory', name: 'Victory Stinger', category: 'combat', url: 'https://assets.mixkit.co/active_storage/sfx/2565/2565-preview.mp3', loop: false, defaultVolume: 0.6, tags: ['win'] },
-];
+/** Music tracks — add your own via Upload or scene media config. */
+export const MUSIC_LIBRARY: MediaLibraryEntry[] = [];
+
+/** Weather-linked ambient loops (auto-applied with map weather, not shown in soundboard). */
+export const WEATHER_AMBIENT_SOUNDS: Record<string, MediaLibraryEntry> = {
+  'rain-light': { id: 'rain-light', name: 'Light Rain', category: 'forest', url: 'https://assets.mixkit.co/active_storage/sfx/2392/2392-preview.mp3', loop: true, defaultVolume: 0.5, tags: ['weather', 'rain'] },
+  'rain-heavy': { id: 'rain-heavy', name: 'Heavy Rain', category: 'forest', url: 'https://assets.mixkit.co/active_storage/sfx/2393/2393-preview.mp3', loop: true, defaultVolume: 0.55, tags: ['weather', 'storm'] },
+  'wind-howling': { id: 'wind-howling', name: 'Howling Wind', category: 'wind', url: 'https://assets.mixkit.co/active_storage/sfx/2394/2394-preview.mp3', loop: true, defaultVolume: 0.45, tags: ['weather', 'mountain'] },
+  'winter-wind': { id: 'winter-wind', name: 'Winter Wind', category: 'winter', url: 'https://assets.mixkit.co/active_storage/sfx/2391/2391-preview.mp3', loop: true, defaultVolume: 0.5, tags: ['weather', 'cold'] },
+  'dungeon-wind': { id: 'dungeon-wind', name: 'Deep Wind', category: 'dungeon', url: 'https://assets.mixkit.co/active_storage/sfx/2018/2018-preview.mp3', loop: true, defaultVolume: 0.4, tags: ['weather', 'fog'] },
+  'fire-camp': { id: 'fire-camp', name: 'Campfire', category: 'camp', url: 'https://assets.mixkit.co/active_storage/sfx/2469/2469-preview.mp3', loop: true, defaultVolume: 0.5, tags: ['weather', 'embers'] },
+  'forest-stream': { id: 'forest-stream', name: 'Forest Stream', category: 'forest', url: 'https://assets.mixkit.co/active_storage/sfx/2433/2433-preview.mp3', loop: true, defaultVolume: 0.45, tags: ['weather', 'leaves'] },
+  'ocean-waves': { id: 'ocean-waves', name: 'Ocean Waves', category: 'ocean', url: 'https://assets.mixkit.co/active_storage/sfx/2390/2390-preview.mp3', loop: true, defaultVolume: 0.55, tags: ['weather', 'coast'] },
+  'swamp-night': { id: 'swamp-night', name: 'Swamp Night', category: 'swamp', url: 'https://assets.mixkit.co/active_storage/sfx/2434/2434-preview.mp3', loop: true, defaultVolume: 0.45, tags: ['weather', 'swamp'] },
+  'forest-birds': { id: 'forest-birds', name: 'Forest Birds', category: 'forest', url: 'https://assets.mixkit.co/active_storage/sfx/2432/2432-preview.mp3', loop: true, defaultVolume: 0.35, tags: ['weather', 'nature'] },
+};
+
+/** Which weather ambient clips to layer for each overlay. */
+export const WEATHER_AMBIENT_LIBRARY: Partial<Record<Exclude<WeatherOverlay, 'none'>, string[]>> = {
+  rain: ['rain-light'],
+  'heavy-rain': ['rain-heavy'],
+  storm: ['rain-heavy', 'wind-howling'],
+  hail: ['rain-heavy', 'wind-howling'],
+  snow: ['winter-wind'],
+  blizzard: ['winter-wind', 'wind-howling'],
+  fog: ['dungeon-wind'],
+  mist: ['dungeon-wind', 'forest-stream'],
+  sandstorm: ['wind-howling'],
+  swamp: ['swamp-night', 'dungeon-wind'],
+  ash: ['wind-howling', 'fire-camp'],
+  embers: ['fire-camp'],
+  leaves: ['forest-stream', 'forest-birds'],
+  fireflies: ['forest-stream', 'swamp-night'],
+  aurora: ['winter-wind', 'dungeon-wind'],
+};
 
 /** Looping background videos for scene pop-ups / overlays. */
 export const VIDEO_LIBRARY: VideoLibraryEntry[] = [
@@ -92,15 +97,32 @@ export const LIGHTING_PRESETS: Array<{ id: LightingPreset; label: string; descri
   { id: 'blood-moon', label: 'Blood Moon', description: 'Ominous crimson tint' },
 ];
 
+export const TIME_OF_DAY_PRESETS: Array<{ id: TimeOfDay; label: string }> = [
+  { id: 'dawn', label: 'Dawn' },
+  { id: 'day', label: 'Midday' },
+  { id: 'golden-hour', label: 'Golden Hour' },
+  { id: 'dusk', label: 'Dusk' },
+  { id: 'night', label: 'Night' },
+  { id: 'midnight', label: 'Midnight' },
+];
+
 export const WEATHER_PRESETS: Array<{ id: WeatherOverlay; label: string }> = [
   { id: 'none', label: 'None' },
   { id: 'rain', label: 'Rain' },
   { id: 'heavy-rain', label: 'Heavy Rain' },
-  { id: 'snow', label: 'Snow' },
-  { id: 'fog', label: 'Fog' },
+  { id: 'hail', label: 'Hail' },
   { id: 'storm', label: 'Storm' },
+  { id: 'snow', label: 'Snow' },
+  { id: 'blizzard', label: 'Blizzard' },
+  { id: 'fog', label: 'Fog' },
+  { id: 'mist', label: 'Mist' },
+  { id: 'sandstorm', label: 'Sandstorm' },
+  { id: 'swamp', label: 'Swamp Mist' },
+  { id: 'ash', label: 'Ash Fall' },
   { id: 'embers', label: 'Embers' },
   { id: 'leaves', label: 'Autumn Leaves' },
+  { id: 'fireflies', label: 'Fireflies' },
+  { id: 'aurora', label: 'Aurora' },
 ];
 
 export const SCENE_TRANSITIONS: Array<{ id: SceneTransition; label: string }> = [

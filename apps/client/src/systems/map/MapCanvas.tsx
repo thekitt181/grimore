@@ -52,6 +52,7 @@ import { tokenBoundsFromGrid, worldToGridColRow } from '@/systems/scene/token/to
 import { snapPoint } from '@/systems/scene/snap';
 import { useSessionStore } from '@/store/sessionStore';
 import { getSocket } from '@/lib/socket';
+import { MapAtmosphereLayer } from '@/systems/scene/media/MapAtmosphereLayer';
 import { MapSceneCanvas } from '@/systems/map3d/Map3DCanvas';
 
 // Back-compat alias — some modules still import mapLayerRefs.
@@ -598,6 +599,8 @@ export function MapCanvas() {
         style={{ touchAction: 'none', pointerEvents: 'auto' }}
         aria-hidden
       />
+
+      <MapAtmosphereLayer />
 
       <MapCameraControls />
 

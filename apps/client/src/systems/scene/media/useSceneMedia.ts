@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
-import type { SceneAudioLayer, SceneChangePayload, SceneRecord, SceneMediaConfig, WeatherOverlay } from '@grimoire/shared';
-import { AMBIENT_SOUND_LIBRARY, DEFAULT_SCENE_MEDIA_CONFIG } from '@grimoire/shared';
+import type { SceneChangePayload, SceneRecord, SceneMediaConfig, SceneAudioLayer, TimeOfDay, WeatherOverlay } from '@grimoire/shared';
+import { DEFAULT_SCENE_MEDIA_CONFIG, WEATHER_AMBIENT_LIBRARY, WEATHER_AMBIENT_SOUNDS } from '@grimoire/shared';
 import { getSocket } from '@/lib/socket';
 import { useSessionStore } from '@/store/sessionStore';
 import {
@@ -14,6 +14,7 @@ import { useSceneMediaStore } from './sceneMediaStore';
 import { hydrateSceneMap } from '../manager/hydrateSceneMap';
 
 export const SESSION_WEATHER_SCENE_ID = 'session-live-weather';
+export const SESSION_TIME_SCENE_ID = 'session-live-time';
 export const SESSION_MEDIA_SCENE_ID = 'session-live-media';
 
 function createSessionLiveScene(
@@ -33,6 +34,7 @@ function createSessionLiveScene(
     backgroundVideoUrl: null,
     lightingPreset: 'default',
     weatherOverlay: null,
+    timeOfDay: 'day',
     sortOrder: 0,
     createdAt: now,
     updatedAt: now,
@@ -65,12 +67,13 @@ function isMediaOnlyPatch(prev: SceneRecord | null, next: SceneRecord): boolean 
   if (!prev || prev.id !== next.id) return false;
   return (
     prev.weatherOverlay === next.weatherOverlay
+    && prev.timeOfDay === next.timeOfDay
     && prev.mapId === next.mapId
     && sceneMediaFingerprint(prev) !== sceneMediaFingerprint(next)
   );
 }
 
-function isWeatherOnlyPatch(prev: SceneRecord | null, next: SceneRecord): boolean {
+function isAtmosphereOnlyPatch(prev: SceneRecord | null, next: SceneRecord): boolean {
   if (!prev || prev.id !== next.id) return false;
   return (
     prev.lightingPreset === next.lightingPreset
@@ -78,30 +81,27 @@ function isWeatherOnlyPatch(prev: SceneRecord | null, next: SceneRecord): boolea
     && prev.backgroundVideoUrl === next.backgroundVideoUrl
     && prev.mapId === next.mapId
     && JSON.stringify(prev.mediaConfig) === JSON.stringify(next.mediaConfig)
-    && prev.weatherOverlay !== next.weatherOverlay
+    && (prev.weatherOverlay !== next.weatherOverlay || prev.timeOfDay !== next.timeOfDay)
   );
 }
 
-function applyWeatherOverlay(weather: WeatherOverlay | null) {
-  useSceneMediaStore.getState().setWeatherOverlay(weather);
+function applyAtmosphere(scene: SceneRecord) {
+  useSceneMediaStore.getState().setWeatherOverlay(scene.weatherOverlay);
+  useSceneMediaStore.getState().setTimeOfDay(scene.timeOfDay ?? 'day');
   useSceneMediaStore.getState().setTransitioning(false);
 }
 
-const WEATHER_AMBIENT_LIBRARY: Partial<Record<Exclude<WeatherOverlay, 'none'>, string[]>> = {
-  rain: ['rain-light'],
-  'heavy-rain': ['rain-heavy'],
-  storm: ['rain-heavy', 'wind-howling'],
-  snow: ['winter-wind'],
-  fog: ['dungeon-wind'],
-  embers: ['fire-camp'],
-  leaves: ['forest-stream'],
-};
+function stripWeatherAmbientLayers(cfg: SceneMediaConfig): SceneMediaConfig {
+  const ambientLayers = cfg.ambientLayers.filter((l) => !l.id.startsWith('weather-'));
+  if (ambientLayers.length === cfg.ambientLayers.length) return cfg;
+  return { ...cfg, ambientLayers };
+}
 
 function buildWeatherAmbientLayers(weather: WeatherOverlay | null): SceneAudioLayer[] {
   if (!weather || weather === 'none') return [];
   const libraryIds = WEATHER_AMBIENT_LIBRARY[weather] ?? [];
   return libraryIds.flatMap((libraryId) => {
-    const entry = AMBIENT_SOUND_LIBRARY.find((e) => e.id === libraryId);
+    const entry = WEATHER_AMBIENT_SOUNDS[libraryId];
     if (!entry) return [];
     return [{
       id: `weather-${libraryId}`,
@@ -117,13 +117,19 @@ function buildWeatherAmbientLayers(weather: WeatherOverlay | null): SceneAudioLa
 function mergeWeatherAmbientLayers(
   cfg: SceneMediaConfig,
   weather: WeatherOverlay | null,
-): SceneAudioLayer[] {
-  const withoutWeather = cfg.ambientLayers.filter((l) => !l.id.startsWith('weather-'));
-  return [...withoutWeather, ...buildWeatherAmbientLayers(weather)];
+): SceneMediaConfig {
+  const base = stripWeatherAmbientLayers(cfg);
+  return {
+    ...base,
+    ambientLayers: [...base.ambientLayers, ...buildWeatherAmbientLayers(weather)],
+  };
 }
 
 function buildMediaConfig(scene: SceneRecord): SceneMediaConfig {
-  const cfg = scene.mediaConfig ?? DEFAULT_SCENE_MEDIA_CONFIG;
+  const cfg = mergeWeatherAmbientLayers(
+    scene.mediaConfig ?? DEFAULT_SCENE_MEDIA_CONFIG,
+    scene.weatherOverlay,
+  );
   const layers = [...cfg.ambientLayers];
   if (scene.ambientAudioUrl && !layers.some((l) => l.url === scene.ambientAudioUrl)) {
     layers.unshift({
@@ -154,6 +160,7 @@ function buildMediaConfig(scene: SceneRecord): SceneMediaConfig {
 
 export function applySceneBundle(scene: SceneRecord, transition: SceneChangePayload['transition'] = 'fade') {
   useSceneMediaStore.getState().setActiveScene(scene, transition);
+  applyAtmosphere(scene);
   const media = buildMediaConfig(scene);
   useSceneMediaStore.getState().setMasterVolume(media.masterVolume);
   applySceneMediaConfig(media);
@@ -196,12 +203,16 @@ export function useSceneMedia(sessionId: string | undefined) {
       if (payload.sessionId !== sessionId || !payload.scene) return;
       const prev = useSceneMediaStore.getState().activeScene;
       if (payload.scene.id === SESSION_WEATHER_SCENE_ID) {
-        applyWeatherOverlay(payload.scene.weatherOverlay);
+        applySceneBundle(payload.scene, 'none');
         return;
       }
-      if (prev && isWeatherOnlyPatch(prev, payload.scene)) {
-        applyWeatherOverlay(payload.scene.weatherOverlay);
+      if (payload.scene.id === SESSION_TIME_SCENE_ID) {
+        applyAtmosphere(payload.scene);
         useSceneMediaStore.getState().setActiveScene(payload.scene, 'none');
+        return;
+      }
+      if (prev && isAtmosphereOnlyPatch(prev, payload.scene)) {
+        applySceneBundle(payload.scene, 'none');
         return;
       }
       if (
@@ -248,15 +259,12 @@ export function emitSessionWeather(sessionId: string, weather: WeatherOverlay) {
   const active = useSceneMediaStore.getState().activeScene;
   const campaignId = useSessionStore.getState().campaignId ?? 'local';
   const baseCfg = active?.mediaConfig ?? DEFAULT_SCENE_MEDIA_CONFIG;
-  const mediaConfig = {
-    ...baseCfg,
-    ambientLayers: mergeWeatherAmbientLayers(baseCfg, normalized),
-  };
+  const mediaConfig = mergeWeatherAmbientLayers(baseCfg, normalized);
 
   if (active) {
     const scene = { ...active, weatherOverlay: normalized, mediaConfig };
     applySceneBundle(scene, 'none');
-    applyWeatherOverlay(normalized);
+    applyAtmosphere(scene);
     getSocket().emit('scene:change', {
       sessionId,
       sceneId: scene.id,
@@ -269,7 +277,36 @@ export function emitSessionWeather(sessionId: string, weather: WeatherOverlay) {
   const scene = createSessionWeatherScene(campaignId, normalized);
   scene.mediaConfig = mediaConfig;
   applySceneBundle(scene, 'none');
-  applyWeatherOverlay(normalized);
+  applyAtmosphere(scene);
+  getSocket().emit('scene:change', {
+    sessionId,
+    sceneId: scene.id,
+    transition: 'none',
+    scene,
+  });
+}
+
+/** Push map time-of-day live to all clients (right-click map menu / media bar). */
+export function emitSessionTimeOfDay(sessionId: string, timeOfDay: TimeOfDay) {
+  const active = useSceneMediaStore.getState().activeScene;
+  const campaignId = useSessionStore.getState().campaignId ?? 'local';
+
+  if (active) {
+    const scene = { ...active, timeOfDay };
+    applyAtmosphere(scene);
+    useSceneMediaStore.getState().setActiveScene(scene, 'none');
+    getSocket().emit('scene:change', {
+      sessionId,
+      sceneId: scene.id,
+      transition: 'none',
+      scene,
+    });
+    return;
+  }
+
+  const scene = createSessionLiveScene(SESSION_TIME_SCENE_ID, 'Map time', campaignId, { timeOfDay });
+  applyAtmosphere(scene);
+  useSceneMediaStore.getState().setActiveScene(scene, 'none');
   getSocket().emit('scene:change', {
     sessionId,
     sceneId: scene.id,

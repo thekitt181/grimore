@@ -264,6 +264,7 @@ model Scene {
   backgroundVideoUrl String?
   lightingPreset  String  @default("default")
   weatherOverlay  String?
+  timeOfDay       String  @default("day")
   mediaConfig     Json     @default("{}")
   sortOrder       Int     @default(0)
   createdAt       DateTime @default(now())

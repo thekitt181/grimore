@@ -7,6 +7,7 @@ import {
   LIGHTING_PRESETS,
   MUSIC_LIBRARY,
   SCENE_TRANSITIONS,
+  TIME_OF_DAY_PRESETS,
   VIDEO_LIBRARY,
   WEATHER_PRESETS,
 } from '@grimoire/shared';
@@ -200,6 +201,19 @@ export function SceneManager({ campaignId, isGM, liveSessionId, onSceneActivated
                 </select>
               </label>
 
+              <label className="font-ui text-xs block">
+                Time of day
+                <select
+                  className="input mt-1 w-full"
+                  value={scene.timeOfDay ?? 'day'}
+                  onChange={(e) => void setSceneField(scene, { timeOfDay: e.target.value as NonNullable<SceneRecord['timeOfDay']> })}
+                >
+                  {TIME_OF_DAY_PRESETS.map((p) => (
+                    <option key={p.id} value={p.id}>{p.label}</option>
+                  ))}
+                </select>
+              </label>
+
               <label className="font-ui text-xs block md:col-span-2">
                 Background video URL
                 <input
@@ -230,24 +244,35 @@ export function SceneManager({ campaignId, isGM, liveSessionId, onSceneActivated
                 <p className="font-ui text-xs mb-1" style={{ color: 'var(--color-text-secondary)' }}>
                   Ambient layers ({scene.mediaConfig.ambientLayers.length})
                 </p>
-                <div className="flex flex-wrap gap-1 max-h-28 overflow-y-auto">
-                  {AMBIENT_SOUND_LIBRARY.map((a) => (
-                    <button
-                      key={a.id}
-                      type="button"
-                      className="btn-ghost text-xs"
-                      onClick={() => void addLibraryAmbient(scene, a.id)}
-                    >
-                      + {a.name}
-                    </button>
-                  ))}
-                </div>
+                {AMBIENT_SOUND_LIBRARY.length === 0 ? (
+                  <p className="font-ui text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                    Set a scene ambient URL above, or push custom audio from the live session Upload menu.
+                  </p>
+                ) : (
+                  <div className="flex flex-wrap gap-1 max-h-28 overflow-y-auto">
+                    {AMBIENT_SOUND_LIBRARY.map((a) => (
+                      <button
+                        key={a.id}
+                        type="button"
+                        className="btn-ghost text-xs"
+                        onClick={() => void addLibraryAmbient(scene, a.id)}
+                      >
+                        + {a.name}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
 
               <div className="md:col-span-2">
                 <p className="font-ui text-xs mb-1" style={{ color: 'var(--color-text-secondary)' }}>Music playlist</p>
-                <div className="flex flex-wrap gap-1">
-                  {MUSIC_LIBRARY.map((m) => (
+                {MUSIC_LIBRARY.length === 0 ? (
+                  <p className="font-ui text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                    Add music tracks from the live session Upload menu during play.
+                  </p>
+                ) : (
+                  <div className="flex flex-wrap gap-1">
+                    {MUSIC_LIBRARY.map((m) => (
                     <button
                       key={m.id}
                       type="button"
@@ -271,7 +296,8 @@ export function SceneManager({ campaignId, isGM, liveSessionId, onSceneActivated
                       + {m.name}
                     </button>
                   ))}
-                </div>
+                  </div>
+                )}
               </div>
 
               <label className="font-ui text-xs block md:col-span-2">

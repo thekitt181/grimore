@@ -7,22 +7,38 @@ const WEATHER_TINT: Partial<Record<Exclude<WeatherOverlay, 'none'>, string>> = {
   rain: 'rgba(80, 100, 140, 0.06)',
   'heavy-rain': 'rgba(60, 80, 120, 0.1)',
   storm: 'rgba(40, 50, 90, 0.15)',
+  hail: 'rgba(100, 120, 160, 0.09)',
   snow: 'rgba(200, 220, 255, 0.08)',
+  blizzard: 'rgba(180, 200, 230, 0.14)',
   fog: 'rgba(120, 130, 145, 0.12)',
+  mist: 'rgba(160, 175, 190, 0.08)',
+  sandstorm: 'rgba(160, 130, 80, 0.12)',
+  swamp: 'rgba(60, 90, 50, 0.1)',
+  ash: 'rgba(80, 80, 90, 0.14)',
   embers: 'rgba(80, 30, 10, 0.08)',
   leaves: 'rgba(60, 40, 20, 0.05)',
+  fireflies: 'rgba(20, 40, 30, 0.12)',
+  aurora: 'rgba(30, 50, 80, 0.1)',
 };
 
-const WEATHER_PRESETS: Partial<
+const WEATHER_SETTINGS: Partial<
   Record<Exclude<WeatherOverlay, 'none'>, { cover: number; wind: number; direction: number }>
 > = {
   rain: { cover: 55, wind: 35, direction: 195 },
   'heavy-rain': { cover: 80, wind: 55, direction: 190 },
   storm: { cover: 90, wind: 70, direction: 200 },
+  hail: { cover: 75, wind: 45, direction: 195 },
   snow: { cover: 60, wind: 25, direction: 210 },
+  blizzard: { cover: 95, wind: 85, direction: 220 },
   fog: { cover: 75, wind: 10, direction: 180 },
+  mist: { cover: 50, wind: 15, direction: 175 },
+  sandstorm: { cover: 85, wind: 90, direction: 270 },
+  swamp: { cover: 65, wind: 12, direction: 180 },
+  ash: { cover: 70, wind: 40, direction: 190 },
   embers: { cover: 50, wind: 30, direction: 170 },
   leaves: { cover: 45, wind: 50, direction: 90 },
+  fireflies: { cover: 40, wind: 8, direction: 160 },
+  aurora: { cover: 60, wind: 5, direction: 0 },
 };
 
 export function WeatherOverlay() {
@@ -37,7 +53,7 @@ export function WeatherOverlay() {
 
   const settings = useMemo(() => {
     if (!weather || weather === 'none') return sessionSettings;
-    return { ...sessionSettings, ...WEATHER_PRESETS[weather] };
+    return { ...sessionSettings, ...WEATHER_SETTINGS[weather] };
   }, [weather, sessionSettings]);
 
   if (!weather || weather === 'none') return null;
@@ -47,7 +63,7 @@ export function WeatherOverlay() {
       {tint && (
         <div
           aria-hidden
-          className="pointer-events-none absolute inset-0 z-[14]"
+          className="pointer-events-none absolute inset-0"
           style={{ background: tint }}
         />
       )}
@@ -73,7 +89,7 @@ export function LightingTintOverlay() {
   return (
     <div
       aria-hidden
-      className="pointer-events-none absolute inset-0 z-[14]"
+      className="pointer-events-none absolute inset-0"
       style={{ background: tint, mixBlendMode: 'multiply' }}
     />
   );

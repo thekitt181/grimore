@@ -4,6 +4,7 @@ import type {
   SceneMediaConfig,
   SceneRecord,
   SceneTransition,
+  TimeOfDay,
   WeatherOverlay,
   WeatherSettings,
 } from '@grimoire/shared';
@@ -19,6 +20,7 @@ interface SceneMediaState {
   activeScene: SceneRecord | null;
   /** Live weather when no scene is active (map context menu). */
   sessionWeather: WeatherOverlay | null;
+  sessionTimeOfDay: TimeOfDay | null;
   sessionWeatherSettings: WeatherSettings;
   cinemaTakeover: boolean;
   transition: SceneTransition;
@@ -30,6 +32,7 @@ interface SceneMediaState {
   previewMode: boolean;
   setActiveScene: (scene: SceneRecord | null, transition?: SceneTransition) => void;
   setWeatherOverlay: (weather: WeatherOverlay | null) => void;
+  setTimeOfDay: (time: TimeOfDay | null) => void;
   setWeatherSettings: (settings: Partial<WeatherSettings>) => void;
   setCinemaTakeover: (active: boolean) => void;
   clearVideoPlayback: () => void;
@@ -44,6 +47,7 @@ interface SceneMediaState {
 export const useSceneMediaStore = create<SceneMediaState>((set, get) => ({
   activeScene: null,
   sessionWeather: null,
+  sessionTimeOfDay: null,
   sessionWeatherSettings: DEFAULT_WEATHER_SETTINGS,
   cinemaTakeover: false,
   transition: 'fade',
@@ -60,6 +64,14 @@ export const useSceneMediaStore = create<SceneMediaState>((set, get) => ({
       set({ activeScene: { ...scene, weatherOverlay: weather } });
     } else {
       set({ sessionWeather: weather });
+    }
+  },
+  setTimeOfDay: (time) => {
+    const scene = get().activeScene;
+    if (scene) {
+      set({ activeScene: { ...scene, timeOfDay: time } });
+    } else {
+      set({ sessionTimeOfDay: time });
     }
   },
   setWeatherSettings: (patch) =>
@@ -107,4 +119,9 @@ export function getActiveWeather(): WeatherOverlay | null {
   const { activeScene, sessionWeather } = useSceneMediaStore.getState();
   const w = activeScene?.weatherOverlay ?? sessionWeather;
   return w && w !== 'none' ? w : null;
+}
+
+export function getActiveTimeOfDay(): TimeOfDay {
+  const { activeScene, sessionTimeOfDay } = useSceneMediaStore.getState();
+  return activeScene?.timeOfDay ?? sessionTimeOfDay ?? 'day';
 }

@@ -49,7 +49,7 @@ import { loadInitiativeLocal, persistInitiativeLocal } from '@/systems/scene/ses
 import { useItemStore } from '@/systems/scene/store/itemStore';
 import { useSceneMedia } from '@/systems/scene/media/useSceneMedia';
 import { BackgroundVideoLayer } from '@/systems/scene/media/BackgroundVideoLayer';
-import { LightingTintOverlay, SceneTransitionOverlay, WeatherOverlay } from '@/systems/scene/media/SceneAtmosphere';
+import { SceneTransitionOverlay } from '@/systems/scene/media/SceneAtmosphere';
 import { SessionMediaBar } from '@/systems/scene/media/SessionMediaBar';
 import { SessionSceneBar } from '@/systems/scene/manager/SessionSceneBar';
 import { SceneManagerPanel } from '@/systems/scene/manager/SceneManagerPanel';
@@ -278,8 +278,6 @@ export function SessionPage() {
         {/* Map canvas + overlay panels */}
         <div className="flex-1 relative overflow-hidden">
           <MapCanvas />
-          <LightingTintOverlay />
-          <WeatherOverlay />
           <SceneTransitionOverlay />
           <MobileDdbTokenBar />
 

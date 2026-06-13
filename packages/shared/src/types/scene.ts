@@ -13,10 +13,26 @@ export type WeatherOverlay =
   | 'rain'
   | 'heavy-rain'
   | 'snow'
+  | 'blizzard'
   | 'fog'
+  | 'mist'
   | 'storm'
+  | 'hail'
+  | 'sandstorm'
+  | 'swamp'
+  | 'ash'
   | 'embers'
-  | 'leaves';
+  | 'leaves'
+  | 'fireflies'
+  | 'aurora';
+
+export type TimeOfDay =
+  | 'dawn'
+  | 'day'
+  | 'golden-hour'
+  | 'dusk'
+  | 'night'
+  | 'midnight';
 
 export interface SceneAudioLayer {
   id: string;
@@ -100,6 +116,8 @@ export interface SceneRecord {
   backgroundVideoUrl: string | null;
   lightingPreset: LightingPreset;
   weatherOverlay: WeatherOverlay | null;
+  /** Visual time-of-day tint on the map (defaults to midday). */
+  timeOfDay?: TimeOfDay | null;
   mediaConfig: SceneMediaConfig;
   sortOrder: number;
   createdAt: string;
@@ -119,6 +137,7 @@ export interface CreateScenePayload {
   backgroundVideoUrl?: string | null;
   lightingPreset?: LightingPreset;
   weatherOverlay?: WeatherOverlay | null;
+  timeOfDay?: TimeOfDay | null;
   mediaConfig?: Partial<SceneMediaConfig>;
 }
 

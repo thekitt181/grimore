@@ -60,6 +60,7 @@ export function serializeScene(scene: {
   backgroundVideoUrl: string | null;
   lightingPreset: string;
   weatherOverlay: string | null;
+  timeOfDay?: string | null;
   mediaConfig: unknown;
   sortOrder: number;
   createdAt: Date;
@@ -75,6 +76,7 @@ export function serializeScene(scene: {
     backgroundVideoUrl: scene.backgroundVideoUrl,
     lightingPreset: scene.lightingPreset as SceneRecord['lightingPreset'],
     weatherOverlay: (scene.weatherOverlay ?? null) as SceneRecord['weatherOverlay'],
+    timeOfDay: (scene.timeOfDay ?? 'day') as SceneRecord['timeOfDay'],
     mediaConfig: parseMediaConfig(scene.mediaConfig),
     sortOrder: scene.sortOrder,
     createdAt: scene.createdAt.toISOString(),

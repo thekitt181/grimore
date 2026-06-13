@@ -1,17 +1,18 @@
 import { useEffect, useRef, useState } from 'react';
 import { v4 as uuidv4 } from 'uuid';
-import type { LightingPreset, MediaLibraryCategory, MediaLibraryEntry, VideoLibraryEntry } from '@grimoire/shared';
+import type { LightingPreset, MediaLibraryCategory, MediaLibraryEntry, TimeOfDay, VideoLibraryEntry } from '@grimoire/shared';
 import {
   AMBIENT_SOUND_LIBRARY,
   DEFAULT_SCENE_MEDIA_CONFIG,
   LIGHTING_PRESETS,
   MUSIC_LIBRARY,
+  TIME_OF_DAY_PRESETS,
   VIDEO_LIBRARY,
 } from '@grimoire/shared';
 import { fileToDataUrl } from '@/lib/imagePersistence';
 import { skipMusicTrack } from './audioEngine';
 import { useSceneMediaStore } from './sceneMediaStore';
-import { emitSessionMediaPatch } from './useSceneMedia';
+import { emitSessionMediaPatch, emitSessionTimeOfDay } from './useSceneMedia';
 
 type MenuId = 'media' | 'video' | 'audio' | 'upload' | 'libraries';
 
@@ -147,6 +148,11 @@ export function SessionMediaBar({ sessionId, isGM }: SessionMediaBarProps) {
 
   function pushLighting(preset: LightingPreset) {
     emitSessionMediaPatch(sessionId, { lightingPreset: preset });
+    setOpenMenu(null);
+  }
+
+  function pushTimeOfDay(timeOfDay: TimeOfDay) {
+    emitSessionTimeOfDay(sessionId, timeOfDay);
     setOpenMenu(null);
   }
 
@@ -317,6 +323,13 @@ export function SessionMediaBar({ sessionId, isGM }: SessionMediaBarProps) {
                 {LIGHTING_PRESETS.map((p) => (
                   <PickBtn key={p.id} label={p.label} onClick={() => pushLighting(p.id)} />
                 ))}
+                <div className="gold-divider my-1" />
+                <p className="px-1 font-ui text-[10px] uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>
+                  Time of day
+                </p>
+                {TIME_OF_DAY_PRESETS.map((t) => (
+                  <PickBtn key={t.id} label={t.label} onClick={() => pushTimeOfDay(t.id)} />
+                ))}
               </div>
             )}
 
@@ -344,19 +357,30 @@ export function SessionMediaBar({ sessionId, isGM }: SessionMediaBarProps) {
             {openMenu === 'audio' && (
               <div className="space-y-2">
                 <PickBtn label="✕ Clear all audio" onClick={clearAudio} />
-                <p className="px-1 font-ui text-[10px] uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>
-                  Ambient layers
+                <p className="px-1 font-ui text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
+                  Paste or upload your own tracks via Upload — no built-in soundboard (old presets were inaccurate).
                 </p>
-                {AMBIENT_SOUND_LIBRARY.slice(0, 12).map((a) => (
-                  <PickBtn key={a.id} label={`+ ${a.name}`} onClick={() => pushAmbient(a)} />
-                ))}
-                <div className="gold-divider my-1" />
-                <p className="px-1 font-ui text-[10px] uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>
-                  Music
-                </p>
-                {MUSIC_LIBRARY.map((m) => (
-                  <PickBtn key={m.id} label={`♫ ${m.name}`} onClick={() => pushMusic(m)} />
-                ))}
+                {AMBIENT_SOUND_LIBRARY.length > 0 && (
+                  <>
+                    <p className="px-1 font-ui text-[10px] uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>
+                      Ambient layers
+                    </p>
+                    {AMBIENT_SOUND_LIBRARY.slice(0, 12).map((a) => (
+                      <PickBtn key={a.id} label={`+ ${a.name}`} onClick={() => pushAmbient(a)} />
+                    ))}
+                  </>
+                )}
+                {MUSIC_LIBRARY.length > 0 && (
+                  <>
+                    <div className="gold-divider my-1" />
+                    <p className="px-1 font-ui text-[10px] uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>
+                      Music
+                    </p>
+                    {MUSIC_LIBRARY.map((m) => (
+                      <PickBtn key={m.id} label={`♫ ${m.name}`} onClick={() => pushMusic(m)} />
+                    ))}
+                  </>
+                )}
               </div>
             )}
 
@@ -416,13 +440,21 @@ export function SessionMediaBar({ sessionId, isGM }: SessionMediaBarProps) {
                 <p className="px-1 font-ui text-[10px] uppercase tracking-wider" style={{ color: 'var(--color-accent-gold)' }}>
                   Ambient
                 </p>
-                {filterCategory(AMBIENT_SOUND_LIBRARY).map((a) => (
+                {filterCategory(AMBIENT_SOUND_LIBRARY).length === 0 ? (
+                  <p className="px-1 font-ui text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
+                    Use Upload to add ambient audio URLs.
+                  </p>
+                ) : filterCategory(AMBIENT_SOUND_LIBRARY).map((a) => (
                   <PickBtn key={a.id} label={`+ ${a.name}`} onClick={() => pushAmbient(a)} />
                 ))}
                 <p className="px-1 font-ui text-[10px] uppercase tracking-wider" style={{ color: 'var(--color-accent-gold)' }}>
                   Music
                 </p>
-                {filterCategory(MUSIC_LIBRARY).map((m) => (
+                {filterCategory(MUSIC_LIBRARY).length === 0 ? (
+                  <p className="px-1 font-ui text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
+                    Use Upload to add music URLs.
+                  </p>
+                ) : filterCategory(MUSIC_LIBRARY).map((m) => (
                   <PickBtn key={m.id} label={`♫ ${m.name}`} onClick={() => pushMusic(m)} />
                 ))}
                 <p className="px-1 font-ui text-[10px] uppercase tracking-wider" style={{ color: 'var(--color-accent-gold)' }}>

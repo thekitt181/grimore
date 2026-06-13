@@ -16,7 +16,11 @@ const lightingPresetSchema = z.enum([
   'default', 'torchlight', 'moonlight', 'overcast', 'underdark', 'ethereal', 'blood-moon',
 ]);
 const weatherSchema = z.enum([
-  'none', 'rain', 'heavy-rain', 'snow', 'fog', 'storm', 'embers', 'leaves',
+  'none', 'rain', 'heavy-rain', 'snow', 'blizzard', 'fog', 'mist', 'storm', 'hail',
+  'sandstorm', 'swamp', 'ash', 'embers', 'leaves', 'fireflies', 'aurora',
+]).nullable().optional();
+const timeOfDaySchema = z.enum([
+  'dawn', 'day', 'golden-hour', 'dusk', 'night', 'midnight',
 ]).nullable().optional();
 const transitionSchema = z.enum(['fade', 'fire', 'page-turn', 'none']);
 
@@ -61,6 +65,7 @@ const createSceneSchema = z.object({
   backgroundVideoUrl: z.string().nullable().optional(),
   lightingPreset: lightingPresetSchema.optional(),
   weatherOverlay: weatherSchema,
+  timeOfDay: timeOfDaySchema,
   mediaConfig: mediaConfigSchema,
 });
 
@@ -205,6 +210,7 @@ router.post('/campaign/:campaignId', requireAuth, async (req: AuthenticatedReque
         backgroundVideoUrl: data.backgroundVideoUrl ?? null,
         lightingPreset: data.lightingPreset ?? 'default',
         weatherOverlay: data.weatherOverlay ?? null,
+        timeOfDay: data.timeOfDay ?? 'day',
         mediaConfig: mediaConfigInput(data.mediaConfig),
         sortOrder: (maxOrder._max.sortOrder ?? -1) + 1,
       },
@@ -251,6 +257,7 @@ router.patch('/:id', requireAuth, async (req: AuthenticatedRequest, res) => {
         ...(data.backgroundVideoUrl !== undefined ? { backgroundVideoUrl: data.backgroundVideoUrl } : {}),
         ...(data.lightingPreset !== undefined ? { lightingPreset: data.lightingPreset } : {}),
         ...(data.weatherOverlay !== undefined ? { weatherOverlay: data.weatherOverlay } : {}),
+        ...(data.timeOfDay !== undefined ? { timeOfDay: data.timeOfDay ?? 'day' } : {}),
         ...(data.sortOrder !== undefined ? { sortOrder: data.sortOrder } : {}),
         ...(data.mediaConfig !== undefined ? { mediaConfig: mediaConfigInput(data.mediaConfig) } : {}),
       },

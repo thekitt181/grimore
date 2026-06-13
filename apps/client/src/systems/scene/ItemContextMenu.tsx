@@ -24,10 +24,10 @@ import { getPersistSessionId } from './sessionPersistence';
 import { DraggablePanel } from '@/components/DraggablePanel';
 import { isMobileClient } from '@/lib/socket';
 import { isDdbPcToken } from '@/systems/ddb/ddbTokenUtils';
-import { WEATHER_PRESETS } from '@grimoire/shared';
-import type { WeatherOverlay } from '@grimoire/shared';
+import { TIME_OF_DAY_PRESETS, WEATHER_PRESETS } from '@grimoire/shared';
+import type { TimeOfDay, WeatherOverlay } from '@grimoire/shared';
 import { useSceneMediaStore } from './media/sceneMediaStore';
-import { emitSessionWeather } from './media/useSceneMedia';
+import { emitSessionTimeOfDay, emitSessionWeather } from './media/useSceneMedia';
 
 const CONDITIONS = [
   'Blinded', 'Charmed', 'Deafened', 'Frightened', 'Grappled', 'Incapacitated',
@@ -332,6 +332,7 @@ export function ItemContextMenu() {
             }}
           />
           <MapWeatherMenuSection onDone={close} />
+          <MapTimeMenuSection onDone={close} />
         </>
       </div>
     );
@@ -491,6 +492,7 @@ export function ItemContextMenu() {
         <>
           <div className="gold-divider my-1" />
           <MapWeatherMenuSection onDone={close} />
+          <MapTimeMenuSection onDone={close} />
           <div className="gold-divider my-1" />
           <Btn label="⊹ Auto-sync grid" onClick={() => {
             void syncGridToMap(single as MapItem).then((r) => {
@@ -591,11 +593,19 @@ const WEATHER_ICONS: Record<WeatherOverlay, string> = {
   none: '☀',
   rain: '🌧',
   'heavy-rain': '🌧',
-  snow: '❄',
-  fog: '🌫',
+  hail: '🧊',
   storm: '⛈',
+  snow: '❄',
+  blizzard: '🌨',
+  fog: '🌫',
+  mist: '🌁',
+  sandstorm: '🏜',
+  swamp: '🐸',
+  ash: '🌋',
   embers: '🔥',
   leaves: '🍂',
+  fireflies: '✨',
+  aurora: '🌌',
 };
 
 function MapWeatherMenuSection({ onDone }: { onDone: () => void }) {
@@ -636,6 +646,61 @@ function MapWeatherMenuSection({ onDone }: { onDone: () => void }) {
             }}
           >
             {WEATHER_ICONS[preset.id]} {preset.label}
+            {active ? ' ✓' : ''}
+          </button>
+        );
+      })}
+    </>
+  );
+}
+
+const TIME_ICONS: Record<TimeOfDay, string> = {
+  dawn: '🌅',
+  day: '☀',
+  'golden-hour': '🌇',
+  dusk: '🌆',
+  night: '🌙',
+  midnight: '🌑',
+};
+
+function MapTimeMenuSection({ onDone }: { onDone: () => void }) {
+  const activeScene = useSceneMediaStore((s) => s.activeScene);
+  const sessionTime = useSceneMediaStore((s) => s.sessionTimeOfDay);
+  const current = activeScene?.timeOfDay ?? sessionTime ?? 'day';
+
+  function pick(timeOfDay: TimeOfDay) {
+    const sessionId = getPersistSessionId();
+    if (!sessionId) return;
+    emitSessionTimeOfDay(sessionId, timeOfDay);
+    onDone();
+  }
+
+  return (
+    <>
+      <div className="gold-divider my-1" />
+      <div className="px-3 py-1 font-ui text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+        Time of day
+      </div>
+      {TIME_OF_DAY_PRESETS.map((preset) => {
+        const active = current === preset.id;
+        return (
+          <button
+            key={preset.id}
+            type="button"
+            onClick={() => pick(preset.id)}
+            className="w-full text-left px-3 py-1.5 text-xs font-ui rounded transition-colors"
+            style={{
+              color: active ? 'var(--color-accent-gold)' : 'var(--color-text-primary)',
+              background: active ? 'rgba(201,168,76,0.12)' : 'transparent',
+            }}
+            onMouseEnter={(e) => {
+              if (!active) (e.currentTarget as HTMLElement).style.background = 'var(--color-bg-tertiary)';
+            }}
+            onMouseLeave={(e) => {
+              if (!active) (e.currentTarget as HTMLElement).style.background = active ? 'rgba(201,168,76,0.12)' : 'transparent';
+            }}
+          >
+            {TIME_ICONS[preset.id]} {preset.label}
             {active ? ' ✓' : ''}
           </button>
         );
