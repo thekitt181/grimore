@@ -4,8 +4,6 @@ import { api } from '@/lib/axios';
 import { AppShell } from '@/components/layout/AppShell';
 import { InvitePanel } from '@/components/campaign/InvitePanel';
 import { DdbLinkPanelEmbedded } from '@/systems/ddb/DdbLinkPanel';
-import { SceneManager } from '@/systems/scene/manager/SceneManager';
-import { emitSceneChange } from '@/systems/scene/media/useSceneMedia';
 import type { CampaignWithMembers, CampaignMember } from '@grimoire/shared';
 
 interface MemberWithUser extends CampaignMember {
@@ -236,30 +234,6 @@ export function CampaignDetail() {
             </div>
           )}
         </div>
-
-        <div className="gold-divider my-10" />
-
-        <section className="mb-10">
-          <h2
-            className="font-display text-base font-semibold tracking-wider mb-4"
-            style={{ color: 'var(--color-accent-gold)' }}
-          >
-            Scene Manager
-          </h2>
-          <p className="font-ui text-sm mb-4" style={{ color: 'var(--color-text-secondary)' }}>
-            Prepare scenes with maps, ambient audio layers, background videos, lighting, and weather — then push them live during a session.
-          </p>
-          {id && (
-            <SceneManager
-              campaignId={id}
-              isGM={isGM}
-              liveSessionId={liveSession?.id ?? null}
-              onSceneActivated={(scene, transition) => {
-                if (liveSession?.id) emitSceneChange(liveSession.id, scene, transition);
-              }}
-            />
-          )}
-        </section>
 
         {isGM && (
           <>

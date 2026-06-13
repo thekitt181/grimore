@@ -570,8 +570,18 @@ export async function persistRawGlobalDoc(
     }
   }
 
-  const normalized = normalizeOwlbearGlobalDoc(payload);
-  const fallbackPersisted = Boolean(saveGlobalFallback(normalized, payload));
+  const normalized = normalizeOwlbearGlobalDoc(
+    shardWrite ? normalizeRawDoc({ ...raw, lastUpdated: payload.lastUpdated }) : payload,
+  );
+  const fallbackPersisted = Boolean(
+    saveGlobalFallback(
+      normalized,
+      payload,
+      shardWrite && shardWrite.shards.length > 0
+        ? { shards: shardWrite.shards, meta: shardWrite.meta }
+        : undefined,
+    ),
+  );
   if (!col && !fallbackPersisted && isMongoCircuitOpen()) {
     throw new Error('MongoDB unavailable and failed to write local compendium mirror');
   }

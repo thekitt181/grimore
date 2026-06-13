@@ -39,7 +39,9 @@ const WEATHER_STYLES: Record<Exclude<WeatherOverlay, 'none'>, CSSProperties> = {
 };
 
 export function WeatherOverlay() {
-  const weather = useSceneMediaStore((s) => s.activeScene?.weatherOverlay);
+  const activeScene = useSceneMediaStore((s) => s.activeScene);
+  const sessionWeather = useSceneMediaStore((s) => s.sessionWeather);
+  const weather = activeScene?.weatherOverlay ?? sessionWeather;
   const style = useMemo(() => {
     if (!weather || weather === 'none') return null;
     return WEATHER_STYLES[weather];

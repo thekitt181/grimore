@@ -91,15 +91,13 @@ export function isBsonTooLargeError(err: unknown): boolean {
   return /BSONObj size|document too large|16MB|16544/i.test(msg);
 }
 
-/** Load sharded override arrays and merge into the raw global doc. */
-export async function loadOverrideShardsIntoRawDoc(
+/** Merge shard entry arrays loaded from Mongo or local files into a raw global doc. */
+export function mergeLoadedShardsIntoRawDoc(
   raw: OwlbearRawGlobalDoc,
-): Promise<OwlbearRawGlobalDoc> {
+  loadShardEntries: (field: OverrideShardField, index: number) => unknown[] | null | undefined,
+): OwlbearRawGlobalDoc {
   const meta = (raw as OwlbearRawGlobalDoc & { overrideShards?: OverrideShardMeta }).overrideShards;
-  if (!meta || isMongoCircuitOpen()) return raw;
-
-  const col = await getCollection<{ _id: string; entries?: unknown[] }>('data');
-  if (!col) return raw;
+  if (!meta) return raw;
 
   const merged: OwlbearRawGlobalDoc = { ...raw };
 
@@ -109,17 +107,8 @@ export async function loadOverrideShardsIntoRawDoc(
 
     const loaded: unknown[] = [];
     for (let i = 0; i < shardCount; i++) {
-      try {
-        const doc = await withMongoTimeout(() => col.findOne({ _id: shardDocId(field, i) }, { projection: { entries: 1 } }),
-          20_000,
-        );
-        if (doc?.entries?.length) loaded.push(...doc.entries);
-      } catch (err) {
-        console.warn(
-          `[Compendium] Failed to read shard ${field}:${i}:`,
-          err instanceof Error ? err.message : err,
-        );
-      }
+      const entries = loadShardEntries(field, i);
+      if (entries?.length) loaded.push(...entries);
     }
     if (loaded.length > 0) {
       (merged as Record<string, unknown>)[field] = loaded;
@@ -127,6 +116,39 @@ export async function loadOverrideShardsIntoRawDoc(
   }
 
   return merged;
+}
+
+/** Load sharded override arrays from Mongo and merge into the raw global doc. */
+export async function loadOverrideShardsIntoRawDoc(
+  raw: OwlbearRawGlobalDoc,
+): Promise<OwlbearRawGlobalDoc> {
+  const meta = (raw as OwlbearRawGlobalDoc & { overrideShards?: OverrideShardMeta }).overrideShards;
+  if (!meta || isMongoCircuitOpen()) return raw;
+
+  const col = await getCollection<{ _id: string; entries?: unknown[] }>('data');
+  if (!col) return raw;
+
+  const shardCache = new Map<string, unknown[]>();
+
+  for (const field of ['overrideMonsters', 'overrideItems', 'overrideSpells'] as const) {
+    const shardCount = meta[field] ?? 0;
+    for (let i = 0; i < shardCount; i++) {
+      try {
+        const doc = await withMongoTimeout(
+          () => col.findOne({ _id: shardDocId(field, i) }, { projection: { entries: 1 } }),
+          20_000,
+        );
+        if (doc?.entries?.length) shardCache.set(`${field}:${i}`, doc.entries);
+      } catch (err) {
+        console.warn(
+          `[Compendium] Failed to read Mongo shard ${field}:${i}:`,
+          err instanceof Error ? err.message : err,
+        );
+      }
+    }
+  }
+
+  return mergeLoadedShardsIntoRawDoc(raw, (field, index) => shardCache.get(`${field}:${index}`));
 }
 
 /** Persist override shards. */

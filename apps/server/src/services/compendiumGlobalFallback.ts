@@ -2,6 +2,13 @@ import fs from 'fs';
 import path from 'path';
 import type { CompendiumGlobalDoc, OwlbearRawGlobalDoc } from '@grimoire/shared';
 import { normalizeOwlbearGlobalDoc } from '@grimoire/shared';
+import {
+  fallbackBundleMtimeMs,
+  loadFallbackShardsIntoRawDoc,
+  persistFallbackShardFiles,
+  prepareFallbackWritePayload,
+} from './compendiumFallbackShards';
+import type { OverrideShardField, OverrideShardMeta } from './compendiumGlobalShards';
 
 let cached: CompendiumGlobalDoc | null | undefined;
 let cachedMtime = 0;
@@ -43,21 +50,22 @@ function fileMtimeMs(filePath: string): number {
   }
 }
 
-/** ISO timestamp from file mtime — detects extension writes to data.json when Mongo is down. */
+/** ISO timestamp from file mtime — includes shard files when present. */
 export function globalFallbackFileRevision(): string | null {
   const filePath = globalJsonPath();
   if (!filePath) return null;
-  const mtime = fileMtimeMs(filePath);
+  const mtime = fallbackBundleMtimeMs(filePath);
   if (!mtime) return null;
   return new Date(mtime).toISOString();
 }
 
-/** Load raw Owlbear data.json (override* + custom arrays intact). */
+/** Load raw Owlbear data.json (override* + custom arrays intact), merging all shard files. */
 export function loadRawGlobalFallback(): OwlbearRawGlobalDoc | null {
   const filePath = globalJsonPath();
   if (!filePath) return null;
   try {
-    return JSON.parse(fs.readFileSync(filePath, 'utf8')) as OwlbearRawGlobalDoc;
+    const raw = JSON.parse(fs.readFileSync(filePath, 'utf8')) as OwlbearRawGlobalDoc;
+    return loadFallbackShardsIntoRawDoc(raw, filePath);
   } catch {
     return null;
   }
@@ -72,13 +80,18 @@ export function loadGlobalFallback(force = false): CompendiumGlobalDoc | null {
     return null;
   }
 
-  const mtime = fileMtimeMs(filePath);
+  const mtime = fallbackBundleMtimeMs(filePath);
   if (!force && cached !== undefined && mtime === cachedMtime) {
     return cached;
   }
 
   try {
-    const raw = JSON.parse(fs.readFileSync(filePath, 'utf8')) as OwlbearRawGlobalDoc;
+    const raw = loadRawGlobalFallback();
+    if (!raw) {
+      cached = null;
+      cachedMtime = mtime;
+      return null;
+    }
     cached = normalizeOwlbearGlobalDoc(raw);
     cachedMtime = mtime;
     return cached;
@@ -114,7 +127,7 @@ export function patchRawGlobalFallbackPolicy(
     raw.lastUpdated = lastUpdated;
     fs.writeFileSync(filePath, JSON.stringify(raw, null, 2), 'utf8');
     cached = undefined;
-    cachedMtime = fileMtimeMs(filePath);
+    cachedMtime = fallbackBundleMtimeMs(filePath);
   } catch (err) {
     console.warn('[Compendium] Failed to patch fallback policy:', err);
   }
@@ -124,6 +137,10 @@ export function patchRawGlobalFallbackPolicy(
 export function saveGlobalFallback(
   next: CompendiumGlobalDoc,
   rawMongo?: OwlbearRawGlobalDoc | Record<string, unknown>,
+  preSplit?: {
+    shards: Array<{ _id: string; field: OverrideShardField; entries: unknown[] }>;
+    meta: OverrideShardMeta;
+  },
 ): CompendiumGlobalDoc | null {
   const filePath = writableGlobalJsonPath();
   try {
@@ -152,8 +169,15 @@ export function saveGlobalFallback(
         'overrideMonsters',
         'overrideItems',
         'overrideSpells',
+        'lockedSources',
+        'publishedEntryKeys',
       ] as const) {
         if (Array.isArray(rawMongo[key])) toWrite[key] = rawMongo[key];
+        else if (rawMongo[key] !== undefined) toWrite[key] = rawMongo[key];
+      }
+      const rawRecord = rawMongo as Record<string, unknown>;
+      if (rawRecord.overrideShards) {
+        toWrite.overrideShards = rawRecord.overrideShards;
       }
     } else {
       toWrite.monsters = next.monsters ?? [];
@@ -161,10 +185,31 @@ export function saveGlobalFallback(
       toWrite.spells = next.spells ?? [];
     }
 
-    fs.writeFileSync(filePath, JSON.stringify(toWrite, null, 2), 'utf8');
+    let main: Record<string, unknown>;
+    let shards: Array<{ _id: string; field: OverrideShardField; entries: unknown[] }>;
+    let meta: OverrideShardMeta;
+
+    if (preSplit && preSplit.shards.length > 0) {
+      main = { ...toWrite, overrideShards: preSplit.meta };
+      shards = preSplit.shards;
+      meta = preSplit.meta;
+    } else {
+      const prepared = prepareFallbackWritePayload(toWrite as OwlbearRawGlobalDoc);
+      main = { ...toWrite, ...prepared.main };
+      shards = prepared.shards;
+      meta = prepared.meta;
+    }
+
+    fs.writeFileSync(filePath, JSON.stringify(main, null, 2), 'utf8');
+    persistFallbackShardFiles(filePath, shards, meta);
+
     cached = next;
-    cachedMtime = fileMtimeMs(filePath);
-    console.log('[Compendium] Saved global fallback to', filePath);
+    cachedMtime = fallbackBundleMtimeMs(filePath);
+    if (shards.length > 0) {
+      console.log('[Compendium] Saved global fallback to', filePath, `(${shards.length} shard files)`);
+    } else {
+      console.log('[Compendium] Saved global fallback to', filePath);
+    }
     return next;
   } catch (err) {
     console.error('[Compendium] Failed to write global fallback:', err);

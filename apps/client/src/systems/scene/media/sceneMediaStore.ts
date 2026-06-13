@@ -10,6 +10,8 @@ import { DEFAULT_SCENE_MEDIA_CONFIG } from '@grimoire/shared';
 
 interface SceneMediaState {
   activeScene: SceneRecord | null;
+  /** Live weather when no scene is active (map context menu). */
+  sessionWeather: WeatherOverlay | null;
   transition: SceneTransition;
   transitioning: boolean;
   masterVolume: number;
@@ -18,6 +20,7 @@ interface SceneMediaState {
   /** GM-only local preview before pushing to session. */
   previewMode: boolean;
   setActiveScene: (scene: SceneRecord | null, transition?: SceneTransition) => void;
+  setWeatherOverlay: (weather: WeatherOverlay | null) => void;
   setTransitioning: (v: boolean) => void;
   setMasterVolume: (v: number) => void;
   setAmbientMuted: (v: boolean) => void;
@@ -28,6 +31,7 @@ interface SceneMediaState {
 
 export const useSceneMediaStore = create<SceneMediaState>((set, get) => ({
   activeScene: null,
+  sessionWeather: null,
   transition: 'fade',
   transitioning: false,
   masterVolume: DEFAULT_SCENE_MEDIA_CONFIG.masterVolume,
@@ -36,6 +40,14 @@ export const useSceneMediaStore = create<SceneMediaState>((set, get) => ({
   previewMode: false,
   setActiveScene: (scene, transition = 'fade') =>
     set({ activeScene: scene, transition, transitioning: true }),
+  setWeatherOverlay: (weather) => {
+    const scene = get().activeScene;
+    if (scene) {
+      set({ activeScene: { ...scene, weatherOverlay: weather } });
+    } else {
+      set({ sessionWeather: weather });
+    }
+  },
   setTransitioning: (transitioning) => set({ transitioning }),
   setMasterVolume: (masterVolume) => set({ masterVolume }),
   setAmbientMuted: (ambientMuted) => set({ ambientMuted }),
@@ -58,6 +70,7 @@ export function getActiveLighting(): LightingPreset {
 }
 
 export function getActiveWeather(): WeatherOverlay | null {
-  const w = useSceneMediaStore.getState().activeScene?.weatherOverlay;
+  const { activeScene, sessionWeather } = useSceneMediaStore.getState();
+  const w = activeScene?.weatherOverlay ?? sessionWeather;
   return w && w !== 'none' ? w : null;
 }

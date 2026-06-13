@@ -50,8 +50,10 @@ import { useItemStore } from '@/systems/scene/store/itemStore';
 import { useSceneMedia } from '@/systems/scene/media/useSceneMedia';
 import { BackgroundVideoLayer } from '@/systems/scene/media/BackgroundVideoLayer';
 import { LightingTintOverlay, SceneTransitionOverlay, WeatherOverlay } from '@/systems/scene/media/SceneAtmosphere';
-import { SessionMediaControls } from '@/systems/scene/media/SessionMediaControls';
+import { SessionMediaBar } from '@/systems/scene/media/SessionMediaBar';
 import { SessionSceneBar } from '@/systems/scene/manager/SessionSceneBar';
+import { SceneManagerPanel } from '@/systems/scene/manager/SceneManagerPanel';
+import { useSceneUiStore } from '@/systems/scene/manager/sceneUiStore';
 
 interface SessionInfo {
   id: string;
@@ -107,6 +109,8 @@ export function SessionPage() {
   const setLibraryPanelOpen = useDdbStore((s) => s.setLibraryPanelOpen);
   const linkPanelOpen = useDdbStore((s) => s.linkPanelOpen);
   const setLinkPanelOpen = useDdbStore((s) => s.setLinkPanelOpen);
+  const sceneManagerOpen = useSceneUiStore((s) => s.sceneManagerOpen);
+  const setSceneManagerOpen = useSceneUiStore((s) => s.setSceneManagerOpen);
 
   // ── Fetch session info ─────────────────────────────────────────────────────
   const { data: sessionInfo, isLoading } = useQuery({
@@ -214,13 +218,15 @@ export function SessionPage() {
 
         <div className="flex items-center gap-3 flex-wrap justify-end">
           {isGM && (
-            <SessionSceneBar
-              campaignId={sessionInfo.campaignId}
-              sessionId={sessionInfo.id}
-              isGM={isGM}
-            />
+            <>
+              <SessionSceneBar
+                campaignId={sessionInfo.campaignId}
+                sessionId={sessionInfo.id}
+                isGM={isGM}
+              />
+              <SessionMediaBar sessionId={sessionInfo.id} isGM={isGM} />
+            </>
           )}
-          <SessionMediaControls />
           <div className="flex items-center gap-2">
             <div className="flex items-center gap-1.5">
               <div
@@ -332,6 +338,9 @@ export function SessionPage() {
           {linkPanelOpen && isGM && (
             <DdbLinkPanel onClose={() => setLinkPanelOpen(false)} />
           )}
+          {sceneManagerOpen && isGM && (
+            <SceneManagerPanel onClose={() => setSceneManagerOpen(false)} />
+          )}
           {importModalOpen && (
             <CharacterImportModal
               {...(importLinkTokenId ? { linkTokenId: importLinkTokenId } : {})}
@@ -364,6 +373,20 @@ export function SessionPage() {
 
               <div className="flex gap-2">
                 <MapViewModeToggle variant="dock" />
+                {isGM && (
+                  <button
+                    onClick={() => setSceneManagerOpen(!sceneManagerOpen)}
+                    className="w-10 h-10 rounded-lg flex items-center justify-center text-lg shadow-panel transition-all"
+                    style={{
+                      background: sceneManagerOpen ? 'rgba(201,168,76,0.2)' : 'var(--color-bg-secondary)',
+                      border: `1px solid ${sceneManagerOpen ? 'var(--color-accent-gold)' : 'var(--color-border)'}`,
+                      color: sceneManagerOpen ? 'var(--color-accent-gold)' : 'var(--color-text-secondary)',
+                    }}
+                    title="Scene Manager"
+                  >
+                    🎬
+                  </button>
+                )}
                 {isGM && (
                   <button
                     onClick={() => setPanelOpen(!panelOpen)}

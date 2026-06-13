@@ -19,6 +19,7 @@ import { persistModelFileForItem } from '@/lib/modelAssetStore';
 import { getPersistSessionId } from '@/systems/scene/sessionPersistence';
 import { CompendiumSidebarList } from '@/systems/compendium/CompendiumSidebarList';
 import { useDdbStore } from '@/systems/ddb/ddbStore';
+import { useSceneUiStore } from '@/systems/scene/manager/sceneUiStore';
 
 /**
  * Right-hand sidebar shown during a session.
@@ -321,6 +322,8 @@ function GMSidebarContent() {
       {/* Quick Add Token */}
       <AddTokenForm />
 
+      <SceneSidebarSection />
+
       <DdbSidebarSection />
 
       {/* Token list */}
@@ -333,6 +336,24 @@ function GMSidebarContent() {
         </div>
       )}
     </>
+  );
+}
+
+function SceneSidebarSection() {
+  const setSceneManagerOpen = useSceneUiStore((s) => s.setSceneManagerOpen);
+
+  return (
+    <div className="panel space-y-2">
+      <h3 className="font-display text-xs font-semibold tracking-wider uppercase" style={{ color: 'var(--color-accent-gold)' }}>
+        Scenes
+      </h3>
+      <button type="button" className="btn-primary w-full text-xs py-1.5" onClick={() => setSceneManagerOpen(true)}>
+        Scene Manager
+      </button>
+      <p className="font-ui text-xs leading-snug" style={{ color: 'var(--color-text-secondary)' }}>
+        Prepare maps, ambience, video, lighting, and weather — then push scenes live to the table.
+      </p>
+    </div>
   );
 }
 
