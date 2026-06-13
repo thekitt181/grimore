@@ -7,7 +7,7 @@ import cookieParser from 'cookie-parser';
 import { prisma } from './lib/prisma';
 import { connectRedisOptional, disconnectAllRedis, isRedisOperational } from './lib/redis';
 import { attachRedisSocketAdapter, isSocketRedisAdapterEnabled } from './lib/socketRedisAdapter';
-import { getMongoCircuitStatus, isMongoConfigured } from './lib/mongo';
+import { getMongoHealthSnapshot, isMongoConfigured, startMongoHealthProbe } from './lib/mongo';
 import { initSocket } from './socket';
 import campaignRoutes from './routes/campaigns';
 import userRoutes from './routes/users';
@@ -60,15 +60,23 @@ app.all('/api/auth/*', toNodeHandler(auth));
 app.use(express.json({ limit: '50mb' }));
 
 app.get('/health', (_req, res) => {
-  const mongo = getMongoCircuitStatus();
+  const mongoHealth = getMongoHealthSnapshot();
   res.json({
     status: servicesReady ? 'ok' : 'starting',
     ready: servicesReady,
     redis: isRedisOperational() ? 'connected' : 'degraded',
     socketAdapter: isSocketRedisAdapterEnabled() ? 'redis-when-available' : 'disabled',
-    mongo: isMongoConfigured()
-      ? (mongo.open ? 'circuit-open' : 'configured')
-      : 'disabled',
+    mongo: isMongoConfigured() ? mongoHealth.state : 'disabled',
+    mongoHealth: isMongoConfigured()
+      ? {
+          state: mongoHealth.state,
+          circuitOpen: mongoHealth.circuitOpen,
+          lastCheckedAt: mongoHealth.lastCheckedAt,
+          lastSuccessAt: mongoHealth.lastSuccessAt,
+          lastError: mongoHealth.lastError,
+          latencyMs: mongoHealth.latencyMs,
+        }
+      : undefined,
     auth: {
       baseUrl: getAuthBaseUrl(),
       googleOAuth: isGoogleOAuthEnabled(),
@@ -102,6 +110,7 @@ const io = initSocket(httpServer);
 
 async function startCompendiumBackground(): Promise<void> {
   try {
+    startMongoHealthProbe(Number(process.env['MONGO_HEALTH_INTERVAL_MS'] ?? 20_000));
     await syncCompendiumStorageOnStartup();
     const { ensureBundledSourcesLocked, ensureImportedSourcesUnlocked } = await import('./services/compendiumBundledLock');
     await ensureBundledSourcesLocked('startup');

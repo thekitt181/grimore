@@ -119,10 +119,25 @@ export interface CompendiumSpell extends OwlbearSpell {
   imageUrl?: string;
 }
 
+export type MongoHealthState = 'disabled' | 'connected' | 'degraded' | 'circuit-open' | 'unavailable';
+
+/** Live MongoDB probe snapshot (server refreshes on a background interval). */
+export interface CompendiumMongoHealth {
+  state: MongoHealthState;
+  configured: boolean;
+  circuitOpen: boolean;
+  lastCheckedAt?: string;
+  lastSuccessAt?: string;
+  lastFailureAt?: string;
+  lastError?: string;
+  latencyMs?: number;
+}
+
 export interface CompendiumSyncStatus {
   lastUpdated: string;
   storage: 'mongodb' | 'local' | 'unavailable';
   mongoConnected?: boolean;
+  mongoHealth?: CompendiumMongoHealth;
   /** In-memory catalog revision after last rebuild. */
   catalogRev?: string;
   entryCounts?: { monsters: number; items: number; spells: number };

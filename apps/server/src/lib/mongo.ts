@@ -16,6 +16,33 @@ let consecutiveFailures = 0;
 let circuitOpenUntil = 0;
 let lastCircuitLogAt = 0;
 
+export type MongoHealthState = 'disabled' | 'connected' | 'degraded' | 'circuit-open' | 'unavailable';
+
+export interface MongoHealthSnapshot {
+  state: MongoHealthState;
+  configured: boolean;
+  circuitOpen: boolean;
+  lastCheckedAt: string | null;
+  lastSuccessAt: string | null;
+  lastFailureAt: string | null;
+  lastError: string | null;
+  latencyMs: number | null;
+}
+
+let healthSnapshot: MongoHealthSnapshot = {
+  state: 'disabled',
+  configured: false,
+  circuitOpen: false,
+  lastCheckedAt: null,
+  lastSuccessAt: null,
+  lastFailureAt: null,
+  lastError: null,
+  latencyMs: null,
+};
+
+let healthProbeStarted = false;
+let lastHealthState: MongoHealthState = 'disabled';
+
 export function isMongoConfigured(): boolean {
   return Boolean(process.env['MONGODB_URI']) && process.env['MONGODB_DISABLED'] !== '1';
 }
@@ -159,4 +186,99 @@ export async function runMongo<T>(op: (database: Db) => Promise<T>): Promise<T |
 
 export async function closeMongo(): Promise<void> {
   resetMongoClient();
+}
+
+function buildHealthSnapshot(partial: Partial<MongoHealthSnapshot>): MongoHealthSnapshot {
+  const configured = isMongoConfigured();
+  const circuitOpen = isMongoCircuitOpen();
+  return {
+    state: partial.state ?? (configured ? (circuitOpen ? 'circuit-open' : 'unavailable') : 'disabled'),
+    configured,
+    circuitOpen,
+    lastCheckedAt: partial.lastCheckedAt ?? healthSnapshot.lastCheckedAt,
+    lastSuccessAt: partial.lastSuccessAt ?? healthSnapshot.lastSuccessAt,
+    lastFailureAt: partial.lastFailureAt ?? healthSnapshot.lastFailureAt,
+    lastError: partial.lastError ?? healthSnapshot.lastError,
+    latencyMs: partial.latencyMs ?? healthSnapshot.latencyMs,
+  };
+}
+
+async function bumpSyncStatusOnHealthChange(nextState: MongoHealthState): Promise<void> {
+  if (nextState === lastHealthState) return;
+  lastHealthState = nextState;
+  try {
+    const { bumpCompendiumSyncStatusCache } = await import('../services/compendiumSync');
+    bumpCompendiumSyncStatusCache();
+  } catch {
+    // compendium may not be loaded yet during startup
+  }
+}
+
+export function getMongoHealthSnapshot(): MongoHealthSnapshot {
+  if (!isMongoConfigured()) {
+    return buildHealthSnapshot({ state: 'disabled', circuitOpen: false });
+  }
+  if (isMongoCircuitOpen()) {
+    return buildHealthSnapshot({ state: 'circuit-open', circuitOpen: true });
+  }
+  return healthSnapshot;
+}
+
+/** Active ping — updates health snapshot and may open/close the circuit via withMongoTimeout. */
+export async function pingMongo(): Promise<MongoHealthSnapshot> {
+  const now = new Date().toISOString();
+  if (!isMongoConfigured()) {
+    healthSnapshot = buildHealthSnapshot({ state: 'disabled', lastCheckedAt: now });
+    await bumpSyncStatusOnHealthChange('disabled');
+    return healthSnapshot;
+  }
+  if (isMongoCircuitOpen()) {
+    healthSnapshot = buildHealthSnapshot({
+      state: 'circuit-open',
+      lastCheckedAt: now,
+      lastError: healthSnapshot.lastError,
+    });
+    await bumpSyncStatusOnHealthChange('circuit-open');
+    return healthSnapshot;
+  }
+
+  const started = Date.now();
+  try {
+    const database = await getMongoDb();
+    if (!database) {
+      throw new Error('MongoDB connection unavailable');
+    }
+    await withMongoTimeout(database.command({ ping: 1 }), 5_000);
+    const latencyMs = Date.now() - started;
+    healthSnapshot = buildHealthSnapshot({
+      state: 'connected',
+      lastCheckedAt: now,
+      lastSuccessAt: now,
+      lastError: null,
+      latencyMs,
+    });
+    await bumpSyncStatusOnHealthChange('connected');
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    healthSnapshot = buildHealthSnapshot({
+      state: isMongoCircuitOpen() ? 'circuit-open' : 'unavailable',
+      lastCheckedAt: now,
+      lastFailureAt: now,
+      lastError: msg,
+      latencyMs: null,
+    });
+    await bumpSyncStatusOnHealthChange(healthSnapshot.state);
+  }
+  return healthSnapshot;
+}
+
+export function startMongoHealthProbe(intervalMs = 20_000): void {
+  if (healthProbeStarted || !isMongoConfigured()) return;
+  healthProbeStarted = true;
+  const ms = Math.max(5_000, intervalMs);
+  void pingMongo();
+  setInterval(() => {
+    void pingMongo();
+  }, ms);
+  console.log(`[Mongo] Health probe active (every ${ms / 1000}s)`);
 }

@@ -14,6 +14,7 @@ import {
   getSyncStatus,
   listAllBookSources,
   listSources,
+  reconcileCompendiumMongo,
   saveItem,
   saveMonster,
   saveSpell,
@@ -224,6 +225,17 @@ router.get('/sync-status', ...auth, async (_req, res) => {
   } catch (err) {
     console.error('[Compendium] sync-status error:', err);
     res.status(500).json({ error: 'Failed to read sync status' });
+  }
+});
+
+router.post('/reconcile-mongo', ...auth, async (req: AuthenticatedRequest, res) => {
+  const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim() : 'client-reconcile';
+  const deferCatalogRebuild = req.body?.deferCatalogRebuild === true;
+  try {
+    res.json(await reconcileCompendiumMongo(reason || 'client-reconcile', { deferCatalogRebuild }));
+  } catch (err) {
+    console.error('[Compendium] reconcile-mongo error:', err);
+    res.status(500).json({ error: err instanceof Error ? err.message : 'Failed to reconcile MongoDB' });
   }
 });
 

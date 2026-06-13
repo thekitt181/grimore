@@ -11,7 +11,7 @@ import type {
 } from '@grimoire/shared';
 import { isHomebrewEntry, normalizeOwlbearGlobalDoc, splitCompendiumSources } from '@grimoire/shared';
 import { isLikelyValidItem, parseCr, slugify } from '@grimoire/monster-dex';
-import { getCollection, isMongoCircuitOpen, withMongoTimeout, resetMongoClient } from '../lib/mongo';
+import { getCollection, getMongoHealthSnapshot, isMongoConfigured, isMongoCircuitOpen, pingMongo, withMongoTimeout, resetMongoClient } from '../lib/mongo';
 import { resolveCompendiumEntryImageUrl, resolveEntryImageUrl } from './compendiumImages';
 import {
   isLocalCatalogAvailable,
@@ -387,6 +387,10 @@ function invalidateCatalogCache(): void {
 
 function invalidateSyncStatusCache(): void {
   syncStatusCache = null;
+}
+
+export function bumpCompendiumSyncStatusCache(): void {
+  invalidateSyncStatusCache();
 }
 
 function rawOverrideCount(raw: {
@@ -1125,6 +1129,18 @@ export async function getSyncStatus(): Promise<CompendiumSyncStatus> {
 
   const stamps: string[] = [];
 
+  if (isMongoConfigured()) {
+    const health = getMongoHealthSnapshot();
+    const staleMs = health.lastCheckedAt
+      ? Date.now() - new Date(health.lastCheckedAt).getTime()
+      : Number.POSITIVE_INFINITY;
+    if (staleMs > 30_000) {
+      await pingMongo();
+    }
+  }
+
+  const mongoHealth = getMongoHealthSnapshot();
+
   const mongoVersion = await readMongoGlobalVersion();
   if (mongoVersion) stamps.push(mongoVersion);
 
@@ -1138,7 +1154,7 @@ export async function getSyncStatus(): Promise<CompendiumSyncStatus> {
   if (fileRev) stamps.push(fileRev);
 
   const col = await getCollection<CompendiumGlobalDoc>('data');
-  const mongoConnected = Boolean(col && mongoVersion && !isMongoCircuitOpen());
+  const mongoConnected = mongoHealth.state === 'connected' && Boolean(col && mongoVersion);
   const hasLocal = isLocalCatalogAvailable() || Boolean(file);
   const hasExtension = Boolean(extVersion);
 
@@ -1163,6 +1179,16 @@ export async function getSyncStatus(): Promise<CompendiumSyncStatus> {
     lastUpdated: stamps.length ? newestIso(...stamps) : new Date(0).toISOString(),
     storage: mongoConnected ? 'mongodb' : hasLocal || hasExtension ? 'local' : 'unavailable',
     mongoConnected,
+    mongoHealth: {
+      state: mongoHealth.state,
+      configured: mongoHealth.configured,
+      circuitOpen: mongoHealth.circuitOpen,
+      ...(mongoHealth.lastCheckedAt ? { lastCheckedAt: mongoHealth.lastCheckedAt } : {}),
+      ...(mongoHealth.lastSuccessAt ? { lastSuccessAt: mongoHealth.lastSuccessAt } : {}),
+      ...(mongoHealth.lastFailureAt ? { lastFailureAt: mongoHealth.lastFailureAt } : {}),
+      ...(mongoHealth.lastError ? { lastError: mongoHealth.lastError } : {}),
+      ...(mongoHealth.latencyMs != null ? { latencyMs: mongoHealth.latencyMs } : {}),
+    },
     catalogRev: getCatalogRevision() ?? undefined,
     entryCounts,
     ...(rebuild ? { catalogRebuild: rebuild } : {}),
@@ -1419,58 +1445,86 @@ export async function findCatalogSpell(id: string): Promise<CompendiumSpell | nu
   return (await getCachedSpells()).find((s) => s.id === id) ?? null;
 }
 
+async function notifyTypedCollectionsChanged(): Promise<void> {
+  const { markCompendiumWritePending } = await import('./compendiumMongoWatch');
+  const { notifyCompendiumChanged } = await import('./compendiumChangeNotify');
+  markCompendiumWritePending();
+  notifyCompendiumChanged(new Date());
+}
+
 async function upsertCollectionMonstersBulk(entries: Array<{ entry: OwlbearMonster; isCustom: boolean }>) {
+  if (entries.length === 0) return;
   const col = await getCollection<StoredMonster>('monsters');
-  if (!col || entries.length === 0) return;
-  await col.bulkWrite(
-    entries.map(({ entry, isCustom }) => {
-      const _id = slugify(entry.name);
-      return {
-        updateOne: {
-          filter: { _id },
-          update: { $set: { ...entry, _id, isCustom } },
-          upsert: true,
-        },
-      };
-    }),
-    { ordered: false },
+  if (!col) {
+    throw new Error('MongoDB unavailable — monster bulk write skipped');
+  }
+  await withMongoTimeout(
+    col.bulkWrite(
+      entries.map(({ entry, isCustom }) => {
+        const _id = slugify(entry.name);
+        return {
+          updateOne: {
+            filter: { _id },
+            update: { $set: { ...entry, _id, isCustom } },
+            upsert: true,
+          },
+        };
+      }),
+      { ordered: false },
+    ),
+    60_000,
   );
+  await notifyTypedCollectionsChanged();
 }
 
 async function upsertCollectionItemsBulk(entries: Array<{ entry: OwlbearItem; isCustom: boolean }>) {
+  if (entries.length === 0) return;
   const col = await getCollection<StoredItem>('items');
-  if (!col || entries.length === 0) return;
-  await col.bulkWrite(
-    entries.map(({ entry, isCustom }) => {
-      const _id = slugify(entry.name);
-      return {
-        updateOne: {
-          filter: { _id },
-          update: { $set: { ...entry, _id, isCustom } },
-          upsert: true,
-        },
-      };
-    }),
-    { ordered: false },
+  if (!col) {
+    throw new Error('MongoDB unavailable — item bulk write skipped');
+  }
+  await withMongoTimeout(
+    col.bulkWrite(
+      entries.map(({ entry, isCustom }) => {
+        const _id = slugify(entry.name);
+        return {
+          updateOne: {
+            filter: { _id },
+            update: { $set: { ...entry, _id, isCustom } },
+            upsert: true,
+          },
+        };
+      }),
+      { ordered: false },
+    ),
+    60_000,
   );
+  await notifyTypedCollectionsChanged();
 }
 
 async function upsertCollectionSpellsBulk(entries: Array<{ entry: OwlbearSpell; isCustom: boolean }>) {
+  if (entries.length === 0) return;
   const col = await getCollection<StoredSpell>('spells');
-  if (!col || entries.length === 0) return;
-  await col.bulkWrite(
-    entries.map(({ entry, isCustom }) => {
-      const _id = slugify(entry.name);
-      return {
-        updateOne: {
-          filter: { _id },
-          update: { $set: { ...entry, _id, isCustom } },
-          upsert: true,
-        },
-      };
-    }),
-    { ordered: false },
+  if (!col) {
+    throw new Error('MongoDB unavailable — spell bulk write skipped');
+  }
+  await withMongoTimeout(
+    col.bulkWrite(
+      entries.map(({ entry, isCustom }) => {
+        const _id = slugify(entry.name);
+        return {
+          updateOne: {
+            filter: { _id },
+            update: { $set: { ...entry, _id, isCustom } },
+            upsert: true,
+          },
+        };
+      }),
+      { ordered: false },
+    ),
+    60_000,
   );
+  await notifyTypedCollectionsChanged();
 }
 
 async function upsertCollectionMonster(entry: OwlbearMonster, isCustom: boolean) {
@@ -1663,6 +1717,24 @@ export async function finishBulkCompendiumImport(opts?: {
   return { catalogRev: getCatalogRevision() };
 }
 
+/** Promote fallback JSON, warm catalog, and rebuild after Mongo/import drift. */
+export async function reconcileCompendiumMongo(
+  reason: string,
+  opts?: { deferCatalogRebuild?: boolean },
+): Promise<CompendiumSyncStatus> {
+  const { promoteFallbackToMongo } = await import('./compendiumFallbackMongoSync');
+  const { ensureBundledSourcesLocked, ensureImportedSourcesUnlocked } = await import('./compendiumBundledLock');
+  await promoteFallbackToMongo(reason);
+  await pingMongo();
+  await ensureBundledSourcesLocked(reason);
+  await ensureImportedSourcesUnlocked(reason);
+  clearRawGlobalDocInflight();
+  invalidateSyncStatusCache();
+  await warmCompendiumCatalog();
+  await finishBulkCompendiumImport({ deferCatalogRebuild: opts?.deferCatalogRebuild });
+  return getSyncStatus();
+}
+
 async function saveEntriesBulkForImport<T extends OwlbearMonster | OwlbearItem | OwlbearSpell, R>(
   kind: CompendiumKind,
   entries: Array<{ entry: T; opts?: CompendiumSaveOptions }>,
@@ -1716,9 +1788,13 @@ async function saveEntriesBulkForImport<T extends OwlbearMonster | OwlbearItem |
     { typedCollectionsOnly: true },
   );
 
+  let typedMongoOk = true;
   await upsertCollection(
     prepared.map(({ payload, saveAs }) => ({ entry: payload, isCustom: saveAs === 'homebrew' })),
-  );
+  ).catch((err) => {
+    typedMongoOk = false;
+    console.error('[Compendium] Typed collection bulk write failed:', err instanceof Error ? err.message : err);
+  });
 
   return {
     entries: prepared.map(({ payload, saveAs }) => toResult(payload, saveAs)),
@@ -1740,7 +1816,7 @@ async function saveEntriesBulkForImport<T extends OwlbearMonster | OwlbearItem |
         lastUpdated: patch.lastUpdated,
       }),
       lastUpdated: patch.lastUpdated,
-      mongoPersisted: patch.mongoPersisted,
+      mongoPersisted: patch.mongoPersisted && typedMongoOk,
     },
   };
 }

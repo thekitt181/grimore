@@ -10,8 +10,18 @@ import { ensureApiAuthSession } from '@/lib/axios';
 /** Backup poll when socket push is healthy — compendium:updated drives refetches. */
 const POLL_CONNECTED_MS = 120_000;
 const POLL_MS = 45_000;
+const POLL_DEGRADED_MS = 15_000;
 const POLL_SLOW_MS = 120_000;
 const POLL_REBUILD_MS = 1_000;
+
+function isMongoDegraded(status?: CompendiumSyncStatus): boolean {
+  const state = status?.mongoHealth?.state;
+  return status?.mongoConnected === false
+    || state === 'unavailable'
+    || state === 'circuit-open'
+    || state === 'degraded'
+    || status?.storage === 'local';
+}
 
 async function refetchAllCompendium(queryClient: ReturnType<typeof useQueryClient>) {
   if (isApiAuthBlocked()) return;
@@ -51,6 +61,7 @@ export function useCompendiumSyncPoll(enabled = true) {
     refetchInterval: (query) => {
       if (!enabled) return false;
       if (query.state.data?.catalogRebuild?.active) return POLL_REBUILD_MS;
+      if (isMongoDegraded(query.state.data)) return POLL_DEGRADED_MS;
       return socketConnected ? POLL_CONNECTED_MS : pollMs;
     },
     refetchOnWindowFocus: !socketConnected,
@@ -59,12 +70,14 @@ export function useCompendiumSyncPoll(enabled = true) {
 
   useEffect(() => {
     if (!enabled) return;
-    if (isError || data?.mongoConnected === false) {
-      setPollMs(POLL_SLOW_MS);
+    if (isError || isMongoDegraded(data)) {
+      setPollMs(POLL_DEGRADED_MS);
     } else if (data?.mongoConnected) {
       setPollMs(POLL_MS);
+    } else {
+      setPollMs(POLL_SLOW_MS);
     }
-  }, [enabled, isError, data?.mongoConnected]);
+  }, [enabled, isError, data]);
 
   useEffect(() => {
     if (!enabled) return;

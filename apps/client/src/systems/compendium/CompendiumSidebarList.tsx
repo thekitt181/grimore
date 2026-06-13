@@ -18,6 +18,7 @@ import { useCompendiumUiStore, type CompendiumBrowseMode, type CompendiumTab } f
 import { useSessionStore } from '@/store/sessionStore';
 import { useCompendiumEditor } from './useCompendiumEditor';
 import { CompendiumAdminUnlock } from './CompendiumAdminUnlock';
+import { CompendiumMongoStatus } from './CompendiumMongoStatus';
 
 const PAGE_SIZE = 50;
 const GOLD = 'var(--color-accent-gold)';
@@ -271,6 +272,8 @@ export function CompendiumSidebarList() {
         </h3>
         <CompendiumAdminUnlock />
       </div>
+
+      <CompendiumMongoStatus />
 
       {/* Type tabs */}
       <div className="flex gap-0.5 shrink-0">

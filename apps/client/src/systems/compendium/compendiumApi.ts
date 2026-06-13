@@ -20,6 +20,17 @@ export async function fetchSyncStatus(): Promise<CompendiumSyncStatus> {
   return data;
 }
 
+export async function reconcileCompendiumMongo(opts?: {
+  reason?: string;
+  deferCatalogRebuild?: boolean;
+}): Promise<CompendiumSyncStatus> {
+  const { data } = await api.post<CompendiumSyncStatus>('/compendium/reconcile-mongo', {
+    reason: opts?.reason ?? 'client-reconcile',
+    deferCatalogRebuild: opts?.deferCatalogRebuild ?? false,
+  });
+  return data;
+}
+
 export async function fetchAdminConfigured(): Promise<{ configured: boolean }> {
   const { data } = await api.get<{ configured: boolean }>('/compendium/admin/configured');
   return data;

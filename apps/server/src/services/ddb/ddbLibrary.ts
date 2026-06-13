@@ -1203,18 +1203,10 @@ export async function finishDdbLibraryImport(
   sourcesUnlocked?: string[];
   catalogRebuildPending?: boolean;
 }> {
-  const { promoteFallbackToMongo } = await import('../compendiumFallbackMongoSync');
-  await promoteFallbackToMongo('ddb-finish-import');
-  await ensureBundledSourcesLocked('ddb-finish-import');
-  await ensureImportedSourcesUnlocked('ddb-finish-import');
-
-  const { clearRawGlobalDocInflight } = await import('../compendiumOwlbearPersist');
-  clearRawGlobalDocInflight();
-
   const { collectImportedSourceLabels } = await import('../compendiumBundledLock');
   const unlocked: string[] = [];
 
-  // ensureImportedSourcesUnlocked already unlocks every override source — only add targeted unlocks.
+  // ensureImportedSourcesUnlocked (inside reconcile) unlocks every override source — only add targeted unlocks.
   const needsTargetedUnlock =
     (opts?.sourceIds?.length || opts?.sourceLabels?.length)
     && !opts?.unlockAllImportedSources;
@@ -1236,10 +1228,11 @@ export async function finishDdbLibraryImport(
     unlocked.push(...await collectImportedSourceLabels());
   }
 
-  const { finishBulkCompendiumImport } = await import('../compendiumSync');
-  const result = await finishBulkCompendiumImport({ deferCatalogRebuild: true });
+  const { reconcileCompendiumMongo } = await import('../compendiumSync');
+  const status = await reconcileCompendiumMongo('ddb-finish-import', { deferCatalogRebuild: true });
   return {
-    ...result,
+    catalogRev: status.catalogRev ?? null,
     sourcesUnlocked: [...new Set(unlocked)],
+    catalogRebuildPending: Boolean(status.catalogRebuild?.active),
   };
 }
