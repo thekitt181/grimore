@@ -1,3 +1,5 @@
+import { clientDeltaToScreen } from './pixiScreenCoords';
+
 /** Pixi world (x right, y down) → Three.js (Y up, ground on XZ). */
 export function pixiToThreeX(x: number): number {
   return x;
@@ -39,6 +41,7 @@ export function screenDeltaToWorldDelta(
   scale: number,
   azimuth: number,
 ): { dx: number; dy: number } {
-  const { dcx, dcz } = screenPanToGroundDelta(screenDx, screenDy, azimuth, scale);
+  const { x: sdx, y: sdy } = clientDeltaToScreen(screenDx, screenDy);
+  const { dcx, dcz } = screenPanToGroundDelta(sdx, sdy, azimuth, scale);
   return { dx: -dcx, dy: -dcz };
 }

@@ -3,52 +3,52 @@ import { useMapStore, type MapViewMode } from '../store/mapStore';
 import { useItemStore } from '@/systems/scene/store/itemStore';
 import { sceneRefs, getMapInteractionEl } from '@/systems/scene/sceneRefs';
 
-const AZIMUTH_SENS = 0.005;
-const POLAR_SENS = 0.005;
+const AZIMUTH_SENS = 0.004;
 const ORBIT_DRAG_PX = 3;
 
 function isOrbitPointer(e: PointerEvent): boolean {
   return e.button === 2;
 }
 
-function selectedOrbitTokenId(): string | null {
+function selectedModelTokenId(): string | null {
   const { viewMode, activeTool } = useMapStore.getState();
-  if (viewMode !== '3d' || activeTool !== 'select') return null;
+  if (viewMode !== '2d' || activeTool !== 'select') return null;
 
   const selectedIds = useItemStore.getState().selectedIds;
   if (selectedIds.length !== 1) return null;
 
   const item = useItemStore.getState().items[selectedIds[0]!];
-  if (item?.type !== 'token') return null;
+  if (item?.type !== 'token' || !item.modelUrl) return null;
   return selectedIds[0]!;
 }
 
-/** Right-drag in 3D view orbits the camera; per-token view is saved on deselect. */
-export function useMap3DOrbit(appReady: boolean, viewMode: MapViewMode, interactionReady = false) {
+/** Right-drag with a GLB mini selected orbits the 2D overlay camera (shape stays intact). */
+export function useMap2DMiniOrbit(appReady: boolean, viewMode: MapViewMode, interactionReady = false) {
   const selectedKey = useItemStore((s) =>
     s.selectedIds.length === 1 ? s.selectedIds[0]! : '',
   );
   const activeTool = useMapStore((s) => s.activeTool);
   const prevTokenRef = useRef<string | null>(null);
 
+  // Save/load per token — never reset orbit when clicking off (view stays put).
   useEffect(() => {
-    const tokenId = selectedOrbitTokenId();
+    const tokenId = selectedModelTokenId();
     const prev = prevTokenRef.current;
     const store = useMapStore.getState();
 
     if (prev && prev !== tokenId) {
-      store.saveMiniOrbit3dForToken(prev, store.view3dOrbit);
+      store.saveMiniOrbitForToken(prev, store.view2dMiniOrbit.azimuth);
     }
 
     if (tokenId && tokenId !== prev) {
-      store.setView3dOrbit(store.getMiniOrbit3dForToken(tokenId));
+      store.setView2dMiniOrbitAzimuth(store.getMiniOrbitForToken(tokenId));
     }
 
     prevTokenRef.current = tokenId;
   }, [selectedKey, viewMode, activeTool]);
 
   useEffect(() => {
-    if (!appReady || !interactionReady || viewMode !== '3d') return;
+    if (!appReady || !interactionReady || viewMode !== '2d') return;
     const app = sceneRefs.app.current;
     if (!app) return;
     const canvas = getMapInteractionEl() ?? app.canvas;
@@ -56,38 +56,28 @@ export function useMap3DOrbit(appReady: boolean, viewMode: MapViewMode, interact
     let orbiting = false;
     let orbitDragged = false;
     let lastX = 0;
-    let lastY = 0;
     let suppressContextMenu = false;
 
     function onDown(e: PointerEvent) {
-      if (!isOrbitPointer(e)) return;
+      if (!isOrbitPointer(e) || !selectedModelTokenId()) return;
       e.preventDefault();
       e.stopPropagation();
       orbiting = true;
       orbitDragged = false;
       suppressContextMenu = false;
       lastX = e.clientX;
-      lastY = e.clientY;
       canvas.setPointerCapture(e.pointerId);
-      canvas.style.cursor = 'grabbing';
+      canvas.style.cursor = 'grab';
     }
 
     function onMove(e: PointerEvent) {
       if (!orbiting) return;
       e.preventDefault();
       const dx = e.clientX - lastX;
-      const dy = e.clientY - lastY;
-      if (Math.abs(dx) >= ORBIT_DRAG_PX || Math.abs(dy) >= ORBIT_DRAG_PX) {
-        orbitDragged = true;
-      }
+      if (Math.abs(dx) >= ORBIT_DRAG_PX) orbitDragged = true;
       lastX = e.clientX;
-      lastY = e.clientY;
-      const tokenId = selectedOrbitTokenId();
-      useMapStore.getState().adjustView3dOrbit(
-        -dx * AZIMUTH_SENS,
-        dy * POLAR_SENS,
-        tokenId ?? undefined,
-      );
+      const tokenId = selectedModelTokenId();
+      useMapStore.getState().adjustView2dMiniOrbit(-dx * AZIMUTH_SENS, tokenId ?? undefined);
     }
 
     function onContextMenu(e: Event) {

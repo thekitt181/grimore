@@ -15,6 +15,16 @@ function configuredServerOrigin(): string | undefined {
 
   const url = raw.trim().replace(/\/$/, '');
 
+  if (typeof window !== 'undefined' && import.meta.env.DEV && isLocalhostUrl(url)) {
+    const port = window.location.port;
+    if (port === '5173' || port === '') {
+      console.warn(
+        '[Grimoire] Ignoring localhost VITE_SERVER_URL in dev — API requests use the Vite /api proxy.',
+      );
+      return undefined;
+    }
+  }
+
   if (typeof window !== 'undefined' && isLocalhostUrl(url) && !isLocalhostUrl(window.location.origin)) {
     console.warn(
       '[Grimoire] VITE_SERVER_URL points at localhost but the app is on',

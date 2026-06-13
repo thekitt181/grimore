@@ -5,6 +5,8 @@ export interface LiveTransform {
   rotation?: number;
   x?: number;
   y?: number;
+  width?: number;
+  height?: number;
 }
 
 interface LiveTransformState {

@@ -1,16 +1,59 @@
 /** Minimum Pixi viewport scale (smaller = zoomed out farther). */
 export const MIN_VIEWPORT_SCALE_2D = 0.08;
-/** Keep 3D min scale low enough to zoom out over large maps. */
-export const MIN_VIEWPORT_SCALE_3D = 0.025;
+/** Absolute floor for 3D zoom-out (large maps). */
+export const MIN_VIEWPORT_SCALE_3D = 0.004;
 
-export function minViewportScale(viewMode: '2d' | '3d'): number {
-  return viewMode === '3d' ? MIN_VIEWPORT_SCALE_3D : MIN_VIEWPORT_SCALE_2D;
+export interface ViewportScaleContext {
+  mapWidth: number;
+  mapHeight: number;
+  screenW: number;
+  screenH: number;
 }
 
-export function clampViewportScale(scale: number, viewMode: '2d' | '3d', maxScale: number): number {
-  return Math.max(minViewportScale(viewMode), Math.min(maxScale, scale));
+/** Smallest allowed scale — always permits zooming out past fit-to-screen in 3D. */
+export function minViewportScale(
+  viewMode: '2d' | '3d',
+  ctx?: ViewportScaleContext,
+): number {
+  if (!ctx || ctx.mapWidth <= 0 || ctx.mapHeight <= 0) {
+    return viewMode === '3d' ? MIN_VIEWPORT_SCALE_3D : MIN_VIEWPORT_SCALE_2D;
+  }
+  const fit = Math.min(ctx.screenW / ctx.mapWidth, ctx.screenH / ctx.mapHeight) * 0.88;
+  if (viewMode === '3d') {
+    // Allow zooming out freely; only enforce a tiny absolute floor.
+    return MIN_VIEWPORT_SCALE_3D;
+  }
+  return Math.max(MIN_VIEWPORT_SCALE_2D, fit * 0.5);
 }
 
-export function effectiveViewportScale(scale: number, viewMode: '2d' | '3d'): number {
-  return Math.max(scale, minViewportScale(viewMode));
+export function maxViewportScale(isMobile: boolean): number {
+  return isMobile ? 24 : 8;
+}
+
+export function viewportScaleLimits(
+  viewMode: '2d' | '3d',
+  isMobile: boolean,
+  ctx?: ViewportScaleContext,
+): { min: number; max: number } {
+  return {
+    min: minViewportScale(viewMode, ctx),
+    max: maxViewportScale(isMobile),
+  };
+}
+
+export function clampViewportScale(
+  scale: number,
+  viewMode: '2d' | '3d',
+  maxScale: number,
+  ctx?: ViewportScaleContext,
+): number {
+  return Math.max(minViewportScale(viewMode, ctx), Math.min(maxScale, scale));
+}
+
+export function effectiveViewportScale(
+  scale: number,
+  viewMode: '2d' | '3d',
+  ctx?: ViewportScaleContext,
+): number {
+  return Math.max(scale, minViewportScale(viewMode, ctx));
 }

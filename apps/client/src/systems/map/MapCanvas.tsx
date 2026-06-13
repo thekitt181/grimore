@@ -15,6 +15,7 @@ import { useSelectionTool } from '@/systems/scene/interaction/useSelectionTool';
 import { useAttackTargetPick } from '@/systems/combat/useAttackTargetPick';
 import { useAoePlacement } from '@/systems/combat/useAoePlacement';
 import { useTransformControls } from '@/systems/scene/interaction/useTransformControls';
+import { usePixiSelectionGizmo } from '@/systems/scene/interaction/usePixiSelectionGizmo';
 import { sceneRefs } from '@/systems/scene/sceneRefs';
 import { DEFAULT_MAP_GRID_SIZE, defaultMapGrid, gridSizeForMap } from '@/systems/scene/types';
 import { emitItemAdd, emitItemUpdate, emitItemsSync } from '@/systems/scene/sceneSync';
@@ -40,12 +41,12 @@ import { useEraserTool } from './hooks/useEraserTool';
 import { useDeleteKey } from './hooks/useDeleteKey';
 import { useMap3DPixiMode } from './hooks/useMap3DPixiMode';
 import { useMap3DOrbit } from './hooks/useMap3DOrbit';
+import { useMap2DMiniOrbit } from './hooks/useMap2DMiniOrbit';
 import type { Item, MapItem, TokenItem } from '@/systems/scene/types';
 import { MapCategoryWheel, type ImageCategory } from './MapCategoryWheel';
 import { TokenTypeChoicePopup } from './TokenTypeChoicePopup';
 import { MapCameraControls } from './MapCameraControls';
 import { useTokenSocket } from '@/systems/scene/token/useTokenSocket';
-import { TokenPropertiesPanel } from '@/systems/scene/TokenPropertiesPanel';
 import { emitTokenPlace } from '@/systems/scene/token/tokenSync';
 import { tokenBoundsFromGrid, worldToGridColRow } from '@/systems/scene/token/tokenGrid';
 import { snapPoint } from '@/systems/scene/snap';
@@ -79,6 +80,7 @@ export function MapCanvas() {
   const containerRef = useRef<HTMLDivElement>(null);
   const dropZoneRef = useRef<HTMLDivElement>(null);
   const [appReady, setAppReady] = useState(false);
+  const [interactionReady, setInteractionReady] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
   const [pendingDrop, setPendingDrop] = useState<PendingDrop | null>(null);
 
@@ -341,13 +343,14 @@ export function MapCanvas() {
   }, [appReady, sessionId, items]);
 
   // ── Hooks ───────────────────────────────────────────────────────────────
-  useMapViewport(appRef, sceneRefs.world, appReady, dropZoneRef);
+  useMapViewport(appRef, sceneRefs.world, appReady, interactionReady);
   useItemRenderer(sceneRefs.items, appReady);
   useMapFogOverlay(sceneRefs.items, appReady);
-  useSelectionTool(appReady);
+  useSelectionTool(appReady, interactionReady);
   useAttackTargetPick(appReady);
   useAoePlacement(appReady);
   useTransformControls(appReady);
+  usePixiSelectionGizmo(appReady);
   useFogRenderer(appReady);
   useMapMeasure(sceneRefs.measure, sceneRefs.world);
   useDrawingTool(appReady);
@@ -356,7 +359,8 @@ export function MapCanvas() {
   useEraserTool(appReady);
   useDeleteKey(appReady);
   useMap3DPixiMode(appReady, viewMode);
-  useMap3DOrbit(appReady, viewMode);
+  useMap3DOrbit(appReady, viewMode, interactionReady);
+  useMap2DMiniOrbit(appReady, viewMode, interactionReady);
   useTokenSocket(sessionId);
 
   // ── Fix maps that still use 96px after an image changed their dimensions ─
@@ -577,15 +581,25 @@ export function MapCanvas() {
       <div
         ref={containerRef}
         className="absolute inset-0 w-full h-full z-0"
-        style={{ pointerEvents: 'auto' }}
+        style={{ pointerEvents: 'none' }}
       />
 
-      <div className="absolute inset-0 z-[1] pointer-events-none">
+      <div className="absolute inset-0 z-[1] pointer-events-none [&_*]:pointer-events-none">
         <MapSceneCanvas />
       </div>
 
+      {/* Above Three.js — all map pointer/wheel input goes here in 2D/3D. */}
+      <div
+        ref={(el) => {
+          sceneRefs.interactionRoot.current = el;
+          setInteractionReady((prev) => (prev === !!el ? prev : !!el));
+        }}
+        className="absolute inset-0 z-[2]"
+        style={{ touchAction: 'none', pointerEvents: 'auto' }}
+        aria-hidden
+      />
+
       <MapCameraControls />
-      <TokenPropertiesPanel />
 
       {(viewMode === '2d' || viewMode === '3d') && isDragOver && (
         <div

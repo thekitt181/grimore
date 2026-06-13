@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { PerspectiveCameraState } from './sceneCameraRef';
+import { sceneCameraRef } from './sceneCameraRef';
 
 const perspCam = new THREE.PerspectiveCamera();
 const worldVec = new THREE.Vector3();
@@ -14,7 +15,8 @@ export function syncPerspectiveCamera(
   perspCam.near = cam.near;
   perspCam.far = cam.far;
   perspCam.position.set(cam.position.x, cam.position.y, cam.position.z);
-  perspCam.up.set(0, 1, 0);
+  // Must match SyncedPixiPerspectiveCamera (ground plane XZ, up = -Z).
+  perspCam.up.set(0, 0, -1);
   perspCam.lookAt(cam.target.x, cam.target.y, cam.target.z);
   perspCam.updateMatrixWorld();
   perspCam.updateProjectionMatrix();
@@ -28,8 +30,10 @@ export function worldXZToScreen(
   rect: DOMRect,
   cam: PerspectiveCameraState,
 ): { x: number; y: number } {
-  const aspect = rect.width / Math.max(rect.height, 1);
-  const threeCam = syncPerspectiveCamera(cam, aspect);
+  const threeCam = sceneCameraRef.liveCamera instanceof THREE.PerspectiveCamera
+    ? sceneCameraRef.liveCamera
+    : syncPerspectiveCamera(cam, rect.width / Math.max(rect.height, 1));
+  threeCam.updateMatrixWorld(true);
   worldVec.set(wx, 0, wz);
   worldVec.project(threeCam);
   return {

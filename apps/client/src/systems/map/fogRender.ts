@@ -70,6 +70,25 @@ function cutPolygon(g: Graphics, poly: { x: number; y: number }[]): void {
   g.poly(poly.flatMap((p) => [p.x, p.y])).cut();
 }
 
+function drawPolygonPath(ctx: CanvasRenderingContext2D, poly: { x: number; y: number }[]): void {
+  if (poly.length < 3) return;
+  ctx.moveTo(poly[0]!.x, poly[0]!.y);
+  for (let i = 1; i < poly.length; i++) {
+    ctx.lineTo(poly[i]!.x, poly[i]!.y);
+  }
+  ctx.closePath();
+}
+
+function cutPolygonCanvas(ctx: CanvasRenderingContext2D, poly: { x: number; y: number }[]): void {
+  drawPolygonPath(ctx, poly);
+  ctx.fill();
+}
+
+function cutCellCanvas(ctx: CanvasRenderingContext2D, cx: number, cy: number, gridSize: number): void {
+  ctx.rect(cx * gridSize, cy * gridSize, gridSize, gridSize);
+  ctx.fill();
+}
+
 function cutCell(g: Graphics, cx: number, cy: number, gridSize: number): void {
   g.rect(cx * gridSize, cy * gridSize, gridSize, gridSize).cut();
 }
@@ -163,6 +182,81 @@ function paintFogGraphics(
       refog
         .rect(cell.x * gridSize, cell.y * gridSize, gridSize, gridSize)
         .fill({ color: FOG_COLOR, alpha: 1 });
+    }
+  }
+}
+
+/** Paint fog-of-war to a canvas (map-local coordinates) — used by 3D map overlay. */
+export function paintFogCanvas(
+  ctx: CanvasRenderingContext2D,
+  map: MapItem,
+  opts: FogDrawOptions,
+): void {
+  const { width, height, gridSize } = map;
+  if (width <= 0 || height <= 0 || gridSize <= 0 || !opts.visible) {
+    ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+    return;
+  }
+
+  ctx.clearRect(0, 0, width, height);
+  ctx.globalCompositeOperation = 'source-over';
+
+  const visionTokens = getVisionTokens(
+    opts.items,
+    opts.selectedIds,
+    opts.isGM,
+    opts.isGM ? null : opts.myUserId,
+    map,
+  );
+
+  const polys = visionTokens.length > 0
+    ? losPolygons(map, visionTokens, gridSize, { directional: true })
+    : [];
+
+  ctx.fillStyle = '#000000';
+  ctx.fillRect(0, 0, width, height);
+
+  ctx.globalCompositeOperation = 'destination-out';
+  ctx.fillStyle = 'rgba(0,0,0,1)';
+
+  if (polys.length > 0) {
+    for (const poly of polys) {
+      cutPolygonCanvas(ctx, poly);
+    }
+
+    if (opts.isGM) {
+      const visibleCells = gmVisibleCells(
+        opts.revealedCells,
+        map,
+        opts.items,
+        opts.selectedIds,
+        gridSize,
+      );
+      for (const key of visibleCells) {
+        const cell = parseCellKey(key);
+        if (!cell || !isInteriorVisibleCell(cell.x, cell.y, visibleCells)) continue;
+        cutCellCanvas(ctx, cell.x, cell.y, gridSize);
+      }
+    }
+  } else {
+    for (let cx = 0; cx < Math.ceil(width / gridSize); cx++) {
+      for (let cy = 0; cy < Math.ceil(height / gridSize); cy++) {
+        if (!opts.revealedCells.has(cellKey(cx, cy))) continue;
+        cutCellCanvas(ctx, cx, cy, gridSize);
+      }
+    }
+  }
+
+  ctx.globalCompositeOperation = 'source-over';
+
+  if (!opts.isGM && opts.revealedCells.size > 0 && polys.length > 0) {
+    ctx.fillStyle = '#000000';
+    const coneCells = losVisibleCellKeys(map, visionTokens, gridSize, { directional: true });
+    for (const key of coneCells) {
+      if (opts.revealedCells.has(key)) continue;
+      const cell = parseCellKey(key);
+      if (!cell || !isInteriorCell(cell.x, cell.y, coneCells)) continue;
+      ctx.fillRect(cell.x * gridSize, cell.y * gridSize, gridSize, gridSize);
     }
   }
 }

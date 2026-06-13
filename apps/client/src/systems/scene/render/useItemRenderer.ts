@@ -4,20 +4,13 @@ import { useItemStore, getActiveMap } from '../store/itemStore';
 import { useSessionStore } from '@/store/sessionStore';
 import { useInitiativeStore } from '@/systems/map/store/initiativeStore';
 import { useMapStore } from '@/systems/map/store/mapStore';
-import { useTokenStore } from '../store/tokenStore';
-import { isFogOverlayVisible } from '@/systems/scene/fogActiveSync';
 import {
-  isTokenVisibleToPlayer,
-  playerHasVisionSource,
-  playerSeenCellKeys,
-} from '@/systems/map/fogLos';
-import {
-  itemsWithLiveTransforms,
   useLiveTransformStore,
 } from '../store/liveTransformStore';
-import { renderItem, itemVisualSignature, tokenOverlayVisualSignature, updateTokenOverlay, renderMapWalls, wallVisualSignature, type RenderContext } from './renderers';
-import type { Item, MapItem, TokenItem } from '../types';
+import { renderItem, itemVisualSignature, renderMapWalls, wallVisualSignature, type RenderContext } from './renderers';
+import type { Item, MapItem } from '../types';
 import { itemDisplayZIndex, wallDisplayZIndex } from '../zOrder';
+import { tokenRendersInThree } from '../token/tokenRenderType';
 
 /**
  * Renders all scene items into a single sortable PixiJS layer.
@@ -36,23 +29,16 @@ export function useItemRenderer(
   const selectedIds = useItemStore((s) => s.selectedIds);
   const selectedWallIndices = useItemStore((s) => s.selectedWallIndices);
   const myRole  = useSessionStore((s) => s.myRole);
-  const myUserId = useSessionStore((s) => s.myUserId);
-  const revealedCells = useMapStore((s) => s.revealedCells);
-  const revealedCount = useMapStore((s) => s.revealedCells.size);
-  const fogEnabled = useMapStore((s) => s.fogEnabled);
-  const sessionFogActive = useMapStore((s) => s.sessionFogActive);
   const liveById = useLiveTransformStore((s) => s.byId);
   const liveTick = useLiveTransformStore((s) => s.tick);
   const activeTurnItemId = useInitiativeStore((s) =>
     s.isActive && s.combatants[s.currentIndex] ? s.combatants[s.currentIndex]!.tokenId : undefined
   );
   const viewMode = useMapStore((s) => s.viewMode);
-  const moveModeTokenId = useTokenStore((s) => s.moveModeTokenId);
 
   const containers = useRef<Map<string, Container>>(new Map());
   const wallContainers = useRef<Map<string, Container>>(new Map());
   const signatures = useRef<Map<string, string>>(new Map());
-  const overlaySignatures = useRef<Map<string, string>>(new Map());
   const wallSignatures = useRef<Map<string, string>>(new Map());
 
   useEffect(() => {
@@ -62,7 +48,6 @@ export function useItemRenderer(
       containers.current.clear();
       wallContainers.current.clear();
       signatures.current.clear();
-      overlaySignatures.current.clear();
       wallSignatures.current.clear();
       return;
     }
@@ -76,27 +61,9 @@ export function useItemRenderer(
       gm,
       viewMode,
       selectedIds,
-      moveModeTokenId,
       ...(activeTurnItemId ? { activeTurnItemId } : {}),
     };
-    const itemsForVision = itemsWithLiveTransforms(items, liveById);
     const activeMap = getActiveMap();
-    const fogFiltersTokens = !gm && isFogOverlayVisible();
-    const hasVision = Boolean(
-      fogFiltersTokens
-      && activeMap
-      && playerHasVisionSource(itemsForVision, myUserId, selectedIds, activeMap),
-    );
-    const seenCells = hasVision && activeMap
-      ? playerSeenCellKeys(
-        revealedCells,
-        activeMap,
-        itemsForVision,
-        myUserId,
-        selectedIds,
-        activeMap.gridSize,
-      )
-      : null;
 
     const liveIds = new Set(Object.keys(items));
     const liveMapIds = new Set(
@@ -109,7 +76,6 @@ export function useItemRenderer(
         c.destroy({ children: true });
         containers.current.delete(id);
         signatures.current.delete(id);
-        overlaySignatures.current.delete(id);
       }
     }
     for (const [mapId, wc] of wallContainers.current) {
@@ -121,6 +87,21 @@ export function useItemRenderer(
     }
 
     for (const item of Object.values(items) as Item[]) {
+      // 3D view: token bodies in Three.js. 2D model tokens: invisible Pixi bounds + Three mesh.
+      const threeBodyOnly =
+        item.type === 'token' &&
+        viewMode === '3d' &&
+        tokenRendersInThree(item, viewMode);
+      if (threeBodyOnly) {
+        const stale = containers.current.get(item.id);
+        if (stale) {
+          stale.destroy({ children: true });
+          containers.current.delete(item.id);
+          signatures.current.delete(item.id);
+        }
+        continue;
+      }
+
       let c = containers.current.get(item.id);
       if (!c || c.parent !== layer) {
         c = new Container();
@@ -130,47 +111,33 @@ export function useItemRenderer(
         containers.current.set(item.id, c);
       }
 
-      // Rebuild children only when visual data changed; tokens patch overlay separately.
+      // Rebuild children only when visual data changed.
       const sig = itemVisualSignature(item, ctx);
       const prevSig = signatures.current.get(item.id);
       if (prevSig !== sig) {
         renderItem(c, item, ctx);
         signatures.current.set(item.id, sig);
-        if (item.type === 'token') {
-          overlaySignatures.current.set(item.id, tokenOverlayVisualSignature(item, ctx));
-        }
-      } else if (item.type === 'token') {
-        const overlaySig = tokenOverlayVisualSignature(item, ctx);
-        if (overlaySignatures.current.get(item.id) !== overlaySig) {
-          updateTokenOverlay(c, item, ctx);
-          overlaySignatures.current.set(item.id, overlaySig);
-        }
       }
 
-      // Transform — merge live drag offsets so tokens stay aligned with fog vision.
+      // Transform — merge live drag offsets for fog vision alignment.
       const live = liveById[item.id];
       const drawX = live?.x ?? item.x;
       const drawY = live?.y ?? item.y;
+      const drawW = live?.width ?? item.width;
+      const drawH = live?.height ?? item.height;
       const drawRot = live?.rotation ?? item.rotation;
-      c.scale.set(1, 1);
       c.pivot.set(item.width / 2, item.height / 2);
-      c.position.set(drawX + item.width / 2, drawY + item.height / 2);
+      c.scale.set(drawW / item.width, drawH / item.height);
+      c.position.set(drawX + drawW / 2, drawY + drawH / 2);
       c.rotation = (drawRot * Math.PI) / 180;
       c.zIndex = itemDisplayZIndex(item);
 
       // Visibility / ghosting
-      let show = item.visible || gm;
-      let alpha = item.visible || !gm ? 1 : 0.35;
-
-      if (show && item.type === 'token' && fogFiltersTokens) {
-        const visionToken = (itemsForVision[item.id] ?? item) as TokenItem;
-        if (!activeMap || !seenCells || !isTokenVisibleToPlayer(visionToken, activeMap, seenCells)) {
-          show = false;
-        }
-      }
+      const show = item.visible || gm;
+      const alpha = item.visible || !gm ? 1 : 0.35;
 
       c.visible = show;
-      c.alpha = show ? alpha : 1;
+      c.alpha = show ? alpha : 0;
 
       // Wall overlay — always above map background/grid, below tokens
       if (item.type === 'map') {
@@ -209,16 +176,10 @@ export function useItemRenderer(
     selectedIds,
     selectedWallIndices,
     myRole,
-    myUserId,
-    revealedCells,
-    revealedCount,
-    fogEnabled,
-    sessionFogActive,
     liveById,
     liveTick,
     activeTurnItemId,
     viewMode,
-    moveModeTokenId,
     appReady,
   ]);
 
@@ -230,7 +191,6 @@ export function useItemRenderer(
       containers.current.clear();
       wallContainers.current.clear();
       signatures.current.clear();
-      overlaySignatures.current.clear();
       wallSignatures.current.clear();
     };
   }, []);

@@ -26,9 +26,10 @@ export function visionRadiusFromFeet(feet: number): number {
   return Math.max(1, feet) / 5;
 }
 
-/** Facing angle in map-local radians (0 = east, clockwise — matches Pixi rotation). */
+/** Facing angle in map-local radians — matches rotate-handle math (0° = north/up). */
 export function tokenFacingRad(token: TokenItem, map: MapItem): number {
-  return ((token.rotation - map.rotation) * Math.PI) / 180;
+  const deg = token.rotation - map.rotation;
+  return (deg * Math.PI) / 180 - Math.PI / 2;
 }
 
 export function mapBoundaryWalls(width: number, height: number): WallSegment[] {

@@ -1,12 +1,10 @@
 import { sceneRefs } from '@/systems/scene/sceneRefs';
 import { useMapStore } from '@/systems/map/store/mapStore';
+import { useItemStore } from '@/systems/scene/store/itemStore';
 import { fitMapToScreen } from '@/systems/map/hooks/useMapViewport';
-import { clampViewportScale } from '@/systems/map/viewportLimits';
+import { clampViewportScale, maxViewportScale } from '@/systems/map/viewportLimits';
+import { viewportScaleContext } from '@/systems/map/mapNavigation';
 import { isMobileClient } from '@/lib/socket';
-
-function maxScale(): number {
-  return isMobileClient() ? 24 : 8;
-}
 
 function zoomBy(factor: number) {
   const world = sceneRefs.world.current;
@@ -15,8 +13,9 @@ function zoomBy(factor: number) {
   const sw = app.screen.width;
   const sh = app.screen.height;
   const viewMode = useMapStore.getState().viewMode;
+  const ctx = viewportScaleContext(app);
   const oldScale = world.scale.x;
-  const newScale = clampViewportScale(oldScale * factor, viewMode, maxScale());
+  const newScale = clampViewportScale(oldScale * factor, viewMode, maxViewportScale(isMobileClient()), ctx);
   if (Math.abs(newScale - oldScale) < 1e-7) return;
   const ratio = newScale / oldScale;
   world.x = sw / 2 - (sw / 2 - world.x) * ratio;
@@ -29,6 +28,19 @@ export function MapCameraControls() {
   const viewMode = useMapStore((s) => s.viewMode);
   const adjustView3dOrbit = useMapStore((s) => s.adjustView3dOrbit);
   const resetView3dOrbit = useMapStore((s) => s.resetView3dOrbit);
+  const selectedKey = useItemStore((s) =>
+    s.selectedIds.length === 1 ? s.selectedIds[0]! : '',
+  );
+
+  function orbitTokenId(): string | undefined {
+    if (viewMode !== '3d') return undefined;
+    const item = useItemStore.getState().items[selectedKey];
+    return item?.type === 'token' ? selectedKey : undefined;
+  }
+
+  function adjustOrbit(deltaAzimuth: number, deltaPolar: number) {
+    adjustView3dOrbit(deltaAzimuth, deltaPolar, orbitTokenId());
+  }
 
   function resetView() {
     const app = sceneRefs.app.current;
@@ -49,10 +61,10 @@ export function MapCameraControls() {
       <button type="button" className={btn} onClick={resetView}>Reset View</button>
       {viewMode === '3d' && (
         <>
-          <button type="button" className={btn} onClick={() => adjustView3dOrbit(-0.25, 0)}>Rotate Left</button>
-          <button type="button" className={btn} onClick={() => adjustView3dOrbit(0.25, 0)}>Rotate Right</button>
-          <button type="button" className={btn} onClick={() => adjustView3dOrbit(0, -0.12)}>Tilt Up</button>
-          <button type="button" className={btn} onClick={() => adjustView3dOrbit(0, 0.12)}>Tilt Down</button>
+          <button type="button" className={btn} onClick={() => adjustOrbit(-0.25, 0)}>Rotate Left</button>
+          <button type="button" className={btn} onClick={() => adjustOrbit(0.25, 0)}>Rotate Right</button>
+          <button type="button" className={btn} onClick={() => adjustOrbit(0, -0.12)}>Tilt Up</button>
+          <button type="button" className={btn} onClick={() => adjustOrbit(0, 0.12)}>Tilt Down</button>
         </>
       )}
     </div>

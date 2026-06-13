@@ -1,22 +1,26 @@
-import { is3dToken } from '@/systems/scene/token/tokenRenderType';
-import { sceneRefs } from '@/systems/scene/sceneRefs';
-import { pixiClientToWorld } from './pixiScreenCoords';
+import { sceneRefs, clientToWorld } from '@/systems/scene/sceneRefs';
+import { getPickCanvasRect } from './pickCamera';
+import { sceneCameraRef } from './sceneCameraRef';
+import { useLiveTransformStore } from '@/systems/scene/store/liveTransformStore';
+import { useMapStore } from '@/systems/map/store/mapStore';
+import { resolveItemBounds } from '@/systems/map3d/sceneItemBounds';
+import { worldXZToScreen } from './perspectiveCameraSync';
 import type { TokenItem } from '@/systems/scene/types';
 
-/** Screen pick for 3D tokens (Three.js layer on top). */
-export function pickTokenAtScreen(clientX: number, clientY: number, tokens: TokenItem[]): string | null {
+function pickTokenAtScreen2d(clientX: number, clientY: number, tokens: TokenItem[]): string | null {
   const world = sceneRefs.world.current;
   if (!world) return null;
 
-  const { x: clickWx, y: clickWy } = pixiClientToWorld(clientX, clientY);
+  const { x: clickWx, y: clickWy } = clientToWorld(clientX, clientY);
   const scale = Math.max(world.scale.x, 0.08);
   const pad = 8 / scale;
+  const liveById = useLiveTransformStore.getState().byId;
 
   for (const token of tokens) {
-    if (!is3dToken(token)) continue;
+    const b = resolveItemBounds(token, liveById[token.id]);
     if (
-      clickWx >= token.x - pad && clickWx <= token.x + token.width + pad
-      && clickWy >= token.y - pad && clickWy <= token.y + token.height + pad
+      clickWx >= b.x - pad && clickWx <= b.x + b.width + pad
+      && clickWy >= b.y - pad && clickWy <= b.y + b.height + pad
     ) {
       return token.id;
     }
@@ -25,11 +29,9 @@ export function pickTokenAtScreen(clientX: number, clientY: number, tokens: Toke
   let bestId: string | null = null;
   let bestDist = Infinity;
   for (const token of tokens) {
-    if (!is3dToken(token)) continue;
-    const cx = token.x + token.width / 2;
-    const cz = token.y + token.height / 2;
-    const dist = Math.hypot(clickWx - cx, clickWy - cz);
-    const hitWorld = Math.max(token.width, token.height) * 0.55 + pad;
+    const b = resolveItemBounds(token, liveById[token.id]);
+    const dist = Math.hypot(clickWx - b.cx, clickWy - b.cz);
+    const hitWorld = Math.max(b.width, b.height) * 0.55 + pad;
     if (dist <= hitWorld && dist < bestDist) {
       bestDist = dist;
       bestId = token.id;
@@ -37,4 +39,52 @@ export function pickTokenAtScreen(clientX: number, clientY: number, tokens: Toke
   }
 
   return bestId;
+}
+
+/** Screen pick using projected token bounds — accurate under perspective orbit. */
+function pickTokenAtScreen3d(clientX: number, clientY: number, tokens: TokenItem[]): string | null {
+  const cam = sceneCameraRef.current;
+  const rect = getPickCanvasRect();
+  if (!cam || cam.type !== 'perspective' || !rect) return null;
+
+  const liveById = useLiveTransformStore.getState().byId;
+  const pad = 10;
+  let bestId: string | null = null;
+  let bestDist = Infinity;
+
+  for (const token of tokens) {
+    const b = resolveItemBounds(token, liveById[token.id]);
+    const corners = [
+      worldXZToScreen(b.x, b.y, rect, cam),
+      worldXZToScreen(b.x + b.width, b.y, rect, cam),
+      worldXZToScreen(b.x + b.width, b.y + b.height, rect, cam),
+      worldXZToScreen(b.x, b.y + b.height, rect, cam),
+    ];
+    const minX = Math.min(...corners.map((c) => c.x)) - pad;
+    const maxX = Math.max(...corners.map((c) => c.x)) + pad;
+    const minY = Math.min(...corners.map((c) => c.y)) - pad;
+    const maxY = Math.max(...corners.map((c) => c.y)) + pad;
+
+    if (clientX < minX || clientX > maxX || clientY < minY || clientY > maxY) continue;
+
+    const center = worldXZToScreen(b.cx, b.cz, rect, cam);
+    const dist = Math.hypot(clientX - center.x, clientY - center.y);
+    if (dist < bestDist) {
+      bestDist = dist;
+      bestId = token.id;
+    }
+  }
+
+  return bestId;
+}
+
+/** Screen pick fallback for tokens when Three.js raycast misses. */
+export function pickTokenAtScreen(clientX: number, clientY: number, tokens: TokenItem[]): string | null {
+  if (tokens.length === 0) return null;
+
+  const viewMode = useMapStore.getState().viewMode;
+  if (viewMode === '3d') {
+    return pickTokenAtScreen3d(clientX, clientY, tokens);
+  }
+  return pickTokenAtScreen2d(clientX, clientY, tokens);
 }

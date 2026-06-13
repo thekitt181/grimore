@@ -186,10 +186,23 @@ async function bootServices(): Promise<void> {
 }
 
 function start() {
+  let listenAttempts = 0;
+  const MAX_LISTEN_ATTEMPTS = 6;
+
   httpServer.on('error', (err: NodeJS.ErrnoException) => {
+    if (err.code === 'EADDRINUSE' && listenAttempts < MAX_LISTEN_ATTEMPTS) {
+      listenAttempts += 1;
+      console.warn(
+        `[Server] Port ${PORT} is in use — retrying in 2s (${listenAttempts}/${MAX_LISTEN_ATTEMPTS})…`,
+      );
+      setTimeout(() => {
+        httpServer.listen(PORT);
+      }, 2000);
+      return;
+    }
     if (err.code === 'EADDRINUSE') {
       console.error(
-        `[Server] Port ${PORT} is already in use. Stop the other process (or run: Get-NetTCPConnection -LocalPort ${PORT} | Stop-Process -Id {OwningProcess})`,
+        `[Server] Port ${PORT} is still in use after ${MAX_LISTEN_ATTEMPTS} attempts. Run: pnpm dev:kill-ports`,
       );
       process.exit(1);
     }
@@ -201,6 +214,7 @@ function start() {
   httpServer.headersTimeout = 125_000;
 
   httpServer.listen(PORT, () => {
+    listenAttempts = 0;
     console.log(`[Server] GrimoireVTT listening on port ${PORT}`);
     console.log(`[Server] Allowed client origins: ${clientOrigins.join(', ')}`);
     console.log(`[Server] Public app URL (invites): ${getPrimaryClientUrl()}`);

@@ -5,6 +5,7 @@ export function applyModelNormalization(
   root: THREE.Object3D,
   targetSize: number,
   groundAlign: boolean,
+  footprint?: { width: number; height: number },
 ): boolean {
   root.position.set(0, 0, 0);
   root.rotation.set(0, 0, 0);
@@ -15,10 +16,15 @@ export function applyModelNormalization(
   if (box.isEmpty()) return false;
 
   const size = box.getSize(new THREE.Vector3());
-  const maxDim = Math.max(size.x, size.y, size.z);
-  if (!Number.isFinite(maxDim) || maxDim < 1e-6) return false;
-
-  const scaleFactor = THREE.MathUtils.clamp(targetSize / maxDim, 1e-3, 1e3);
+  let scaleFactor: number;
+  if (footprint && size.x > 1e-6 && size.z > 1e-6) {
+    scaleFactor = Math.min(footprint.width / size.x, footprint.height / size.z);
+  } else {
+    const maxDim = Math.max(size.x, size.y, size.z);
+    if (!Number.isFinite(maxDim) || maxDim < 1e-6) return false;
+    scaleFactor = targetSize / maxDim;
+  }
+  scaleFactor = THREE.MathUtils.clamp(scaleFactor, 1e-3, 1e3);
   root.scale.setScalar(scaleFactor);
   root.updateMatrixWorld(true);
 

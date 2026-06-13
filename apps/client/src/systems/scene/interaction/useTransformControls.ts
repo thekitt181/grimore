@@ -3,23 +3,31 @@ import { Graphics } from 'pixi.js';
 import { useMapStore } from '@/systems/map/store/mapStore';
 import { useItemStore } from '../store/itemStore';
 import { useSessionStore } from '@/store/sessionStore';
-import { sceneRefs, clientToWorld } from '../sceneRefs';
+import { sceneRefs, clientToWorld, getMapInteractionEl } from '../sceneRefs';
+import * as THREE from 'three';
+import { sceneCameraRef } from '@/systems/map3d/sceneCameraRef';
+import { getPickCanvasRect } from '@/systems/map3d/pickCamera';
 import { snapAngle, snapSize } from '../snap';
 import { emitItemUpdate } from '../sceneSync';
+import { emitTokenRotate } from '../token/tokenSync';
 import { getItemContainer } from '../render/useItemRenderer';
 import { useLiveTransformStore } from '../store/liveTransformStore';
 import { resizeFromCenter } from '../resizeFromCenter';
 import { isInteriorClick } from '../hitTest';
-import type { Item } from '../types';
+import { resolveItemBounds } from '@/systems/map3d/sceneItemBounds';
+import { worldToGridColRow } from '../token/tokenGrid';
+import type { Item, TokenItem } from '../types';
+
+import type { TokenGizmoLayout, GizmoHandle } from '../token/tokenGizmoLayout';
 
 // ─── Handle registry (shared with selection tool) ──────────────────────────────
 
-type HandleId = 'nw' | 'ne' | 'se' | 'sw' | 'n' | 'e' | 's' | 'w' | 'rotate';
+type HandleId = GizmoHandle['id'];
 
 interface HandleDesc {
   id: HandleId;
-  wx: number; wy: number;   // world position
-  sx: number; sy: number;   // local sign direction (corner/edge)
+  wx: number; wy: number;
+  sx: number; sy: number;
 }
 
 interface HandleRegistry {
@@ -29,23 +37,57 @@ interface HandleRegistry {
 }
 
 const registry: HandleRegistry = { mode: 'none', itemId: undefined, handles: [] };
+const worldVec = new THREE.Vector3();
 
-/** Picks a transform handle near a world point (tight hit area; interior clicks excluded). */
-export function pickHandle(wx: number, wy: number): HandleDesc | null {
-  const scale = sceneRefs.world.current?.scale.x ?? 1;
+/** Read-only handle positions for debugging. */
+export function getTransformHandleRegistry(): Readonly<HandleRegistry> {
+  return registry;
+}
+
+/** Sync pick registry from the shared gizmo layout (Three.js is source of truth). */
+export function syncTransformHandleRegistry(layout: TokenGizmoLayout): void {
+  registry.mode = layout.mode;
+  registry.itemId = layout.itemId;
+  registry.handles = layout.handles.map((h) => ({ ...h }));
+}
+
+/** Picks a transform handle near the pointer (screen space in 3D, world space in 2D). */
+export function pickHandle(clientX: number, clientY: number): HandleDesc | null {
+  if (registry.mode === 'none' || registry.handles.length === 0) return null;
+  const viewMode = useMapStore.getState().viewMode;
   const item = registry.itemId
     ? useItemStore.getState().items[registry.itemId]
     : undefined;
-  if (item && isInteriorClick(item, wx, wy)) return null;
+  const { x: wx, y: wy } = clientToWorld(clientX, clientY);
+  // In 2D, interior clicks prefer move over edge handles; 3D uses screen-space handle pick.
+  if (item && viewMode !== '3d' && isInteriorClick(item, wx, wy)) return null;
 
+  const scale = sceneRefs.world.current?.scale.x ?? 1;
   const minDim = item ? Math.min(item.width, item.height) : 64;
-  const tol = Math.min(7 / scale, minDim * 0.1);
+  const tol = viewMode === '3d'
+    ? Math.max(14, Math.min(minDim * 0.14, 42))
+    : Math.max(10 / scale, Math.min(minDim * 0.12, 24));
+
+  const rect = getPickCanvasRect();
+  const live = sceneCameraRef.liveCamera;
+  const useScreen = viewMode === '3d' && rect && live;
 
   let best: HandleDesc | null = null;
   let bestD = tol * tol;
   for (const h of registry.handles) {
-    const dx = wx - h.wx, dy = wy - h.wy;
-    const d = dx * dx + dy * dy;
+    let d: number;
+    if (useScreen) {
+      live.updateMatrixWorld(true);
+      worldVec.set(h.wx, 0, h.wy);
+      worldVec.project(live);
+      const sx = rect.left + (worldVec.x * 0.5 + 0.5) * rect.width;
+      const sy = rect.top + (-worldVec.y * 0.5 + 0.5) * rect.height;
+      d = (clientX - sx) ** 2 + (clientY - sy) ** 2;
+    } else {
+      const dx = wx - h.wx;
+      const dy = wy - h.wy;
+      d = dx * dx + dy * dy;
+    }
     if (d <= bestD) { bestD = d; best = h; }
   }
   return best;
@@ -59,8 +101,6 @@ function rot(x: number, y: number, deg: number): { x: number; y: number } {
 }
 
 const MIN = 16;
-const HANDLE = 10;
-const ROT_DIST = 28;
 
 function aspectLocked(item: Item): boolean {
   return item.type === 'map' || item.type === 'token' || item.type === 'handout';
@@ -72,7 +112,6 @@ export function useTransformControls(appReady: boolean) {
   const selectedIds = useItemStore((s) => s.selectedIds);
   const items       = useItemStore((s) => s.items);
   const activeTool  = useMapStore((s) => s.activeTool);
-  const viewMode    = useMapStore((s) => s.viewMode);
   const myRole      = useSessionStore((s) => s.myRole);
 
   useEffect(() => {
@@ -87,18 +126,14 @@ export function useTransformControls(appReady: boolean) {
     let handlesG = overlay.getChildByLabel('xf-handles') as Graphics | null;
     if (!handlesG) { handlesG = new Graphics(); handlesG.label = 'xf-handles'; overlay.addChild(handlesG); }
 
-    function clearControls() {
-      registry.mode = 'none';
-      registry.handles = [];
+    function hidePixiControls() {
+      box!.visible = false;
+      handlesG!.visible = false;
       box!.clear();
       handlesG!.clear();
     }
 
-    // Pixi transform UI is top-down only — 3D view uses Map3DSelectionOutlines instead.
-    if (viewMode === '3d') {
-      clearControls();
-      return;
-    }
+    hidePixiControls();
 
     const gm = myRole === 'GM';
     const sel = selectedIds.map((id) => items[id]).filter(Boolean) as Item[];
@@ -108,139 +143,12 @@ export function useTransformControls(appReady: boolean) {
       return it.type === 'token';
     });
 
-    // Only show transform UI with the select tool and an unlocked selection
     if (activeTool !== 'select' || manipulable.length === 0) {
-      clearControls();
       return;
     }
 
-    const scale = sceneRefs.world.current?.scale.x ?? 1;
-
-    function handleHalfSize(it: Item): number {
-      const minDim = Math.min(it.width, it.height);
-      if (minDim < 96) return Math.min(5 / scale, minDim * 0.07);
-      return HANDLE / scale / 2;
-    }
-
-    function drawHandleSquare(wx: number, wy: number, hs: number) {
-      handlesG!.rect(wx - hs, wy - hs, hs * 2, hs * 2);
-    }
-
-    function drawSingleItemControls(
-      it: Item,
-      cx: number,
-      cy: number,
-      w: number,
-      h: number,
-      rebuildRegistry: boolean,
-    ) {
-      if (rebuildRegistry) {
-        box!.clear();
-        handlesG!.clear();
-        registry.handles = [];
-        registry.mode = 'single';
-        registry.itemId = it.id;
-      } else {
-        box!.clear();
-        handlesG!.clear();
-      }
-
-      const hw = w / 2;
-      const hh = h / 2;
-      const toWorld = (lx: number, ly: number) => {
-        const r = rot(lx, ly, it.rotation);
-        return { x: cx + r.x, y: cy + r.y };
-      };
-      const corners = {
-        nw: toWorld(-hw, -hh), ne: toWorld(hw, -hh),
-        se: toWorld(hw, hh),   sw: toWorld(-hw, hh),
-      };
-      box!.setStrokeStyle({ width: 2 / scale, color: 0xc9a84c, alpha: 0.9 });
-      box!.moveTo(corners.nw.x, corners.nw.y);
-      box!.lineTo(corners.ne.x, corners.ne.y);
-      box!.lineTo(corners.se.x, corners.se.y);
-      box!.lineTo(corners.sw.x, corners.sw.y);
-      box!.lineTo(corners.nw.x, corners.nw.y);
-      box!.stroke();
-
-      const minDim = Math.min(w, h);
-      const compact = minDim < 96;
-      const hs = handleHalfSize({ ...it, width: w, height: h });
-      const defs: Array<[HandleId, number, number]> = compact
-        ? [['nw', -1, -1], ['ne', 1, -1], ['se', 1, 1], ['sw', -1, 1]]
-        : [
-            ['nw', -1, -1], ['ne', 1, -1], ['se', 1, 1], ['sw', -1, 1],
-            ['n', 0, -1], ['e', 1, 0], ['s', 0, 1], ['w', -1, 0],
-          ];
-      handlesG!.setStrokeStyle({ width: 1 / scale, color: 0x0a0a0f, alpha: 1 });
-      for (const [id, sx, sy] of defs) {
-        const pt = toWorld(sx * hw, sy * hh);
-        if (rebuildRegistry) registry.handles.push({ id, wx: pt.x, wy: pt.y, sx, sy });
-        else {
-          const hnd = registry.handles.find((x) => x.id === id);
-          if (hnd) { hnd.wx = pt.x; hnd.wy = pt.y; }
-        }
-        drawHandleSquare(pt.x, pt.y, hs);
-      }
-      const rotDist = compact ? Math.max(ROT_DIST / scale, minDim * 0.55) : ROT_DIST / scale;
-      const rotPt = toWorld(0, -hh - rotDist);
-      const topMid = toWorld(0, -hh);
-      if (rebuildRegistry) {
-        registry.handles.push({ id: 'rotate', wx: rotPt.x, wy: rotPt.y, sx: 0, sy: 0 });
-      } else {
-        const hnd = registry.handles.find((x) => x.id === 'rotate');
-        if (hnd) { hnd.wx = rotPt.x; hnd.wy = rotPt.y; }
-      }
-      box!.setStrokeStyle({ width: 1.5 / scale, color: 0xc9a84c, alpha: 0.8 });
-      box!.moveTo(topMid.x, topMid.y);
-      box!.lineTo(rotPt.x, rotPt.y);
-      box!.stroke();
-      handlesG!.fill({ color: 0xc9a84c });
-      handlesG!.circle(rotPt.x, rotPt.y, hs * 1.2);
-      handlesG!.fill({ color: 0xc9a84c });
-    }
-
-    function redraw() {
-      box!.clear();
-      handlesG!.clear();
-      registry.handles = [];
-
-      if (manipulable.length === 1) {
-        const it = manipulable[0]!;
-        drawSingleItemControls(
-          it, it.x + it.width / 2, it.y + it.height / 2, it.width, it.height, true,
-        );
-      } else {
-        // Group — axis-aligned box, 4 corner handles, proportional scale
-        registry.mode = 'group';
-        registry.itemId = undefined;
-        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-        for (const it of manipulable) {
-          minX = Math.min(minX, it.x); minY = Math.min(minY, it.y);
-          maxX = Math.max(maxX, it.x + it.width); maxY = Math.max(maxY, it.y + it.height);
-        }
-        box!.setStrokeStyle({ width: 2 / scale, color: 0xc9a84c, alpha: 0.9 });
-        box!.rect(minX, minY, maxX - minX, maxY - minY);
-        box!.stroke();
-        const defs: Array<[HandleId, number, number]> = [
-          ['nw', minX, minY], ['ne', maxX, minY], ['se', maxX, maxY], ['sw', minX, maxY],
-        ];
-        handlesG!.setStrokeStyle({ width: 1 / scale, color: 0x0a0a0f, alpha: 1 });
-        const groupHs = HANDLE / scale / 2;
-        for (const [id, x, y] of defs) {
-          const sx = id === 'nw' || id === 'sw' ? -1 : 1;
-          const sy = id === 'nw' || id === 'ne' ? -1 : 1;
-          registry.handles.push({ id, wx: x, wy: y, sx, sy });
-          drawHandleSquare(x, y, groupHs);
-        }
-      }
-      handlesG!.fill({ color: 0xc9a84c });
-    }
-
-    redraw();
-
-    // ── Drag handling ─────────────────────────────────────────────────────────
-    const canvas = app.canvas;
+    // Registry + gizmo visuals: Pixi in 2D (usePixiSelectionGizmo), Three in 3D (Map3DTokenGizmo).
+    const canvas = getMapInteractionEl() ?? app.canvas;
 
     interface DragState {
       handle: HandleDesc;
@@ -248,6 +156,7 @@ export function useTransformControls(appReady: boolean) {
       item?: Item;
       anchorWX?: number; anchorWY?: number;
       cx0?: number; cy0?: number;
+      w0?: number; h0?: number; rot0?: number;
       // group
       groupMinX?: number; groupMinY?: number; groupMaxX?: number; groupMaxY?: number;
       groupAnchorX?: number; groupAnchorY?: number;
@@ -257,31 +166,45 @@ export function useTransformControls(appReady: boolean) {
 
     function onDown(e: PointerEvent) {
       if (e.button !== 0) return;
-      const { x: wx, y: wy } = clientToWorld(e.clientX, e.clientY);
-      const h = pickHandle(wx, wy);
+      const h = pickHandle(e.clientX, e.clientY);
       if (!h) return; // not on a handle — selection tool handles it
       e.stopPropagation();
 
       if (registry.mode === 'single' && registry.itemId) {
         const it = useItemStore.getState().items[registry.itemId];
         if (!it) return;
-        const cx0 = it.x + it.width / 2;
-        const cy0 = it.y + it.height / 2;
+        const live = useLiveTransformStore.getState().byId[it.id];
+        const b = resolveItemBounds(it, live);
+        const cx0 = b.cx;
+        const cy0 = b.cz;
         if (it.type === 'map') {
-          // Maps resize from center so they don't drift upward/sideways.
-          drag = { handle: h, item: it, cx0, cy0 };
+          drag = { handle: h, item: it, cx0, cy0, w0: b.width, h0: b.height, rot0: b.rotation };
         } else {
-          const aLocal = { x: -h.sx * (it.width / 2), y: -h.sy * (it.height / 2) };
-          const aRot = rot(aLocal.x, aLocal.y, it.rotation);
-          drag = { handle: h, item: it, anchorWX: cx0 + aRot.x, anchorWY: cy0 + aRot.y, cx0, cy0 };
+          const aLocal = { x: -h.sx * (b.width / 2), y: -h.sy * (b.height / 2) };
+          const aRot = rot(aLocal.x, aLocal.y, b.rotation);
+          drag = {
+            handle: h,
+            item: it,
+            anchorWX: cx0 + aRot.x,
+            anchorWY: cy0 + aRot.y,
+            cx0,
+            cy0,
+            w0: b.width,
+            h0: b.height,
+            rot0: b.rotation,
+          };
         }
       } else if (registry.mode === 'group') {
         let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
         const origins = new Map<string, { x: number; y: number; w: number; h: number }>();
+        const liveById = useLiveTransformStore.getState().byId;
         for (const it of manipulable) {
-          minX = Math.min(minX, it.x); minY = Math.min(minY, it.y);
-          maxX = Math.max(maxX, it.x + it.width); maxY = Math.max(maxY, it.y + it.height);
-          origins.set(it.id, { x: it.x, y: it.y, w: it.width, h: it.height });
+          const b = resolveItemBounds(it, liveById[it.id]);
+          minX = Math.min(minX, b.x);
+          minY = Math.min(minY, b.y);
+          maxX = Math.max(maxX, b.x + b.width);
+          maxY = Math.max(maxY, b.y + b.height);
+          origins.set(it.id, { x: b.x, y: b.y, w: b.width, h: b.height });
         }
         // Anchor = opposite corner
         const anchorX = h.sx > 0 ? minX : maxX;
@@ -303,9 +226,9 @@ export function useTransformControls(appReady: boolean) {
         if (drag.handle.id === 'rotate') {
           let deg = (Math.atan2(wy - drag.cy0!, wx - drag.cx0!) * 180) / Math.PI + 90;
           if (snap) deg = snapAngle(deg);
-          const c = getItemContainer(layer, it.id);
+          const c = it.type !== 'token' ? getItemContainer(layer, it.id) : null;
           if (c) c.rotation = (deg * Math.PI) / 180;
-          (drag as any)._deg = deg;
+          (drag as DragState & { _deg?: number })._deg = deg;
           useLiveTransformStore.getState().setLive(it.id, { rotation: deg });
           return;
         }
@@ -321,16 +244,19 @@ export function useTransformControls(appReady: boolean) {
           newW = r.width; newH = r.height; nx = r.x; ny = r.y;
           cx = drag.cx0!; cy = drag.cy0!;
         } else {
+          const w0 = drag.w0 ?? it.width;
+          const h0 = drag.h0 ?? it.height;
+          const rot0 = drag.rot0 ?? it.rotation;
           // Tokens / drawings: anchor opposite corner/edge
-          const rel = rot(wx - drag.anchorWX!, wy - drag.anchorWY!, -it.rotation);
-          newW = sx === 0 ? it.width  : Math.max(MIN, rel.x / sx);
-          newH = sy === 0 ? it.height : Math.max(MIN, rel.y / sy);
+          const rel = rot(wx - drag.anchorWX!, wy - drag.anchorWY!, -rot0);
+          newW = sx === 0 ? w0 : Math.max(MIN, rel.x / sx);
+          newH = sy === 0 ? h0 : Math.max(MIN, rel.y / sy);
 
           if (aspectLocked(it)) {
-            const ratio = it.width / it.height;
+            const ratio = w0 / h0;
             if (sx !== 0 && sy !== 0) {
-              const sca = Math.max(newW / it.width, newH / it.height);
-              newW = it.width * sca; newH = it.height * sca;
+              const sca = Math.max(newW / w0, newH / h0);
+              newW = w0 * sca; newH = h0 * sca;
             } else if (sx !== 0) { newH = newW / ratio; }
             else { newW = newH * ratio; }
           }
@@ -339,24 +265,27 @@ export function useTransformControls(appReady: boolean) {
             if (sy !== 0) newH = snapSize(newH);
           }
 
-          const half = rot(sx * (newW / 2), sy * (newH / 2), it.rotation);
+          const half = rot(sx * (newW / 2), sy * (newH / 2), rot0);
           cx = drag.anchorWX! + half.x;
           cy = drag.anchorWY! + half.y;
           nx = cx - newW / 2;
           ny = cy - newH / 2;
         }
 
-        (drag as any)._w = newW; (drag as any)._h = newH;
-        (drag as any)._x = nx;   (drag as any)._y = ny;
+        (drag as DragState & { _w?: number; _h?: number; _x?: number; _y?: number })._w = newW;
+        (drag as DragState & { _w?: number; _h?: number; _x?: number; _y?: number })._h = newH;
+        (drag as DragState & { _w?: number; _h?: number; _x?: number; _y?: number })._x = nx;
+        (drag as DragState & { _w?: number; _h?: number; _x?: number; _y?: number })._y = ny;
 
-        const c = getItemContainer(layer, it.id);
-        if (c) {
-          // Pivot at content center (original size); scale outward from fixed center.
-          c.pivot.set(it.width / 2, it.height / 2);
-          c.position.set(cx, cy);
-          c.scale.set(newW / it.width, newH / it.height);
+        if (it.type !== 'token') {
+          const c = getItemContainer(layer, it.id);
+          if (c) {
+            c.pivot.set(it.width / 2, it.height / 2);
+            c.position.set(cx, cy);
+            c.scale.set(newW / it.width, newH / it.height);
+          }
         }
-        drawSingleItemControls(it, cx, cy, newW, newH, false);
+        useLiveTransformStore.getState().setLive(it.id, { x: nx, y: ny, width: newW, height: newH });
         return;
       }
 
@@ -367,73 +296,107 @@ export function useTransformControls(appReady: boolean) {
         let scaleX = Math.abs(wx - aX) / (w0 || 1);
         let scaleY = Math.abs(wy - aY) / (h0 || 1);
         const s = Math.max(0.1, Math.max(scaleX, scaleY)); // uniform
-        (drag as any)._scale = s;
+        (drag as DragState & { _scale?: number })._scale = s;
+        const liveEntries: Array<{ id: string; patch: { x: number; y: number; width: number; height: number } }> = [];
         for (const [id, o] of drag.origins) {
-          const c = getItemContainer(layer, id);
-          if (!c) continue;
           const nx = aX + (o.x - aX) * s;
           const ny = aY + (o.y - aY) * s;
-          const nw = o.w * s, nh = o.h * s;
-          c.pivot.set(o.w / 2, o.h / 2);
-          c.position.set(nx + nw / 2, ny + nh / 2);
-          c.scale.set(s, s);
+          const nw = o.w * s;
+          const nh = o.h * s;
+          liveEntries.push({ id, patch: { x: nx, y: ny, width: nw, height: nh } });
+          const it = useItemStore.getState().items[id];
+          if (it?.type !== 'token') {
+            const c = getItemContainer(layer, id);
+            if (c) {
+              c.pivot.set(o.w / 2, o.h / 2);
+              c.position.set(nx + nw / 2, ny + nh / 2);
+              c.scale.set(s, s);
+            }
+          }
         }
+        useLiveTransformStore.getState().setLiveMany(liveEntries);
       }
     }
 
     function onUp() {
       if (!drag) return;
       const layer = sceneRefs.items.current;
+      const liveStore = useLiveTransformStore.getState();
+      const clearedIds: string[] = [];
 
       if (registry.mode === 'single' && drag.item) {
         const it = drag.item;
         if (drag.handle.id === 'rotate') {
-          const deg = (drag as any)._deg ?? it.rotation;
-          useItemStore.getState().updateItem(it.id, { rotation: deg });
-          emitItemUpdate([{ id: it.id, patch: { rotation: deg } }]);
-          useLiveTransformStore.getState().clear([it.id]);
-        } else if ((drag as any)._w) {
-          const newW = (drag as any)._w, newH = (drag as any)._h;
-          const nx = (drag as any)._x, ny = (drag as any)._y;
+          const deg = (drag as DragState & { _deg?: number })._deg ?? it.rotation;
+          if (it.type === 'token') {
+            emitTokenRotate(it.id, deg);
+          } else {
+            useItemStore.getState().updateItem(it.id, { rotation: deg });
+            emitItemUpdate([{ id: it.id, patch: { rotation: deg } }]);
+          }
+          clearedIds.push(it.id);
+        } else if ((drag as DragState & { _w?: number })._w) {
+          const newW = (drag as DragState & { _w?: number; _h?: number; _x?: number; _y?: number })._w!;
+          const newH = (drag as DragState & { _h?: number })._h!;
+          const nx = (drag as DragState & { _x?: number })._x!;
+          const ny = (drag as DragState & { _y?: number })._y!;
           const patch: Partial<Item> = { x: nx, y: ny, width: newW, height: newH } as Partial<Item>;
           if (it.type === 'token') {
-            // keep sizeCells consistent with new pixel size relative to grid
-            const cellPx = it.width / it.sizeCells;
-            (patch as Partial<import('../types').TokenItem>).sizeCells = Math.max(0.25, newW / cellPx);
+            const token = it as TokenItem;
+            const cellPx = token.width / token.sizeCells;
+            const sizeCells = Math.max(0.25, newW / cellPx);
+            const tokenPatch = patch as Partial<TokenItem>;
+            tokenPatch.sizeCells = sizeCells;
+            if (aspectLocked(it)) {
+              tokenPatch.width = newW;
+              tokenPatch.height = newW;
+            }
+            const finalW = tokenPatch.width ?? newW;
+            const finalH = tokenPatch.height ?? newH;
+            const grid = worldToGridColRow(nx + finalW / 2, ny + finalH / 2);
+            tokenPatch.gridCol = grid.gridCol;
+            tokenPatch.gridRow = grid.gridRow;
           }
-          // reset container scale (renderer will rebuild at new size)
-          const c = getItemContainer(layer, it.id);
-          if (c) c.scale.set(1, 1);
+          if (it.type !== 'token') {
+            const c = getItemContainer(layer, it.id);
+            if (c) c.scale.set(1, 1);
+          }
           useItemStore.getState().updateItem(it.id, patch);
           emitItemUpdate([{ id: it.id, patch }]);
+          clearedIds.push(it.id);
         }
       } else if (registry.mode === 'group' && drag.origins) {
-        const s = (drag as any)._scale ?? 1;
+        const s = (drag as DragState & { _scale?: number })._scale ?? 1;
         const aX = drag.groupAnchorX!, aY = drag.groupAnchorY!;
         const patches: Array<{ id: string; patch: Partial<Item> }> = [];
         for (const [id, o] of drag.origins) {
           const nx = aX + (o.x - aX) * s;
           const ny = aY + (o.y - aY) * s;
           patches.push({ id, patch: { x: nx, y: ny, width: o.w * s, height: o.h * s } as Partial<Item> });
-          const c = getItemContainer(layer, id);
-          if (c) c.scale.set(1, 1);
+          const it = useItemStore.getState().items[id];
+          if (it?.type !== 'token') {
+            const c = getItemContainer(layer, id);
+            if (c) c.scale.set(1, 1);
+          }
+          clearedIds.push(id);
         }
         useItemStore.getState().updateItems(patches);
         emitItemUpdate(patches);
       }
+      if (clearedIds.length) liveStore.clear(clearedIds);
       drag = null;
     }
 
-    canvas.addEventListener('pointerdown', onDown);
+    canvas.addEventListener('pointerdown', onDown, true);
     canvas.addEventListener('pointermove', onMove);
     canvas.addEventListener('pointerup', onUp);
     canvas.addEventListener('pointercancel', onUp);
 
     return () => {
-      canvas.removeEventListener('pointerdown', onDown);
+      canvas.removeEventListener('pointerdown', onDown, true);
       canvas.removeEventListener('pointermove', onMove);
       canvas.removeEventListener('pointerup', onUp);
       canvas.removeEventListener('pointercancel', onUp);
     };
-  }, [appReady, selectedIds, items, activeTool, viewMode, myRole]);
+  }, [appReady, selectedIds, items, activeTool, myRole]);
 }

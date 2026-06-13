@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { persistFogScene } from '@/systems/scene/fogSync';
+import { clampView2dMiniOrbitAzimuth } from '@/systems/map3d/tableMiniOrbit';
 
 // ─── Scene-level state ──────────────────────────────────────────────────────────
 //
@@ -40,10 +41,30 @@ export interface View3DOrbit {
   polar: number;
 }
 
+/** Manual orbit for GLB minis on the 2D map (right-drag when selected). */
+export interface View2DMiniOrbit {
+  /** Offset from default tabletop azimuth — capped to ±90°. */
+  azimuth: number;
+}
+
 export const DEFAULT_VIEW3D_ORBIT: View3DOrbit = {
   azimuth: Math.PI / 4,
   polar: 0.95,
 };
+
+export const DEFAULT_VIEW2D_MINI_ORBIT: View2DMiniOrbit = {
+  azimuth: 0,
+};
+
+const POLAR_MIN = 0.12;
+const POLAR_MAX = Math.PI / 2 - 0.05;
+
+export function clampView3dOrbit(orbit: View3DOrbit): View3DOrbit {
+  return {
+    azimuth: orbit.azimuth,
+    polar: Math.max(POLAR_MIN, Math.min(POLAR_MAX, orbit.polar)),
+  };
+}
 
 export interface ActiveGrid {
   gridType: GridType;
@@ -68,6 +89,12 @@ interface SceneState extends ActiveGrid {
   viewMode: MapViewMode;
   /** 3D camera orbit (right-drag or Alt+drag in 3D view). */
   view3dOrbit: View3DOrbit;
+  /** 2D GLB mini view orbit (right-drag when a model token is selected). */
+  view2dMiniOrbit: View2DMiniOrbit;
+  /** Saved 2D orbit angle per GLB token id (persists across deselect). */
+  miniOrbitByTokenId: Record<string, number>;
+  /** Saved 3D camera orbit per token id (persists across deselect). */
+  miniOrbit3dByTokenId: Record<string, View3DOrbit>;
   /** Auto-extrude wall segments into 3D geometry in 3D mode. */
   autoExtrudeWalls: boolean;
   /** Wall height in grid cells (~5 ft per cell). */
@@ -107,8 +134,16 @@ interface SceneState extends ActiveGrid {
 
   setViewMode: (mode: MapViewMode) => void;
   toggleViewMode: () => void;
-  adjustView3dOrbit: (deltaAzimuth: number, deltaPolar: number) => void;
+  adjustView3dOrbit: (deltaAzimuth: number, deltaPolar: number, tokenId?: string) => void;
+  setView3dOrbit: (orbit: View3DOrbit) => void;
+  saveMiniOrbit3dForToken: (tokenId: string, orbit: View3DOrbit) => void;
+  getMiniOrbit3dForToken: (tokenId: string) => View3DOrbit;
   resetView3dOrbit: () => void;
+  adjustView2dMiniOrbit: (deltaAzimuth: number, tokenId?: string) => void;
+  setView2dMiniOrbitAzimuth: (azimuth: number) => void;
+  saveMiniOrbitForToken: (tokenId: string, azimuth: number) => void;
+  getMiniOrbitForToken: (tokenId: string) => number;
+  resetView2dMiniOrbit: () => void;
   setAutoExtrudeWalls: (enabled: boolean) => void;
   setWallHeightCells: (cells: number) => void;
   setScanImageWalls: (enabled: boolean) => void;
@@ -150,7 +185,7 @@ const DEFAULT_GRID: ActiveGrid = {
 
 // ─── Store ────────────────────────────────────────────────────────────────────
 
-export const useMapStore = create<SceneState>((set) => ({
+export const useMapStore = create<SceneState>((set, get) => ({
   ...DEFAULT_GRID,
 
   activeTool:   'select',
@@ -158,6 +193,9 @@ export const useMapStore = create<SceneState>((set) => ({
   viewport:     { x: 0, y: 0, scale: 1 },
   viewMode:     '2d',
   view3dOrbit:    { ...DEFAULT_VIEW3D_ORBIT },
+  view2dMiniOrbit: { ...DEFAULT_VIEW2D_MINI_ORBIT },
+  miniOrbitByTokenId: {},
+  miniOrbit3dByTokenId: {},
   autoExtrudeWalls: false,
   wallHeightCells: 1.8,
   scanImageWalls: false,
@@ -192,18 +230,53 @@ export const useMapStore = create<SceneState>((set) => ({
   setViewMode: (viewMode) => set({ viewMode }),
   toggleViewMode: () =>
     set((s) => ({ viewMode: s.viewMode === '2d' ? '3d' : '2d' })),
-  adjustView3dOrbit: (deltaAzimuth, deltaPolar) =>
+  adjustView3dOrbit: (deltaAzimuth, deltaPolar, tokenId) =>
     set((s) => {
-      const polarMin = 0.12;
-      const polarMax = Math.PI / 2 - 0.05;
+      const orbit = clampView3dOrbit({
+        azimuth: s.view3dOrbit.azimuth + deltaAzimuth,
+        polar: s.view3dOrbit.polar + deltaPolar,
+      });
       return {
-        view3dOrbit: {
-          azimuth: s.view3dOrbit.azimuth + deltaAzimuth,
-          polar: Math.max(polarMin, Math.min(polarMax, s.view3dOrbit.polar + deltaPolar)),
-        },
+        view3dOrbit: orbit,
+        ...(tokenId
+          ? { miniOrbit3dByTokenId: { ...s.miniOrbit3dByTokenId, [tokenId]: orbit } }
+          : {}),
       };
     }),
-  resetView3dOrbit: () => set({ view3dOrbit: { ...DEFAULT_VIEW3D_ORBIT } }),
+  setView3dOrbit: (orbit) => set({ view3dOrbit: clampView3dOrbit(orbit) }),
+  saveMiniOrbit3dForToken: (tokenId, orbit) =>
+    set((s) => ({
+      miniOrbit3dByTokenId: {
+        ...s.miniOrbit3dByTokenId,
+        [tokenId]: clampView3dOrbit(orbit),
+      },
+    })),
+  getMiniOrbit3dForToken: (tokenId) =>
+    get().miniOrbit3dByTokenId[tokenId] ?? { ...DEFAULT_VIEW3D_ORBIT },
+  resetView3dOrbit: () =>
+    set({ view3dOrbit: { ...DEFAULT_VIEW3D_ORBIT }, miniOrbit3dByTokenId: {} }),
+  adjustView2dMiniOrbit: (deltaAzimuth, tokenId) =>
+    set((s) => {
+      const azimuth = clampView2dMiniOrbitAzimuth(s.view2dMiniOrbit.azimuth + deltaAzimuth);
+      return {
+        view2dMiniOrbit: { azimuth },
+        ...(tokenId
+          ? { miniOrbitByTokenId: { ...s.miniOrbitByTokenId, [tokenId]: azimuth } }
+          : {}),
+      };
+    }),
+  setView2dMiniOrbitAzimuth: (azimuth) =>
+    set({ view2dMiniOrbit: { azimuth: clampView2dMiniOrbitAzimuth(azimuth) } }),
+  saveMiniOrbitForToken: (tokenId, azimuth) =>
+    set((s) => ({
+      miniOrbitByTokenId: {
+        ...s.miniOrbitByTokenId,
+        [tokenId]: clampView2dMiniOrbitAzimuth(azimuth),
+      },
+    })),
+  getMiniOrbitForToken: (tokenId) => get().miniOrbitByTokenId[tokenId] ?? 0,
+  resetView2dMiniOrbit: () =>
+    set({ view2dMiniOrbit: { ...DEFAULT_VIEW2D_MINI_ORBIT }, miniOrbitByTokenId: {} }),
   setAutoExtrudeWalls: (autoExtrudeWalls) => set({ autoExtrudeWalls }),
   setWallHeightCells: (wallHeightCells) =>
     set({ wallHeightCells: Math.max(0.5, Math.min(8, wallHeightCells)) }),
@@ -277,6 +350,9 @@ export const useMapStore = create<SceneState>((set) => ({
       viewport: { x: 0, y: 0, scale: 1 },
       viewMode: '2d',
       view3dOrbit: { ...DEFAULT_VIEW3D_ORBIT },
+      view2dMiniOrbit: { ...DEFAULT_VIEW2D_MINI_ORBIT },
+      miniOrbitByTokenId: {},
+      miniOrbit3dByTokenId: {},
       autoExtrudeWalls: false,
       wallHeightCells: 1.8,
       scanImageWalls: false,

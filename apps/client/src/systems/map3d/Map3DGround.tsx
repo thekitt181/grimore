@@ -1,9 +1,9 @@
 import { useMemo } from 'react';
 import type { MapItem } from '@/systems/scene/types';
-import { degToRad } from './coords';
 import { useThreeTexture } from './useThreeTexture';
-import { CLAY, clayMaterialProps } from './clayMaterials';
+import { clayMaterialProps } from './clayMaterials';
 import { useLiveItemBounds } from './useLiveItemBounds';
+import { SceneItemTransformGroup } from './TokenTransformGroup';
 
 export function Map3DGround({
   map,
@@ -12,30 +12,31 @@ export function Map3DGround({
 }: {
   map: MapItem;
   clayMode?: boolean;
-  /** When a 3D map model is present, skip the flat floor plane (avoids z-fighting). */
   skipFloor?: boolean;
 }) {
   const { texture, status } = useThreeTexture(map.backgroundUrl);
-  const { cx, cz, x, y, rotation } = useLiveItemBounds(map);
+  const { x, y, width, height } = useLiveItemBounds(map);
 
   const gridLines = useMemo(() => {
     if (!map.showGrid || clayMode) return null;
-    const cols = Math.ceil(map.width / map.gridSize);
-    const rows = Math.ceil(map.height / map.gridSize);
+    const cols = Math.ceil(width / map.gridSize);
+    const rows = Math.ceil(height / map.gridSize);
     const points: number[] = [];
     const ox = x + map.gridOffsetX;
     const oz = y + map.gridOffsetY;
+    const cx = x + width / 2;
+    const cz = y + height / 2;
 
     for (let c = 0; c <= cols; c++) {
-      const x = ox + c * map.gridSize;
-      points.push(x, 0.02, oz, x, 0.02, oz + rows * map.gridSize);
+      const wx = ox + c * map.gridSize;
+      points.push(wx - cx, 0.02, oz - cz, wx - cx, 0.02, oz + rows * map.gridSize - cz);
     }
     for (let r = 0; r <= rows; r++) {
-      const z = oz + r * map.gridSize;
-      points.push(ox, 0.02, z, ox + cols * map.gridSize, 0.02, z);
+      const wz = oz + r * map.gridSize;
+      points.push(ox - cx, 0.02, wz - cz, ox + cols * map.gridSize - cx, 0.02, wz - cz);
     }
     return new Float32Array(points);
-  }, [map, clayMode, x, y]);
+  }, [map, clayMode, x, y, width, height]);
 
   const gridColor = `#${map.gridColor.toString(16).padStart(6, '0')}`;
 
@@ -48,27 +49,23 @@ export function Map3DGround({
       : { color: status === 'error' ? '#3d2020' : '#252532', roughness: 0.92, metalness: 0.02 };
 
   return (
-    <group>
+    <SceneItemTransformGroup itemId={map.id} surfaceY={0} baseWidth={map.width} baseHeight={map.height}>
       {!skipFloor && (
-        <mesh
-          rotation={[-Math.PI / 2, 0, degToRad(rotation)]}
-          position={[cx, 0, cz]}
-          receiveShadow={false}
-        >
+        <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow={false}>
           <planeGeometry args={[map.width, map.height, 1, 1]} />
           <meshStandardMaterial {...floorMaterial} />
         </mesh>
       )}
 
       {!skipFloor && !texture && status !== 'loading' && !clayMode && (
-        <mesh rotation={[-Math.PI / 2, 0, degToRad(rotation)]} position={[cx, 0.01, cz]}>
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.01, 0]}>
           <planeGeometry args={[map.width, map.height]} />
           <meshStandardMaterial color="#252532" wireframe transparent opacity={0.15} />
         </mesh>
       )}
 
       {gridLines && (
-        <lineSegments position={[0, 0, 0]}>
+        <lineSegments>
           <bufferGeometry>
             <bufferAttribute attach="attributes-position" args={[gridLines, 3]} />
           </bufferGeometry>
@@ -79,6 +76,6 @@ export function Map3DGround({
           />
         </lineSegments>
       )}
-    </group>
+    </SceneItemTransformGroup>
   );
 }

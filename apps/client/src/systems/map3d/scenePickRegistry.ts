@@ -1,54 +1,40 @@
 import * as THREE from 'three';
 import { useMapStore } from '@/systems/map/store/mapStore';
-import type { SceneCameraState } from './sceneCameraRef';
-import { syncPerspectiveCamera } from './perspectiveCameraSync';
+import { useItemStore } from '@/systems/scene/store/itemStore';
+import { sceneCameraRef, type SceneCameraState } from './sceneCameraRef';
+import { getPickCanvasRect, resolvePickCamera } from './pickCamera';
 
 const pickRoots = new Set<THREE.Object3D>();
 
 const ndc = new THREE.Vector2();
 const raycaster = new THREE.Raycaster();
-const orthoCam = new THREE.OrthographicCamera();
 
 export function registerPickRoot(root: THREE.Object3D): () => void {
   pickRoots.add(root);
   return () => pickRoots.delete(root);
 }
 
-function cameraFromState(state: SceneCameraState, rect: DOMRect): THREE.Camera {
-  if (state.type === 'perspective') {
-    return syncPerspectiveCamera(state, rect.width / Math.max(rect.height, 1));
-  }
-
-  orthoCam.left = state.left;
-  orthoCam.right = state.right;
-  orthoCam.top = state.top;
-  orthoCam.bottom = state.bottom;
-  orthoCam.near = 0.1;
-  orthoCam.far = 8000;
-  orthoCam.position.set(state.position.x, state.position.y, state.position.z);
-  orthoCam.up.set(0, 0, -1);
-  orthoCam.rotation.set(-Math.PI / 2, 0, 0);
-  orthoCam.updateMatrixWorld();
-  orthoCam.updateProjectionMatrix();
-  return orthoCam;
-}
-
 /** Raycast pick volumes; returns item id (userData.pickId) closest to camera. */
 export function pickSceneItemId(
   clientX: number,
   clientY: number,
-  rect: DOMRect,
-  cam: SceneCameraState,
+  rect?: DOMRect | null,
+  cam?: SceneCameraState | null,
 ): string | null {
-  if (pickRoots.size === 0 || rect.width <= 0 || rect.height <= 0) return null;
+  const pickRect = rect ?? getPickCanvasRect();
+  const cameraState = cam ?? sceneCameraRef.current;
+  if (!pickRect || !cameraState || pickRoots.size === 0) return null;
+  if (pickRect.width <= 0 || pickRect.height <= 0) return null;
 
   const viewMode = useMapStore.getState().viewMode;
-  if (viewMode === '3d' && cam.type !== 'perspective') return null;
+  if (viewMode === '3d' && cameraState.type !== 'orthographic' && cameraState.type !== 'perspective') {
+    return null;
+  }
 
-  ndc.x = ((clientX - rect.left) / rect.width) * 2 - 1;
-  ndc.y = -((clientY - rect.top) / rect.height) * 2 + 1;
+  ndc.x = ((clientX - pickRect.left) / pickRect.width) * 2 - 1;
+  ndc.y = -((clientY - pickRect.top) / pickRect.height) * 2 + 1;
 
-  const camera = cameraFromState(cam, rect);
+  const camera = resolvePickCamera(cameraState, pickRect);
   raycaster.setFromCamera(ndc, camera);
 
   const hits: THREE.Intersection[] = [];
@@ -59,13 +45,20 @@ export function pickSceneItemId(
   if (hits.length === 0) return null;
 
   hits.sort((a, b) => a.distance - b.distance);
+
+  let fallback: string | null = null;
   for (const hit of hits) {
     let obj: THREE.Object3D | null = hit.object;
     while (obj) {
       const pickId = obj.userData?.pickId as string | undefined;
-      if (pickId) return pickId;
+      if (pickId) {
+        const itemType = useItemStore.getState().items[pickId]?.type;
+        if (itemType === 'token') return pickId;
+        if (!fallback) fallback = pickId;
+        break;
+      }
       obj = obj.parent;
     }
   }
-  return null;
+  return fallback;
 }

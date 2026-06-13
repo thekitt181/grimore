@@ -8,17 +8,19 @@ import { useResolvedModelUrl } from './useResolvedModelUrl';
 import { registerMapRaycastRoot } from './mapGroundRaycast';
 import { applyModelNormalization, applyFallbackModelNormalization } from './normalizeModelRoot';
 
-function brightenMeshMaterials(root: THREE.Object3D) {
+function brightenMeshMaterials(root: THREE.Object3D, miniature2d = false) {
   root.traverse((child) => {
     if (!(child as THREE.Mesh).isMesh) return;
     const mesh = child as THREE.Mesh;
     const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
     for (const mat of mats) {
       if (!(mat instanceof THREE.MeshStandardMaterial)) continue;
-      mat.envMapIntensity = 1.2;
-      if (mat.emissiveIntensity < 0.08) {
+      mat.envMapIntensity = miniature2d ? 1.45 : 1.2;
+      mat.roughness = miniature2d ? Math.min(mat.roughness, 0.68) : mat.roughness;
+      const minEmissive = miniature2d ? 0.14 : 0.08;
+      if (mat.emissiveIntensity < minEmissive) {
         mat.emissive.copy(mat.color);
-        mat.emissiveIntensity = 0.08;
+        mat.emissiveIntensity = minEmissive;
       }
     }
   });
@@ -28,14 +30,15 @@ function useNormalizedModel(
   root: THREE.Object3D,
   targetSize: number,
   groundAlign: boolean,
+  footprint?: { width: number; height: number },
 ) {
   useLayoutEffect(() => {
-    if (applyModelNormalization(root, targetSize, groundAlign)) return;
+    if (applyModelNormalization(root, targetSize, groundAlign, footprint)) return;
 
     let attempts = 0;
     let frameId = 0;
     const retry = () => {
-      if (applyModelNormalization(root, targetSize, groundAlign)) return;
+      if (applyModelNormalization(root, targetSize, groundAlign, footprint)) return;
       if (attempts++ >= 8) {
         applyFallbackModelNormalization(root, targetSize, groundAlign);
         return;
@@ -44,7 +47,7 @@ function useNormalizedModel(
     };
     frameId = requestAnimationFrame(retry);
     return () => cancelAnimationFrame(frameId);
-  }, [root, targetSize, groundAlign]);
+  }, [root, targetSize, groundAlign, footprint?.width, footprint?.height]);
 }
 
 function GltfModel({
@@ -53,12 +56,16 @@ function GltfModel({
   groundAlign,
   registerRaycast,
   tokenRender,
+  tokenRender2d,
+  footprint,
 }: {
   url: string;
   targetSize: number;
   groundAlign: boolean;
   registerRaycast?: boolean;
   tokenRender?: boolean;
+  tokenRender2d?: boolean;
+  footprint?: { width: number; height: number };
 }) {
   const { scene } = useGLTF(url);
   const clone = useMemo(() => {
@@ -69,15 +76,15 @@ function GltfModel({
         mesh.castShadow = true;
         mesh.receiveShadow = !tokenRender;
         if (tokenRender) {
-          mesh.renderOrder = 10;
+          mesh.renderOrder = 12;
         }
       }
     });
-    if (tokenRender) brightenMeshMaterials(root);
+    if (tokenRender) brightenMeshMaterials(root, tokenRender2d);
     return root;
-  }, [scene, tokenRender]);
+  }, [scene, tokenRender, tokenRender2d]);
 
-  useNormalizedModel(clone, targetSize, groundAlign);
+  useNormalizedModel(clone, targetSize, groundAlign, footprint);
 
   useEffect(() => {
     if (!registerRaycast || tokenRender) return;
@@ -105,12 +112,16 @@ function StlModel({
   groundAlign,
   registerRaycast,
   tokenRender,
+  tokenRender2d,
+  footprint,
 }: {
   url: string;
   targetSize: number;
   groundAlign: boolean;
   registerRaycast?: boolean;
   tokenRender?: boolean;
+  tokenRender2d?: boolean;
+  footprint?: { width: number; height: number };
 }) {
   const geometry = useLoader(STLLoader, url);
   const mesh = useMemo(() => {
@@ -120,19 +131,19 @@ function StlModel({
       geo,
       new THREE.MeshStandardMaterial({
         color: '#c9a84c',
-        roughness: 0.55,
-        metalness: 0.15,
+        roughness: tokenRender2d ? 0.52 : 0.55,
+        metalness: tokenRender2d ? 0.22 : 0.15,
         emissive: '#3a3020',
-        emissiveIntensity: 0.12,
+        emissiveIntensity: tokenRender2d ? 0.18 : 0.12,
       }),
     );
     root.castShadow = true;
     root.receiveShadow = !tokenRender;
-    if (tokenRender) root.renderOrder = 10;
+    if (tokenRender) root.renderOrder = 12;
     return root;
-  }, [geometry, tokenRender]);
+  }, [geometry, tokenRender, tokenRender2d]);
 
-  useNormalizedModel(mesh, targetSize, groundAlign);
+  useNormalizedModel(mesh, targetSize, groundAlign, footprint);
 
   useEffect(() => {
     if (!registerRaycast || tokenRender) return;
@@ -166,6 +177,8 @@ export function SceneModel({
   groundAlign = true,
   registerRaycast = false,
   tokenRender = false,
+  tokenRender2d = false,
+  footprint,
 }: {
   url: string;
   targetSize: number;
@@ -174,6 +187,10 @@ export function SceneModel({
   registerRaycast?: boolean;
   /** Brighter materials + render on top of map geometry (tokens). */
   tokenRender?: boolean;
+  /** Extra contrast for GLB/STL minis on the 2D map overlay. */
+  tokenRender2d?: boolean;
+  /** Token footprint in local space (XZ) before transform-group scale. */
+  footprint?: { width: number; height: number };
 }) {
   const { resolved, status } = useResolvedModelUrl(url);
   const format = modelFormatFromUrl(url);
@@ -195,6 +212,8 @@ export function SceneModel({
           groundAlign={groundAlign}
           registerRaycast={registerRaycast}
           tokenRender={tokenRender}
+          tokenRender2d={tokenRender2d}
+          {...(footprint ? { footprint } : {})}
         />
       </Suspense>
     );
@@ -207,6 +226,8 @@ export function SceneModel({
         groundAlign={groundAlign}
         registerRaycast={registerRaycast}
         tokenRender={tokenRender}
+        tokenRender2d={tokenRender2d}
+        {...(footprint ? { footprint } : {})}
       />
     </Suspense>
   );

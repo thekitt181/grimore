@@ -4,9 +4,16 @@ import { isMobileClient } from '@/lib/socket';
 import { useMapStore } from '../store/mapStore';
 import { getPersistSessionId, persistViewportLocal } from '@/systems/scene/sessionPersistence';
 import type { MapViewport } from '../store/mapStore';
-import { apply3dScreenPan } from '@/systems/map3d/viewportPan';
-import { clampViewportScale } from '../viewportLimits';
-import { sceneRefs } from '@/systems/scene/sceneRefs';
+import { apply3dScreenPan, applyScreenPan } from '@/systems/map3d/viewportPan';
+import { clientToCanvas, clientDeltaToScreen } from '@/systems/map3d/pixiScreenCoords';
+import { clampViewportScale, maxViewportScale, type ViewportScaleContext } from '../viewportLimits';
+import { pickHandle } from '@/systems/scene/interaction/useTransformControls';
+import {
+  applyMapZoomAt,
+  shouldStartMapPan,
+  viewportScaleContext,
+} from '../mapNavigation';
+import { sceneRefs, getMapInteractionEl } from '@/systems/scene/sceneRefs';
 
 let viewportPersistTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -23,20 +30,19 @@ function scheduleViewportPersist(vp: MapViewport): void {
 /** Restore a saved pan/zoom onto the Pixi world container. */
 export function applyViewport(world: Container, vp: MapViewport): void {
   const viewMode = useMapStore.getState().viewMode;
-  const maxScale = isMobileClient() ? MAX_SCALE_MOBILE : MAX_SCALE_DESKTOP;
-  let scale = clampViewportScale(vp.scale, viewMode, maxScale);
+  const app = sceneRefs.app.current;
+  const ctx = viewportScaleContext(app);
+  const maxScale = maxViewportScale(isMobileClient());
+  let scale = clampViewportScale(vp.scale, viewMode, maxScale, ctx);
   let x = vp.x;
   let y = vp.y;
 
-  if (Math.abs(scale - vp.scale) > 1e-7) {
-    const app = sceneRefs.app.current;
-    if (app) {
-      const ratio = scale / vp.scale;
-      const sw = app.screen.width;
-      const sh = app.screen.height;
-      x = sw / 2 - (sw / 2 - vp.x) * ratio;
-      y = sh / 2 - (sh / 2 - vp.y) * ratio;
-    }
+  if (Math.abs(scale - vp.scale) > 1e-7 && app) {
+    const ratio = scale / vp.scale;
+    const sw = app.screen.width;
+    const sh = app.screen.height;
+    x = sw / 2 - (sw / 2 - vp.x) * ratio;
+    y = sh / 2 - (sh / 2 - vp.y) * ratio;
   }
 
   world.scale.set(scale);
@@ -45,38 +51,10 @@ export function applyViewport(world: Container, vp: MapViewport): void {
   useMapStore.getState().setViewport({ x, y, scale });
 }
 
-const MAX_SCALE_DESKTOP = 8;
-const MAX_SCALE_MOBILE = 24;
 const ZOOM_SPEED = 0.001;
 const ZOOM_SPEED_3D = 0.0014;
-
-function maxScale(): number {
-  return isMobileClient() ? MAX_SCALE_MOBILE : MAX_SCALE_DESKTOP;
-}
-
-function clampScale(scale: number): number {
-  const viewMode = useMapStore.getState().viewMode;
-  return clampViewportScale(scale, viewMode, maxScale());
-}
-
-function applyZoomAt(
-  world: Container,
-  screenX: number,
-  screenY: number,
-  newScale: number,
-  setViewport: (v: { x: number; y: number; scale: number }) => void,
-): void {
-  const oldScale = world.scale.x;
-  const clamped = clampScale(newScale);
-  if (Math.abs(clamped - oldScale) < 1e-7) return;
-  const ratio = clamped / oldScale;
-  world.x = screenX - (screenX - world.x) * ratio;
-  world.y = screenY - (screenY - world.y) * ratio;
-  world.scale.set(clamped);
-  const vp = { x: world.x, y: world.y, scale: clamped };
-  setViewport(vp);
-  scheduleViewportPersist(vp);
-}
+/** Drag distance before 3D select-mode pan steals the pointer from click-to-select. */
+const PAN_DRAG_THRESHOLD = 5;
 
 /**
  * Scales + centres the world container so the entire map fits in the viewport.
@@ -98,13 +76,14 @@ export function fitMapToScreen(app: Application, world: Container) {
 }
 
 /**
- * Attaches wheel (zoom), pinch (mobile), and pointer (pan) listeners to the canvas.
+ * Attaches wheel (zoom), pinch (mobile), and pointer (pan) listeners to the map overlay.
+ * Capture phase so navigation wins over selection/transform hooks on the same element.
  */
 export function useMapViewport(
   appRef: React.RefObject<Application | null>,
   worldContainerRef: React.RefObject<Container | null>,
   appReady: boolean,
-  mapAreaRef?: React.RefObject<HTMLElement | null>,
+  interactionReady: boolean,
 ) {
   const setViewport = useMapStore((s) => s.setViewport);
   const activeToolRef = useRef(useMapStore.getState().activeTool);
@@ -116,6 +95,7 @@ export function useMapViewport(
   }, []);
 
   const isPanning = useRef(false);
+  const pendingPan = useRef<{ pointerId: number; x: number; y: number; vpX: number; vpY: number } | null>(null);
   const panStart = useRef({ x: 0, y: 0, vpX: 0, vpY: 0 });
   const spaceDown = useRef(false);
   const pointers = useRef(new Map<number, { x: number; y: number }>());
@@ -124,11 +104,16 @@ export function useMapViewport(
   useEffect(() => {
     const app = appRef.current;
     const world = worldContainerRef.current;
-    if (!app || !world) return;
+    const mapEl = getMapInteractionEl();
+    if (!app || !world || !mapEl || !interactionReady) return;
+    const el = mapEl;
+
     const pixiApp = app;
     const w = world;
-    const canvas = pixiApp.canvas;
-    canvas.style.touchAction = 'none';
+    const scaleCtx = (): ViewportScaleContext | undefined => viewportScaleContext(pixiApp);
+    const maxScale = () => maxViewportScale(isMobileClient());
+
+    el.style.touchAction = 'none';
 
     function pointerList(): { x: number; y: number }[] {
       return [...pointers.current.values()];
@@ -141,75 +126,100 @@ export function useMapViewport(
     }
 
     function pointerMidScreen(): { x: number; y: number } {
-      const rect = canvas.getBoundingClientRect();
       const pts = pointerList();
-      return {
-        x: (pts[0]!.x + pts[1]!.x) / 2 - rect.left,
-        y: (pts[0]!.y + pts[1]!.y) / 2 - rect.top,
-      };
+      const midX = (pts[0]!.x + pts[1]!.x) / 2;
+      const midY = (pts[0]!.y + pts[1]!.y) / 2;
+      const pt = clientToCanvas(midX, midY);
+      return pt ?? { x: pixiApp.screen.width / 2, y: pixiApp.screen.height / 2 };
+    }
+
+    function setCursor(cursor: string) {
+      el.style.cursor = cursor;
+    }
+
+    function persistIfChanged(vp: MapViewport) {
+      setViewport(vp);
+      scheduleViewportPersist(vp);
     }
 
     function onKeyDown(e: KeyboardEvent) {
-      if (e.code === 'Space') {
-        spaceDown.current = true;
-        canvas.style.cursor = 'grab';
-      }
+      if (e.code !== 'Space' || e.repeat) return;
+      spaceDown.current = true;
+      setCursor('grab');
     }
     function onKeyUp(e: KeyboardEvent) {
-      if (e.code === 'Space') {
-        spaceDown.current = false;
-        if (!isPanning.current) canvas.style.cursor = 'default';
-      }
+      if (e.code !== 'Space') return;
+      spaceDown.current = false;
+      if (!isPanning.current) setCursor('');
     }
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
 
     function isOverMapArea(clientX: number, clientY: number): boolean {
-      const area = mapAreaRef?.current ?? canvas;
-      const rect = area.getBoundingClientRect();
+      const rect = el.getBoundingClientRect();
       return clientX >= rect.left && clientX <= rect.right
         && clientY >= rect.top && clientY <= rect.bottom;
+    }
+
+    function zoomAtClient(clientX: number, clientY: number, newScale: number) {
+      const pt = clientToCanvas(clientX, clientY);
+      const mouseX = pt?.x ?? pixiApp.screen.width / 2;
+      const mouseY = pt?.y ?? pixiApp.screen.height / 2;
+      if (applyMapZoomAt(w, mouseX, mouseY, newScale, maxScale(), setViewport, scaleCtx())) {
+        scheduleViewportPersist({ x: w.x, y: w.y, scale: w.scale.x });
+      }
     }
 
     function onWheel(e: WheelEvent) {
       if (!isOverMapArea(e.clientX, e.clientY)) return;
       e.preventDefault();
-      e.stopPropagation();
-      const rect = canvas.getBoundingClientRect();
-      const mouseX = e.clientX - rect.left;
-      const mouseY = e.clientY - rect.top;
+      e.stopImmediatePropagation();
       const zoomSpeed = useMapStore.getState().viewMode === '3d' ? ZOOM_SPEED_3D : ZOOM_SPEED;
       const delta = -e.deltaY * zoomSpeed;
       const oldScale = w.scale.x;
-      applyZoomAt(w, mouseX, mouseY, oldScale + delta * oldScale, setViewport);
+      zoomAtClient(e.clientX, e.clientY, oldScale + delta * oldScale);
     }
-    const mapArea = mapAreaRef?.current;
-    const wheelRoot: EventTarget = mapArea ?? document;
-    const onWheelCapture = (evt: Event) => onWheel(evt as WheelEvent);
-    wheelRoot.addEventListener('wheel', onWheelCapture, { passive: false, capture: true });
 
     function onPointerDown(e: PointerEvent) {
+      if (!isOverMapArea(e.clientX, e.clientY)) return;
+
       pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
 
       if (pointers.current.size >= 2) {
         isPanning.current = false;
         pinchStart.current = { dist: pointerDistance(), scale: w.scale.x };
+        e.preventDefault();
+        e.stopImmediatePropagation();
         return;
       }
 
-      const isMiddle = e.button === 1;
-      const isSpaceLeft = spaceDown.current && e.button === 0;
-      const isPanTool = activeToolRef.current === 'pan' && e.button === 0;
-      const is3dLeftPan = useMapStore.getState().viewMode === '3d'
-        && e.button === 0
-        && activeToolRef.current !== 'select';
+      const mode = useMapStore.getState().viewMode;
+      const tool = activeToolRef.current;
+      if (!shouldStartMapPan(e, spaceDown.current, tool, mode)) return;
+      if (pickHandle(e.clientX, e.clientY)) return;
 
-      if (!isMiddle && !isSpaceLeft && !isPanTool && !is3dLeftPan) return;
+      const deferForSelect = mode === '3d' && tool === 'select' && !spaceDown.current && !e.shiftKey;
+      if (deferForSelect) {
+        pendingPan.current = {
+          pointerId: e.pointerId,
+          x: e.clientX,
+          y: e.clientY,
+          vpX: w.x,
+          vpY: w.y,
+        };
+        return;
+      }
 
       isPanning.current = true;
       panStart.current = { x: e.clientX, y: e.clientY, vpX: w.x, vpY: w.y };
-      canvas.style.cursor = 'grabbing';
-      canvas.setPointerCapture(e.pointerId);
+      setCursor('grabbing');
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      try {
+        el.setPointerCapture(e.pointerId);
+      } catch {
+        /* ok */
+      }
     }
 
     function onPointerMove(e: PointerEvent) {
@@ -222,34 +232,65 @@ export function useMapViewport(
         const dist = pointerDistance();
         if (dist < 1 || pinchStart.current.dist < 1) return;
         const mid = pointerMidScreen();
-        const newScale = pinchStart.current.scale * (dist / pinchStart.current.dist);
-        applyZoomAt(w, mid.x, mid.y, newScale, setViewport);
+        zoomAtClient(mid.x, mid.y, pinchStart.current.scale * (dist / pinchStart.current.dist));
         return;
       }
 
-      if (!isPanning.current) return;
-      const screenDx = e.clientX - panStart.current.x;
-      const screenDy = e.clientY - panStart.current.y;
-      const { viewMode, view3dOrbit } = useMapStore.getState();
-      if (viewMode === '3d') {
-        const vp = apply3dScreenPan(
-          w,
-          pixiApp,
-          screenDx,
-          screenDy,
-          panStart.current.vpX,
-          panStart.current.vpY,
-          view3dOrbit.azimuth,
-        );
-        setViewport(vp);
-        scheduleViewportPersist(vp);
-      } else {
-        w.x = panStart.current.vpX + screenDx;
-        w.y = panStart.current.vpY + screenDy;
-        const vp = { x: w.x, y: w.y, scale: w.scale.x };
-        setViewport(vp);
-        scheduleViewportPersist(vp);
+      const pending = pendingPan.current;
+      if (pending && !isPanning.current && e.pointerId === pending.pointerId) {
+        const dx = e.clientX - pending.x;
+        const dy = e.clientY - pending.y;
+        if (Math.hypot(dx, dy) >= PAN_DRAG_THRESHOLD) {
+          isPanning.current = true;
+          panStart.current = {
+            x: pending.x,
+            y: pending.y,
+            vpX: pending.vpX,
+            vpY: pending.vpY,
+          };
+          pendingPan.current = null;
+          setCursor('grabbing');
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          try {
+            el.setPointerCapture(e.pointerId);
+          } catch {
+            /* ok */
+          }
+        } else {
+          return;
+        }
       }
+
+      if (!isPanning.current) return;
+      e.preventDefault();
+
+      const rawDx = e.clientX - panStart.current.x;
+      const rawDy = e.clientY - panStart.current.y;
+      const { x: screenDx, y: screenDy } = clientDeltaToScreen(rawDx, rawDy);
+      const { viewMode: mode, view3dOrbit } = useMapStore.getState();
+      const vp = mode === '3d'
+        ? apply3dScreenPan(
+            w,
+            pixiApp,
+            screenDx,
+            screenDy,
+            panStart.current.vpX,
+            panStart.current.vpY,
+            view3dOrbit.azimuth,
+          )
+        : applyScreenPan(
+            panStart.current.vpX,
+            panStart.current.vpY,
+            screenDx,
+            screenDy,
+            0,
+            w.scale.x,
+            pixiApp,
+          );
+      w.x = vp.x;
+      w.y = vp.y;
+      persistIfChanged(vp);
     }
 
     function onPointerUp(e: PointerEvent) {
@@ -258,32 +299,41 @@ export function useMapViewport(
         pinchStart.current = null;
       }
 
+      if (pendingPan.current?.pointerId === e.pointerId) {
+        pendingPan.current = null;
+      }
+
       if (!isPanning.current) return;
       isPanning.current = false;
-      canvas.style.cursor = spaceDown.current ? 'grab' : 'default';
+      setCursor(spaceDown.current ? 'grab' : '');
       try {
-        canvas.releasePointerCapture(e.pointerId);
+        el.releasePointerCapture(e.pointerId);
       } catch {
         /* ok */
       }
     }
 
-    canvas.addEventListener('pointerdown', onPointerDown);
-    canvas.addEventListener('pointermove', onPointerMove, { passive: false });
-    canvas.addEventListener('pointerup', onPointerUp);
-    canvas.addEventListener('pointercancel', onPointerUp);
+    const captureOpts = { passive: false, capture: true } as AddEventListenerOptions;
+    el.addEventListener('wheel', onWheel, captureOpts);
+    el.addEventListener('pointerdown', onPointerDown, captureOpts);
+    el.addEventListener('pointermove', onPointerMove, captureOpts);
+    el.addEventListener('pointerup', onPointerUp, captureOpts);
+    el.addEventListener('pointercancel', onPointerUp, captureOpts);
 
     return () => {
-      canvas.style.touchAction = '';
+      el.style.touchAction = '';
+      el.style.cursor = '';
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
-      wheelRoot.removeEventListener('wheel', onWheelCapture, { capture: true } as AddEventListenerOptions);
-      canvas.removeEventListener('pointerdown', onPointerDown);
-      canvas.removeEventListener('pointermove', onPointerMove);
-      canvas.removeEventListener('pointerup', onPointerUp);
-      canvas.removeEventListener('pointercancel', onPointerUp);
+      el.removeEventListener('wheel', onWheel, captureOpts);
+      el.removeEventListener('pointerdown', onPointerDown, captureOpts);
+      el.removeEventListener('pointermove', onPointerMove, captureOpts);
+      el.removeEventListener('pointerup', onPointerUp, captureOpts);
+      el.removeEventListener('pointercancel', onPointerUp, captureOpts);
       pointers.current.clear();
       pinchStart.current = null;
+      isPanning.current = false;
+      pendingPan.current = null;
     };
-  }, [appRef, worldContainerRef, appReady, setViewport, mapAreaRef]);
+  }, [appRef, worldContainerRef, appReady, interactionReady, setViewport]);
 }

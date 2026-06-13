@@ -47,12 +47,15 @@ export function isMapGroundHit(hit: Item | null): boolean {
   return hit === null || hit.type === 'map';
 }
 
-/** Canvas or a child of the Pixi view (pointer / right-click target varies by browser). */
+/** Map interaction layer, Pixi canvas, or children (pointer target varies by browser). */
 export function isCanvasPointerEvent(e: { target: EventTarget | null }): boolean {
-  const canvas = sceneRefs.app.current?.canvas;
-  if (!canvas) return false;
+  const pixiCanvas = sceneRefs.app.current?.canvas;
+  const interaction = sceneRefs.interactionRoot.current;
   const target = e.target as Node | null;
-  return target === canvas || (target != null && canvas.contains(target));
+  if (!target) return false;
+  if (interaction && (target === interaction || interaction.contains(target))) return true;
+  if (!pixiCanvas) return false;
+  return target === pixiCanvas || pixiCanvas.contains(target);
 }
 
 /** @deprecated Use isCanvasPointerEvent */

@@ -1,5 +1,6 @@
 import { getActiveMap, useItemStore } from './store/itemStore';
 import { emitItemRemove, emitItemUpdate } from './sceneSync';
+import { emitTokenDelete } from './token/tokenSync';
 import { removeWallIndices } from '@/systems/map/wallUtils';
 import type { MapItem } from './types';
 
@@ -11,8 +12,17 @@ export function deleteCurrentSelection(): boolean {
   let changed = false;
 
   if (itemIds.length > 0) {
-    store.removeItems(itemIds);
-    emitItemRemove(itemIds);
+    const tokenIds = itemIds.filter((id) => store.items[id]?.type === 'token');
+    const otherIds = itemIds.filter((id) => !tokenIds.includes(id));
+
+    for (const tokenId of tokenIds) {
+      emitTokenDelete(tokenId);
+    }
+    if (otherIds.length > 0) {
+      store.removeItems(otherIds);
+      emitItemRemove(otherIds);
+    }
+    store.select([], 'set');
     changed = true;
   }
 

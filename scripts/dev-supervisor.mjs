@@ -2,7 +2,7 @@
  * Dev orchestrator: keeps the API server running and exposes a control endpoint
  * so the Vite proxy can request a restart when it hits ECONNREFUSED.
  */
-import { spawn } from 'node:child_process';
+import { spawn, execSync } from 'node:child_process';
 import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -26,8 +26,25 @@ function log(tag, message) {
   console.log(`[${tag}] ${message}`);
 }
 
+function freePort(port) {
+  try {
+    if (process.platform === 'win32') {
+      execSync(
+        `powershell -NoProfile -Command "Get-NetTCPConnection -LocalPort ${port} -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }"`,
+        { stdio: 'ignore' },
+      );
+    } else {
+      execSync(`lsof -ti:${port} | xargs kill -9 2>/dev/null || true`, { stdio: 'ignore', shell: true });
+    }
+  } catch {
+    /* best effort */
+  }
+}
+
 function spawnServer() {
   if (shuttingDown) return;
+
+  freePort(3001);
 
   if (serverProcess) {
     serverProcess.removeAllListeners('exit');
