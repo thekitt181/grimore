@@ -933,6 +933,34 @@ function tallyBooksSourceCountsForKind(
   return counts;
 }
 
+function entryHasImportedBookSource(source: string | undefined, bundled: Set<string>): boolean {
+  const parts = splitSources(source);
+  if (parts.length === 0) return false;
+  return parts.some((part) => {
+    const norm = normalizeSourceLabel(part);
+    if (!norm || norm === 'custom') return false;
+    return !bundled.has(norm);
+  });
+}
+
+/** Book counts from merged catalog — matches what players see when opening a source. */
+async function tallyBookSourceCountsFromCatalog(
+  kind: 'monsters' | 'items' | 'spells',
+  policy: CompendiumVisibilityPolicy,
+  counts: SourceCountMap = new Map(),
+): Promise<SourceCountMap> {
+  await ensureCatalogIncludesOverrides();
+  const compendiumKind = kindToCompendiumKind(kind);
+  const bundled = bundledSourceLabelSet();
+  const merged = kind === 'monsters'
+    ? filterVisible('monster', await getCachedMonsters(), policy, true)
+    : kind === 'items'
+      ? filterVisible('item', await getCachedItems(), policy, true)
+      : filterVisible('spell', await getCachedSpells(), policy, true);
+  const bookEntries = merged.filter((entry) => entryHasImportedBookSource(entry.source, bundled));
+  return tallyBooksSourceCountsForKind(bookEntries, compendiumKind, policy, counts);
+}
+
 function tallyBooksSourceCounts(
   raw: Awaited<ReturnType<typeof readRawGlobalDoc>>,
   policy: CompendiumVisibilityPolicy,
@@ -956,14 +984,11 @@ export async function listAllBookSources(): Promise<
   const policy = await readVisibilityPolicyFast();
   let counts: SourceCountMap = new Map();
 
-  // Always tally from Postgres — book counts change during DDB import.
-  const { readImportedNameSourceRowsForBooks } = await import('./compendiumPostgres');
-  const imported = await readImportedNameSourceRowsForBooks();
-  for (const kind of ['monster', 'item', 'spell'] as const) {
-    counts = tallyBooksSourceCountsForKind(imported[kind], kind, policy, counts);
+  for (const kind of ['monsters', 'items', 'spells'] as const) {
+    counts = await tallyBookSourceCountsFromCatalog(kind, policy, counts);
   }
 
-  // Local data.json mirror when Postgres has no imports yet.
+  // Local data.json mirror when catalog has no imported books yet.
   if (counts.size === 0) {
     const rawFallback = loadRawGlobalFallback();
     if (rawFallback) {
@@ -1197,10 +1222,7 @@ export async function listSources(
   const policy = await readVisibilityPolicyFast();
 
   if (excludeBundled) {
-    const compendiumKind = kindToCompendiumKind(kind);
-    const { readImportedNameSourceRowsForBooks } = await import('./compendiumPostgres');
-    const imported = await readImportedNameSourceRowsForBooks();
-    const counts = tallyBooksSourceCountsForKind(imported[compendiumKind], compendiumKind, policy);
+    const counts = await tallyBookSourceCountsFromCatalog(kind, policy);
     return mapSourceListResults(counts, policy, true, true, null);
   }
 
