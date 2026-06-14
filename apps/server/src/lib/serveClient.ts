@@ -25,6 +25,19 @@ function hasAssetBundle(dist: string): boolean {
   return fs.existsSync(assetsDir) && fs.readdirSync(assetsDir).length > 0;
 }
 
+/** Warn when index.html references bundles that are missing from disk. */
+function verifyIndexAssets(dist: string): void {
+  const indexPath = path.join(dist, 'index.html');
+  const html = fs.readFileSync(indexPath, 'utf8');
+  const refs = [...html.matchAll(/(?:src|href)="(\/assets\/[^"]+)"/g)].map((m) => m[1]!);
+  const missing = refs.filter((ref) => !fs.existsSync(path.join(dist, ref.replace(/^\//, '').replace(/\//g, path.sep))));
+  if (missing.length > 0) {
+    console.error('[Server] index.html references missing assets:', missing.join(', '));
+  } else if (refs.length > 0) {
+    console.log(`[Server] Verified ${refs.length} client bundle reference(s) in index.html`);
+  }
+}
+
 /** Serve Vite build + SPA fallback when dist exists or SERVE_CLIENT=1. */
 export function mountClientSpa(app: Express): boolean {
   const enabled = process.env['SERVE_CLIENT'] === '1';
@@ -38,21 +51,36 @@ export function mountClientSpa(app: Express): boolean {
 
   if (!hasAssetBundle(dist)) {
     console.warn(`[Server] Client dist at ${dist} has no assets/ — rebuild the client`);
+  } else {
+    verifyIndexAssets(dist);
   }
 
   console.log(`[Server] Serving client static files from ${dist}`);
-  app.use(express.static(dist, { index: false, maxAge: '1h' }));
+  app.use(express.static(dist, {
+    index: false,
+    maxAge: '1y',
+    setHeaders(res, filePath) {
+      if (filePath.includes(`${path.sep}assets${path.sep}`)) {
+        res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+        return;
+      }
+      if (filePath.endsWith(`${path.sep}index.html`)) {
+        res.setHeader('Cache-Control', 'no-cache');
+      }
+    },
+  }));
 
   app.get('*', (req, res, next) => {
     if (req.path.startsWith('/api') || req.path.startsWith('/socket.io')) {
       next();
       return;
     }
-    // Missing hashed bundles must 404 — do not return index.html (breaks MIME types).
+    // Missing hashed bundles must 404 — never return index.html (breaks MIME types).
     if (req.path.startsWith('/assets/') || path.extname(req.path) !== '') {
       res.status(404).type('text/plain').send('Not found');
       return;
     }
+    res.set('Cache-Control', 'no-cache');
     res.sendFile(path.join(dist, 'index.html'));
   });
   return true;
