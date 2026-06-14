@@ -4,6 +4,7 @@ import { dash } from '@better-auth/infra';
 import { bearer } from 'better-auth/plugins';
 import { prisma } from './prisma';
 import { getClientOrigins, getPrimaryClientUrl } from './clientOrigins';
+import { sendEmail } from './email';
 
 const googleClientId = process.env['GOOGLE_CLIENT_ID']?.trim();
 const googleClientSecret = process.env['GOOGLE_CLIENT_SECRET']?.trim();
@@ -31,6 +32,21 @@ export const auth = betterAuth({
   emailAndPassword: {
     enabled: true,
     minPasswordLength: 8,
+    revokeSessionsOnPasswordReset: true,
+    sendResetPassword: async ({ user, url }) => {
+      void sendEmail({
+        to: user.email,
+        subject: 'Reset your Grimoire password',
+        text: [
+          'You requested a password reset for your Grimoire account.',
+          '',
+          `Reset your password: ${url}`,
+          '',
+          'If you did not request this, you can ignore this email.',
+          'This link expires in one hour.',
+        ].join('\n'),
+      });
+    },
   },
   ...(googleClientId && googleClientSecret
     ? {

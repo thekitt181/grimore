@@ -6,8 +6,11 @@ import { Dashboard } from '@/pages/Dashboard';
 import { CampaignDetail } from '@/pages/CampaignDetail';
 import { SessionPage } from '@/pages/SessionPage';
 import { JoinPage } from '@/pages/JoinPage';
+import { SupportPage } from '@/pages/SupportPage';
 import { SignInPage } from '@/pages/SignInPage';
 import { SignUpPage } from '@/pages/SignUpPage';
+import { ForgotPasswordPage } from '@/pages/ForgotPasswordPage';
+import { ResetPasswordPage } from '@/pages/ResetPasswordPage';
 import { DdbImportJobBanner } from '@/systems/ddb/DdbImportJobBanner';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -55,6 +58,8 @@ export default function App() {
       {/* Public */}
       <Route path="/sign-in/*" element={<SignInPage />} />
       <Route path="/sign-up/*" element={<SignUpPage />} />
+      <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+      <Route path="/reset-password" element={<ResetPasswordPage />} />
 
       {/* Protected */}
       <Route
@@ -86,6 +91,14 @@ export default function App() {
         element={
           <ProtectedRoute>
             <JoinPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/support"
+        element={
+          <ProtectedRoute>
+            <SupportPage />
           </ProtectedRoute>
         }
       />

@@ -17,6 +17,7 @@ import ddbRoutes from './routes/ddb';
 import mapsRoutes from './routes/maps';
 import sceneRoutes from './routes/scenes';
 import handoutRoutes from './routes/handouts';
+import supportRoutes, { handleSupportWebhook } from './routes/support';
 import { getClientOrigins, getPrimaryClientUrl } from './lib/clientOrigins';
 import { toNodeHandler } from 'better-auth/node';
 import { auth, getAuthBaseUrl, isBetterAuthDashboardEnabled, isGoogleOAuthEnabled } from './lib/auth';
@@ -57,6 +58,11 @@ app.use(cors({
 }));
 app.use(cookieParser());
 app.all('/api/auth/*', toNodeHandler(auth));
+app.post(
+  '/api/support/webhook',
+  express.raw({ type: 'application/json' }),
+  (req, res) => { void handleSupportWebhook(req, res); },
+);
 app.use(express.json({ limit: '50mb' }));
 
 app.get('/health', (_req, res) => {
@@ -102,6 +108,7 @@ app.use('/api/ddb', ddbRoutes);
 app.use('/api/maps', mapsRoutes);
 app.use('/api/scenes', sceneRoutes);
 app.use('/api/handouts', handoutRoutes);
+app.use('/api/support', supportRoutes);
 
 mountClientSpa(app);
 

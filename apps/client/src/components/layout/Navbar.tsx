@@ -34,7 +34,7 @@ export function Navbar() {
       </Link>
 
       {/* Nav links */}
-      <nav className="hidden md:flex items-center gap-6">
+      <nav className="flex items-center gap-4 md:gap-6">
         <Link
           to="/"
           className="font-ui text-sm transition-colors duration-200"
@@ -47,6 +47,19 @@ export function Navbar() {
           }
         >
           Campaigns
+        </Link>
+        <Link
+          to="/support"
+          className="font-ui text-sm transition-colors duration-200"
+          style={{ color: 'var(--color-text-secondary)' }}
+          onMouseEnter={(e) =>
+            ((e.target as HTMLElement).style.color = 'var(--color-text-primary)')
+          }
+          onMouseLeave={(e) =>
+            ((e.target as HTMLElement).style.color = 'var(--color-text-secondary)')
+          }
+        >
+          Support
         </Link>
       </nav>
 

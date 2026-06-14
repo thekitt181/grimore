@@ -20,6 +20,13 @@ model User {
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
+  // Stripe supporter (optional — set via /api/support webhook)
+  stripeCustomerId     String?   @unique
+  stripeSubscriptionId String?   @unique
+  supporterActive      Boolean   @default(false)
+  supporterPlan        String?   // "monthly" | "one_time"
+  supporterSince       DateTime?
+
   // Relations
   ownedCampaigns       Campaign[]            @relation("CampaignGM")
   memberships          CampaignMember[]

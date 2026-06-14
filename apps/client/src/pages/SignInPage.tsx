@@ -1,10 +1,12 @@
 import { useState, type FormEvent } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { authClient, signInWithGoogle } from '@/lib/auth-client';
 import { useGoogleOAuthAvailable } from '@/hooks/useGoogleOAuthAvailable';
 
 export function SignInPage() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const passwordResetSuccess = (location.state as { passwordReset?: boolean } | null)?.passwordReset;
   const googleOAuthAvailable = useGoogleOAuthAvailable();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -71,6 +73,12 @@ export function SignInPage() {
             Sign in
           </h2>
 
+          {passwordResetSuccess && (
+            <p className="text-sm rounded px-3 py-2" style={{ background: '#1a2e1a', color: '#b4ffb4' }}>
+              Password updated. Sign in with your new password.
+            </p>
+          )}
+
           {error && (
             <p className="text-sm rounded px-3 py-2" style={{ background: '#3a1515', color: '#ffb4b4' }}>
               {error}
@@ -114,6 +122,12 @@ export function SignInPage() {
               }}
             />
           </label>
+
+          <p className="text-right font-ui text-sm -mt-1">
+            <Link to="/forgot-password" style={{ color: 'var(--color-accent-gold)' }}>
+              Forgot password?
+            </Link>
+          </p>
 
           <button
             type="submit"
