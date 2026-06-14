@@ -1,3 +1,4 @@
+import { isMobileClient } from '@/lib/socket';
 import { sceneRefs } from '@/systems/scene/sceneRefs';
 
 /** Apply 2D/3D visibility on Pixi layers — call from useLayoutEffect so 3D never flashes 2D art. */
@@ -5,6 +6,8 @@ export function applyPixiViewMode(is3d: boolean): void {
   const app = sceneRefs.app.current;
   const world = sceneRefs.world.current;
   if (!app || !world) return;
+
+  const mobile = isMobileClient();
 
   world.eventMode = is3d ? 'none' : 'static';
 
@@ -20,8 +23,20 @@ export function applyPixiViewMode(is3d: boolean): void {
   }
 
   if (sceneRefs.items.current) {
-    sceneRefs.items.current.alpha = is3d ? 0 : 1;
-    sceneRefs.items.current.visible = !is3d;
+    if (is3d && !mobile) {
+      sceneRefs.items.current.alpha = 0;
+      sceneRefs.items.current.visible = false;
+    } else if (is3d && mobile) {
+      // Keep map art in Pixi under the Three overlay — mobile WebGL can fail or size to 0.
+      sceneRefs.items.current.alpha = 1;
+      sceneRefs.items.current.visible = true;
+      for (const child of sceneRefs.items.current.children) {
+        if (child.label?.startsWith('walls_')) child.visible = false;
+      }
+    } else {
+      sceneRefs.items.current.alpha = 1;
+      sceneRefs.items.current.visible = true;
+    }
   }
   if (sceneRefs.fog.current) {
     sceneRefs.fog.current.alpha = is3d ? 0 : 1;

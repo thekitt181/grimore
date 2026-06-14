@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { Container } from 'pixi.js';
+import { isMobileClient } from '@/lib/socket';
 import { useItemStore, getActiveMap } from '../store/itemStore';
 import { useSessionStore } from '@/store/sessionStore';
 import { useInitiativeStore } from '@/systems/map/store/initiativeStore';
@@ -56,6 +57,7 @@ export function useItemRenderer(
     if (!layer) return;
 
     layer.sortableChildren = true;
+    const mobile3d = viewMode === '3d' && isMobileClient();
     const gm: boolean = myRole === 'GM';
     const ctx: RenderContext = {
       gm,
@@ -136,8 +138,13 @@ export function useItemRenderer(
       const show = item.visible || gm;
       const alpha = item.visible || !gm ? 1 : 0.35;
 
-      c.visible = show;
-      c.alpha = show ? alpha : 0;
+      if (viewMode === '3d' && (item.type !== 'map' || !mobile3d)) {
+        c.visible = false;
+        c.alpha = 0;
+      } else {
+        c.visible = show;
+        c.alpha = show ? alpha : 0;
+      }
 
       // Wall overlay — always above map background/grid, below tokens
       if (item.type === 'map') {
@@ -163,7 +170,7 @@ export function useItemRenderer(
         wc.rotation = (map.rotation * Math.PI) / 180;
         wc.zIndex = wallDisplayZIndex(map.zIndex);
         // LOS walls affect everyone; only the GM sees the wall overlay.
-        if (gm) {
+        if (gm && viewMode !== '3d') {
           wc.visible = true;
           wc.alpha = map.visible ? 1 : 0.35;
         } else {

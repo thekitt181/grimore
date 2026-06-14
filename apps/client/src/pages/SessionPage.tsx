@@ -283,14 +283,14 @@ export function SessionPage() {
       </header>
 
       {/* ── Main layout ──────────────────────────────────────────────────────── */}
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 flex min-h-0 overflow-hidden">
         {/* Toolbar */}
         <div className="p-2 flex flex-col items-start shrink-0 z-10 h-full min-h-0 overflow-y-auto">
           <MapToolbar />
         </div>
 
         {/* Map canvas + overlay panels */}
-        <div className="flex-1 relative overflow-hidden">
+        <div className="flex-1 min-h-0 relative overflow-hidden">
           <MapCanvas />
           <SceneTransitionOverlay />
           <MobileDdbTokenBar />

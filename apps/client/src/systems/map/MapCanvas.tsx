@@ -576,16 +576,16 @@ export function MapCanvas() {
   return (
     <div
       ref={dropZoneRef}
-      className="w-full h-full relative select-none"
+      className="w-full h-full min-h-0 relative select-none"
       style={{ background: '#0a0a0f' }}
     >
       <div
         ref={containerRef}
-        className="absolute inset-0 w-full h-full z-0"
+        className="absolute inset-0 w-full h-full min-h-0 z-0"
         style={{ pointerEvents: 'none' }}
       />
 
-      <div className="absolute inset-0 z-[1] pointer-events-none [&_*]:pointer-events-none">
+      <div className="absolute inset-0 z-[1] min-h-0 w-full h-full pointer-events-none [&_*]:pointer-events-none">
         <MapSceneCanvas />
       </div>
 

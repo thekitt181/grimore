@@ -3,6 +3,7 @@ import { Canvas } from '@react-three/fiber';
 import type { RootState } from '@react-three/fiber';
 import type { WebGLRenderer } from 'three';
 import * as THREE from 'three';
+import { isMobileClient } from '@/lib/socket';
 import { useItemStore, selectSortedItems } from '@/systems/scene/store/itemStore';
 import { sceneRefs } from '@/systems/scene/sceneRefs';
 import { sceneCameraRef } from './sceneCameraRef';
@@ -72,6 +73,7 @@ function TokenOverlay2DContent() {
 function Map3DSceneContent() {
   const items = useItemStore(selectSortedItems);
   const activeMapId = useItemStore((s) => s.activeMapId);
+  const mobile = isMobileClient();
   const activeMap = useMemo(() => {
     if (activeMapId) {
       const m = items.find((i) => i.id === activeMapId && i.type === 'map');
@@ -94,7 +96,7 @@ function Map3DSceneContent() {
   return (
     <>
       <ambientLight intensity={1.05} />
-      <directionalLight position={[800, 1400, 500]} intensity={1.35} castShadow shadow-mapSize={[2048, 2048]} />
+      <directionalLight position={[800, 1400, 500]} intensity={1.35} castShadow={!mobile} />
       <directionalLight position={[-400, 900, -400]} intensity={0.65} />
       <hemisphereLight args={['#f0ece4', '#2a2520', 0.55]} />
 
@@ -130,6 +132,8 @@ function MapPickGroup({ map }: { map: MapItem }) {
 const canvasStyle = {
   position: 'absolute' as const,
   inset: 0,
+  width: '100%',
+  height: '100%',
   touchAction: 'none' as const,
   pointerEvents: 'none' as const,
 };
@@ -137,6 +141,8 @@ const canvasStyle = {
 function onThreeCanvasCreated({ gl }: { gl: WebGLRenderer }) {
   gl.setClearColor(0x000000, 0);
   gl.domElement.style.pointerEvents = 'none';
+  gl.domElement.style.width = '100%';
+  gl.domElement.style.height = '100%';
   sceneRefs.threeCanvas.current = gl.domElement;
 }
 
@@ -170,15 +176,35 @@ export function MapSceneCanvas() {
 
   const orthoDefaults = useStableOrthoCameraDefaults();
 
+  const mobile = isMobileClient();
   const glProps = {
-    antialias: true,
+    antialias: !mobile,
     alpha: true,
+    powerPreference: (mobile ? 'default' : 'high-performance') as WebGLPowerPreference,
+    failIfMajorPerformanceCaveat: false,
   };
   const dpr = pixiRenderResolution();
+  const useShadows = !mobile;
 
   useEffect(() => () => {
     sceneRefs.threeCanvas.current = null;
     sceneCameraRef.liveCamera = null;
+  }, [is3d, hasModelTokens]);
+
+  useEffect(() => {
+    if (!is3d && !hasModelTokens) return;
+    const onResize = () => {
+      const canvas = sceneRefs.threeCanvas.current;
+      if (!canvas) return;
+      canvas.style.width = '100%';
+      canvas.style.height = '100%';
+    };
+    window.addEventListener('resize', onResize);
+    window.addEventListener('orientationchange', onResize);
+    return () => {
+      window.removeEventListener('resize', onResize);
+      window.removeEventListener('orientationchange', onResize);
+    };
   }, [is3d, hasModelTokens]);
 
   if (!is3d && !hasModelTokens) return null;
@@ -202,12 +228,13 @@ export function MapSceneCanvas() {
   return (
     <Canvas
       orthographic
-      shadows
+      shadows={useShadows}
       frameloop="always"
       camera={orthoDefaults}
       style={canvasStyle}
       gl={glProps}
       dpr={dpr}
+      resize={{ scroll: false, debounce: 0 }}
       onCreated={on3dCanvasCreated}
     >
       <color attach="background" args={['#1e1e22']} />
