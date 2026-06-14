@@ -59,7 +59,7 @@ export function Navbar() {
             ((e.target as HTMLElement).style.color = 'var(--color-text-secondary)')
           }
         >
-          Support
+          Tip jar
         </Link>
       </nav>
 

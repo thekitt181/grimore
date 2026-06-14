@@ -35,3 +35,40 @@ export function stripeOneTimeAmountCents(): number {
 export function stripeWebhookSecret(): string | null {
   return process.env['STRIPE_WEBHOOK_SECRET']?.trim() || null;
 }
+
+export function stripeErrorMessage(err: unknown, fallback: string): string {
+  if (err && typeof err === 'object' && 'type' in err && (err as { type?: string }).type === 'StripeInvalidRequestError') {
+    const message = (err as { message?: string }).message;
+    if (message) return message;
+  }
+  if (err instanceof Error && err.message) return err.message;
+  return fallback;
+}
+
+export function isMissingStripeCustomerError(err: unknown): boolean {
+  if (!err || typeof err !== 'object') return false;
+  const stripeErr = err as { code?: string; param?: string; message?: string };
+  return (
+    stripeErr.code === 'resource_missing'
+    && (stripeErr.param === 'customer' || /no such customer/i.test(stripeErr.message ?? ''))
+  );
+}
+
+/** Ensure monthly vs one-time price IDs are not swapped in env vars. */
+export async function validateSupportPrice(
+  stripe: Stripe,
+  priceId: string,
+  kind: 'monthly' | 'one_time',
+): Promise<void> {
+  const price = await stripe.prices.retrieve(priceId);
+  if (kind === 'monthly' && !price.recurring) {
+    throw new Error(
+      'STRIPE_PRICE_SUPPORT_MONTHLY must be a recurring price. Swap the monthly and one-time price IDs in Render if needed.',
+    );
+  }
+  if (kind === 'one_time' && price.recurring) {
+    throw new Error(
+      'STRIPE_PRICE_SUPPORT_ONETIME must be a one-time price. Swap the monthly and one-time price IDs in Render if needed.',
+    );
+  }
+}

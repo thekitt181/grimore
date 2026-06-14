@@ -5,15 +5,19 @@ import { requireAuth, type AuthenticatedRequest } from '../middleware/auth';
 import { getPrimaryClientUrl } from '../lib/clientOrigins';
 import {
   getStripe,
+  isMissingStripeCustomerError,
   isStripeConfigured,
+  stripeErrorMessage,
   stripeMonthlyPriceId,
   stripeOneTimeAmountCents,
   stripeOneTimePriceId,
   stripeWebhookSecret,
+  validateSupportPrice,
 } from '../lib/stripe';
 import {
   applyCheckoutCompleted,
   applySubscriptionChange,
+  clearStripeCustomerId,
   getOrCreateStripeCustomer,
 } from '../services/supportStripe';
 import { prisma } from '../lib/prisma';
@@ -26,6 +30,41 @@ const checkoutBody = z.object({
 
 function supportReturnUrl(): string {
   return `${getPrimaryClientUrl()}/support`;
+}
+
+async function createCheckoutSession(opts: {
+  stripe: ReturnType<typeof getStripe>;
+  userId: string;
+  mode: 'payment' | 'subscription';
+  lineItems: Stripe.Checkout.SessionCreateParams.LineItem[];
+  successUrl: string;
+  cancelUrl: string;
+  retryMissingCustomer?: boolean;
+}): Promise<Stripe.Checkout.Session> {
+  const { stripe, userId, mode, lineItems, successUrl, cancelUrl } = opts;
+  const customerId = await getOrCreateStripeCustomer(userId);
+
+  try {
+    return await stripe.checkout.sessions.create({
+      mode,
+      customer: customerId,
+      client_reference_id: userId,
+      metadata: { userId, mode },
+      line_items: lineItems,
+      success_url: successUrl,
+      cancel_url: cancelUrl,
+      ...(mode === 'subscription'
+        ? { subscription_data: { metadata: { userId } } }
+        : {}),
+    });
+  } catch (err) {
+    if (opts.retryMissingCustomer !== false && isMissingStripeCustomerError(err)) {
+      console.warn('[Support] stale Stripe customer — recreating for user', userId);
+      await clearStripeCustomerId(userId);
+      return createCheckoutSession({ ...opts, retryMissingCustomer: false });
+    }
+    throw err;
+  }
 }
 
 // GET /api/support/config — what payment options are available
@@ -87,7 +126,6 @@ router.post('/checkout', requireAuth, async (req: AuthenticatedRequest, res) => 
   const userId = req.userId!;
 
   try {
-    const customerId = await getOrCreateStripeCustomer(userId);
     const stripe = getStripe();
     const successUrl = `${supportReturnUrl()}?thanks=1&session_id={CHECKOUT_SESSION_ID}`;
     const cancelUrl = `${supportReturnUrl()}?canceled=1`;
@@ -100,43 +138,35 @@ router.post('/checkout', requireAuth, async (req: AuthenticatedRequest, res) => 
         res.status(503).json({ error: 'Monthly support is not configured (STRIPE_PRICE_SUPPORT_MONTHLY)' });
         return;
       }
+      await validateSupportPrice(stripe, priceId, 'monthly');
       lineItems = [{ price: priceId, quantity: 1 }];
     } else {
       const priceId = stripeOneTimePriceId();
-      lineItems = priceId
-        ? [{ price: priceId, quantity: 1 }]
-        : [{
-            price_data: {
-              currency: 'usd',
-              unit_amount: stripeOneTimeAmountCents(),
-              product_data: {
-                name: 'Support Grimoire VTT',
-                description: 'One-time thank-you to the developer',
-              },
+      if (priceId) {
+        await validateSupportPrice(stripe, priceId, 'one_time');
+        lineItems = [{ price: priceId, quantity: 1 }];
+      } else {
+        lineItems = [{
+          price_data: {
+            currency: 'usd',
+            unit_amount: stripeOneTimeAmountCents(),
+            product_data: {
+              name: 'Support Grimoire VTT',
+              description: 'One-time thank-you to the developer',
             },
-            quantity: 1,
-          }];
+          },
+          quantity: 1,
+        }];
+      }
     }
 
-    const session = await stripe.checkout.sessions.create({
+    const session = await createCheckoutSession({
+      stripe,
+      userId,
       mode,
-      customer: customerId,
-      client_reference_id: userId,
-      metadata: { userId, mode },
-      line_items: lineItems,
-      success_url: successUrl,
-      cancel_url: cancelUrl,
-      ...(mode === 'subscription'
-        ? {
-            subscription_data: {
-              metadata: { userId },
-            },
-          }
-        : {
-            payment_intent_data: {
-              metadata: { userId },
-            },
-          }),
+      lineItems,
+      successUrl,
+      cancelUrl,
     });
 
     if (!session.url) {
@@ -147,7 +177,7 @@ router.post('/checkout', requireAuth, async (req: AuthenticatedRequest, res) => 
     res.json({ url: session.url });
   } catch (err) {
     console.error('[Support] checkout error:', err);
-    res.status(500).json({ error: 'Failed to start checkout' });
+    res.status(500).json({ error: stripeErrorMessage(err, 'Failed to start checkout') });
   }
 });
 

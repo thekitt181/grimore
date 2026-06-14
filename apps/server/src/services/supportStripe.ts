@@ -34,6 +34,13 @@ export async function getOrCreateStripeCustomer(userId: string): Promise<string>
   return customer.id;
 }
 
+export async function clearStripeCustomerId(userId: string): Promise<void> {
+  await prisma.user.update({
+    where: { id: userId },
+    data: { stripeCustomerId: null },
+  });
+}
+
 export async function applyCheckoutCompleted(session: Stripe.Checkout.Session): Promise<void> {
   const userId = session.metadata?.userId ?? session.client_reference_id;
   if (!userId) {
