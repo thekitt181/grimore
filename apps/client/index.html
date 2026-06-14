@@ -12,9 +12,52 @@
       href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700;900&family=Crimson+Text:ital,wght@0,400;0,600;1,400&family=Inter:wght@300;400;500;600&display=swap"
       rel="stylesheet"
     />
+    <style>
+      html,
+      body {
+        margin: 0;
+        min-height: 100%;
+        background: #0a0a0f;
+        color: #e8e0d0;
+      }
+
+      #root {
+        min-height: 100vh;
+      }
+    </style>
   </head>
   <body>
-    <div id="root"></div>
+    <noscript>
+      <div style="padding: 2rem; font-family: system-ui, sans-serif; background: #0a0a0f; color: #e8e0d0">
+        Grimoire requires JavaScript. Please enable it and reload.
+      </div>
+    </noscript>
+    <div id="root">
+      <div
+        style="
+          min-height: 100vh;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          background: #0a0a0f;
+          color: #c9a84c;
+          font-family: system-ui, sans-serif;
+          font-size: 1rem;
+        "
+      >
+        Loading Grimoire…
+      </div>
+    </div>
+    <script>
+      window.addEventListener('error', function () {
+        var root = document.getElementById('root');
+        if (!root || root.dataset.appMounted === '1') return;
+        root.innerHTML =
+          '<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:2rem;background:#0a0a0f;color:#ffb4b4;font-family:system-ui,sans-serif;text-align:center">' +
+          'Grimoire failed to load. Hard refresh (Ctrl+Shift+R) or try <a href="/sign-in" style="color:#c9a84c">/sign-in</a>.' +
+          '</div>';
+      });
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

@@ -20,9 +20,9 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
     return (
       <div
         className="min-h-screen flex items-center justify-center"
-        style={{ background: 'var(--color-bg-primary)' }}
+        style={{ background: '#0a0a0f' }}
       >
-        <div className="font-display text-lg animate-torch" style={{ color: 'var(--color-accent-gold)' }}>
+        <div className="font-display text-lg animate-torch" style={{ color: '#c9a84c' }}>
           Loading...
         </div>
       </div>

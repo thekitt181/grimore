@@ -41,7 +41,10 @@ if (process.env['TRUST_PROXY'] === '1') {
 }
 
 // ─── Middleware ────────────────────────────────────────────────────────────────
-app.use(helmet({ contentSecurityPolicy: false }));
+app.use(helmet({
+  contentSecurityPolicy: false,
+  crossOriginResourcePolicy: false,
+}));
 app.use(cors({
   origin(origin, callback) {
     if (!origin || clientOrigins.includes(origin)) {
