@@ -350,9 +350,19 @@ async function filterCachedEntriesBySource<T extends { source?: string; name: st
   policy: CompendiumVisibilityPolicy,
   includeDrafts: boolean,
 ): Promise<T[]> {
-  await ensureCatalogIncludesOverrides();
-  const merged = filterVisible(kind, await load(), policy, includeDrafts);
-  return merged.filter((entry) => entryMatchesSource(entry.source, sourceFilter));
+  if (catalogCache) {
+    const merged = filterVisible(kind, await load(), policy, includeDrafts);
+    return merged.filter((entry) => entryMatchesSource(entry.source, sourceFilter));
+  }
+  let fromPostgres: T[];
+  if (kind === 'monster') {
+    fromPostgres = (await monstersFromRawOverrides(sourceFilter, policy)) as unknown as T[];
+  } else if (kind === 'item') {
+    fromPostgres = (await itemsFromRawOverrides(sourceFilter, policy)) as unknown as T[];
+  } else {
+    fromPostgres = (await spellsFromRawOverrides(sourceFilter, policy)) as unknown as T[];
+  }
+  return filterVisible(kind, fromPostgres, policy, includeDrafts);
 }
 
 /** Prefer fast local JSON catalog; Postgres is fallback when bundled files are absent. */
@@ -402,6 +412,86 @@ let catalogBuildPromise: Promise<CatalogCache> | null = null;
 let syncStatusCache: { at: number; value: CompendiumSyncStatus } | null = null;
 let overrideCheckCache: { at: number; missing: boolean } | null = null;
 
+type BookSourceCountsCache = {
+  rev: string;
+  byKind: Record<'monsters' | 'items' | 'spells', SourceCountMap>;
+};
+
+let bookSourceCountsCache: BookSourceCountsCache | null = null;
+
+/** Don't block HTTP handlers on a full catalog rebuild (Render request timeout). */
+const CATALOG_API_WAIT_MS = 4_000;
+
+function refreshBookSourceCountsCache(cache: CatalogCache): void {
+  const bundled = bundledSourceLabelSet();
+  const byKind: BookSourceCountsCache['byKind'] = {
+    monsters: new Map(),
+    items: new Map(),
+    spells: new Map(),
+  };
+  const specs: Array<{
+    tab: 'monsters' | 'items' | 'spells';
+    compKind: CompendiumKind;
+    entries: Array<{ name: string; source?: string }>;
+  }> = [
+    { tab: 'monsters', compKind: 'monster', entries: cache.monsters },
+    { tab: 'items', compKind: 'item', entries: cache.items },
+    { tab: 'spells', compKind: 'spell', entries: cache.spells },
+  ];
+  for (const { tab, compKind, entries } of specs) {
+    const visible = filterVisible(compKind, entries as never, cache.policy, true);
+    const bookEntries = visible.filter((entry) => entryHasImportedBookSource(entry.source, bundled));
+    byKind[tab] = tallyBooksSourceCountsForKind(bookEntries, compKind, cache.policy);
+  }
+  bookSourceCountsCache = { rev: cache.rev, byKind };
+}
+
+async function tallyBookSourceCountsFromPostgres(
+  kind: 'monsters' | 'items' | 'spells',
+  policy: CompendiumVisibilityPolicy,
+  counts: SourceCountMap = new Map(),
+): Promise<SourceCountMap> {
+  const compendiumKind = kindToCompendiumKind(kind);
+  const { readImportedNameSourceRowsForBooks } = await import('./compendiumPostgres');
+  const imported = await readImportedNameSourceRowsForBooks();
+  return tallyBooksSourceCountsForKind(imported[compendiumKind], compendiumKind, policy, counts);
+}
+
+async function resolveBookSourceCountsForKind(
+  kind: 'monsters' | 'items' | 'spells',
+  policy: CompendiumVisibilityPolicy,
+  counts: SourceCountMap = new Map(),
+): Promise<SourceCountMap> {
+  if (catalogCache) {
+    if (!bookSourceCountsCache || bookSourceCountsCache.rev !== catalogCache.rev) {
+      refreshBookSourceCountsCache(catalogCache);
+    }
+    const slice = bookSourceCountsCache!.byKind[kind];
+    for (const [id, c] of slice) {
+      const cur = counts.get(id) ?? { total: 0, public: 0, draft: 0 };
+      cur.total += c.total;
+      cur.public += c.public;
+      cur.draft += c.draft;
+      counts.set(id, cur);
+    }
+    return counts;
+  }
+  return tallyBookSourceCountsFromPostgres(kind, policy, counts);
+}
+
+async function raceCatalogBuild<T>(pick: (cache: CatalogCache) => T, fallback: () => Promise<T>): Promise<T> {
+  if (catalogCache) return pick(catalogCache);
+  if (catalogBuildPromise) {
+    const raced = await Promise.race([
+      catalogBuildPromise.then(pick),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), CATALOG_API_WAIT_MS)),
+    ]);
+    if (raced != null) return raced;
+    return fallback();
+  }
+  return pick(await buildCatalogCache());
+}
+
 function catalogEntryCount(cache: CatalogCache): number {
   return cache.monsters.length + cache.items.length + cache.spells.length;
 }
@@ -410,6 +500,7 @@ function invalidateCatalogCache(): void {
   catalogCache = null;
   catalogBuildPromise = null;
   overrideCheckCache = null;
+  bookSourceCountsCache = null;
 }
 
 function invalidateSyncStatusCache(): void {
@@ -772,6 +863,7 @@ async function catalogIsMissingOverrides(): Promise<boolean> {
 }
 
 async function ensureCatalogIncludesOverrides(): Promise<void> {
+  if (catalogBuildPromise && !catalogCache) return;
   const now = Date.now();
   if (overrideCheckCache && now - overrideCheckCache.at < 30_000 && !overrideCheckCache.missing) {
     return;
@@ -796,6 +888,7 @@ async function buildCatalogCache(): Promise<CatalogCache> {
     try {
       const built = await executeCatalogBuild(previousCache);
       catalogCache = built;
+      refreshBookSourceCountsCache(built);
       return catalogCache;
     } finally {
       catalogBuildPromise = null;
@@ -806,15 +899,52 @@ async function buildCatalogCache(): Promise<CatalogCache> {
 }
 
 async function getCachedMonsters(): Promise<CompendiumMonster[]> {
-  return (await buildCatalogCache()).monsters;
+  return raceCatalogBuild(
+    (cache) => cache.monsters,
+    async () => {
+      const policy = await getCatalogPolicy();
+      const list = await monstersFromRawOverrides(undefined, policy);
+      if (list.length > 0) return filterVisible('monster', list, policy, false);
+      return loadLocalMonsters().map((b) => toMonster(b, false, undefined, true));
+    },
+  );
 }
 
 async function getCachedItems(): Promise<CompendiumItem[]> {
-  return (await buildCatalogCache()).items;
+  return raceCatalogBuild(
+    (cache) => cache.items,
+    async () => {
+      const policy = await getCatalogPolicy();
+      const list = await itemsFromRawOverrides(undefined, policy);
+      if (list.length > 0) return filterVisible('item', list, policy, false);
+      return loadLocalItems().map((b) => ({
+        id: b._id,
+        name: b.name,
+        type: b.type,
+        source: b.source,
+        description: b.description,
+        isCustom: false,
+      }));
+    },
+  );
 }
 
 async function getCachedSpells(): Promise<CompendiumSpell[]> {
-  return (await buildCatalogCache()).spells;
+  return raceCatalogBuild(
+    (cache) => cache.spells,
+    async () => {
+      const policy = await getCatalogPolicy();
+      const list = await spellsFromRawOverrides(undefined, policy);
+      if (list.length > 0) return filterVisible('spell', list, policy, false);
+      return loadLocalSpells().map((b) => ({
+        id: b._id,
+        name: b.name,
+        level: b.level,
+        ...(b.source ? { source: b.source } : {}),
+        isCustom: false,
+      }));
+    },
+  );
 }
 
 async function getCatalogPolicy(): Promise<CompendiumVisibilityPolicy> {
@@ -949,16 +1079,7 @@ async function tallyBookSourceCountsFromCatalog(
   policy: CompendiumVisibilityPolicy,
   counts: SourceCountMap = new Map(),
 ): Promise<SourceCountMap> {
-  await ensureCatalogIncludesOverrides();
-  const compendiumKind = kindToCompendiumKind(kind);
-  const bundled = bundledSourceLabelSet();
-  const merged = kind === 'monsters'
-    ? filterVisible('monster', await getCachedMonsters(), policy, true)
-    : kind === 'items'
-      ? filterVisible('item', await getCachedItems(), policy, true)
-      : filterVisible('spell', await getCachedSpells(), policy, true);
-  const bookEntries = merged.filter((entry) => entryHasImportedBookSource(entry.source, bundled));
-  return tallyBooksSourceCountsForKind(bookEntries, compendiumKind, policy, counts);
+  return resolveBookSourceCountsForKind(kind, policy, counts);
 }
 
 function tallyBooksSourceCounts(
@@ -1222,7 +1343,7 @@ export async function listSources(
   const policy = await readVisibilityPolicyFast();
 
   if (excludeBundled) {
-    const counts = await tallyBookSourceCountsFromCatalog(kind, policy);
+    const counts = await resolveBookSourceCountsForKind(kind, policy);
     return mapSourceListResults(counts, policy, true, true, null);
   }
 
