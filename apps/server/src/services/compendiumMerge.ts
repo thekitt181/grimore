@@ -4,6 +4,7 @@ import {
   loadLocalMonsters,
   loadLocalSpells,
 } from './compendiumLocal';
+import { dedupeByIdenticalContent } from './compendiumEntryIdentity';
 
 export type OwlbearEntry = (OwlbearMonster | OwlbearItem | OwlbearSpell) & {
   originBookName?: string;
@@ -106,9 +107,9 @@ export function filterCustomEntries<T extends OwlbearEntry>(
 
 /** Mirror Owlbear extension server normalizeLibraryData — dedupe overrides and filter customs. */
 export function normalizeOwlbearRawDoc(raw: OwlbearRawGlobalDoc): OwlbearRawGlobalDoc {
-  const overrideMonsters = dedupeByEntryName(raw.overrideMonsters);
-  const overrideItems = dedupeByEntryName(raw.overrideItems);
-  const overrideSpells = dedupeByEntryName(raw.overrideSpells);
+  const overrideMonsters = dedupeByIdenticalContent('monster', raw.overrideMonsters);
+  const overrideItems = dedupeByIdenticalContent('item', raw.overrideItems);
+  const overrideSpells = dedupeByIdenticalContent('spell', raw.overrideSpells);
   let deleted = [...(raw.deleted ?? [])];
 
   const ensureDeleted = (name: string) => {

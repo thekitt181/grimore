@@ -47,13 +47,18 @@ import {
 } from './compendiumOwlbearPersist';
 import {
   buildHiddenBuiltInKeys,
-  dedupeByEntryName,
   entryNameKey,
   filterCustomEntries,
   isHiddenBuiltIn,
   namesMatch,
   normalizeOwlbearRawDoc,
 } from './compendiumMerge';
+import {
+  compendiumCatalogMergeKey,
+  compendiumContentFingerprint,
+  dedupeByIdenticalContent,
+  resolveEntryId,
+} from './compendiumEntryIdentity';
 import {
   registerCompendiumCacheInvalidator,
   setCachedGlobalLite,
@@ -129,46 +134,62 @@ function mergeMonsters(
   global?: CompendiumGlobalDoc,
   lite = false,
 ): CompendiumMonster[] {
-  const activeOverrides = dedupeByEntryName(overrides);
+  const activeOverrides = dedupeByIdenticalContent('monster', overrides);
   const activeCustoms = filterCustomEntries('monster', customs, activeOverrides, deleted);
   const hiddenBuiltIns = buildHiddenBuiltInKeys(activeOverrides, deleted);
   const deletedKeys = new Set(deleted.map((d) => entryNameKey(d)));
-  const overrideByName = new Map(activeOverrides.map((o) => [entryNameKey(o.name), o] as const));
+  const overrideByBook = new Map(
+    activeOverrides.map((o) => [compendiumCatalogMergeKey(o.name, o.source), o] as const),
+  );
+  const contentSeen = new Set<string>();
   const out = new Map<string, CompendiumMonster>();
+
+  const remember = (monster: CompendiumMonster, raw: StoredMonster | OwlbearMonster): void => {
+    const fp = compendiumContentFingerprint('monster', raw);
+    if (contentSeen.has(fp)) return;
+    contentSeen.add(fp);
+    out.set(monster.id, monster);
+  };
 
   for (const b of base) {
     if (isHiddenBuiltIn(b.name, hiddenBuiltIns)) continue;
-    const ov = overrideByName.get(entryNameKey(b.name));
-    const merged = ov ? { ...b, ...ov } : b;
-    out.set(entryNameKey(b.name), toMonster(
-      { ...merged, _id: b._id },
-      isHomebrewEntry(Boolean(ov), merged.source),
-      global,
-      lite,
-    ));
+    const bookKey = compendiumCatalogMergeKey(b.name, b.source);
+    const ov = overrideByBook.get(bookKey);
+    const merged = ov ? { ...b, ...ov, _id: (ov as StoredMonster)._id ?? b._id } : b;
+    const entryId = resolveEntryId('monster', merged);
+    remember(
+      toMonster(
+        { ...merged, _id: entryId },
+        isHomebrewEntry(Boolean(ov), merged.source),
+        global,
+        lite,
+      ),
+      merged,
+    );
+    if (ov) overrideByBook.delete(bookKey);
   }
 
-  for (const ov of activeOverrides) {
-    const key = entryNameKey(ov.name);
-    if (out.has(key)) continue;
-    out.set(key, toMonster(
-      { ...ov, _id: slugify(ov.name) } as StoredMonster,
-      isHomebrewEntry(true, ov.source),
-      global,
-      lite,
-    ));
+  for (const ov of overrideByBook.values()) {
+    const entryId = resolveEntryId('monster', ov as StoredMonster);
+    remember(
+      toMonster(
+        { ...ov, _id: entryId } as StoredMonster,
+        isHomebrewEntry(true, ov.source),
+        global,
+        lite,
+      ),
+      ov,
+    );
   }
 
   for (const c of activeCustoms) {
     if (deletedKeys.has(entryNameKey(c.name))) continue;
-    const key = entryNameKey(c.name);
-    if (out.has(key)) continue;
-    out.set(key, toMonster(
-      { ...c, _id: slugify(c.name) } as StoredMonster,
-      true,
-      global,
-      lite,
-    ));
+    const entryId = resolveEntryId('monster', c as StoredMonster);
+    if (out.has(entryId)) continue;
+    remember(
+      toMonster({ ...c, _id: entryId } as StoredMonster, true, global, lite),
+      c,
+    );
   }
 
   return Array.from(out.values());
@@ -182,19 +203,31 @@ function mergeItems(
   global?: CompendiumGlobalDoc,
   lite = false,
 ): CompendiumItem[] {
-  const activeOverrides = dedupeByEntryName(overrides);
+  const activeOverrides = dedupeByIdenticalContent('item', overrides);
   const activeCustoms = filterCustomEntries('item', customs, activeOverrides, deleted);
   const hiddenBuiltIns = buildHiddenBuiltInKeys(activeOverrides, deleted);
   const deletedKeys = new Set(deleted.map((d) => entryNameKey(d)));
-  const overrideByName = new Map(activeOverrides.map((o) => [entryNameKey(o.name), o] as const));
+  const overrideByBook = new Map(
+    activeOverrides.map((o) => [compendiumCatalogMergeKey(o.name, o.source), o] as const),
+  );
+  const contentSeen = new Set<string>();
   const out = new Map<string, CompendiumItem>();
+
+  const remember = (item: CompendiumItem, raw: StoredItem | OwlbearItem): void => {
+    const fp = compendiumContentFingerprint('item', raw);
+    if (contentSeen.has(fp)) return;
+    contentSeen.add(fp);
+    out.set(item.id, item);
+  };
 
   for (const b of base) {
     if (isHiddenBuiltIn(b.name, hiddenBuiltIns)) continue;
-    const ov = overrideByName.get(entryNameKey(b.name));
-    const merged = ov ? { ...b, ...ov } : b;
+    const bookKey = compendiumCatalogMergeKey(b.name, b.source);
+    const ov = overrideByBook.get(bookKey);
+    const merged = ov ? { ...b, ...ov, _id: (ov as StoredItem)._id ?? b._id } : b;
+    const entryId = resolveEntryId('item', merged);
     const item: CompendiumItem = {
-      id: b._id,
+      id: entryId,
       name: merged.name,
       type: merged.type,
       source: merged.source,
@@ -209,14 +242,14 @@ function mergeItems(
       const imageUrl = resolveEntryImageUrl(global, 'item', merged.name, merged.image);
       if (imageUrl) item.imageUrl = imageUrl;
     }
-    out.set(entryNameKey(b.name), item);
+    remember(item, merged);
+    if (ov) overrideByBook.delete(bookKey);
   }
 
-  for (const ov of activeOverrides) {
-    const key = entryNameKey(ov.name);
-    if (out.has(key)) continue;
+  for (const ov of overrideByBook.values()) {
+    const entryId = resolveEntryId('item', ov as StoredItem);
     const item: CompendiumItem = {
-      id: slugify(ov.name),
+      id: entryId,
       ...ov,
       isCustom: isHomebrewEntry(true, ov.source),
     };
@@ -224,15 +257,15 @@ function mergeItems(
       const imageUrl = resolveEntryImageUrl(global, 'item', ov.name, ov.image);
       if (imageUrl) item.imageUrl = imageUrl;
     }
-    out.set(key, item);
+    remember(item, ov);
   }
 
   for (const c of activeCustoms) {
     if (deletedKeys.has(entryNameKey(c.name))) continue;
-    const key = entryNameKey(c.name);
-    if (out.has(key)) continue;
+    const entryId = resolveEntryId('item', c as StoredItem);
+    if (out.has(entryId)) continue;
     const item: CompendiumItem = {
-      id: slugify(c.name),
+      id: entryId,
       ...c,
       isCustom: true,
     };
@@ -240,7 +273,7 @@ function mergeItems(
       const imageUrl = resolveEntryImageUrl(global, 'item', c.name, c.image);
       if (imageUrl) item.imageUrl = imageUrl;
     }
-    out.set(key, item);
+    remember(item, c);
   }
 
   return Array.from(out.values());
@@ -254,19 +287,31 @@ function mergeSpells(
   global?: CompendiumGlobalDoc,
   lite = false,
 ): CompendiumSpell[] {
-  const activeOverrides = dedupeByEntryName(overrides);
+  const activeOverrides = dedupeByIdenticalContent('spell', overrides);
   const activeCustoms = filterCustomEntries('spell', customs, activeOverrides, deleted);
   const hiddenBuiltIns = buildHiddenBuiltInKeys(activeOverrides, deleted);
   const deletedKeys = new Set(deleted.map((d) => entryNameKey(d)));
-  const overrideByName = new Map(activeOverrides.map((o) => [entryNameKey(o.name), o] as const));
+  const overrideByBook = new Map(
+    activeOverrides.map((o) => [compendiumCatalogMergeKey(o.name, o.source), o] as const),
+  );
+  const contentSeen = new Set<string>();
   const out = new Map<string, CompendiumSpell>();
+
+  const remember = (spell: CompendiumSpell, raw: StoredSpell | OwlbearSpell): void => {
+    const fp = compendiumContentFingerprint('spell', raw);
+    if (contentSeen.has(fp)) return;
+    contentSeen.add(fp);
+    out.set(spell.id, spell);
+  };
 
   for (const b of base) {
     if (isHiddenBuiltIn(b.name, hiddenBuiltIns)) continue;
-    const ov = overrideByName.get(entryNameKey(b.name));
-    const merged = ov ? { ...b, ...ov } : b;
+    const bookKey = compendiumCatalogMergeKey(b.name, b.source);
+    const ov = overrideByBook.get(bookKey);
+    const merged = ov ? { ...b, ...ov, _id: (ov as StoredSpell)._id ?? b._id } : b;
+    const entryId = resolveEntryId('spell', merged);
     const spell: CompendiumSpell = {
-      id: b._id,
+      id: entryId,
       name: merged.name,
       level: merged.level,
       ...(merged.damage ? { damage: merged.damage } : {}),
@@ -283,14 +328,14 @@ function mergeSpells(
       const imageUrl = resolveEntryImageUrl(global, 'spell', merged.name, undefined);
       if (imageUrl) spell.imageUrl = imageUrl;
     }
-    out.set(entryNameKey(b.name), spell);
+    remember(spell, merged);
+    if (ov) overrideByBook.delete(bookKey);
   }
 
-  for (const ov of activeOverrides) {
-    const key = entryNameKey(ov.name);
-    if (out.has(key)) continue;
+  for (const ov of overrideByBook.values()) {
+    const entryId = resolveEntryId('spell', ov as StoredSpell);
     const spell: CompendiumSpell = {
-      id: slugify(ov.name),
+      id: entryId,
       ...ov,
       isCustom: isHomebrewEntry(true, ov.source),
     };
@@ -298,15 +343,15 @@ function mergeSpells(
       const imageUrl = resolveEntryImageUrl(global, 'spell', ov.name, undefined);
       if (imageUrl) spell.imageUrl = imageUrl;
     }
-    out.set(key, spell);
+    remember(spell, ov);
   }
 
   for (const c of activeCustoms) {
     if (deletedKeys.has(entryNameKey(c.name))) continue;
-    const key = entryNameKey(c.name);
-    if (out.has(key)) continue;
+    const entryId = resolveEntryId('spell', c as StoredSpell);
+    if (out.has(entryId)) continue;
     const spell: CompendiumSpell = {
-      id: slugify(c.name),
+      id: entryId,
       ...c,
       isCustom: true,
     };
@@ -314,7 +359,7 @@ function mergeSpells(
       const imageUrl = resolveEntryImageUrl(global, 'spell', c.name, undefined);
       if (imageUrl) spell.imageUrl = imageUrl;
     }
-    out.set(key, spell);
+    remember(spell, c);
   }
 
   return Array.from(out.values());
@@ -535,13 +580,18 @@ async function augmentRawWithTypedImports(
     );
   }
 
-  const mergeList = <T extends { name: string }>(global: T[] | undefined, typedList: T[]): T[] => {
+  const mergeList = <T extends { name: string; source?: string; _id?: string }>(
+    global: T[] | undefined,
+    typedList: T[],
+  ): T[] => {
     const map = new Map<string, T>();
+    const keyOf = (entry: T) =>
+      entry._id?.trim() || compendiumCatalogMergeKey(entry.name, entry.source);
     for (const entry of global ?? []) {
-      if (entry?.name) map.set(entryNameKey(entry.name), entry);
+      if (entry?.name) map.set(keyOf(entry), entry);
     }
     for (const entry of typedList) {
-      if (entry?.name) map.set(entryNameKey(entry.name), entry);
+      if (entry?.name) map.set(keyOf(entry), entry);
     }
     return Array.from(map.values());
   };

@@ -9,6 +9,7 @@ import type {
 import { slugify } from '@grimoire/monster-dex';
 import { prisma } from '../lib/prisma';
 import { entryNameKey, normalizeOwlbearRawDoc } from './compendiumMerge';
+import { compendiumEntryStorageId } from './compendiumEntryIdentity';
 import type { CompendiumKind } from './compendiumOwlbearPersist';
 import type { BookSourceLabelBuckets } from './compendiumOwlbearPersist';
 import { entryMatchesSource } from './compendiumVisibility';
@@ -158,7 +159,11 @@ function buildUpsertData(
     originBookName?: string | null;
   },
 ) {
-  const id = slugify(entry.name);
+  const id = compendiumEntryStorageId(
+    entry.name,
+    entry.source?.trim() || (flags.isCustom ? 'Custom' : ''),
+    ('_id' in entry ? (entry as { _id?: string })._id : undefined),
+  );
   const originBookName =
     flags.originBookName
     ?? ('originBookName' in entry ? (entry.originBookName as string | undefined) : undefined)
@@ -335,11 +340,11 @@ export async function readOverrideEntriesFromPostgres(
     readTypedImportEntriesFromPostgres(kind),
   ]);
   const map = new Map<string, OwlbearMonster | OwlbearItem | OwlbearSpell>();
-  for (const entry of globalOverrides) {
-    if (entry?.name) map.set(entryNameKey(entry.name), entry);
-  }
-  for (const entry of typed) {
-    if (entry?.name) map.set(entryNameKey(entry.name), entry);
+  for (const entry of [...globalOverrides, ...typed]) {
+    if (!entry?.name) continue;
+    const withId = entry as { _id?: string; name: string; source?: string };
+    const id = withId._id?.trim() || compendiumEntryStorageId(withId.name, withId.source);
+    map.set(id, entry);
   }
   return Array.from(map.values());
 }
@@ -527,7 +532,7 @@ async function readRawGlobalDocFromPostgresBulk(
     const entry = rowToEntry(kind, row);
     const name = entry.name?.trim();
     if (!name) continue;
-    const key = entryNameKey(name);
+    const rowKey = row.id;
 
     if (row.inGlobalHomebrew) {
       if (kind === 'monster') monsters.push(entry as OwlbearMonster);
@@ -536,9 +541,9 @@ async function readRawGlobalDocFromPostgresBulk(
     }
 
     if (row.inGlobalOverride && !row.inTypedImport) {
-      if (kind === 'monster') overrideMonsters.set(key, entry as OwlbearMonster);
-      else if (kind === 'item') overrideItems.set(key, entry as OwlbearItem);
-      else overrideSpells.set(key, entry as OwlbearSpell);
+      if (kind === 'monster') overrideMonsters.set(rowKey, entry as OwlbearMonster);
+      else if (kind === 'item') overrideItems.set(rowKey, entry as OwlbearItem);
+      else overrideSpells.set(rowKey, entry as OwlbearSpell);
     }
   }
 
@@ -548,10 +553,10 @@ async function readRawGlobalDocFromPostgresBulk(
     const entry = rowToEntry(kind, row);
     const name = entry.name?.trim();
     if (!name) continue;
-    const key = entryNameKey(name);
-    if (kind === 'monster') overrideMonsters.set(key, entry as OwlbearMonster);
-    else if (kind === 'item') overrideItems.set(key, entry as OwlbearItem);
-    else overrideSpells.set(key, entry as OwlbearSpell);
+    const rowKey = row.id;
+    if (kind === 'monster') overrideMonsters.set(rowKey, entry as OwlbearMonster);
+    else if (kind === 'item') overrideItems.set(rowKey, entry as OwlbearItem);
+    else overrideSpells.set(rowKey, entry as OwlbearSpell);
   }
 
   const lastUpdated = metaRow?.lastUpdated?.toISOString() ?? new Date(0).toISOString();

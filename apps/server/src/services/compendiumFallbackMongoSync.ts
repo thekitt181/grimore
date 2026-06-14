@@ -2,6 +2,7 @@ import type { OwlbearItem, OwlbearMonster, OwlbearRawGlobalDoc, OwlbearSpell } f
 import { normalizeOwlbearGlobalDoc } from '@grimoire/shared';
 import { isCompendiumStorageUnavailable, readRawGlobalDocFromPostgres } from './compendiumPostgres';
 import { entryNameKey, normalizeOwlbearRawDoc } from './compendiumMerge';
+import { compendiumCatalogMergeKey } from './compendiumEntryIdentity';
 import {
   clearGlobalFallbackCache,
   globalFallbackFileRevision,
@@ -48,16 +49,18 @@ export function rawOverrideEntryCount(raw: OwlbearRawGlobalDoc): number {
     + (raw.overrideSpells?.length ?? 0);
 }
 
-function mergeNamedEntries<T extends { name: string }>(
+function mergeNamedEntries<T extends { name: string; source?: string; _id?: string }>(
   mongoArr: T[] | undefined,
   fallbackArr: T[] | undefined,
 ): T[] {
   const map = new Map<string, T>();
+  const keyOf = (entry: T) =>
+    entry._id?.trim() || compendiumCatalogMergeKey(entry.name, entry.source);
   for (const entry of mongoArr ?? []) {
-    if (entry?.name) map.set(entryNameKey(entry.name), entry);
+    if (entry?.name) map.set(keyOf(entry), entry);
   }
   for (const entry of fallbackArr ?? []) {
-    if (entry?.name) map.set(entryNameKey(entry.name), entry);
+    if (entry?.name) map.set(keyOf(entry), entry);
   }
   return Array.from(map.values());
 }
