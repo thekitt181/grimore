@@ -4,6 +4,7 @@ import { getActiveMap } from '@/systems/scene/store/itemStore';
 import { useSessionStore } from '@/store/sessionStore';
 import { setFogVisibleForSession } from '@/systems/scene/fogActiveSync';
 import { sceneRefs, clientToWorld } from '@/systems/scene/sceneRefs';
+import { getMapToolElement } from '../mapToolPointer';
 
 function worldToMapLocal(wx: number, wy: number): { x: number; y: number } {
   const map = getActiveMap();
@@ -23,7 +24,7 @@ function worldToMapLocal(wx: number, wy: number): { x: number; y: number } {
  * Fog painting — grid-based GM reveal/hide via canvas pointer events.
  * Rendering lives in useMapFogOverlay (map-attached layer).
  */
-export function useFogRenderer(appReady = false) {
+export function useFogRenderer(appReady = false, interactionReady = false) {
   const activeTool = useMapStore((s) => s.activeTool);
   const fogBrushSize = useMapStore((s) => s.fogBrushSize);
   const fogEnabled = useMapStore((s) => s.fogEnabled);
@@ -39,11 +40,12 @@ export function useFogRenderer(appReady = false) {
   }, [isGM, isFogTool]);
 
   useEffect(() => {
-    if (!appReady || !isGM || !isFogTool || !fogEnabled) return;
+    if (!appReady || !interactionReady || !isGM || !isFogTool || !fogEnabled) return;
     const app = sceneRefs.app.current;
-    if (!app) return;
+    const el = getMapToolElement();
+    if (!app || !el) return;
+    const toolEl = el;
 
-    const canvas = app.canvas;
     let painting = false;
 
     function paint(clientX: number, clientY: number) {
@@ -65,9 +67,10 @@ export function useFogRenderer(appReady = false) {
 
     function onDown(e: PointerEvent) {
       if (e.button !== 0) return;
+      e.stopPropagation();
       painting = true;
       paint(e.clientX, e.clientY);
-      canvas.setPointerCapture(e.pointerId);
+      toolEl.setPointerCapture(e.pointerId);
     }
     function onMove(e: PointerEvent) {
       if (!painting) return;
@@ -76,18 +79,18 @@ export function useFogRenderer(appReady = false) {
     function onUp(e: PointerEvent) {
       if (!painting) return;
       painting = false;
-      try { canvas.releasePointerCapture(e.pointerId); } catch { /* ok */ }
+      try { toolEl.releasePointerCapture(e.pointerId); } catch { /* ok */ }
     }
 
-    canvas.addEventListener('pointerdown', onDown);
-    canvas.addEventListener('pointermove', onMove);
-    canvas.addEventListener('pointerup', onUp);
-    canvas.addEventListener('pointercancel', onUp);
+    toolEl.addEventListener('pointerdown', onDown, true);
+    toolEl.addEventListener('pointermove', onMove, true);
+    toolEl.addEventListener('pointerup', onUp, true);
+    toolEl.addEventListener('pointercancel', onUp, true);
     return () => {
-      canvas.removeEventListener('pointerdown', onDown);
-      canvas.removeEventListener('pointermove', onMove);
-      canvas.removeEventListener('pointerup', onUp);
-      canvas.removeEventListener('pointercancel', onUp);
+      toolEl.removeEventListener('pointerdown', onDown, true);
+      toolEl.removeEventListener('pointermove', onMove, true);
+      toolEl.removeEventListener('pointerup', onUp, true);
+      toolEl.removeEventListener('pointercancel', onUp, true);
     };
-  }, [appReady, activeTool, fogBrushSize, isGM, isFogTool, fogEnabled, applyFogCells]);
+  }, [appReady, interactionReady, activeTool, fogBrushSize, isGM, isFogTool, fogEnabled, applyFogCells]);
 }

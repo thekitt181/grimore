@@ -1,5 +1,14 @@
 import { isMobileClient } from '@/lib/socket';
 import { sceneRefs } from '@/systems/scene/sceneRefs';
+import { useMapStore } from './store/mapStore';
+
+function usesDrawPreview(activeTool: string): boolean {
+  return (
+    activeTool === 'wall'
+    || activeTool === 'calibrate'
+    || activeTool.startsWith('draw-')
+  );
+}
 
 /** Apply 2D/3D visibility on Pixi layers — call from useLayoutEffect so 3D never flashes 2D art. */
 export function applyPixiViewMode(is3d: boolean): void {
@@ -8,18 +17,23 @@ export function applyPixiViewMode(is3d: boolean): void {
   if (!app || !world) return;
 
   const mobile = isMobileClient();
+  const activeTool = useMapStore.getState().activeTool;
 
   world.eventMode = is3d ? 'none' : 'static';
 
   app.renderer.background.alpha = 0;
   app.canvas.style.background = 'transparent';
 
-  for (const layer of [
-    sceneRefs.fog.current,
-    sceneRefs.measure.current,
-    sceneRefs.drawPreview.current,
-  ]) {
-    if (layer) layer.alpha = is3d ? 0 : 1;
+  if (sceneRefs.fog.current) {
+    sceneRefs.fog.current.alpha = is3d ? 0 : 1;
+  }
+  if (sceneRefs.measure.current) {
+    const showMeasure = !is3d || activeTool === 'measure';
+    sceneRefs.measure.current.alpha = showMeasure ? 1 : 0;
+  }
+  if (sceneRefs.drawPreview.current) {
+    const showPreview = !is3d || usesDrawPreview(activeTool);
+    sceneRefs.drawPreview.current.alpha = showPreview ? 1 : 0;
   }
 
   if (sceneRefs.items.current) {
@@ -37,9 +51,6 @@ export function applyPixiViewMode(is3d: boolean): void {
       sceneRefs.items.current.alpha = 1;
       sceneRefs.items.current.visible = true;
     }
-  }
-  if (sceneRefs.fog.current) {
-    sceneRefs.fog.current.alpha = is3d ? 0 : 1;
   }
 
   if (sceneRefs.overlay.current) {

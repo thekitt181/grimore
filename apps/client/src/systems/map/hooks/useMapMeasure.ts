@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { Graphics, Text, TextStyle, Container } from 'pixi.js';
 import { useMapStore } from '../store/mapStore';
 import { mapLayerRefs } from '../MapCanvas';
+import { clientToWorld, getMapToolElement } from '../mapToolPointer';
 
 /**
  * Multi-waypoint ruler tool (Owlbear-style).
@@ -14,7 +15,8 @@ import { mapLayerRefs } from '../MapCanvas';
  */
 export function useMapMeasure(
   layerRef: React.RefObject<Container | null>,
-  worldRef: React.RefObject<Container | null>
+  worldRef: React.RefObject<Container | null>,
+  interactionReady = false,
 ) {
   const activeTool = useMapStore((s) => s.activeTool);
   const gridSize   = useMapStore((s) => s.gridSize);
@@ -157,25 +159,23 @@ export function useMapMeasure(
   // ── DOM event handling ──────────────────────────────────────────────────────
   useEffect(() => {
     const app   = mapLayerRefs.app.current;
-    const world = mapLayerRefs.world.current;
+    const world = worldRef.current;
     const layer = layerRef.current;
-    if (!app || !world || !layer) return;
+    const el = getMapToolElement();
+    if (!app || !world || !layer || !el || !interactionReady) return;
+    const toolEl = el;
     if (activeTool !== 'measure') return;
 
-    const canvas = app.canvas;
     let lastClickTime = 0;
 
     function toWorld(cx: number, cy: number) {
-      const rect = canvas.getBoundingClientRect();
-      return {
-        x: (cx - rect.left - world!.x) / world!.scale.x,
-        y: (cy - rect.top  - world!.y) / world!.scale.y,
-      };
+      return clientToWorld(cx, cy);
     }
 
     function onDown(e: PointerEvent) {
-      if (e.button === 2) { clearMeasure(layer!); return; } // right-click clears
+      if (e.button === 2) { clearMeasure(layer!); return; }
       if (e.button !== 0) return;
+      e.stopPropagation();
 
       const wp  = toWorld(e.clientX, e.clientY);
       const now = Date.now();
@@ -200,14 +200,14 @@ export function useMapMeasure(
 
     function onContextMenu(e: MouseEvent) { e.preventDefault(); }
 
-    canvas.addEventListener('pointerdown', onDown);
-    canvas.addEventListener('pointermove', onMove);
-    canvas.addEventListener('contextmenu', onContextMenu);
+    toolEl.addEventListener('pointerdown', onDown, true);
+    toolEl.addEventListener('pointermove', onMove, true);
+    toolEl.addEventListener('contextmenu', onContextMenu);
 
     return () => {
-      canvas.removeEventListener('pointerdown', onDown);
-      canvas.removeEventListener('pointermove', onMove);
-      canvas.removeEventListener('contextmenu', onContextMenu);
+      toolEl.removeEventListener('pointerdown', onDown, true);
+      toolEl.removeEventListener('pointermove', onMove, true);
+      toolEl.removeEventListener('contextmenu', onContextMenu);
     };
-  }, [activeTool, gridSize]);
+  }, [activeTool, gridSize, interactionReady]);
 }

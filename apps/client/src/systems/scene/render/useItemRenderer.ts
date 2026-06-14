@@ -36,6 +36,7 @@ export function useItemRenderer(
     s.isActive && s.combatants[s.currentIndex] ? s.combatants[s.currentIndex]!.tokenId : undefined
   );
   const viewMode = useMapStore((s) => s.viewMode);
+  const activeTool = useMapStore((s) => s.activeTool);
 
   const containers = useRef<Map<string, Container>>(new Map());
   const wallContainers = useRef<Map<string, Container>>(new Map());
@@ -170,7 +171,7 @@ export function useItemRenderer(
         wc.rotation = (map.rotation * Math.PI) / 180;
         wc.zIndex = wallDisplayZIndex(map.zIndex);
         // LOS walls affect everyone; only the GM sees the wall overlay.
-        if (gm && viewMode !== '3d') {
+        if (gm && (viewMode !== '3d' || activeTool === 'wall')) {
           wc.visible = true;
           wc.alpha = map.visible ? 1 : 0.35;
         } else {
@@ -187,6 +188,7 @@ export function useItemRenderer(
     liveTick,
     activeTurnItemId,
     viewMode,
+    activeTool,
     appReady,
   ]);
 

@@ -11,15 +11,20 @@ import {
 } from './viewportLimits';
 
 /** Tools that own pointer input — map pan/zoom defers to them. */
-const TOOL_OWNS_POINTER = new Set([
-  'wall',
-  'fog',
-  'measure',
-  'draw',
-  'text',
-  'calibrate',
-  'eraser',
-]);
+export function toolOwnsMapPointer(activeTool: string): boolean {
+  if (
+    activeTool === 'wall'
+    || activeTool === 'measure'
+    || activeTool === 'calibrate'
+    || activeTool === 'eraser'
+    || activeTool === 'text'
+  ) {
+    return true;
+  }
+  if (activeTool.startsWith('draw-')) return true;
+  if (activeTool === 'fog-reveal' || activeTool === 'fog-hide') return true;
+  return false;
+}
 
 /** Token under cursor blocks 3D navigation; map pick volume is treated as pannable ground. */
 export function pointerTargetsToken(clientX: number, clientY: number): boolean {
@@ -36,7 +41,7 @@ export function shouldStartMapPan(
   activeTool: string,
   viewMode: MapViewMode,
 ): boolean {
-  if (TOOL_OWNS_POINTER.has(activeTool)) return false;
+  if (toolOwnsMapPointer(activeTool)) return false;
   if (e.button === 1) return true;
   if (spaceDown && e.button === 0) return true;
   if (activeTool === 'pan' && e.button === 0) return true;

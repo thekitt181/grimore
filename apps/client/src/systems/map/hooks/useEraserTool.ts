@@ -6,6 +6,7 @@ import { useSessionStore } from '@/store/sessionStore';
 import { emitItemRemove, emitItemUpdate } from '@/systems/scene/sceneSync';
 import { hitTest } from '@/systems/scene/hitTest';
 import { eraseWallsAtPoint, toMapLocal, wallsChanged, WALL_ERASE_RADIUS } from '../wallUtils';
+import { clientToWorld, getMapToolElement } from '../mapToolPointer';
 
 function canEraseItem(
   item: { type: string; ownerId?: string },
@@ -20,28 +21,24 @@ function canEraseItem(
 /**
  * Eraser — removes drawings/text under cursor; GM can also erase wall segments.
  */
-export function useEraserTool(appReady = false) {
+export function useEraserTool(appReady = false, interactionReady = false) {
   const activeTool = useMapStore((s) => s.activeTool);
   const myRole = useSessionStore((s) => s.myRole);
   const myUserId = useSessionStore((s) => s.myUserId);
   const isGM = myRole === 'GM';
 
   useEffect(() => {
-    if (!appReady || activeTool !== 'eraser') return;
+    if (!appReady || !interactionReady || activeTool !== 'eraser') return;
 
-    const app = mapLayerRefs.app.current;
     const world = mapLayerRefs.world.current;
-    if (!app || !world) return;
+    const el = getMapToolElement();
+    if (!world || !el) return;
+    const toolEl = el;
 
-    const canvas = app.canvas;
-    canvas.style.cursor = 'cell';
+    toolEl.style.cursor = 'cell';
 
     function toWorld(clientX: number, clientY: number) {
-      const rect = canvas.getBoundingClientRect();
-      return {
-        x: (clientX - rect.left - world!.x) / world!.scale.x,
-        y: (clientY - rect.top - world!.y) / world!.scale.y,
-      };
+      return clientToWorld(clientX, clientY);
     }
 
     function eraseAt(clientX: number, clientY: number) {
@@ -75,8 +72,9 @@ export function useEraserTool(appReady = false) {
     function onDown(e: PointerEvent) {
       if (e.button !== 0) return;
       e.preventDefault();
+      e.stopPropagation();
       eraseAt(e.clientX, e.clientY);
-      canvas.setPointerCapture(e.pointerId);
+      toolEl.setPointerCapture(e.pointerId);
     }
 
     function onMove(e: PointerEvent) {
@@ -84,13 +82,13 @@ export function useEraserTool(appReady = false) {
       eraseAt(e.clientX, e.clientY);
     }
 
-    canvas.addEventListener('pointerdown', onDown);
-    canvas.addEventListener('pointermove', onMove);
+    toolEl.addEventListener('pointerdown', onDown, true);
+    toolEl.addEventListener('pointermove', onMove, true);
 
     return () => {
-      canvas.style.cursor = 'default';
-      canvas.removeEventListener('pointerdown', onDown);
-      canvas.removeEventListener('pointermove', onMove);
+      toolEl.style.cursor = '';
+      toolEl.removeEventListener('pointerdown', onDown, true);
+      toolEl.removeEventListener('pointermove', onMove, true);
     };
-  }, [appReady, activeTool, isGM, myUserId]);
+  }, [appReady, interactionReady, activeTool, isGM, myUserId]);
 }

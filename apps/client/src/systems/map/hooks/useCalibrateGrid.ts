@@ -5,29 +5,30 @@ import { mapLayerRefs } from '../MapCanvas';
 import { useItemStore, getActiveMap } from '@/systems/scene/store/itemStore';
 import { emitItemUpdate } from '@/systems/scene/sceneSync';
 import type { MapItem } from '@/systems/scene/types';
+import { clientToWorld, getMapToolElement } from '../mapToolPointer';
 
 /**
  * Grid calibration tool. Drag a rectangle over exactly one printed grid cell of
  * the active map. On release the rectangle size becomes the map's gridSize and
  * its top-left (relative to the map origin) becomes the grid offset.
  */
-export function useCalibrateGrid(appReady = false) {
+export function useCalibrateGrid(appReady = false, interactionReady = false) {
   const activeTool = useMapStore((s) => s.activeTool);
   const overlayRef = useRef<Graphics | null>(null);
 
   useEffect(() => {
-    if (!appReady || activeTool !== 'calibrate') {
+    if (!appReady || !interactionReady || activeTool !== 'calibrate') {
       if (overlayRef.current) overlayRef.current.clear();
       return;
     }
 
-    const app   = mapLayerRefs.app.current;
     const world = mapLayerRefs.world.current;
     const prev  = mapLayerRefs.drawPreview.current;
-    if (!app || !world || !prev) return;
+    const el = getMapToolElement();
+    if (!world || !prev || !el) return;
+    const toolEl = el;
 
-    const canvas = app.canvas;
-    canvas.style.cursor = 'crosshair';
+    toolEl.style.cursor = 'crosshair';
 
     if (!overlayRef.current) {
       const g = new Graphics();
@@ -41,20 +42,17 @@ export function useCalibrateGrid(appReady = false) {
     let startWX = 0, startWY = 0;
 
     function toWorld(clientX: number, clientY: number) {
-      const rect = canvas.getBoundingClientRect();
-      return {
-        x: (clientX - rect.left - world!.x) / world!.scale.x,
-        y: (clientY - rect.top  - world!.y) / world!.scale.y,
-      };
+      return clientToWorld(clientX, clientY);
     }
 
     function onDown(e: PointerEvent) {
       if (e.button !== 0) return;
       e.preventDefault();
+      e.stopPropagation();
       const wp = toWorld(e.clientX, e.clientY);
       startWX = wp.x; startWY = wp.y;
       dragging = true;
-      canvas.setPointerCapture(e.pointerId);
+      toolEl.setPointerCapture(e.pointerId);
     }
 
     function onMove(e: PointerEvent) {
@@ -98,20 +96,20 @@ export function useCalibrateGrid(appReady = false) {
       useMapStore.getState().setTool('select');
     }
 
-    canvas.addEventListener('pointerdown', onDown);
-    canvas.addEventListener('pointermove', onMove);
-    canvas.addEventListener('pointerup',   onUp);
-    canvas.addEventListener('pointercancel', onUp);
+    toolEl.addEventListener('pointerdown', onDown, true);
+    toolEl.addEventListener('pointermove', onMove, true);
+    toolEl.addEventListener('pointerup',   onUp, true);
+    toolEl.addEventListener('pointercancel', onUp, true);
 
     return () => {
-      canvas.removeEventListener('pointerdown', onDown);
-      canvas.removeEventListener('pointermove', onMove);
-      canvas.removeEventListener('pointerup',   onUp);
-      canvas.removeEventListener('pointercancel', onUp);
-      canvas.style.cursor = 'default';
+      toolEl.removeEventListener('pointerdown', onDown, true);
+      toolEl.removeEventListener('pointermove', onMove, true);
+      toolEl.removeEventListener('pointerup',   onUp, true);
+      toolEl.removeEventListener('pointercancel', onUp, true);
+      toolEl.style.cursor = '';
       overlay.clear();
     };
-  }, [appReady, activeTool]);
+  }, [appReady, interactionReady, activeTool]);
 }
 
 function dashRect(g: Graphics, x: number, y: number, w: number, h: number, dash: number, gap: number) {

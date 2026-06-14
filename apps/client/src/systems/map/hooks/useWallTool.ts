@@ -5,6 +5,7 @@ import { mapLayerRefs } from '../MapCanvas';
 import { useItemStore, getActiveMap } from '@/systems/scene/store/itemStore';
 import { emitItemUpdate } from '@/systems/scene/sceneSync';
 import type { MapItem, WallSegment } from '@/systems/scene/types';
+import { clientToWorld, getMapToolElement } from '../mapToolPointer';
 import {
   eraseWallsAtPoint,
   toMapLocal,
@@ -69,24 +70,24 @@ function drawEraserPreview(g: Graphics, wx: number, wy: number, radius: number) 
 /**
  * GM wall tool — freehand, rectangle, circle, and eraser sub-modes.
  */
-export function useWallTool(appReady = false) {
+export function useWallTool(appReady = false, interactionReady = false) {
   const activeTool = useMapStore((s) => s.activeTool);
   const wallMode = useMapStore((s) => s.wallMode);
   const overlayRef = useRef<Graphics | null>(null);
 
   useEffect(() => {
-    if (!appReady || activeTool !== 'wall') {
+    if (!appReady || !interactionReady || activeTool !== 'wall') {
       overlayRef.current?.clear();
       return;
     }
 
-    const app = mapLayerRefs.app.current;
     const world = mapLayerRefs.world.current;
     const prev = mapLayerRefs.drawPreview.current;
-    if (!app || !world || !prev) return;
+    const maybeEl = getMapToolElement();
+    if (!world || !prev || !maybeEl) return;
+    const toolEl: HTMLElement = maybeEl;
 
-    const canvas = app.canvas;
-    canvas.style.cursor = wallMode === 'eraser' ? 'cell' : 'crosshair';
+    toolEl.style.cursor = wallMode === 'eraser' ? 'cell' : 'crosshair';
 
     if (!overlayRef.current) {
       const g = new Graphics();
@@ -99,18 +100,11 @@ export function useWallTool(appReady = false) {
     let drawing = false;
     const pts: number[] = [];
 
-    function toWorld(clientX: number, clientY: number) {
-      const rect = canvas.getBoundingClientRect();
-      return {
-        x: (clientX - rect.left - world!.x) / world!.scale.x,
-        y: (clientY - rect.top - world!.y) / world!.scale.y,
-      };
-    }
-
     function onDown(e: PointerEvent) {
       if (e.button !== 0) return;
       e.preventDefault();
-      const wp = toWorld(e.clientX, e.clientY);
+      e.stopPropagation();
+      const wp = clientToWorld(e.clientX, e.clientY);
       const map = getActiveMap();
       if (!map) return;
 
@@ -118,20 +112,20 @@ export function useWallTool(appReady = false) {
         const local = toMapLocal(wp.x, wp.y, map);
         eraseAt(map, local.x, local.y);
         drawEraserPreview(overlay, wp.x, wp.y, WALL_ERASE_RADIUS);
-        canvas.setPointerCapture(e.pointerId);
+        toolEl.setPointerCapture(e.pointerId);
         return;
       }
 
       drawing = true;
       pts.length = 0;
       pts.push(wp.x, wp.y);
-      canvas.setPointerCapture(e.pointerId);
+      toolEl.setPointerCapture(e.pointerId);
     }
 
     function onMove(e: PointerEvent) {
       const map = getActiveMap();
       if (wallMode === 'eraser') {
-        const wp = toWorld(e.clientX, e.clientY);
+        const wp = clientToWorld(e.clientX, e.clientY);
         drawEraserPreview(overlay, wp.x, wp.y, WALL_ERASE_RADIUS);
         if (e.buttons !== 1 || !map) return;
         const local = toMapLocal(wp.x, wp.y, map);
@@ -140,7 +134,7 @@ export function useWallTool(appReady = false) {
       }
 
       if (!drawing) return;
-      const wp = toWorld(e.clientX, e.clientY);
+      const wp = clientToWorld(e.clientX, e.clientY);
       if (wallMode === 'freehand') {
         const lastX = pts[pts.length - 2];
         const lastY = pts[pts.length - 1];
@@ -165,7 +159,7 @@ export function useWallTool(appReady = false) {
       const map = getActiveMap();
       if (!map) return;
 
-      const wp = toWorld(e.clientX, e.clientY);
+      const wp = clientToWorld(e.clientX, e.clientY);
 
       if (wallMode === 'freehand') {
         const lastX = pts[pts.length - 2];
@@ -185,18 +179,18 @@ export function useWallTool(appReady = false) {
       appendSegments(map, segs);
     }
 
-    canvas.addEventListener('pointerdown', onDown);
-    canvas.addEventListener('pointermove', onMove);
-    canvas.addEventListener('pointerup', onUp);
-    canvas.addEventListener('pointercancel', onUp);
+    toolEl.addEventListener('pointerdown', onDown, true);
+    toolEl.addEventListener('pointermove', onMove, true);
+    toolEl.addEventListener('pointerup', onUp, true);
+    toolEl.addEventListener('pointercancel', onUp, true);
 
     return () => {
-      canvas.style.cursor = 'default';
-      canvas.removeEventListener('pointerdown', onDown);
-      canvas.removeEventListener('pointermove', onMove);
-      canvas.removeEventListener('pointerup', onUp);
-      canvas.removeEventListener('pointercancel', onUp);
+      toolEl.style.cursor = '';
+      toolEl.removeEventListener('pointerdown', onDown, true);
+      toolEl.removeEventListener('pointermove', onMove, true);
+      toolEl.removeEventListener('pointerup', onUp, true);
+      toolEl.removeEventListener('pointercancel', onUp, true);
       overlay.clear();
     };
-  }, [appReady, activeTool, wallMode]);
+  }, [appReady, interactionReady, activeTool, wallMode]);
 }

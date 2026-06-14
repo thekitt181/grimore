@@ -352,12 +352,12 @@ export function MapCanvas() {
   useAoePlacement(appReady);
   useTransformControls(appReady);
   usePixiSelectionGizmo(appReady);
-  useFogRenderer(appReady);
-  useMapMeasure(sceneRefs.measure, sceneRefs.world);
-  useDrawingTool(appReady);
-  useCalibrateGrid(appReady);
-  useWallTool(appReady);
-  useEraserTool(appReady);
+  useFogRenderer(appReady, interactionReady);
+  useMapMeasure(sceneRefs.measure, sceneRefs.world, interactionReady);
+  useDrawingTool(appReady, interactionReady);
+  useCalibrateGrid(appReady, interactionReady);
+  useWallTool(appReady, interactionReady);
+  useEraserTool(appReady, interactionReady);
   useDeleteKey(appReady);
   useMap3DPixiMode(appReady, viewMode);
   useMap3DOrbit(appReady, viewMode, interactionReady);

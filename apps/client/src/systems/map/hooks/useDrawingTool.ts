@@ -9,6 +9,7 @@ import type { DrawItem, TextItem, DrawShape } from '@/systems/scene/types';
 
 import { useSessionStore } from '@/store/sessionStore';
 import { DEFAULT_TEXT_FONT_SIZE } from '../drawColors';
+import { clientToWorld, getMapToolElement } from '../mapToolPointer';
 
 const DRAW_TOOLS = new Set(['draw-freehand', 'draw-rect', 'draw-circle', 'draw-arrow', 'text']);
 
@@ -36,7 +37,7 @@ export function commitTextDrawing(worldX: number, worldY: number, text: string) 
  * Drawing tools create scene items (DrawItem / TextItem).
  * Preview is rendered in the drawPreview layer while dragging.
  */
-export function useDrawingTool(appReady = false) {
+export function useDrawingTool(appReady = false, interactionReady = false) {
   const activeTool  = useMapStore((s) => s.activeTool);
   const drawColor   = useMapStore((s) => s.drawColor);
   const drawStroke  = useMapStore((s) => s.drawStroke);
@@ -44,7 +45,7 @@ export function useDrawingTool(appReady = false) {
   const previewRef = useRef<Graphics | null>(null);
 
   useEffect(() => {
-    if (!appReady || !DRAW_TOOLS.has(activeTool)) {
+    if (!appReady || !interactionReady || !DRAW_TOOLS.has(activeTool)) {
       previewRef.current?.clear();
       return;
     }
@@ -52,10 +53,11 @@ export function useDrawingTool(appReady = false) {
     const app   = mapLayerRefs.app.current;
     const world = mapLayerRefs.world.current;
     const prev  = mapLayerRefs.drawPreview.current;
-    if (!app || !world || !prev) return;
+    const el = getMapToolElement();
+    if (!app || !world || !prev || !el) return;
+    const toolEl = el;
 
-    const canvas = app.canvas;
-    canvas.style.cursor = activeTool === 'text' ? 'text' : 'crosshair';
+    toolEl.style.cursor = activeTool === 'text' ? 'text' : 'crosshair';
 
     if (!previewRef.current) {
       const g = new Graphics();
@@ -69,15 +71,12 @@ export function useDrawingTool(appReady = false) {
     const pts: number[] = [];
 
     function toWorld(cx: number, cy: number) {
-      const rect = canvas.getBoundingClientRect();
-      return {
-        x: (cx - rect.left - world!.x) / world!.scale.x,
-        y: (cy - rect.top  - world!.y) / world!.scale.y,
-      };
+      return clientToWorld(cx, cy);
     }
 
     function onDown(e: PointerEvent) {
       if (e.button !== 0) return;
+      e.stopPropagation();
       if (activeTool === 'text') {
         const wp = toWorld(e.clientX, e.clientY);
         _setPendingText?.({ worldX: wp.x, worldY: wp.y, screenX: e.clientX, screenY: e.clientY });
@@ -87,7 +86,7 @@ export function useDrawingTool(appReady = false) {
       pts.length = 0;
       const wp = toWorld(e.clientX, e.clientY);
       pts.push(wp.x, wp.y);
-      canvas.setPointerCapture(e.pointerId);
+      toolEl.setPointerCapture(e.pointerId);
     }
 
     function onMove(e: PointerEvent) {
@@ -142,21 +141,21 @@ export function useDrawingTool(appReady = false) {
       emitItemAdd(item);
     }
 
-    canvas.addEventListener('pointerdown', onDown);
-    canvas.addEventListener('pointermove', onMove);
-    canvas.addEventListener('pointerup',   onUp);
-    canvas.addEventListener('pointercancel', onUp);
+    toolEl.addEventListener('pointerdown', onDown, true);
+    toolEl.addEventListener('pointermove', onMove, true);
+    toolEl.addEventListener('pointerup',   onUp, true);
+    toolEl.addEventListener('pointercancel', onUp, true);
 
     return () => {
-      canvas.removeEventListener('pointerdown', onDown);
-      canvas.removeEventListener('pointermove', onMove);
-      canvas.removeEventListener('pointerup',   onUp);
-      canvas.removeEventListener('pointercancel', onUp);
-      canvas.style.cursor = 'default';
+      toolEl.removeEventListener('pointerdown', onDown, true);
+      toolEl.removeEventListener('pointermove', onMove, true);
+      toolEl.removeEventListener('pointerup',   onUp, true);
+      toolEl.removeEventListener('pointercancel', onUp, true);
+      toolEl.style.cursor = '';
       preview.clear();
       _setPendingText?.(null);
     };
-  }, [appReady, activeTool, drawColor, drawStroke]);
+  }, [appReady, interactionReady, activeTool, drawColor, drawStroke]);
 }
 
 function drawPreviewFreehand(g: Graphics, pts: number[], color: string, stroke: number) {
