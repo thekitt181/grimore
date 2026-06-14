@@ -2,12 +2,21 @@
 export function getClientOrigins(): string[] {
   const origins = new Set<string>();
 
-  const raw = process.env['CLIENT_URLS'] ?? process.env['CLIENT_URL'];
-  if (raw?.trim()) {
-    for (const origin of raw.split(',').map((s) => s.trim()).filter(Boolean)) {
-      origins.add(origin);
+  const addOrigins = (raw: string | undefined): void => {
+    if (!raw?.trim()) return;
+    for (const part of raw.split(',').map((s) => s.trim()).filter(Boolean)) {
+      if (part.startsWith('//')) {
+        origins.add(`https:${part}`);
+        origins.add(`http:${part}`);
+        continue;
+      }
+      origins.add(part.replace(/\/$/, ''));
     }
-  }
+  };
+
+  // Always merge both — CLIENT_URLS alone must not hide CLIENT_URL.
+  addOrigins(process.env['CLIENT_URLS']);
+  addOrigins(process.env['CLIENT_URL']);
 
   const renderUrl = process.env['RENDER_EXTERNAL_URL']?.trim().replace(/\/$/, '');
   if (renderUrl) origins.add(renderUrl);

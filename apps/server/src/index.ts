@@ -45,9 +45,10 @@ app.use(helmet({
   contentSecurityPolicy: false,
   crossOriginResourcePolicy: false,
 }));
-app.use(cors({
+
+const corsOptions: cors.CorsOptions = {
   origin(origin, callback) {
-    if (!origin || clientOrigins.includes(origin)) {
+    if (!origin || getClientOrigins().includes(origin)) {
       callback(null, true);
       return;
     }
@@ -58,7 +59,10 @@ app.use(cors({
     callback(new Error(`CORS blocked origin: ${origin}`));
   },
   credentials: true,
-}));
+};
+
+// CORS only for API — global CORS breaks Vite crossorigin /assets/ (500 + text/html CSS errors).
+app.use('/api', cors(corsOptions));
 app.use(cookieParser());
 app.all('/api/auth/*', toNodeHandler(auth));
 app.post(
