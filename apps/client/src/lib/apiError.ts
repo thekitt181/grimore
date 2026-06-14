@@ -18,7 +18,7 @@ export function extractApiError(err: unknown, fallback = 'Request failed'): stri
     const status = err.response.status;
     if (status === 400) return data?.error ?? 'D&D Beyond rejected the request — check your linked account and character.';
     if (status === 401) return 'Session expired — sign in again';
-    if (status === 503) return data?.error ?? 'Server is starting — retry in a moment';
+    if (status === 404) return data?.error ?? 'Not found on D&D Beyond — check the encounter URL or save it to your campaign first';
     if (status === 502 || status === 504) {
       return data?.error ?? 'Server timed out — retry in a moment';
     }

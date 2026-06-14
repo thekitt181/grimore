@@ -42,6 +42,12 @@ export const DDB_URLS = {
     return `${DDB_URLS.monsterBase}?search=${encodeURIComponent(search)}&skip=${skip}&take=${take}${homebrew}${sources}`;
   },
   monsterById: (id: number) => `${DDB_URLS.monsterBase}/${id}`,
+  encounterServiceBase: 'https://encounter-service.dndbeyond.com/v1',
+  encounterById: (encounterId: string) =>
+    `${DDB_URLS.encounterServiceBase}/encounters/${encounterId}`,
+  encounterList: () => `${DDB_URLS.encounterServiceBase}/encounters?take=100`,
+  encounterListForCampaign: (campaignId: number) =>
+    `${DDB_URLS.encounterServiceBase}/encounters?campaignId=${campaignId}&take=100`,
 } as const;
 
 /** Class ids for spell game-data API (level 20 fetch). */

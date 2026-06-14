@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { authClient, signInWithGoogle } from '@/lib/auth-client';
 import { useGoogleOAuthAvailable } from '@/hooks/useGoogleOAuthAvailable';
+import { LogoMark } from '@/components/LogoMark';
 
 export function SignInPage() {
   const navigate = useNavigate();
@@ -52,7 +53,9 @@ export function SignInPage() {
     >
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
-          <div className="text-5xl mb-3">🎲</div>
+          <div className="flex justify-center mb-3">
+            <LogoMark size={56} />
+          </div>
           <h1
             className="font-display text-4xl font-black tracking-widest animate-torch"
             style={{ color: 'var(--color-accent-gold)' }}

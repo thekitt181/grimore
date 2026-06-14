@@ -18,7 +18,7 @@ import mapsRoutes from './routes/maps';
 import sceneRoutes from './routes/scenes';
 import handoutRoutes from './routes/handouts';
 import supportRoutes, { handleSupportWebhook } from './routes/support';
-import { getClientOrigins, getPrimaryClientUrl } from './lib/clientOrigins';
+import { getCanonicalClientHostname, getClientOrigins, getPrimaryClientUrl } from './lib/clientOrigins';
 import { toNodeHandler } from 'better-auth/node';
 import { auth, getAuthBaseUrl, isBetterAuthDashboardEnabled, isGoogleOAuthEnabled } from './lib/auth';
 import { startCompendiumMongoWatch } from './services/compendiumMongoWatch';
@@ -39,6 +39,22 @@ let servicesReady = false;
 if (process.env['TRUST_PROXY'] === '1') {
   app.set('trust proxy', 1);
 }
+
+// Canonical host — keep OAuth state cookies on one hostname (www → apex).
+app.use((req, res, next) => {
+  const canonical = getCanonicalClientHostname();
+  if (!canonical) {
+    next();
+    return;
+  }
+  const host = req.hostname.toLowerCase();
+  if (host === `www.${canonical}`) {
+    const proto = req.secure || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
+    res.redirect(301, `${proto}://${canonical}${req.originalUrl}`);
+    return;
+  }
+  next();
+});
 
 // ─── Middleware ────────────────────────────────────────────────────────────────
 app.use(helmet({

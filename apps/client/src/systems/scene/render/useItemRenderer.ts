@@ -8,7 +8,11 @@ import { useMapStore } from '@/systems/map/store/mapStore';
 import {
   useLiveTransformStore,
 } from '../store/liveTransformStore';
-import { renderItem, itemVisualSignature, renderMapWalls, wallVisualSignature, type RenderContext } from './renderers';
+import {
+  renderItem, itemVisualSignature, renderMapWalls, wallVisualSignature,
+  updateTokenOverlay, tokenOverlayVisualSignature,
+  type RenderContext,
+} from './renderers';
 import type { Item, MapItem } from '../types';
 import { itemDisplayZIndex, wallDisplayZIndex } from '../zOrder';
 import { tokenRendersInThree } from '../token/tokenRenderType';
@@ -41,6 +45,7 @@ export function useItemRenderer(
   const containers = useRef<Map<string, Container>>(new Map());
   const wallContainers = useRef<Map<string, Container>>(new Map());
   const signatures = useRef<Map<string, string>>(new Map());
+  const overlaySignatures = useRef<Map<string, string>>(new Map());
   const wallSignatures = useRef<Map<string, string>>(new Map());
 
   useEffect(() => {
@@ -50,6 +55,7 @@ export function useItemRenderer(
       containers.current.clear();
       wallContainers.current.clear();
       signatures.current.clear();
+      overlaySignatures.current.clear();
       wallSignatures.current.clear();
       return;
     }
@@ -79,6 +85,7 @@ export function useItemRenderer(
         c.destroy({ children: true });
         containers.current.delete(id);
         signatures.current.delete(id);
+        overlaySignatures.current.delete(id);
       }
     }
     for (const [mapId, wc] of wallContainers.current) {
@@ -101,6 +108,7 @@ export function useItemRenderer(
           stale.destroy({ children: true });
           containers.current.delete(item.id);
           signatures.current.delete(item.id);
+          overlaySignatures.current.delete(item.id);
         }
         continue;
       }
@@ -120,6 +128,15 @@ export function useItemRenderer(
       if (prevSig !== sig) {
         renderItem(c, item, ctx);
         signatures.current.set(item.id, sig);
+        if (item.type === 'token') {
+          overlaySignatures.current.set(item.id, tokenOverlayVisualSignature(item, ctx));
+        }
+      } else if (item.type === 'token') {
+        const overlaySig = tokenOverlayVisualSignature(item, ctx);
+        if (overlaySignatures.current.get(item.id) !== overlaySig) {
+          updateTokenOverlay(c, item, ctx);
+          overlaySignatures.current.set(item.id, overlaySig);
+        }
       }
 
       // Transform — merge live drag offsets for fog vision alignment.
@@ -200,6 +217,7 @@ export function useItemRenderer(
       containers.current.clear();
       wallContainers.current.clear();
       signatures.current.clear();
+      overlaySignatures.current.clear();
       wallSignatures.current.clear();
     };
   }, []);

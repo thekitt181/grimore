@@ -1,16 +1,40 @@
-import { formatDdbImportJobProgress } from './ddbApi';
+import { useEffect, useState } from 'react';
+import {
+  formatDdbImportJobProgress,
+  getHiddenDdbImportBannerJobId,
+  setHiddenDdbImportBannerJobId,
+} from './ddbApi';
 import { useDdbImportJob } from './useDdbImportJob';
 
 const GOLD = 'var(--color-accent-gold)';
 
 export function DdbImportJobBanner({ enabled = true }: { enabled?: boolean }) {
   const { job, isRunning, verb, progressPercent, cancelImport, isCancelling } = useDdbImportJob(enabled);
+  const [bannerHidden, setBannerHidden] = useState(false);
 
-  if (!job || !isRunning) return null;
+  useEffect(() => {
+    if (!job?.id) {
+      setBannerHidden(false);
+      return;
+    }
+    if (job.status !== 'running') {
+      setHiddenDdbImportBannerJobId(null);
+      setBannerHidden(false);
+      return;
+    }
+    setBannerHidden(getHiddenDdbImportBannerJobId() === job.id);
+  }, [job?.id, job?.status]);
+
+  if (!job || !isRunning || bannerHidden) return null;
 
   const label = job.progress
     ? formatDdbImportJobProgress(job.progress, verb)
     : `Background ${verb} running…`;
+
+  function hideBanner() {
+    setHiddenDdbImportBannerJobId(job!.id);
+    setBannerHidden(true);
+  }
 
   return (
     <div
@@ -39,14 +63,24 @@ export function DdbImportJobBanner({ enabled = true }: { enabled?: boolean }) {
             </div>
           )}
         </div>
-        <button
-          type="button"
-          className="btn-ghost text-[10px] py-0.5 px-2 shrink-0"
-          disabled={isCancelling}
-          onClick={() => void cancelImport(job.id)}
-        >
-          Cancel
-        </button>
+        <div className="flex items-center gap-1 shrink-0">
+          <button
+            type="button"
+            className="btn-ghost text-[10px] py-0.5 px-2"
+            onClick={hideBanner}
+            title="Hide this bar — import keeps running"
+          >
+            Hide
+          </button>
+          <button
+            type="button"
+            className="btn-ghost text-[10px] py-0.5 px-2"
+            disabled={isCancelling}
+            onClick={() => void cancelImport(job.id)}
+          >
+            Cancel
+          </button>
+        </div>
       </div>
     </div>
   );

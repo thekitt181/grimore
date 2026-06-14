@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom';
 import { useGrimoireUser, useGrimoireSignOut } from '@/hooks/useGrimoireAuth';
+import { LogoMark } from '@/components/LogoMark';
 
 export function Navbar() {
   const { user } = useGrimoireUser();
@@ -18,7 +19,7 @@ export function Navbar() {
     >
       {/* Logo */}
       <Link to="/" className="flex items-center gap-3 group">
-        <span className="text-2xl select-none">🎲</span>
+        <LogoMark size={30} className="shrink-0 select-none" />
         <span
           className="font-display text-lg font-bold tracking-widest animate-torch"
           style={{ color: 'var(--color-accent-gold)' }}

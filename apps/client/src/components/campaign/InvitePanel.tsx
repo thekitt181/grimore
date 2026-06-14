@@ -1,6 +1,5 @@
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { api } from '@/lib/axios';
+import { useCampaignInvite } from './useCampaignInvite';
 
 interface InvitePanelProps {
   campaignId: string;
@@ -8,16 +7,7 @@ interface InvitePanelProps {
 
 export function InvitePanel({ campaignId }: InvitePanelProps) {
   const [copied, setCopied] = useState(false);
-
-  const { data } = useQuery({
-    queryKey: ['campaign-invite', campaignId],
-    queryFn: async () => {
-      const res = await api.get<{ inviteCode: string; inviteUrl: string }>(
-        `/campaigns/${campaignId}/invite`
-      );
-      return res.data;
-    },
-  });
+  const { data } = useCampaignInvite(campaignId);
 
   const handleCopy = async () => {
     if (!data) return;

@@ -58,6 +58,9 @@ import { GameClockWidget } from '@/systems/scene/media/GameClockWidget';
 import { SessionSceneBar } from '@/systems/scene/manager/SessionSceneBar';
 import { SceneManagerPanel } from '@/systems/scene/manager/SceneManagerPanel';
 import { useSceneUiStore } from '@/systems/scene/manager/sceneUiStore';
+import { DmScreenPanel } from '@/systems/dm/DmScreenPanel';
+import { useDmScreenStore } from '@/systems/dm/dmScreenStore';
+import { InviteCodeChip } from '@/components/campaign/InviteCodeChip';
 
 interface SessionInfo {
   id: string;
@@ -118,6 +121,8 @@ export function SessionPage() {
   const setLinkPanelOpen = useDdbStore((s) => s.setLinkPanelOpen);
   const sceneManagerOpen = useSceneUiStore((s) => s.sceneManagerOpen);
   const setSceneManagerOpen = useSceneUiStore((s) => s.setSceneManagerOpen);
+  const dmScreenOpen = useDmScreenStore((s) => s.open);
+  const setDmScreenOpen = useDmScreenStore((s) => s.setOpen);
 
   // ── Fetch session info ─────────────────────────────────────────────────────
   const { data: sessionInfo, isLoading } = useQuery({
@@ -230,6 +235,7 @@ export function SessionPage() {
         </div>
 
         <div className="flex items-center gap-3 flex-wrap justify-end">
+          {isGM && <InviteCodeChip campaignId={sessionInfo.campaignId} />}
           {isGM && (
             <>
               <SessionSceneBar
@@ -377,6 +383,11 @@ export function SessionPage() {
           {showDice && <DiceRoller onClose={() => setShowDice(false)} />}
           {showInitiative && <InitiativeTracker onClose={() => setShowInitiative(false)} />}
           {isGM && panelOpen && <MonsterDexPanel onClose={() => setPanelOpen(false)} />}
+          {isGM && dmScreenOpen && (
+            <PanelErrorBoundary title="DM Screen failed" onReset={() => setDmScreenOpen(false)}>
+              <DmScreenPanel onClose={() => setDmScreenOpen(false)} />
+            </PanelErrorBoundary>
+          )}
 
           <MobileSessionDock
             showInitiative={showInitiative}
@@ -435,6 +446,20 @@ export function SessionPage() {
                     title="Scene Manager"
                   >
                     🎬
+                  </button>
+                )}
+                {isGM && (
+                  <button
+                    onClick={() => setDmScreenOpen(!dmScreenOpen)}
+                    className="w-10 h-10 rounded-lg flex items-center justify-center text-lg shadow-panel transition-all"
+                    style={{
+                      background: dmScreenOpen ? 'rgba(201,168,76,0.2)' : 'var(--color-bg-secondary)',
+                      border: `1px solid ${dmScreenOpen ? 'var(--color-accent-gold)' : 'var(--color-border)'}`,
+                      color: dmScreenOpen ? 'var(--color-accent-gold)' : 'var(--color-text-secondary)',
+                    }}
+                    title="DM Screen"
+                  >
+                    📋
                   </button>
                 )}
                 {isGM && (

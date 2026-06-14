@@ -63,5 +63,17 @@ export function getPublicAppUrl(): string {
     }
     return url;
   }
-  return typeof window !== 'undefined' ? window.location.origin : '';
+  if (typeof window === 'undefined') return '';
+
+  const origin = window.location.origin;
+  try {
+    const url = new URL(origin);
+    if (url.hostname.startsWith('www.')) {
+      url.hostname = url.hostname.slice(4);
+      return url.origin;
+    }
+  } catch {
+    /* ignore */
+  }
+  return origin;
 }

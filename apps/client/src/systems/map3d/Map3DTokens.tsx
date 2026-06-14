@@ -8,6 +8,7 @@ import { SceneModel } from './SceneModel';
 import { TokenPickVolume } from './TokenPickVolume';
 import { TokenNameLabel } from './TokenNameLabel';
 import { TokenHpBar } from './TokenHpBar';
+import { TokenConditionDots } from './TokenConditionDots';
 import { TokenTransformGroup } from './TokenTransformGroup';
 import { TokenSelectionGizmo } from './Map3DTokenGizmo';
 import { TABLE_MINI_VIEW_AZIMUTH_OFFSET } from './orthographicCameraSync';
@@ -114,6 +115,7 @@ function Token2DFlat({
       <TokenPickVolume itemId={token.id} radius={Math.max(meshBase.w, meshBase.h) * 0.52} height={radius * 0.5} />
       <TokenNameLabel name={token.name} localY={radius * 0.85 * stretchZ} />
       <TokenHpBar tokenId={token.id} footprint={targetSize} />
+      <TokenConditionDots tokenId={token.id} radius={radius} />
 
       {activeTurn && (
         <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.08, 0]} scale={[stretchX, 1, stretchZ]}>
@@ -176,6 +178,7 @@ function Token3DModel({
       <TokenPickVolume itemId={token.id} radius={Math.max(meshBase.w, meshBase.h) * 0.52} height={view2d ? targetSize * 1.85 : targetSize * 1.35} />
       <TokenNameLabel name={token.name} localY={view2d ? targetSize * 1.35 : targetSize * 0.92} />
       <TokenHpBar tokenId={token.id} footprint={targetSize} />
+      <TokenConditionDots tokenId={token.id} radius={baseRadius} y={view2d ? 0.35 : 0.25} />
 
       {activeTurn && view2d && (
         <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.12, 0]}>
@@ -266,6 +269,7 @@ function Token3DMesh({
       <TokenPickVolume itemId={token.id} radius={Math.max(meshBase.w, meshBase.h) * 0.52} height={pickHeight * 1.25} />
       <TokenNameLabel name={token.name} localY={(yTop + radius * 0.75) * stretchZ} />
       <TokenHpBar tokenId={token.id} footprint={targetSize} />
+      <TokenConditionDots tokenId={token.id} radius={radius} y={yTop + 0.3} />
 
       {activeTurn && (
         <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, yTop + 0.35, 0]}>

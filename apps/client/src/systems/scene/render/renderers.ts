@@ -15,13 +15,7 @@ export interface RenderContext {
   selectedIds?: string[];
 }
 
-// Standard D&D 5e condition colours
-const CONDITION_COLORS: Record<string, number> = {
-  Blinded: 0xaaaaaa, Charmed: 0xff69b4, Deafened: 0x888888, Exhaustion: 0x8b4513,
-  Frightened: 0x9400d3, Grappled: 0xd2691e, Incapacitated: 0xff0000, Invisible: 0xc0c0c0,
-  Paralyzed: 0xffff00, Petrified: 0x808080, Poisoned: 0x32cd32, Prone: 0xa0522d,
-  Restrained: 0xffa500, Stunned: 0x00bfff, Unconscious: 0x000080,
-};
+import { tokenConditionColor } from '../token/tokenConditionColors';
 
 function cssHex(hex: string): number { return parseInt(hex.replace('#', ''), 16); }
 
@@ -32,7 +26,8 @@ export function tokenBaseVisualSignature(item: TokenItem): string {
 
 /** HP, conditions, and turn ring — cheap to patch without rebuilding the whole token. */
 export function tokenOverlayVisualSignature(item: TokenItem, ctx: RenderContext): string {
-  return `${item.hp}|${item.maxHp}|${item.tempHp ?? 0}|${item.conditions.join(',')}|${ctx.activeTurnItemId === item.id}|${ctx.gm}`;
+  const selected = ctx.selectedIds?.includes(item.id) ?? false;
+  return `${item.hp}|${item.maxHp}|${item.tempHp ?? 0}|${item.conditions.join(',')}|${ctx.activeTurnItemId === item.id}|${selected}|${ctx.gm}`;
 }
 
 /** A signature of the visual-relevant fields so we can skip needless rebuilds. */
@@ -340,7 +335,7 @@ function renderTokenOverlay(c: Container, item: TokenItem, ctx: RenderContext) {
       const dot = new Graphics();
       dot.label = `cond-${i}`;
       dot.circle(dx, dy, dotR);
-      dot.fill({ color: CONDITION_COLORS[cond] ?? 0xffffff });
+      dot.fill({ color: parseInt(tokenConditionColor(cond).replace('#', ''), 16) });
       dot.setStrokeStyle({ width: 1, color: 0x000000, alpha: 0.5 });
       dot.stroke();
       overlay.addChild(dot);

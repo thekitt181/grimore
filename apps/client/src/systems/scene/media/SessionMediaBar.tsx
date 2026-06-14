@@ -11,7 +11,7 @@ import { skipMusicTrack } from './audioEngine';
 import { useSceneMediaStore } from './sceneMediaStore';
 import { emitSessionMediaPatch, emitSessionTimeOfDay } from './useSceneMedia';
 
-type MenuId = 'media' | 'video' | 'audio' | 'upload';
+type MenuId = 'media' | 'upload';
 
 interface SessionMediaBarProps {
   sessionId: string;
@@ -172,8 +172,6 @@ export function SessionMediaBar({ sessionId, isGM }: SessionMediaBarProps) {
         Media
       </span>
       <TabBtn id="media" label="Mix" />
-      <TabBtn id="video" label="Video" />
-      <TabBtn id="audio" label="Audio" />
       <TabBtn id="upload" label="Upload" />
 
       {openMenu && (
@@ -233,26 +231,11 @@ export function SessionMediaBar({ sessionId, isGM }: SessionMediaBarProps) {
               </div>
             )}
 
-            {openMenu === 'video' && (
-              <div className="space-y-2">
-                <PickBtn label="✕ Clear video" onClick={clearVideo} />
-                <p className="px-1 font-ui text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
-                  Use Upload to paste a URL or pick a video file.
-                </p>
-              </div>
-            )}
-
-            {openMenu === 'audio' && (
-              <div className="space-y-2">
-                <PickBtn label="✕ Clear all audio" onClick={clearAudio} />
-                <p className="px-1 font-ui text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
-                  Use Upload to add ambient layers or music tracks.
-                </p>
-              </div>
-            )}
-
             {openMenu === 'upload' && (
               <div className="space-y-2 px-1">
+                <PickBtn label="Clear video" onClick={clearVideo} />
+                <PickBtn label="Clear all audio" onClick={clearAudio} />
+                <div className="gold-divider my-1" />
                 <select
                   className="input w-full text-xs py-1"
                   value={uploadKind}

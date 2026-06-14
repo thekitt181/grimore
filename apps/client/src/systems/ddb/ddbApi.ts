@@ -150,13 +150,32 @@ export async function fetchDdbEncounters(ddbCampaignId: number): Promise<DdbEnco
 
 export async function prepareEncounterSummon(
   encounterId: string,
-  ddbCampaignId: number,
+  ddbCampaignId?: number,
 ): Promise<DdbEncounter> {
-  const { data } = await api.post<{ encounter: DdbEncounter }>(
-    `/ddb/encounters/${encounterId}/summon`,
-    { ddbCampaignId },
-  );
-  return data.encounter;
+  try {
+    const { data } = await api.post<{ encounter: DdbEncounter }>(
+      `/ddb/encounters/${encodeURIComponent(encounterId)}/summon`,
+      ddbCampaignId ? { ddbCampaignId } : {},
+    );
+    return data.encounter;
+  } catch (err) {
+    throw new Error(extractApiError(err, 'Failed to prepare encounter summon'));
+  }
+}
+
+export async function resolveDdbEncounterRef(
+  encounterRef: string,
+  ddbCampaignId?: number,
+): Promise<DdbEncounter> {
+  try {
+    const { data } = await api.post<{ encounter: DdbEncounter }>(
+      '/ddb/encounters/resolve',
+      { encounterRef, ...(ddbCampaignId ? { ddbCampaignId } : {}) },
+    );
+    return data.encounter;
+  } catch (err) {
+    throw new Error(extractApiError(err, 'Could not import encounter from D&D Beyond'));
+  }
 }
 
 export async function updateDdbSettings(settings: {
@@ -737,6 +756,7 @@ export async function importAllDdbLibraryFromSource(
 }
 
 const IMPORT_JOB_STORAGE_KEY = 'grimoire-ddb-import-job-id';
+const IMPORT_BANNER_HIDDEN_KEY = 'grimoire-ddb-import-banner-hidden';
 
 export function getStoredDdbImportJobId(): string | null {
   try {
@@ -750,6 +770,24 @@ export function setStoredDdbImportJobId(jobId: string | null): void {
   try {
     if (jobId) localStorage.setItem(IMPORT_JOB_STORAGE_KEY, jobId);
     else localStorage.removeItem(IMPORT_JOB_STORAGE_KEY);
+  } catch {
+    // ignore
+  }
+}
+
+/** Banner dismissed for this job id — import still runs in the background. */
+export function getHiddenDdbImportBannerJobId(): string | null {
+  try {
+    return localStorage.getItem(IMPORT_BANNER_HIDDEN_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function setHiddenDdbImportBannerJobId(jobId: string | null): void {
+  try {
+    if (jobId) localStorage.setItem(IMPORT_BANNER_HIDDEN_KEY, jobId);
+    else localStorage.removeItem(IMPORT_BANNER_HIDDEN_KEY);
   } catch {
     // ignore
   }

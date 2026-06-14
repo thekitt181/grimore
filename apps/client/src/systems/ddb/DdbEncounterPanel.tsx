@@ -4,12 +4,12 @@ import { DraggablePanel } from '@/components/DraggablePanel';
 import { useSessionStore } from '@/store/sessionStore';
 import {
   fetchDdbCampaigns,
-  fetchDdbEncounters,
   fetchDdbStatus,
   fetchGrimoireDdbLink,
   linkGrimoireCampaign,
   prepareEncounterSummon,
 } from './ddbApi';
+import { useDdbEncounters, ddbEncountersQueryKey } from './useDdbEncounters';
 import { summonEncounterMonsters } from './summonEncounter';
 import { requestDdbRollBridgeStart } from './startRollBridge';
 import { useDdbStore } from './ddbStore';
@@ -53,18 +53,17 @@ export function DdbEncounterPanel({ onClose }: { onClose: () => void }) {
   const ddbCampaignId = link?.ddbCampaignId ?? null;
   const linkedCampaignName = ddbCampaigns?.find((c) => c.ddbCampaignId === ddbCampaignId)?.name;
 
-  const { data: encounters, isLoading: encountersLoading } = useQuery({
-    queryKey: ['ddb', 'encounters', ddbCampaignId],
-    queryFn: () => fetchDdbEncounters(ddbCampaignId!),
-    enabled: Boolean(ddbCampaignId),
-  });
+  const { data: encounters, isLoading: encountersLoading, isFetching, refetch } = useDdbEncounters(
+    ddbCampaignId,
+  );
 
   const linkMutation = useMutation({
     mutationFn: (id: number) => linkGrimoireCampaign(campaignId!, id),
-    onSuccess: async () => {
+    onSuccess: async (_data, linkedDdbCampaignId) => {
       setLinkError(null);
       setManualId('');
       void qc.invalidateQueries({ queryKey: ['ddb', 'campaign-link', campaignId] });
+      void qc.invalidateQueries({ queryKey: ddbEncountersQueryKey(linkedDdbCampaignId) });
       bumpRollBridge();
       const result = await requestDdbRollBridgeStart();
       setBridgeMessage(
@@ -242,9 +241,19 @@ export function DdbEncounterPanel({ onClose }: { onClose: () => void }) {
 
       {ddbCampaignId && (
         <>
-          <h4 className="font-display text-[10px] tracking-wider uppercase mb-1 shrink-0" style={{ color: GOLD }}>
-            Encounters
-          </h4>
+          <div className="flex items-center justify-between gap-2 mb-1 shrink-0">
+            <h4 className="font-display text-[10px] tracking-wider uppercase" style={{ color: GOLD }}>
+              Encounters
+            </h4>
+            <button
+              type="button"
+              className="btn-ghost text-[10px] py-0.5 px-1.5 shrink-0 disabled:opacity-50"
+              disabled={isFetching}
+              onClick={() => void refetch()}
+            >
+              {isFetching ? 'Refreshing…' : 'Refresh'}
+            </button>
+          </div>
           <div className="flex-1 overflow-y-auto space-y-2 min-h-0">
             {encountersLoading && <p className="text-xs">Loading encounters…</p>}
             {!encountersLoading && (!encounters || encounters.length === 0) && (

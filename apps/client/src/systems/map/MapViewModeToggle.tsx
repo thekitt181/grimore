@@ -26,10 +26,7 @@ export function MapViewModeToggle({ variant = 'toolbar' }: { variant?: 'toolbar'
           color: is3d ? GOLD : 'var(--color-text-primary)',
         }}
       >
-        <span className="text-lg leading-none" aria-hidden>
-          {is3d ? '🗺' : '🧊'}
-        </span>
-        <span className="font-ui text-[9px] font-semibold mt-0.5 tracking-wide">{is3d ? '2D' : '3D'}</span>
+        <span className="text-[10px] font-bold leading-none">{is3d ? '2D' : '3D'}</span>
       </button>
     );
   }

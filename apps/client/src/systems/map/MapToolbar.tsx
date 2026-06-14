@@ -16,8 +16,6 @@ type ToolDef = { id: MapTool; label: string; icon: string; title: string };
 const GM_TOOLS: ToolDef[] = [
   { id: 'select',    label: 'Select',  icon: '↖',  title: 'Select & move items; drag marquee for walls; drag gold dots to extend walls' },
   { id: 'pan',       label: 'Pan',     icon: '✋',  title: 'Pan the map (middle-mouse or this tool)' },
-  { id: 'fog-reveal',label: 'Reveal',  icon: '☀',  title: 'Reveal fog cells' },
-  { id: 'fog-hide',  label: 'Hide',    icon: '🌑', title: 'Hide fog cells' },
   { id: 'wall',      label: 'Wall',    icon: '🧱', title: 'Wall tool — freehand, rect, circle & eraser appear below' },
   { id: 'measure',   label: 'Measure', icon: '📏', title: 'Measure distance' },
   { id: 'calibrate', label: 'Calibrate', icon: '⊹', title: 'Calibrate grid — drag a rectangle over one cell' },
@@ -197,6 +195,7 @@ export function MapToolbar() {
           <>
             <div className="gold-divider my-1" />
             <button
+              type="button"
               title={fogOverlayOn ? 'Fog: ON — click to turn off for players' : 'Fog: OFF — click to turn on'}
               onClick={() => {
                 const next = !fogOverlayOn;
@@ -208,22 +207,45 @@ export function MapToolbar() {
                 }
               }}
               className={clsx(
-                'w-9 h-9 rounded flex flex-col items-center justify-center font-ui transition-all',
+                'w-9 rounded flex flex-col items-center justify-center font-ui transition-all py-1',
                 fogOverlayOn
                   ? 'bg-[#c9a84c33] text-[#c9a84c] ring-2 ring-[#c9a84c] shadow-[0_0_10px_rgba(201,168,76,0.35)]'
                   : 'text-[#6b6560] hover:text-[#8a8075] hover:bg-[#1c1c28] ring-1 ring-[#2a2a3a]',
               )}
             >
-              <span className="text-sm leading-none" aria-hidden>
-                {fogOverlayOn ? '🌫' : '🗺'}
-              </span>
               <span
-                className="text-[7px] font-bold tracking-widest mt-0.5"
+                className="text-[7px] font-bold tracking-widest"
                 style={{ color: fogOverlayOn ? '#c9a84c' : '#6b6560' }}
               >
-                {fogOverlayOn ? 'ON' : 'OFF'}
+                {fogOverlayOn ? 'FOG ON' : 'FOG OFF'}
               </span>
             </button>
+            {fogOverlayOn && (
+              <div className="flex flex-col gap-0.5 w-9">
+                <button
+                  type="button"
+                  title="Reveal fog cells"
+                  onClick={() => setTool(activeTool === 'fog-reveal' ? 'select' : 'fog-reveal')}
+                  className={clsx(
+                    'w-full rounded py-0.5 font-ui text-[8px] transition-all',
+                    activeTool === 'fog-reveal' ? ACTIVE_BTN : 'text-[#8a8075] hover:text-[#e8e0d0] hover:bg-[#1c1c28]',
+                  )}
+                >
+                  Reveal
+                </button>
+                <button
+                  type="button"
+                  title="Hide fog cells"
+                  onClick={() => setTool(activeTool === 'fog-hide' ? 'select' : 'fog-hide')}
+                  className={clsx(
+                    'w-full rounded py-0.5 font-ui text-[8px] transition-all',
+                    activeTool === 'fog-hide' ? ACTIVE_BTN : 'text-[#8a8075] hover:text-[#e8e0d0] hover:bg-[#1c1c28]',
+                  )}
+                >
+                  Hide
+                </button>
+              </div>
+            )}
           </>
         )}
       </div>

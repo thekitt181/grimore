@@ -8,6 +8,7 @@ import {
   fetchDdbCampaigns,
   fetchDdbCharacterList,
   fetchDdbEncounters,
+  resolveDdbEncounter,
   getCobaltForUser,
   getDdbStatus,
   getOrSyncCharacter,
@@ -327,8 +328,37 @@ router.post('/encounters/:id/summon', requireAuth, async (req: AuthenticatedRequ
   try {
     const encounterId = req.params['id'] ?? '';
     const { ddbCampaignId } = req.body as { ddbCampaignId?: number };
-    if (!ddbCampaignId) {
-      res.status(400).json({ error: 'ddbCampaignId required' });
+    const cobalt = await getCobaltForUser(req.userId!);
+    if (!cobalt) {
+      res.status(400).json({ error: 'D&D Beyond account not linked' });
+      return;
+    }
+    const encounter = await resolveDdbEncounter(
+      cobalt,
+      encounterId,
+      ddbCampaignId,
+    );
+    if (!encounter) {
+      res.status(404).json({
+        error: 'Encounter not found — save it to your DDB campaign or paste the encounter URL/id from Encounter Builder',
+      });
+      return;
+    }
+    res.json({ encounter, monsters: encounter.monsters });
+  } catch (err) {
+    res.status(400).json({ error: err instanceof Error ? err.message : 'Summon prep failed' });
+  }
+});
+
+router.post('/encounters/resolve', requireAuth, async (req: AuthenticatedRequest, res) => {
+  try {
+    const schema = z.object({
+      encounterRef: z.string().min(1),
+      ddbCampaignId: z.number().int().positive().optional(),
+    });
+    const parsed = schema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: 'encounterRef required (URL or numeric id)' });
       return;
     }
     const cobalt = await getCobaltForUser(req.userId!);
@@ -336,15 +366,21 @@ router.post('/encounters/:id/summon', requireAuth, async (req: AuthenticatedRequ
       res.status(400).json({ error: 'D&D Beyond account not linked' });
       return;
     }
-    const encounters = await fetchDdbEncounters(cobalt, ddbCampaignId);
-    const encounter = encounters.find((e) => e.id === encounterId);
+    const encounter = await resolveDdbEncounter(
+      cobalt,
+      parsed.data.encounterRef,
+      parsed.data.ddbCampaignId,
+    );
     if (!encounter) {
-      res.status(404).json({ error: 'Encounter not found' });
+      res.status(404).json({
+        error:
+          'Encounter not found on D&D Beyond — paste the full encounter URL from Encounter Builder (UUID in the address bar), not just the campaign link',
+      });
       return;
     }
-    res.json({ encounter, monsters: encounter.monsters });
+    res.json({ encounter });
   } catch (err) {
-    res.status(400).json({ error: err instanceof Error ? err.message : 'Summon prep failed' });
+    res.status(400).json({ error: err instanceof Error ? err.message : 'Failed to resolve encounter' });
   }
 });
 

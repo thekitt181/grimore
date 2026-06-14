@@ -93,6 +93,20 @@ export function dedupeByIdenticalContent<T extends AnyEntry>(
   return out;
 }
 
+/** Collapse duplicate rows for the same name in the same book — keep cross-book copies. */
+export function dedupeByBookSlot<T extends AnyEntry>(entries: T[] | undefined): T[] {
+  const seen = new Set<string>();
+  const out: T[] = [];
+  for (const entry of entries ?? []) {
+    if (!entry?.name?.trim()) continue;
+    const key = compendiumCatalogMergeKey(entry.name, entry.source);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(entry);
+  }
+  return out;
+}
+
 export function resolveEntryId(
   kind: CompendiumKind,
   entry: AnyEntry & { _id?: string },

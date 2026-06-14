@@ -5,7 +5,7 @@ import { normalizeCobaltToken, validateCobalt } from './cobaltAuth';
 import { extractCharacter } from './characterExtract';
 import { fetchDdbCampaigns, fetchDdbCharacterList } from './campaigns';
 import { pushHpToDdb, pushDeathSavesToDdb, type DdbDeathSavesPayload } from './characterUpdate';
-import { fetchDdbEncounters } from './encounters';
+import { fetchDdbEncounters, resolveDdbEncounter, parseDdbEncounterId } from './encounters';
 import { fetchDdbCatalog } from './ddbSources';
 import { filterAccessibleSourceIds, invalidateAccessibleSourceCache, listAccessibleDdbSources } from './ddbAccessibleSources';
 import {
@@ -435,4 +435,4 @@ export async function finishDdbLibraryImportSession(
   return finishDdbLibraryImport(ctx, opts);
 }
 
-export { fetchDdbCampaigns, fetchDdbCharacterList, fetchDdbEncounters };
+export { fetchDdbCampaigns, fetchDdbCharacterList, fetchDdbEncounters, resolveDdbEncounter, parseDdbEncounterId };

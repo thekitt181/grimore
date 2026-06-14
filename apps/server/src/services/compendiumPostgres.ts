@@ -422,24 +422,19 @@ export async function readImportedNameSourceRowsForBooks(): Promise<{
       select: { kind: true, name: true, source: true, inTypedImport: true },
     }));
     const byKind = {
-      monster: new Map<string, { name: string; source?: string }>(),
-      item: new Map<string, { name: string; source?: string }>(),
-      spell: new Map<string, { name: string; source?: string }>(),
+      monster: [] as Array<{ name: string; source?: string }>,
+      item: [] as Array<{ name: string; source?: string }>,
+      spell: [] as Array<{ name: string; source?: string }>,
     };
     for (const row of rows) {
+      if (!row.inTypedImport && !row.source?.trim()) continue;
       const kind = PRISMA_TO_KIND[row.kind];
-      const key = entryNameKey(row.name);
-      if (!key) continue;
-      const map = byKind[kind];
-      const existing = map.get(key);
-      if (row.inTypedImport || !existing) {
-        map.set(key, { name: row.name, source: row.source || undefined });
-      }
+      byKind[kind].push({ name: row.name, source: row.source || undefined });
     }
     return {
-      monster: Array.from(byKind.monster.values()),
-      item: Array.from(byKind.item.values()),
-      spell: Array.from(byKind.spell.values()),
+      monster: byKind.monster,
+      item: byKind.item,
+      spell: byKind.spell,
     };
   } catch {
     return empty;

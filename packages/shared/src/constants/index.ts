@@ -42,6 +42,8 @@ export const D5E_CONDITIONS = [
 
 export type D5ECondition = (typeof D5E_CONDITIONS)[number];
 
+export { D5E_CONDITION_REFERENCE, type D5eConditionRef } from './d5eConditionReference';
+
 export const DICE_TYPES = [4, 6, 8, 10, 12, 20, 100] as const;
 export type DieType = (typeof DICE_TYPES)[number];
 

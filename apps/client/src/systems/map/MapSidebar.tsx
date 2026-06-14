@@ -20,6 +20,7 @@ import { getPersistSessionId } from '@/systems/scene/sessionPersistence';
 import { CompendiumSidebarList } from '@/systems/compendium/CompendiumSidebarList';
 import { useDdbStore } from '@/systems/ddb/ddbStore';
 import { useSceneUiStore } from '@/systems/scene/manager/sceneUiStore';
+import { useDmScreenStore } from '@/systems/dm/dmScreenStore';
 import { mapSidebarWidth, useMapSidebarStore } from './mapSidebarStore';
 
 const GOLD = 'var(--color-accent-gold)';
@@ -438,6 +439,8 @@ function GMSidebarContent() {
 
       <SceneSidebarSection />
 
+      <DmScreenSidebarSection />
+
       <DdbSidebarSection />
 
       {/* Token list */}
@@ -466,6 +469,29 @@ function SceneSidebarSection() {
       </button>
       <p className="font-ui text-xs leading-snug" style={{ color: 'var(--color-text-secondary)' }}>
         Prepare maps, ambience, video, lighting, and weather — then push scenes live to the table.
+      </p>
+    </div>
+  );
+}
+
+function DmScreenSidebarSection() {
+  const setOpen = useDmScreenStore((s) => s.setOpen);
+  const open = useDmScreenStore((s) => s.open);
+
+  return (
+    <div className="panel space-y-2">
+      <h3 className="font-display text-xs font-semibold tracking-wider uppercase" style={{ color: 'var(--color-accent-gold)' }}>
+        DM Screen
+      </h3>
+      <button
+        type="button"
+        className="btn-primary w-full text-xs py-1.5"
+        onClick={() => setOpen(!open)}
+      >
+        {open ? 'Hide DM Screen' : 'Open DM Screen'}
+      </button>
+      <p className="font-ui text-xs leading-snug" style={{ color: 'var(--color-text-secondary)' }}>
+        Party sync, conditions reference, DDB encounters, private notes, and secret rolls.
       </p>
     </div>
   );

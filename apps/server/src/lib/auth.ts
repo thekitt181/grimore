@@ -3,8 +3,10 @@ import { prismaAdapter } from 'better-auth/adapters/prisma';
 import { dash } from '@better-auth/infra';
 import { bearer } from 'better-auth/plugins';
 import { prisma } from './prisma';
-import { getClientOrigins, getPrimaryClientUrl } from './clientOrigins';
+import { getClientOrigins, getPrimaryClientUrl, getSharedAuthCookieDomain } from './clientOrigins';
 import { sendEmail } from './email';
+
+const sharedAuthCookieDomain = getSharedAuthCookieDomain();
 
 const googleClientId = process.env['GOOGLE_CLIENT_ID']?.trim();
 const googleClientSecret = process.env['GOOGLE_CLIENT_SECRET']?.trim();
@@ -28,6 +30,17 @@ export const auth = betterAuth({
     process.env['BETTER_AUTH_SECRET']?.trim() ??
     'grimoire-dev-auth-secret-change-in-production',
   trustedOrigins: getClientOrigins(),
+  ...(sharedAuthCookieDomain
+    ? {
+        advanced: {
+          crossSubDomainCookies: {
+            enabled: true,
+            domain: sharedAuthCookieDomain,
+          },
+          useSecureCookies: true,
+        },
+      }
+    : {}),
   database: prismaAdapter(prisma, { provider: 'postgresql' }),
   emailAndPassword: {
     enabled: true,
@@ -67,6 +80,9 @@ export const auth = betterAuth({
   },
   account: {
     modelName: 'AuthAccount',
+    // OAuth state is still validated against the verification table; skip the extra
+    // signed cookie check that breaks on mobile / www↔apex redirects when cookies drop.
+    skipStateCookieCheck: true,
   },
   verification: {
     modelName: 'AuthVerification',

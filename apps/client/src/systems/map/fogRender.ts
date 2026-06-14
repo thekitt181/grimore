@@ -1,13 +1,14 @@
 import {
+  CanvasSource,
   Container,
-  Graphics,
+  Sprite,
+  Texture,
   type Renderer,
 } from 'pixi.js';
 import type { Item, MapItem } from '@/systems/scene/types';
 import { cellKey } from './store/mapStore';
 import {
   getVisionTokens,
-  gmVisibleCells,
   losPolygons,
   losVisibleCellKeys,
 } from './fogLos';
@@ -24,11 +25,10 @@ export interface FogDrawOptions {
 
 export interface FogLayers {
   compose: Container;
-  fog: Graphics;
-  refog: Graphics;
+  fogSprite: Sprite;
+  fogCanvas: HTMLCanvasElement;
+  fogTexture: Texture;
 }
-
-const FOG_COLOR = 0x000000;
 
 const layerCache = new WeakMap<Container, FogLayers>();
 
@@ -42,35 +42,44 @@ function parseCellKey(key: string): { x: number; y: number } | null {
 
 export function ensureFogLayers(fc: Container): FogLayers {
   const cached = layerCache.get(fc);
-  if (cached && !cached.compose.destroyed) return cached;
+  if (cached && !cached.compose.destroyed && cached.fogCanvas) return cached;
 
   fc.removeChildren();
 
+  const canvas = document.createElement('canvas');
+  canvas.width = 1;
+  canvas.height = 1;
+  const source = new CanvasSource({ resource: canvas, transparent: true });
+  const texture = new Texture({ source });
+  const fogSprite = new Sprite(texture);
+  fogSprite.label = 'fog-fill';
+
   const compose = new Container();
   compose.label = 'fog-compose';
-  const fog = new Graphics();
-  fog.label = 'fog-fill';
-  const refog = new Graphics();
-  refog.label = 'fog-refog';
-  compose.addChild(fog, refog);
+  compose.addChild(fogSprite);
   fc.addChild(compose);
 
-  const layers: FogLayers = { compose, fog, refog };
+  const layers: FogLayers = { compose, fogSprite, fogCanvas: canvas, fogTexture: texture };
   layerCache.set(fc, layers);
   return layers;
 }
 
+function resizeFogCanvas(layers: FogLayers, width: number, height: number): void {
+  const w = Math.max(1, Math.round(width));
+  const h = Math.max(1, Math.round(height));
+  if (layers.fogCanvas.width === w && layers.fogCanvas.height === h) return;
+  layers.fogCanvas.width = w;
+  layers.fogCanvas.height = h;
+  layers.fogTexture.source.resize(w, h);
+}
+
 export function clearFogLayers(layers: FogLayers): void {
-  layers.fog.clear();
-  layers.refog.clear();
+  const ctx = layers.fogCanvas.getContext('2d');
+  if (ctx) ctx.clearRect(0, 0, layers.fogCanvas.width, layers.fogCanvas.height);
+  layers.fogTexture.source.update();
 }
 
-function cutPolygon(g: Graphics, poly: { x: number; y: number }[]): void {
-  if (poly.length < 3) return;
-  g.poly(poly.flatMap((p) => [p.x, p.y])).cut();
-}
-
-function drawPolygonPath(ctx: CanvasRenderingContext2D, poly: { x: number; y: number }[]): void {
+function appendPolygonPath(ctx: CanvasRenderingContext2D, poly: { x: number; y: number }[]): void {
   if (poly.length < 3) return;
   ctx.moveTo(poly[0]!.x, poly[0]!.y);
   for (let i = 1; i < poly.length; i++) {
@@ -79,18 +88,8 @@ function drawPolygonPath(ctx: CanvasRenderingContext2D, poly: { x: number; y: nu
   ctx.closePath();
 }
 
-function cutPolygonCanvas(ctx: CanvasRenderingContext2D, poly: { x: number; y: number }[]): void {
-  drawPolygonPath(ctx, poly);
-  ctx.fill();
-}
-
-function cutCellCanvas(ctx: CanvasRenderingContext2D, cx: number, cy: number, gridSize: number): void {
+function appendCellPath(ctx: CanvasRenderingContext2D, cx: number, cy: number, gridSize: number): void {
   ctx.rect(cx * gridSize, cy * gridSize, gridSize, gridSize);
-  ctx.fill();
-}
-
-function cutCell(g: Graphics, cx: number, cy: number, gridSize: number): void {
-  g.rect(cx * gridSize, cy * gridSize, gridSize, gridSize).cut();
 }
 
 function isInteriorCell(cx: number, cy: number, cells: Set<string>): boolean {
@@ -103,103 +102,31 @@ function isInteriorCell(cx: number, cy: number, cells: Set<string>): boolean {
   );
 }
 
-/** Grid holes only deep inside visible area — keeps the cone edge smooth. */
-function isInteriorVisibleCell(cx: number, cy: number, visible: Set<string>): boolean {
-  return (
-    visible.has(cellKey(cx, cy))
-    && visible.has(cellKey(cx + 1, cy))
-    && visible.has(cellKey(cx - 1, cy))
-    && visible.has(cellKey(cx, cy + 1))
-    && visible.has(cellKey(cx, cy - 1))
-  );
+/** Wipe the canvas each frame so prior vision holes cannot linger in the GPU texture. */
+function resetFogCanvas(ctx: CanvasRenderingContext2D, width: number, height: number): void {
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalAlpha = 1;
+  ctx.globalCompositeOperation = 'copy';
+  ctx.fillStyle = 'rgba(0,0,0,0)';
+  ctx.fillRect(0, 0, width, height);
+  ctx.globalCompositeOperation = 'source-over';
 }
 
-/**
- * Full-map fog with smooth cone cutouts (fill first, then Pixi cut holes).
- * Players: polygon holes only. GM: polygon + interior grid patches.
- */
-function paintFogGraphics(
-  layers: FogLayers,
-  map: MapItem,
-  opts: FogDrawOptions,
-): void {
-  const { width, height, gridSize } = map;
-  const { fog, refog } = layers;
-
-  fog.clear();
-  refog.clear();
-
-  const visionTokens = getVisionTokens(
-    opts.items,
-    opts.selectedIds,
-    opts.isGM,
-    opts.isGM ? null : opts.myUserId,
-    map,
-  );
-
-  const polys = visionTokens.length > 0
-    ? losPolygons(map, visionTokens, gridSize, { directional: true })
-    : [];
-
-  // Must fill before cut() — Pixi punches holes into the previous fill instruction.
-  fog.rect(0, 0, width, height).fill({ color: FOG_COLOR, alpha: 1 });
-
-  if (polys.length > 0) {
-    for (const poly of polys) {
-      cutPolygon(fog, poly);
-    }
-
-    if (opts.isGM) {
-      const visibleCells = gmVisibleCells(
-        opts.revealedCells,
-        map,
-        opts.items,
-        opts.selectedIds,
-        gridSize,
-      );
-      for (const key of visibleCells) {
-        const cell = parseCellKey(key);
-        if (!cell || !isInteriorVisibleCell(cell.x, cell.y, visibleCells)) continue;
-        cutCell(fog, cell.x, cell.y, gridSize);
-      }
-    }
-  } else {
-    for (let cx = 0; cx < Math.ceil(width / gridSize); cx++) {
-      for (let cy = 0; cy < Math.ceil(height / gridSize); cy++) {
-        if (!opts.revealedCells.has(cellKey(cx, cy))) continue;
-        cutCell(fog, cx, cy, gridSize);
-      }
-    }
-  }
-
-  // Grid refog only on unrevealed interior cone cells (smooth outer edge stays on fog cuts).
-  if (!opts.isGM && opts.revealedCells.size > 0 && polys.length > 0) {
-    const coneCells = losVisibleCellKeys(map, visionTokens, gridSize, { directional: true });
-    for (const key of coneCells) {
-      if (opts.revealedCells.has(key)) continue;
-      const cell = parseCellKey(key);
-      if (!cell || !isInteriorCell(cell.x, cell.y, coneCells)) continue;
-      refog
-        .rect(cell.x * gridSize, cell.y * gridSize, gridSize, gridSize)
-        .fill({ color: FOG_COLOR, alpha: 1 });
-    }
-  }
-}
-
-/** Paint fog-of-war to a canvas (map-local coordinates) — used by 3D map overlay. */
+/** Paint fog-of-war to a canvas (map-local coordinates). */
 export function paintFogCanvas(
   ctx: CanvasRenderingContext2D,
   map: MapItem,
   opts: FogDrawOptions,
 ): void {
   const { width, height, gridSize } = map;
+  const canvasW = ctx.canvas.width;
+  const canvasH = ctx.canvas.height;
   if (width <= 0 || height <= 0 || gridSize <= 0 || !opts.visible) {
-    ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+    ctx.clearRect(0, 0, canvasW, canvasH);
     return;
   }
 
-  ctx.clearRect(0, 0, width, height);
-  ctx.globalCompositeOperation = 'source-over';
+  resetFogCanvas(ctx, canvasW, canvasH);
 
   const visionTokens = getVisionTokens(
     opts.items,
@@ -213,41 +140,33 @@ export function paintFogCanvas(
     ? losPolygons(map, visionTokens, gridSize, { directional: true })
     : [];
 
+  // Even-odd fill: one fresh fog layer per frame (map minus vision holes minus GM reveals).
   ctx.fillStyle = '#000000';
-  ctx.fillRect(0, 0, width, height);
-
-  ctx.globalCompositeOperation = 'destination-out';
-  ctx.fillStyle = 'rgba(0,0,0,1)';
+  ctx.beginPath();
+  ctx.rect(0, 0, width, height);
 
   if (polys.length > 0) {
     for (const poly of polys) {
-      cutPolygonCanvas(ctx, poly);
+      appendPolygonPath(ctx, poly);
     }
 
     if (opts.isGM) {
-      const visibleCells = gmVisibleCells(
-        opts.revealedCells,
-        map,
-        opts.items,
-        opts.selectedIds,
-        gridSize,
-      );
-      for (const key of visibleCells) {
+      for (const key of opts.revealedCells) {
         const cell = parseCellKey(key);
-        if (!cell || !isInteriorVisibleCell(cell.x, cell.y, visibleCells)) continue;
-        cutCellCanvas(ctx, cell.x, cell.y, gridSize);
+        if (!cell) continue;
+        appendCellPath(ctx, cell.x, cell.y, gridSize);
       }
     }
   } else {
     for (let cx = 0; cx < Math.ceil(width / gridSize); cx++) {
       for (let cy = 0; cy < Math.ceil(height / gridSize); cy++) {
         if (!opts.revealedCells.has(cellKey(cx, cy))) continue;
-        cutCellCanvas(ctx, cx, cy, gridSize);
+        appendCellPath(ctx, cx, cy, gridSize);
       }
     }
   }
 
-  ctx.globalCompositeOperation = 'source-over';
+  ctx.fill('evenodd');
 
   if (!opts.isGM && opts.revealedCells.size > 0 && polys.length > 0) {
     ctx.fillStyle = '#000000';
@@ -268,25 +187,32 @@ export function drawFogLayers(
   opts: FogDrawOptions,
   _renderer: Renderer | null,
 ): void {
-  clearFogLayers(layers);
-
   if (!opts.visible) {
+    clearFogLayers(layers);
     layers.compose.visible = false;
     return;
   }
 
   const { width, height } = map;
   const gridSize = opts.gridSize;
-  if (width <= 0 || height <= 0 || gridSize <= 0) return;
+  if (width <= 0 || height <= 0 || gridSize <= 0) {
+    clearFogLayers(layers);
+    return;
+  }
 
-  paintFogGraphics(layers, map, opts);
+  resizeFogCanvas(layers, width, height);
+  const ctx = layers.fogCanvas.getContext('2d');
+  if (!ctx) return;
+
+  paintFogCanvas(ctx, map, opts);
+  layers.fogTexture.source.update();
   layers.compose.visible = true;
   layers.compose.alpha = opts.isGM ? 0.5 : 1;
 }
 
 /** @deprecated Use drawFogLayers. */
 export function drawFogGraphics(
-  g: Graphics,
+  g: import('pixi.js').Graphics,
   map: MapItem,
   opts: FogDrawOptions,
   renderer: Renderer,

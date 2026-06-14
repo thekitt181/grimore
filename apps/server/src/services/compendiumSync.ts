@@ -56,7 +56,7 @@ import {
 import {
   compendiumCatalogMergeKey,
   compendiumContentFingerprint,
-  dedupeByIdenticalContent,
+  dedupeByBookSlot,
   resolveEntryId,
 } from './compendiumEntryIdentity';
 import {
@@ -134,7 +134,7 @@ function mergeMonsters(
   global?: CompendiumGlobalDoc,
   lite = false,
 ): CompendiumMonster[] {
-  const activeOverrides = dedupeByIdenticalContent('monster', overrides);
+  const activeOverrides = dedupeByBookSlot(overrides);
   const activeCustoms = filterCustomEntries('monster', customs, activeOverrides, deleted);
   const hiddenBuiltIns = buildHiddenBuiltInKeys(activeOverrides, deleted);
   const deletedKeys = new Set(deleted.map((d) => entryNameKey(d)));
@@ -203,7 +203,7 @@ function mergeItems(
   global?: CompendiumGlobalDoc,
   lite = false,
 ): CompendiumItem[] {
-  const activeOverrides = dedupeByIdenticalContent('item', overrides);
+  const activeOverrides = dedupeByBookSlot(overrides);
   const activeCustoms = filterCustomEntries('item', customs, activeOverrides, deleted);
   const hiddenBuiltIns = buildHiddenBuiltInKeys(activeOverrides, deleted);
   const deletedKeys = new Set(deleted.map((d) => entryNameKey(d)));
@@ -287,7 +287,7 @@ function mergeSpells(
   global?: CompendiumGlobalDoc,
   lite = false,
 ): CompendiumSpell[] {
-  const activeOverrides = dedupeByIdenticalContent('spell', overrides);
+  const activeOverrides = dedupeByBookSlot(overrides);
   const activeCustoms = filterCustomEntries('spell', customs, activeOverrides, deleted);
   const hiddenBuiltIns = buildHiddenBuiltInKeys(activeOverrides, deleted);
   const deletedKeys = new Set(deleted.map((d) => entryNameKey(d)));
@@ -390,24 +390,21 @@ function paginate<T>(list: T[], page: number, limit: number) {
 
 async function filterCachedEntriesBySource<T extends { source?: string; name: string }>(
   kind: CompendiumKind,
-  load: () => Promise<T[]>,
+  _load: () => Promise<T[]>,
   sourceFilter: string,
   policy: CompendiumVisibilityPolicy,
   includeDrafts: boolean,
 ): Promise<T[]> {
-  if (catalogCache) {
-    const merged = filterVisible(kind, await load(), policy, includeDrafts);
-    return merged.filter((entry) => entryMatchesSource(entry.source, sourceFilter));
-  }
-  let fromPostgres: T[];
+  // Books tab: list every stored row for this source — not the deduped "All" catalog.
+  let fromStorage: T[];
   if (kind === 'monster') {
-    fromPostgres = (await monstersFromRawOverrides(sourceFilter, policy)) as unknown as T[];
+    fromStorage = (await monstersFromRawOverrides(sourceFilter, policy)) as unknown as T[];
   } else if (kind === 'item') {
-    fromPostgres = (await itemsFromRawOverrides(sourceFilter, policy)) as unknown as T[];
+    fromStorage = (await itemsFromRawOverrides(sourceFilter, policy)) as unknown as T[];
   } else {
-    fromPostgres = (await spellsFromRawOverrides(sourceFilter, policy)) as unknown as T[];
+    fromStorage = (await spellsFromRawOverrides(sourceFilter, policy)) as unknown as T[];
   }
-  return filterVisible(kind, fromPostgres, policy, includeDrafts);
+  return filterVisible(kind, fromStorage, policy, includeDrafts);
 }
 
 /** Prefer fast local JSON catalog; Postgres is fallback when bundled files are absent. */
@@ -507,20 +504,7 @@ async function resolveBookSourceCountsForKind(
   policy: CompendiumVisibilityPolicy,
   counts: SourceCountMap = new Map(),
 ): Promise<SourceCountMap> {
-  if (catalogCache) {
-    if (!bookSourceCountsCache || bookSourceCountsCache.rev !== catalogCache.rev) {
-      refreshBookSourceCountsCache(catalogCache);
-    }
-    const slice = bookSourceCountsCache!.byKind[kind];
-    for (const [id, c] of slice) {
-      const cur = counts.get(id) ?? { total: 0, public: 0, draft: 0 };
-      cur.total += c.total;
-      cur.public += c.public;
-      cur.draft += c.draft;
-      counts.set(id, cur);
-    }
-    return counts;
-  }
+  // Book counts must reflect every imported row per source, not deduped catalog entries.
   return tallyBookSourceCountsFromPostgres(kind, policy, counts);
 }
 
@@ -1211,8 +1195,9 @@ function compendiumMonsterFromOverride(
   m: OwlbearMonster,
   _policy?: CompendiumVisibilityPolicy,
 ): CompendiumMonster | null {
+  const entryId = resolveEntryId('monster', m as StoredMonster);
   return toMonster(
-    { ...m, _id: slugify(m.name) } as StoredMonster,
+    { ...m, _id: entryId } as StoredMonster,
     true,
     undefined,
     true,
@@ -1223,8 +1208,9 @@ function compendiumItemFromOverride(
   i: OwlbearItem,
   _policy?: CompendiumVisibilityPolicy,
 ): CompendiumItem | null {
+  const entryId = resolveEntryId('item', i as StoredItem);
   return {
-    id: slugify(i.name),
+    id: entryId,
     name: i.name,
     type: i.type,
     source: i.source,
@@ -1240,8 +1226,9 @@ function compendiumSpellFromOverride(
   s: OwlbearSpell,
   _policy?: CompendiumVisibilityPolicy,
 ): CompendiumSpell | null {
+  const entryId = resolveEntryId('spell', s as StoredSpell);
   return {
-    id: slugify(s.name),
+    id: entryId,
     name: s.name,
     level: s.level,
     ...(s.damage ? { damage: s.damage } : {}),

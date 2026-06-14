@@ -34,6 +34,33 @@ export function getPrimaryClientUrl(): string {
   return getClientOrigins()[0]!;
 }
 
+function hostnameFromUrl(url: string): string | null {
+  try {
+    return new URL(url).hostname.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+/** Apex domain for sharing auth cookies between www and non-www (e.g. grimore.co.uk). */
+export function getSharedAuthCookieDomain(): string | undefined {
+  const primary = hostnameFromUrl(getPrimaryClientUrl());
+  if (!primary || primary === 'localhost' || primary.startsWith('127.') || primary.endsWith('.onrender.com')) {
+    return undefined;
+  }
+  const normalized = primary.startsWith('www.') ? primary.slice(4) : primary;
+  const parts = normalized.split('.');
+  if (parts.length < 2) return undefined;
+  return parts.slice(-2).join('.');
+}
+
+/** Canonical host from CLIENT_URL / BETTER_AUTH_URL (no www prefix). */
+export function getCanonicalClientHostname(): string | null {
+  const host = hostnameFromUrl(getPrimaryClientUrl());
+  if (!host) return null;
+  return host.startsWith('www.') ? host.slice(4) : host;
+}
+
 export function isClientOriginAllowed(origin: string | undefined): boolean {
   if (!origin) return true;
   const allowed = getClientOrigins();
