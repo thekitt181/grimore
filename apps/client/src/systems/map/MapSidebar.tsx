@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useRef, useState, type ReactNode } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { v4 as uuidv4 } from 'uuid';
 import { useItemStore, getActiveMap } from '@/systems/scene/store/itemStore';
@@ -20,6 +20,55 @@ import { getPersistSessionId } from '@/systems/scene/sessionPersistence';
 import { CompendiumSidebarList } from '@/systems/compendium/CompendiumSidebarList';
 import { useDdbStore } from '@/systems/ddb/ddbStore';
 import { useSceneUiStore } from '@/systems/scene/manager/sceneUiStore';
+import { mapSidebarWidth, useMapSidebarStore } from './mapSidebarStore';
+
+const GOLD = 'var(--color-accent-gold)';
+const BD = 'var(--color-border)';
+
+function SidebarIconButton({
+  title,
+  onClick,
+  children,
+}: {
+  title: string;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      className="w-5 h-5 flex items-center justify-center rounded text-xs opacity-60 hover:opacity-100 transition-opacity shrink-0"
+      style={{ color: 'var(--color-text-secondary)' }}
+      title={title}
+      onClick={onClick}
+    >
+      {children}
+    </button>
+  );
+}
+
+function SidebarColumnRail({
+  label,
+  onExpand,
+}: {
+  label: string;
+  onExpand: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className="flex flex-col items-center justify-center gap-2 h-full min-h-0 flex-1 hover:bg-[rgba(201,168,76,0.08)] transition-colors"
+      style={{ borderRight: `1px solid ${BD}` }}
+      title={`Show ${label}`}
+      onClick={onExpand}
+    >
+      <span className="font-display text-[10px] tracking-widest uppercase" style={{ color: GOLD, writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}>
+        {label}
+      </span>
+      <span className="text-xs opacity-50" style={{ color: GOLD }}>◀</span>
+    </button>
+  );
+}
 
 /**
  * Right-hand sidebar shown during a session.
@@ -28,53 +77,118 @@ import { useSceneUiStore } from '@/systems/scene/manager/sceneUiStore';
 export function MapSidebar() {
   const { myRole, connectedUsers } = useSessionStore();
   const isGM = myRole === 'GM';
+  const sidebarCollapsed = useMapSidebarStore((s) => s.sidebarCollapsed);
+  const gmPanelCollapsed = useMapSidebarStore((s) => s.gmPanelCollapsed);
+  const compendiumCollapsed = useMapSidebarStore((s) => s.compendiumCollapsed);
+  const setSidebarCollapsed = useMapSidebarStore((s) => s.setSidebarCollapsed);
+  const setGmPanelCollapsed = useMapSidebarStore((s) => s.setGmPanelCollapsed);
+  const setCompendiumCollapsed = useMapSidebarStore((s) => s.setCompendiumCollapsed);
 
   if (!isGM) return null;
 
+  const width = mapSidebarWidth(sidebarCollapsed, gmPanelCollapsed, compendiumCollapsed);
+  const showOnlineFooter = !sidebarCollapsed && (!gmPanelCollapsed || !compendiumCollapsed);
+
+  if (sidebarCollapsed) {
+    return (
+      <aside
+        className="flex flex-col h-full min-h-0 shrink-0 overflow-hidden items-center py-2 gap-2"
+        style={{
+          width,
+          background: 'var(--color-bg-secondary)',
+          borderLeft: `1px solid ${BD}`,
+        }}
+      >
+        <SidebarIconButton title="Show sidebar" onClick={() => setSidebarCollapsed(false)}>
+          ◀
+        </SidebarIconButton>
+        {!gmPanelCollapsed && (
+          <span className="font-ui text-[9px] opacity-50" style={{ color: GOLD, writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}>
+            Tools
+          </span>
+        )}
+        {!compendiumCollapsed && (
+          <span className="font-ui text-[9px] opacity-50" style={{ color: GOLD, writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}>
+            Compendium
+          </span>
+        )}
+      </aside>
+    );
+  }
+
   return (
     <aside
-      className="flex flex-col h-full min-h-0 shrink-0 overflow-hidden"
+      className="flex flex-col h-full min-h-0 shrink-0 overflow-hidden transition-[width] duration-200"
       style={{
-        width: 440,
+        width,
         background: 'var(--color-bg-secondary)',
-        borderLeft: '1px solid var(--color-border)',
+        borderLeft: `1px solid ${BD}`,
       }}
     >
+      <div
+        className="flex items-center justify-between gap-1 shrink-0 px-2 py-1 border-b"
+        style={{ borderColor: BD }}
+      >
+        <span className="font-display text-[10px] tracking-wider uppercase truncate" style={{ color: GOLD }}>
+          Sidebar
+        </span>
+        <SidebarIconButton title="Hide sidebar" onClick={() => setSidebarCollapsed(true)}>
+          ▶
+        </SidebarIconButton>
+      </div>
+
       <div className="flex flex-1 min-h-0 overflow-hidden">
-        {/* Column 1 — map tools, tokens, etc. */}
+        {gmPanelCollapsed ? (
+          <SidebarColumnRail label="Tools" onExpand={() => setGmPanelCollapsed(false)} />
+        ) : (
+          <div
+            className="flex flex-col min-h-0 min-w-0 flex-1 overflow-hidden"
+            style={{ borderRight: compendiumCollapsed ? undefined : `1px solid ${BD}` }}
+          >
+            <div
+              className="flex items-center justify-between gap-1 shrink-0 px-3 pt-2 pb-1"
+            >
+              <h3 className="font-display text-xs font-semibold tracking-wider uppercase" style={{ color: GOLD }}>
+                Tools
+              </h3>
+              <SidebarIconButton title="Minimize tools" onClick={() => setGmPanelCollapsed(true)}>
+                −
+              </SidebarIconButton>
+            </div>
+            <div className="flex-1 min-h-0 overflow-y-auto px-3 pb-3 flex flex-col gap-3">
+              <GMSidebarContent />
+            </div>
+          </div>
+        )}
+
+        {compendiumCollapsed ? (
+          <SidebarColumnRail label="Compendium" onExpand={() => setCompendiumCollapsed(false)} />
+        ) : (
+          <div className="flex flex-col flex-1 min-h-0 w-[220px] shrink-0 overflow-hidden p-2">
+            <CompendiumSidebarList onMinimize={() => setCompendiumCollapsed(true)} />
+          </div>
+        )}
+      </div>
+
+      {showOnlineFooter && (
         <div
-          className="flex flex-col min-h-0 min-w-0 flex-1 overflow-hidden"
-          style={{ borderRight: '1px solid var(--color-border)' }}
+          className="shrink-0 p-3 pt-2 border-t"
+          style={{ borderColor: BD, background: 'var(--color-bg-secondary)' }}
         >
-          <div className="flex-1 min-h-0 overflow-y-auto p-3 flex flex-col gap-3">
-            <GMSidebarContent />
+          <h3 className="font-display text-xs font-semibold tracking-wider uppercase mb-2" style={{ color: GOLD }}>
+            Online ({connectedUsers.length})
+          </h3>
+          <div className="space-y-1.5">
+            {connectedUsers.map((u) => (
+              <div key={u.id} className="flex items-center gap-2">
+                <div className="w-2 h-2 rounded-full shrink-0" style={{ background: '#4ade80' }} />
+                <span className="font-ui text-xs truncate" style={{ color: 'var(--color-text-primary)' }}>{u.username}</span>
+                <span className={`ml-auto ${u.role === 'GM' ? 'badge-role-gm' : 'badge-role-player'}`}>{u.role}</span>
+              </div>
+            ))}
           </div>
         </div>
-
-        {/* Column 2 — compendium (all signed-in users) */}
-        <div className="flex flex-col flex-1 min-h-0 w-[220px] shrink-0 overflow-hidden p-2">
-          <CompendiumSidebarList />
-        </div>
-      </div>
-
-      {/* Online — full width footer */}
-      <div
-        className="shrink-0 p-3 pt-2 border-t"
-        style={{ borderColor: 'var(--color-border)', background: 'var(--color-bg-secondary)' }}
-      >
-        <h3 className="font-display text-xs font-semibold tracking-wider uppercase mb-2" style={{ color: 'var(--color-accent-gold)' }}>
-          Online ({connectedUsers.length})
-        </h3>
-        <div className="space-y-1.5">
-          {connectedUsers.map((u) => (
-            <div key={u.id} className="flex items-center gap-2">
-              <div className="w-2 h-2 rounded-full shrink-0" style={{ background: '#4ade80' }} />
-              <span className="font-ui text-xs truncate" style={{ color: 'var(--color-text-primary)' }}>{u.username}</span>
-              <span className={`ml-auto ${u.role === 'GM' ? 'badge-role-gm' : 'badge-role-player'}`}>{u.role}</span>
-            </div>
-          ))}
-        </div>
-      </div>
+      )}
     </aside>
   );
 }

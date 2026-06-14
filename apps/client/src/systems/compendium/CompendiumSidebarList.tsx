@@ -78,7 +78,7 @@ function buildSearchParams(
   return base;
 }
 
-export function CompendiumSidebarList() {
+export function CompendiumSidebarList({ onMinimize }: { onMinimize?: () => void } = {}) {
   const tab = useCompendiumUiStore((s) => s.tab);
   const browseMode = useCompendiumUiStore((s) => s.browseMode);
   const selectedSource = useCompendiumUiStore((s) => s.selectedSource);
@@ -303,7 +303,20 @@ export function CompendiumSidebarList() {
         <h3 className="font-display text-xs font-semibold tracking-wider uppercase" style={{ color: GOLD }}>
           Compendium
         </h3>
-        <CompendiumAdminUnlock />
+        <div className="flex items-center gap-0.5 shrink-0">
+          <CompendiumAdminUnlock />
+          {onMinimize && (
+            <button
+              type="button"
+              className="w-5 h-5 flex items-center justify-center rounded text-xs opacity-60 hover:opacity-100 transition-opacity"
+              style={{ color: 'var(--color-text-secondary)' }}
+              title="Minimize compendium"
+              onClick={onMinimize}
+            >
+              −
+            </button>
+          )}
+        </div>
       </div>
 
       <CompendiumMongoStatus />
