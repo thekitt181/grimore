@@ -10,6 +10,10 @@ import { useSessionStore } from '@/store/sessionStore';
 import { clearFogLayers, drawFogLayers, ensureFogLayers } from '../fogRender';
 import { fogDisplayZIndex } from '@/systems/scene/zOrder';
 import { sceneRefs } from '@/systems/scene/sceneRefs';
+import {
+  bindFogRepaintSubscriptions,
+  registerFogRepaintListener,
+} from '../fogRepaintBridge';
 import type { MapItem } from '@/systems/scene/types';
 
 function syncMapFogOverlays(
@@ -101,7 +105,7 @@ export function useMapFogOverlay(
   appReady: boolean,
 ) {
   const revealedCells = useMapStore((s) => s.revealedCells);
-  const revealedCount = useMapStore((s) => s.revealedCells.size);
+  const fogRevision = useMapStore((s) => s.fogRevision);
   const fogEnabled = useMapStore((s) => s.fogEnabled);
   const sessionFogActive = useMapStore((s) => s.sessionFogActive);
   const items = useItemStore((s) => s.items);
@@ -134,6 +138,26 @@ export function useMapFogOverlay(
     showFogOverlay,
   };
 
+  const repaintRef = useRef<() => void>(() => {});
+
+  repaintRef.current = () => {
+    if (!appReady) return;
+    const layer = layerRef.current;
+    if (!layer) return;
+    const live = useLiveTransformStore.getState();
+    syncMapFogOverlays(layer, fogContainers.current, {
+      ...fogStateRef.current,
+      liveById: live.byId,
+    });
+  };
+
+  useEffect(() => {
+    bindFogRepaintSubscriptions();
+    return registerFogRepaintListener(() => {
+      repaintRef.current();
+    });
+  }, []);
+
   useEffect(() => {
     if (!appReady) {
       for (const c of fogContainers.current.values()) c.destroy({ children: true });
@@ -141,18 +165,14 @@ export function useMapFogOverlay(
       return;
     }
 
-    const layer = layerRef.current;
-    if (!layer) return;
-
-    layer.sortableChildren = true;
-    syncMapFogOverlays(layer, fogContainers.current, fogStateRef.current);
+    repaintRef.current();
   }, [
     appReady,
     items,
     liveById,
     liveTick,
     revealedCells,
-    revealedCount,
+    fogRevision,
     fogEnabled,
     sessionFogActive,
     showFogOverlay,
@@ -166,19 +186,11 @@ export function useMapFogOverlay(
   useEffect(() => {
     if (!appReady || !showFogOverlay) return;
     const app = sceneRefs.app.current;
-    const layer = layerRef.current;
-    if (!app || !layer) return;
+    if (!app) return;
 
     const onTick = () => {
-      const state = fogStateRef.current;
-      if (!state.showFogOverlay) return;
-      const live = useLiveTransformStore.getState();
-      const previewVision = state.isGM && state.selectedIds.length > 0;
-      if (Object.keys(live.byId).length === 0 && !previewVision) return;
-      syncMapFogOverlays(layer, fogContainers.current, {
-        ...state,
-        liveById: live.byId,
-      });
+      if (!fogStateRef.current.showFogOverlay) return;
+      repaintRef.current();
     };
 
     app.ticker.add(onTick);

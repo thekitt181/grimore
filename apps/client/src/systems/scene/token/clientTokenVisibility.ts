@@ -1,8 +1,12 @@
 import {
+  getVisionTokens,
   isTokenVisibleToPlayer,
   playerHasVisionSource,
-  playerSeenCellKeys,
+  playerTokenLosCells,
 } from '@/systems/map/fogLos';
+import { useMapStore } from '@/systems/map/store/mapStore';
+import { getActiveMap, useItemStore } from '@/systems/scene/store/itemStore';
+import { useSessionStore } from '@/store/sessionStore';
 import { isFogOverlayVisible } from '@/systems/scene/fogActiveSync';
 import type { Item, MapItem, TokenItem } from '../types';
 
@@ -16,7 +20,6 @@ export function filterPlayerTokens(
     activeMap: MapItem | null;
   },
 ): TokenItem[] {
-  const uid = opts.myUserId?.trim() ?? '';
   const tokens = Object.values(items).filter(
     (i): i is TokenItem => i.type === 'token' && i.visible !== false,
   );
@@ -26,46 +29,21 @@ export function filterPlayerTokens(
   }
 
   const map = opts.activeMap;
-  const own = tokens.filter((t) => t.ownerId?.trim() === uid);
 
+  // No assigned or selected vision source — hide every token under fog.
   if (!playerHasVisionSource(items, opts.myUserId, opts.selectedIds, map)) {
-    const dedupe = (list: TokenItem[]) => {
-      const seen = new Set<string>();
-      return list.filter((t) => {
-        if (seen.has(t.id)) return false;
-        seen.add(t.id);
-        return true;
-      });
-    };
-
-    if (opts.revealedCells.size > 0) {
-      const inReveal = tokens.filter((t) =>
-        isTokenVisibleToPlayer(t, map, opts.revealedCells),
-      );
-      return dedupe([...own, ...inReveal]);
-    }
-
-    const selectedSet = new Set(opts.selectedIds);
-    const selectedPc = tokens.filter((t) => {
-      if (!selectedSet.has(t.id)) return false;
-      if (!isPlayerCharacterToken(t)) return false;
-      const owner = t.ownerId?.trim() ?? '';
-      return !owner || owner === uid;
-    });
-    if (selectedPc.length > 0) {
-      const seen = new Set<string>();
-      return [...own, ...selectedPc].filter((t) => {
-        if (seen.has(t.id)) return false;
-        seen.add(t.id);
-        return true;
-      });
-    }
-    const selectedOwn = own.filter((t) => selectedSet.has(t.id));
-    return selectedOwn.length > 0 ? selectedOwn : own;
+    return [];
   }
 
-  const seen = playerSeenCellKeys(
-    opts.revealedCells,
+  const visionTokens = getVisionTokens(
+    items,
+    opts.selectedIds,
+    false,
+    opts.myUserId,
+    map,
+  );
+  const visionIds = new Set(visionTokens.map((t) => t.id));
+  const losSeen = playerTokenLosCells(
     map,
     items,
     opts.myUserId,
@@ -73,12 +51,10 @@ export function filterPlayerTokens(
     map.gridSize,
   );
 
-  const visibleOthers = tokens.filter((t) => {
-    if (t.ownerId?.trim() === uid) return false;
-    return isTokenVisibleToPlayer(t, map, seen);
+  return tokens.filter((t) => {
+    if (visionIds.has(t.id)) return true;
+    return isTokenVisibleToPlayer(t, map, losSeen);
   });
-
-  return [...own, ...visibleOthers];
 }
 
 export function playerOwnsToken(token: TokenItem, myUserId: string | null): boolean {
@@ -124,7 +100,19 @@ export function playerSelectableTokens(
 
 /** All visible unlocked tokens — used for player drag / hit-testing. */
 export function playerInteractableTokens(items: Record<string, Item>): TokenItem[] {
-  return Object.values(items).filter(
+  const unlocked = Object.values(items).filter(
     (i): i is TokenItem => i.type === 'token' && i.visible !== false && !i.locked,
   );
+  if (!isFogOverlayVisible()) return unlocked;
+
+  const { myUserId } = useSessionStore.getState();
+  const { selectedIds } = useItemStore.getState();
+  const revealedCells = useMapStore.getState().revealedCells;
+  const activeMap = getActiveMap();
+  return filterPlayerTokens(items, {
+    myUserId,
+    selectedIds,
+    revealedCells,
+    activeMap,
+  }).filter((t) => !t.locked);
 }

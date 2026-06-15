@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Container, Application } from 'pixi.js';
 import { v4 as uuidv4 } from 'uuid';
 import { usePixiApp } from './hooks/usePixiApp';
-import { useMapViewport, fitMapToScreen, applyViewport } from './hooks/useMapViewport';
+import { useMapViewport, fitMapToScreen, applyViewport, syncMapGridFromItem } from './hooks/useMapViewport';
 import { useFogRenderer } from './hooks/useFogRenderer';
 import { useMapFogOverlay } from './hooks/useMapFogOverlay';
 import { useMapMeasure } from './hooks/useMapMeasure';
@@ -23,7 +23,7 @@ import { applyFogData, emitFogSync, flushFogScene, hydrateFogFromServer, parseFo
 import { mergeFogIntoCells } from '@/systems/scene/fogMerge';
 import type { FogUpdatePayload } from '@grimoire/shared';
 import { bindFogActiveSocket, syncFogActiveToSession } from '@/systems/scene/fogActiveSync';
-import { bindMapFocusSocket, focusSessionMap, syncMapFocusToSession } from '@/systems/map/mapFocusSync';
+import { bindMapFocusSocket, flushPendingMapFocus, focusSessionMap, syncMapFocusToSession } from '@/systems/map/mapFocusSync';
 import { useParams } from 'react-router-dom';
 import {
   addDeletedIds,
@@ -145,7 +145,7 @@ export function MapCanvas() {
       gmScenePushedRef.current = true;
       emitItemsSync(Object.values(useItemStore.getState().items) as Item[]);
       syncMapFocusToSession();
-    }, 2000);
+    }, 800);
     return () => clearTimeout(timer);
   }, [sessionId, myRole]);
 
@@ -244,7 +244,11 @@ export function MapCanvas() {
     };
     const onAdd = forSession((payload: { sessionId?: string; item: unknown }) => {
       useItemStore.getState().upsertItem(payload.item as Item);
-      persistLocal();
+      if (useSessionStore.getState().myRole === 'PLAYER') {
+        flushPendingMapFocus();
+      } else {
+        persistLocal();
+      }
     });
     const onUpdate = forSession((payload: {
       sessionId?: string;
@@ -275,6 +279,7 @@ export function MapCanvas() {
         }
         if (sessionId) persistItemsLocal(sessionId, serverItems);
         initialSyncRef.current.hadItems = serverItems.length > 0;
+        flushPendingMapFocus();
         return;
       }
 
@@ -465,19 +470,7 @@ export function MapCanvas() {
   useEffect(() => {
     const map = getActiveMap();
     if (!map) return;
-    useMapStore.getState().setActiveGrid({
-      gridType: map.gridType,
-      gridSize: map.gridSize,
-      mapWidth: map.width,
-      mapHeight: map.height,
-      gridColor: map.gridColor,
-      gridOpacity: map.gridOpacity,
-      gridOffsetX: map.gridOffsetX,
-      gridOffsetY: map.gridOffsetY,
-      showGrid: map.showGrid,
-      mapX: map.x,
-      mapY: map.y,
-    });
+    syncMapGridFromItem(map);
   }, [items, activeMapId]);
 
   // Block native HTML drags on the Pixi canvas (marquee select) and clear stale drop overlay.

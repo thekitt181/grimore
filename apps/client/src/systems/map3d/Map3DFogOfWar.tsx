@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { useItemStore, getActiveMap } from '@/systems/scene/store/itemStore';
 import { useMapStore } from '@/systems/map/store/mapStore';
@@ -10,6 +11,10 @@ import { useSessionStore } from '@/store/sessionStore';
 import { paintFogCanvas } from '@/systems/map/fogRender';
 import { fogTextureDimensions } from '@/systems/map/fogTextureSize';
 import { isFogOverlayVisible } from '@/systems/scene/fogActiveSync';
+import {
+  bindFogRepaintSubscriptions,
+  registerFogRepaintListener,
+} from '@/systems/map/fogRepaintBridge';
 import type { MapItem } from '@/systems/scene/types';
 import { SceneItemTransformGroup } from './TokenTransformGroup';
 
@@ -19,7 +24,7 @@ const FOG_RENDER_ORDER = 11;
 
 function useFogDrawState(map: MapItem) {
   const revealedCells = useMapStore((s) => s.revealedCells);
-  const revealedCount = useMapStore((s) => s.revealedCells.size);
+  const fogRevision = useMapStore((s) => s.fogRevision);
   const fogEnabled = useMapStore((s) => s.fogEnabled);
   const sessionFogActive = useMapStore((s) => s.sessionFogActive);
   const items = useItemStore((s) => s.items);
@@ -44,7 +49,7 @@ function useFogDrawState(map: MapItem) {
     visible,
     isGM,
     revealedCells,
-    revealedCount,
+    fogRevision,
     itemsForFog,
     selectedIds,
     myUserId,
@@ -68,9 +73,14 @@ export function Map3DFogOfWar({ map }: { map: MapItem }) {
   }, [map.width, map.height]);
 
   const materialRef = useRef<THREE.MeshBasicMaterial | null>(null);
+  const stateRef = useRef(state);
+  stateRef.current = state;
+
+  const lastPaintSigRef = useRef('');
 
   const repaintFog = useCallback(() => {
-    if (!state.visible) {
+    const s = stateRef.current;
+    if (!s.visible) {
       if (materialRef.current) materialRef.current.visible = false;
       return;
     }
@@ -80,40 +90,49 @@ export function Map3DFogOfWar({ map }: { map: MapItem }) {
 
     ctx.setTransform(texScale, 0, 0, texScale, 0, 0);
     paintFogCanvas(ctx, map, {
-      revealedCells: state.revealedCells,
+      revealedCells: s.revealedCells,
       gridSize: map.gridSize,
-      isGM: state.isGM,
-      items: state.itemsForFog,
-      selectedIds: state.selectedIds,
-      myUserId: state.myUserId,
+      isGM: s.isGM,
+      items: s.itemsForFog,
+      selectedIds: s.selectedIds,
+      myUserId: s.myUserId,
       visible: true,
     });
 
     texture.needsUpdate = true;
     if (materialRef.current) {
       materialRef.current.visible = true;
-      materialRef.current.opacity = state.isGM ? (map.visible ? 0.5 : 0.35) : 1;
+      materialRef.current.opacity = s.isGM ? (map.visible ? 0.5 : 0.35) : 1;
     }
-  }, [
-    canvas,
-    map,
-    state.visible,
-    state.isGM,
-    state.revealedCells,
-    state.itemsForFog,
-    state.selectedIds,
-    state.myUserId,
-    texScale,
-    texture,
-  ]);
+  }, [canvas, map, texScale, texture]);
 
   useEffect(() => () => {
     texture.dispose();
   }, [texture]);
 
   useEffect(() => {
+    bindFogRepaintSubscriptions();
+    return registerFogRepaintListener(() => {
+      lastPaintSigRef.current = '';
+      repaintFog();
+    });
+  }, [repaintFog]);
+
+  useEffect(() => {
+    lastPaintSigRef.current = '';
     repaintFog();
-  }, [repaintFog, state.liveTick, state.revealedCount]);
+  }, [repaintFog, state.fogRevision, state.liveTick, state.visible]);
+
+  useFrame(() => {
+    const s = stateRef.current;
+    if (!s.visible) return;
+
+    const liveTick = useLiveTransformStore.getState().tick;
+    const sig = `${s.fogRevision}:${liveTick}:${s.revealedCells.size}`;
+    if (sig === lastPaintSigRef.current) return;
+    lastPaintSigRef.current = sig;
+    repaintFog();
+  });
 
   useEffect(() => {
     if (!state.visible && materialRef.current) {

@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { requestFogRepaint } from '@/systems/map/fogRepaintBridge';
 import { persistFogScene } from '@/systems/scene/fogSync';
 import { clampView2dMiniOrbitAzimuth } from '@/systems/map3d/tableMiniOrbit';
 
@@ -102,6 +103,8 @@ interface SceneState extends ActiveGrid {
 
   // Fog
   revealedCells: Set<string>;
+  /** Bumped on every fog mutation so overlays repaint without a user click. */
+  fogRevision: number;
   fogBrushSize: number;
   /** GM prep mode — when false the fog overlay is hidden (map fully visible). */
   fogEnabled: boolean;
@@ -211,6 +214,7 @@ export const useMapStore = create<SceneState>((set, get) => ({
   scanImageWalls: false,
   wallScanThreshold: 64,
   revealedCells: new Set<string>(),
+  fogRevision: 0,
   fogBrushSize: 2,
   fogEnabled: false,
   sessionFogActive: false,
@@ -234,8 +238,14 @@ export const useMapStore = create<SceneState>((set, get) => ({
   setWallMode: (wallMode) => set({ wallMode }),
   setViewport:    (viewport) => set({ viewport }),
   setFogBrushSize:(fogBrushSize) => set({ fogBrushSize }),
-  setFogEnabled:  (fogEnabled) => set({ fogEnabled }),
-  setSessionFogActive: (sessionFogActive) => set({ sessionFogActive }),
+  setFogEnabled: (fogEnabled) => {
+    set({ fogEnabled });
+    requestFogRepaint();
+  },
+  setSessionFogActive: (sessionFogActive) => {
+    set({ sessionFogActive });
+    requestFogRepaint();
+  },
   setSyncPlayerViews: (syncPlayerViews) => set({ syncPlayerViews }),
   setGmMovePlayerTokens: (gmMovePlayerTokens) => set({ gmMovePlayerTokens }),
   setPlayersCanMoveTokens: (playersCanMoveTokens) => set({ playersCanMoveTokens }),
@@ -306,9 +316,10 @@ export const useMapStore = create<SceneState>((set, get) => ({
     set((s) => {
       const n = new Set(s.revealedCells);
       n.add(key);
-      return { revealedCells: n };
+      return { revealedCells: n, fogRevision: s.fogRevision + 1 };
     });
     persistFogScene();
+    requestFogRepaint();
   },
 
   applyFogCells: (keys, mode) => {
@@ -319,18 +330,20 @@ export const useMapStore = create<SceneState>((set, get) => ({
         if (mode === 'reveal') n.add(key);
         else n.delete(key);
       }
-      return { revealedCells: n };
+      return { revealedCells: n, fogRevision: s.fogRevision + 1 };
     });
     persistFogScene();
+    requestFogRepaint();
   },
 
   hideCell: (key) => {
     set((s) => {
       const n = new Set(s.revealedCells);
       n.delete(key);
-      return { revealedCells: n };
+      return { revealedCells: n, fogRevision: s.fogRevision + 1 };
     });
     persistFogScene();
+    requestFogRepaint();
   },
 
   revealAll: () => {
@@ -341,21 +354,24 @@ export const useMapStore = create<SceneState>((set, get) => ({
       for (let x = 0; x < cols; x++)
         for (let y = 0; y < rows; y++)
           all.add(cellKey(x, y));
-      return { revealedCells: all };
+      return { revealedCells: all, fogRevision: s.fogRevision + 1 };
     });
     persistFogScene();
+    requestFogRepaint();
   },
 
   hideAll: () => {
-    set({ revealedCells: new Set<string>() });
+    set((s) => ({ revealedCells: new Set<string>(), fogRevision: s.fogRevision + 1 }));
     persistFogScene();
+    requestFogRepaint();
   },
 
   setRevealedCells: (revealedCells, options) => {
-    set({ revealedCells });
+    set((s) => ({ revealedCells, fogRevision: s.fogRevision + 1 }));
     if (options?.persist !== false) {
       persistFogScene({ pushServer: false });
     }
+    requestFogRepaint();
   },
 
   reset: () =>
@@ -374,6 +390,7 @@ export const useMapStore = create<SceneState>((set, get) => ({
       scanImageWalls: false,
       wallScanThreshold: 64,
       revealedCells: new Set<string>(),
+      fogRevision: 0,
       fogEnabled: false,
       sessionFogActive: false,
       syncPlayerViews: true,

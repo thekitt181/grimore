@@ -16,6 +16,8 @@ import {
 } from '../mapNavigation';
 import { isItemDragActive } from '@/systems/scene/interaction/selectionDragState';
 import { sceneRefs, getMapInteractionEl } from '@/systems/scene/sceneRefs';
+import { getActiveMap } from '@/systems/scene/store/itemStore';
+import type { MapItem } from '@/systems/scene/types';
 
 let viewportPersistTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -58,23 +60,47 @@ const ZOOM_SPEED_3D = 0.0014;
 /** Drag distance before 3D select-mode pan steals the pointer from click-to-select. */
 const PAN_DRAG_THRESHOLD = 5;
 
+/** Mirror map item bounds into mapStore before fit/pan (avoids stale grid after sync). */
+export function syncMapGridFromItem(map: MapItem): void {
+  useMapStore.getState().setActiveGrid({
+    gridType: map.gridType,
+    gridSize: map.gridSize,
+    mapWidth: map.width,
+    mapHeight: map.height,
+    gridColor: map.gridColor,
+    gridOpacity: map.gridOpacity,
+    gridOffsetX: map.gridOffsetX,
+    gridOffsetY: map.gridOffsetY,
+    showGrid: map.showGrid,
+    mapX: map.x,
+    mapY: map.y,
+  });
+}
+
+/** Fit viewport to a specific map item (uses item bounds, not stale mapStore). */
+export function fitMapItemToScreen(app: Application, world: Container, map: MapItem) {
+  syncMapGridFromItem(map);
+  const scaleX = app.screen.width / map.width;
+  const scaleY = app.screen.height / map.height;
+  const scale = Math.min(scaleX, scaleY) * 0.88;
+
+  world.scale.set(scale);
+  world.x = (app.screen.width - map.width * scale) / 2 - map.x * scale;
+  world.y = (app.screen.height - map.height * scale) / 2 - map.y * scale;
+
+  const vp = { x: world.x, y: world.y, scale };
+  useMapStore.getState().setViewport(vp);
+  scheduleViewportPersist(vp);
+}
+
 /**
  * Scales + centres the world container so the entire map fits in the viewport.
  * Exported so other hooks (MapCanvas onReady, toolbar button) can call it.
  */
 export function fitMapToScreen(app: Application, world: Container) {
-  const { mapWidth, mapHeight, mapX, mapY } = useMapStore.getState();
-  const scaleX = app.screen.width / mapWidth;
-  const scaleY = app.screen.height / mapHeight;
-  const scale = Math.min(scaleX, scaleY) * 0.88; // small margin
-
-  world.scale.set(scale);
-  world.x = (app.screen.width - mapWidth * scale) / 2 - mapX * scale;
-  world.y = (app.screen.height - mapHeight * scale) / 2 - mapY * scale;
-
-  const vp = { x: world.x, y: world.y, scale };
-  useMapStore.getState().setViewport(vp);
-  scheduleViewportPersist(vp);
+  const map = getActiveMap();
+  if (!map) return;
+  fitMapItemToScreen(app, world, map);
 }
 
 /**

@@ -110,10 +110,13 @@ export function getVisionTokens(
     if (owned.length > 0) return owned;
   }
 
-  if (selectedIds.length === 0) return [];
-  return selectedIds
-    .map((id) => items[id])
-    .filter((i): i is TokenItem => i?.type === 'token' && visibleOnMap(i));
+  if (selectedIds.length > 0) {
+    return selectedIds
+      .map((id) => items[id])
+      .filter((i): i is TokenItem => i?.type === 'token' && visibleOnMap(i));
+  }
+
+  return [];
 }
 
 function pointInPolygon(x: number, y: number, poly: Point[]): boolean {
@@ -348,6 +351,19 @@ export function playerHasVisionSource(
   return getVisionTokens(items, selectedIds, false, userId, map).length > 0;
 }
 
+/** Cells currently visible via assigned/selected token LOS (for token visibility). */
+export function playerTokenLosCells(
+  map: MapItem,
+  items: Record<string, Item>,
+  userId: string | null,
+  selectedIds: string[],
+  gridSize: number,
+): Set<string> {
+  const tokens = getVisionTokens(items, selectedIds, false, userId, map);
+  if (tokens.length === 0) return new Set();
+  return losVisibleCellKeys(map, tokens, gridSize, { directional: true });
+}
+
 /** Cells a player can see — only when they have a vision source (assigned or selected token). */
 export function playerSeenCellKeys(
   revealedCells: Set<string>,
@@ -376,7 +392,7 @@ export function isTokenVisibleToPlayer(
   return false;
 }
 
-/** Cells a player can see: token LOS clipped to GM-revealed area. */
+/** Cells a player can see: live token LOS plus GM-revealed (explored) cells. */
 export function playerVisibleCells(
   revealedCells: Set<string>,
   map: MapItem,
@@ -387,16 +403,8 @@ export function playerVisibleCells(
 ): Set<string> {
   const tokens = getVisionTokens(items, selectedIds, false, userId, map);
   const los = losVisibleCellKeys(map, tokens, gridSize, { directional: true });
-  const visible = new Set<string>();
-
-  if (revealedCells.size === 0) {
-    for (const k of los) visible.add(k);
-    return visible;
-  }
-
-  for (const k of los) {
-    if (revealedCells.has(k)) visible.add(k);
-  }
+  const visible = new Set(revealedCells);
+  for (const k of los) visible.add(k);
   return visible;
 }
 

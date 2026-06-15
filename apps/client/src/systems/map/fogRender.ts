@@ -10,7 +10,6 @@ import { cellKey } from './store/mapStore';
 import {
   getVisionTokens,
   losPolygons,
-  losVisibleCellKeys,
 } from './fogLos';
 
 export interface FogDrawOptions {
@@ -88,20 +87,6 @@ function appendPolygonPath(ctx: CanvasRenderingContext2D, poly: { x: number; y: 
   ctx.closePath();
 }
 
-function appendCellPath(ctx: CanvasRenderingContext2D, cx: number, cy: number, gridSize: number): void {
-  ctx.rect(cx * gridSize, cy * gridSize, gridSize, gridSize);
-}
-
-function isInteriorCell(cx: number, cy: number, cells: Set<string>): boolean {
-  return (
-    cells.has(cellKey(cx, cy))
-    && cells.has(cellKey(cx + 1, cy))
-    && cells.has(cellKey(cx - 1, cy))
-    && cells.has(cellKey(cx, cy + 1))
-    && cells.has(cellKey(cx, cy - 1))
-  );
-}
-
 /** Wipe the canvas each frame so prior vision holes cannot linger in the GPU texture. */
 function resetFogCanvas(ctx: CanvasRenderingContext2D): void {
   const { width, height } = ctx.canvas;
@@ -143,45 +128,35 @@ export function paintFogCanvas(
     ? losPolygons(map, visionTokens, gridSize, { directional: true })
     : [];
 
-  // Even-odd fill: one fresh fog layer per frame (map minus vision holes minus GM reveals).
+  // Solid fog, then erase holes. destination-out avoids even-odd artifacts when
+  // vision cones overlap GM-revealed grid cells (double-punch used to refog them).
   ctx.fillStyle = '#000000';
-  ctx.beginPath();
-  ctx.rect(0, 0, width, height);
+  ctx.fillRect(0, 0, width, height);
 
-  if (polys.length > 0) {
-    for (const poly of polys) {
-      appendPolygonPath(ctx, poly);
-    }
+  ctx.globalCompositeOperation = 'destination-out';
 
-    // GM: punch manual reveals only when not previewing a token vision cone.
-    if (opts.isGM && opts.selectedIds.length === 0) {
-      for (const key of opts.revealedCells) {
-        const cell = parseCellKey(key);
-        if (!cell) continue;
-        appendCellPath(ctx, cell.x, cell.y, gridSize);
-      }
-    }
-  } else {
-    for (let cx = 0; cx < Math.ceil(width / gridSize); cx++) {
-      for (let cy = 0; cy < Math.ceil(height / gridSize); cy++) {
-        if (!opts.revealedCells.has(cellKey(cx, cy))) continue;
-        appendCellPath(ctx, cx, cy, gridSize);
-      }
-    }
+  for (const poly of polys) {
+    ctx.beginPath();
+    appendPolygonPath(ctx, poly);
+    ctx.fill();
   }
 
-  ctx.fill('evenodd');
-
-  if (!opts.isGM && opts.revealedCells.size > 0 && polys.length > 0) {
-    ctx.fillStyle = '#000000';
-    const coneCells = losVisibleCellKeys(map, visionTokens, gridSize, { directional: true });
-    for (const key of coneCells) {
-      if (opts.revealedCells.has(key)) continue;
+  const punchRevealed =
+    (opts.isGM && opts.selectedIds.length === 0) || !opts.isGM;
+  if (punchRevealed) {
+    for (const key of opts.revealedCells) {
       const cell = parseCellKey(key);
-      if (!cell || !isInteriorCell(cell.x, cell.y, coneCells)) continue;
-      ctx.fillRect(cell.x * gridSize, cell.y * gridSize, gridSize, gridSize);
+      if (!cell) continue;
+      ctx.fillRect(
+        cell.x * gridSize,
+        cell.y * gridSize,
+        gridSize,
+        gridSize,
+      );
     }
   }
+
+  ctx.globalCompositeOperation = 'source-over';
 }
 
 /** Draw fog-of-war (map-local coordinates). */

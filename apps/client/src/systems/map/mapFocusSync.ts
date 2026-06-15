@@ -3,14 +3,31 @@ import { useSessionStore } from '@/store/sessionStore';
 import { useItemStore } from '@/systems/scene/store/itemStore';
 import { useMapStore, clampView3dOrbit, type MapViewMode } from '@/systems/map/store/mapStore';
 import { sceneRefs } from '@/systems/scene/sceneRefs';
-import { applyViewport, fitMapToScreen } from '@/systems/map/hooks/useMapViewport';
+import {
+  applyViewport,
+  fitMapItemToScreen,
+  fitMapToScreen,
+  syncMapGridFromItem,
+} from '@/systems/map/hooks/useMapViewport';
 import type { MapFocusPayload } from '@grimoire/shared';
 import type { MapItem } from '@/systems/scene/types';
 
 let mapFocusHandler: ((payload: MapFocusPayload) => void) | null = null;
+let pendingMapFocus: MapFocusPayload | null = null;
+let retryTimer: ReturnType<typeof setTimeout> | null = null;
+
+const FOCUS_RETRY_MS = 50;
+const FOCUS_RETRY_MAX = 40;
 
 function sid(): string | null {
   return useSessionStore.getState().sessionId;
+}
+
+function clearFocusRetry() {
+  if (retryTimer) {
+    clearTimeout(retryTimer);
+    retryTimer = null;
+  }
 }
 
 function buildMapFocusPayload(mapId: string, fitToMap: boolean): MapFocusPayload | null {
@@ -27,6 +44,58 @@ function buildMapFocusPayload(mapId: string, fitToMap: boolean): MapFocusPayload
   };
 }
 
+function applyMapFocusNow(payload: MapFocusPayload, map: MapItem) {
+  useItemStore.getState().setActiveMap(payload.mapId);
+  syncMapGridFromItem(map);
+  useMapStore.getState().setView3dOrbit(clampView3dOrbit(payload.view3dOrbit));
+  if (payload.viewMode) {
+    useMapStore.getState().setViewMode(payload.viewMode as MapViewMode);
+  }
+
+  const run = () => {
+    const app = sceneRefs.app.current;
+    const world = sceneRefs.world.current;
+    if (!app || !world) return false;
+    if (payload.fitToMap) {
+      fitMapItemToScreen(app, world, map);
+    } else {
+      applyViewport(world, payload.viewport);
+    }
+    return true;
+  };
+
+  if (!run()) requestAnimationFrame(() => { run(); });
+}
+
+function scheduleMapFocusRetry(payload: MapFocusPayload, attempt = 0) {
+  pendingMapFocus = payload;
+  if (attempt >= FOCUS_RETRY_MAX) return;
+  clearFocusRetry();
+  retryTimer = setTimeout(() => {
+    const item = useItemStore.getState().items[payload.mapId];
+    const app = sceneRefs.app.current;
+    const world = sceneRefs.world.current;
+    if (item?.type === 'map' && app && world) {
+      pendingMapFocus = null;
+      clearFocusRetry();
+      applyMapFocusNow(payload, item as MapItem);
+      return;
+    }
+    scheduleMapFocusRetry(payload, attempt + 1);
+  }, FOCUS_RETRY_MS);
+}
+
+/** Apply queued map focus after items:sync (player). */
+export function flushPendingMapFocus(): void {
+  const payload = pendingMapFocus;
+  if (!payload) return;
+  const item = useItemStore.getState().items[payload.mapId];
+  if (!item || item.type !== 'map') return;
+  pendingMapFocus = null;
+  clearFocusRetry();
+  applyMapFocusNow(payload, item as MapItem);
+}
+
 export function emitMapFocusFromState(mapId: string, fitToMap: boolean): void {
   if (useSessionStore.getState().myRole !== 'GM') return;
   if (!useMapStore.getState().syncPlayerViews) return;
@@ -40,30 +109,18 @@ export function emitMapFocusFromState(mapId: string, fitToMap: boolean): void {
 /** Apply remote map + camera (players only). */
 export function applyMapFocus(payload: MapFocusPayload): void {
   if (useSessionStore.getState().myRole === 'GM') return;
-  const sid = useSessionStore.getState().sessionId;
-  if (payload.sessionId !== sid) return;
+  const sessionId = useSessionStore.getState().sessionId;
+  if (payload.sessionId !== sessionId) return;
 
   const item = useItemStore.getState().items[payload.mapId];
-  if (!item || item.type !== 'map') return;
-
-  useItemStore.getState().setActiveMap(payload.mapId);
-  useMapStore.getState().setView3dOrbit(clampView3dOrbit(payload.view3dOrbit));
-  if (payload.viewMode) {
-    useMapStore.getState().setViewMode(payload.viewMode as MapViewMode);
+  if (!item || item.type !== 'map') {
+    scheduleMapFocusRetry(payload);
+    return;
   }
 
-  const applyView = () => {
-    const app = sceneRefs.app.current;
-    const world = sceneRefs.world.current;
-    if (!app || !world) return;
-    if (payload.fitToMap) {
-      fitMapToScreen(app, world);
-    } else {
-      applyViewport(world, payload.viewport);
-    }
-  };
-
-  requestAnimationFrame(() => requestAnimationFrame(applyView));
+  pendingMapFocus = null;
+  clearFocusRetry();
+  applyMapFocusNow(payload, item as MapItem);
 }
 
 export function bindMapFocusSocket(): void {
@@ -82,6 +139,7 @@ export function focusSessionMap(
   if (!map || map.type !== 'map') return;
 
   useItemStore.getState().setActiveMap(mapId);
+  syncMapGridFromItem(map);
   if (opts.select !== false) {
     useItemStore.getState().select([mapId], 'set');
   }
@@ -96,7 +154,7 @@ export function focusSessionMap(
 
   if (fitToMap && app && world) {
     requestAnimationFrame(() => {
-      fitMapToScreen(app, world);
+      fitMapItemToScreen(app, world, map);
       if (useMapStore.getState().viewMode === '3d') {
         useMapStore.getState().resetView3dOrbit();
       }
@@ -109,17 +167,16 @@ export function focusSessionMap(
 
 /** GM: fit active map and push view to players (Reset View / Fit). */
 export function resetSessionMapView(): void {
-  const map = useItemStore.getState().items[useItemStore.getState().activeMapId ?? ''];
-  const mapId = map?.type === 'map' ? map.id : null;
-  if (!mapId) return;
+  const mapItem = useItemStore.getState().items[useItemStore.getState().activeMapId ?? ''];
+  if (!mapItem || mapItem.type !== 'map') return;
 
   const app = sceneRefs.app.current;
   const world = sceneRefs.world.current;
-  if (app && world) fitMapToScreen(app, world);
+  if (app && world) fitMapItemToScreen(app, world, mapItem);
   if (useMapStore.getState().viewMode === '3d') {
     useMapStore.getState().resetView3dOrbit();
   }
-  emitMapFocusFromState(mapId, true);
+  emitMapFocusFromState(mapItem.id, true);
 }
 
 /** Push current map/view to players (e.g. after someone joins). */
