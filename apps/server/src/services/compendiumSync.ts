@@ -721,7 +721,7 @@ async function executeCatalogBuild(previousCache: CatalogCache | null): Promise<
     }
 
     if (catalogEntryCount(built) === 0 && rawOverrideCount(raw) > 0) {
-      console.warn('[Compendium] Rebuild empty despite Mongo overrides — retrying raw build');
+      console.warn('[Compendium] Rebuild empty despite Postgres overrides — retrying raw build');
       updateCatalogRebuild({
         phase: 'verifying',
         label: 'Retrying catalog build…',
@@ -885,27 +885,28 @@ registerCatalogPolicySink({
 
 async function catalogIsMissingOverrides(): Promise<boolean> {
   if (!catalogCache) return true;
+  // Catalog size is not comparable to raw Postgres override counts (base SRD + visibility
+  // filters vs import/homebrew rows). Only rebuild when the cache is empty but storage has data.
+  if (catalogEntryCount(catalogCache) > 0) return false;
   try {
     const counts = await readOverrideCountsFromMongo();
-    if (!counts) return catalogEntryCount(catalogCache) === 0;
-    const overrideCount = counts.monsters + counts.items + counts.spells;
-    if (overrideCount === 0) return false;
-    return catalogEntryCount(catalogCache) < Math.min(overrideCount, 200);
+    if (!counts) return false;
+    return counts.monsters + counts.items + counts.spells > 0;
   } catch {
-    return true;
+    return false;
   }
 }
 
 async function ensureCatalogIncludesOverrides(): Promise<void> {
   if (catalogBuildPromise && !catalogCache) return;
   const now = Date.now();
-  if (overrideCheckCache && now - overrideCheckCache.at < 30_000 && !overrideCheckCache.missing) {
+  if (overrideCheckCache && now - overrideCheckCache.at < 30_000) {
     return;
   }
   const missing = await catalogIsMissingOverrides();
   overrideCheckCache = { at: now, missing };
   if (!missing) return;
-  console.warn('[Compendium] Catalog cache missing Mongo overrides — rebuilding');
+  console.warn('[Compendium] Catalog cache empty but storage has imports — rebuilding');
   await rebuildCatalogCacheAtomic();
 }
 
@@ -913,6 +914,7 @@ async function buildCatalogCache(): Promise<CatalogCache> {
   const version = await readMongoGlobalVersion();
   const versionRev = version ?? '';
   if (catalogCache && versionRev && catalogCache.rev.startsWith(`${versionRev}:`)) {
+    if (catalogEntryCount(catalogCache) > 0) return catalogCache;
     if (!(await catalogIsMissingOverrides())) return catalogCache;
   }
   if (catalogBuildPromise) return catalogBuildPromise;
