@@ -27,7 +27,11 @@ function persistScene(fullSync = false) {
 
   if (!fullSync) return;
   if (useSessionStore.getState().myRole !== 'GM') return;
-  emitIfConnected('items:sync', { sessionId: s, items: snapshotItems() });
+  emitIfConnected('items:sync', {
+    sessionId: s,
+    items: snapshotItems(),
+    activeMapId: useItemStore.getState().activeMapId,
+  });
 }
 
 export function emitItemAdd(item: Item) {
@@ -58,7 +62,7 @@ export function emitItemsSync(items: Item[]) {
   if (!s) return;
   if (useSessionStore.getState().myRole !== 'GM') return;
   persistItemsLocal(s, items);
-  emitIfConnected('items:sync', { sessionId: s, items });
+  emitIfConnected('items:sync', { sessionId: s, items, activeMapId: useItemStore.getState().activeMapId });
 }
 
 /** Ask server to resend cached fog + items (after listeners attach). */

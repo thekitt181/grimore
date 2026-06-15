@@ -112,6 +112,8 @@ export interface ItemRemovePayload {
 export interface ItemsSyncPayload {
   sessionId: string;
   items: unknown[];
+  /** GM's active map — players use this instead of guessing from item order. */
+  activeMapId?: string | null;
 }
 
 // ─── Token events (PROJECT.md) ────────────────────────────────────────────────

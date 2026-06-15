@@ -205,11 +205,12 @@ export function MapCanvas() {
     sceneRefs.overlay.current = overlay;
 
     const sid = getPersistSessionId();
-    const savedVp = sid ? loadViewportLocal(sid) : null;
+    const isPlayer = useSessionStore.getState().myRole === 'PLAYER';
+    const savedVp = !isPlayer && sid ? loadViewportLocal(sid) : null;
     if (savedVp) {
       applyViewport(world, savedVp);
       viewportInitializedRef.current = true;
-    } else {
+    } else if (!isPlayer) {
       fitMapToScreen(app, world);
       viewportInitializedRef.current = true;
     }
@@ -272,7 +273,7 @@ export function MapCanvas() {
         persistLocal();
       }
     });
-    const onSync = forSession((payload: { sessionId?: string; items: unknown[] }) => {
+    const onSync = forSession((payload: { sessionId?: string; items: unknown[]; activeMapId?: string | null }) => {
       const list = payload.items;
       initialSyncRef.current.received = true;
       const isGM = useSessionStore.getState().myRole === 'GM';
@@ -281,7 +282,9 @@ export function MapCanvas() {
       if (!isGM) {
         const current = useItemStore.getState().items;
         if (!sameSceneItemSnapshot(serverItems, current)) {
-          useItemStore.getState().setItems(serverItems);
+          useItemStore.getState().setItems(serverItems, payload.activeMapId);
+        } else if (payload.activeMapId && payload.activeMapId !== useItemStore.getState().activeMapId) {
+          useItemStore.getState().setActiveMap(payload.activeMapId);
         }
         if (sessionId) persistItemsLocal(sessionId, serverItems);
         initialSyncRef.current.hadItems = serverItems.length > 0;
@@ -410,6 +413,10 @@ export function MapCanvas() {
   // Fit viewport only on first map load — not on every item sync (avoids jump on reconnect).
   useEffect(() => {
     if (!appReady || !sessionId || viewportInitializedRef.current) return;
+    if (useSessionStore.getState().myRole === 'PLAYER') {
+      viewportInitializedRef.current = true;
+      return;
+    }
     const app = sceneRefs.app.current;
     const world = sceneRefs.world.current;
     const map = getActiveMap();

@@ -10,7 +10,9 @@ import {
   getRoomUsers,
   getSessionFog,
   getSessionItems,
+  getSessionMapFocus,
   setSessionItems,
+  setSessionMapFocus,
 } from '../lib/redis';
 import {
   dedupeSessionUsers,
@@ -75,23 +77,38 @@ function isSessionGM(socket: Socket): boolean {
 }
 
 async function hydrateSessionFromCache(socket: Socket, sessionId: string): Promise<void> {
-  const [cachedFog, cachedItemsRaw] = await Promise.all([
+  const [cachedFog, cachedItemsRaw, cachedFocusRaw] = await Promise.all([
     getSessionFog(sessionId),
     getSessionItems(sessionId),
+    getSessionMapFocus(sessionId),
   ]);
 
   socket.emit('fog:sync', { sessionId, fogData: cachedFog ?? '[]' });
 
+  let mapFocus: MapFocusPayload | undefined;
+  if (cachedFocusRaw) {
+    try {
+      mapFocus = JSON.parse(cachedFocusRaw) as MapFocusPayload;
+      sessionMapFocus.set(sessionId, mapFocus);
+    } catch {
+      /* ignore */
+    }
+  }
+  if (!mapFocus) {
+    mapFocus = sessionMapFocus.get(sessionId);
+  }
+
   const emitMapFocus = () => {
-    const mapFocus = sessionMapFocus.get(sessionId);
     if (mapFocus) socket.emit('map:focus', mapFocus);
   };
+
+  const activeMapId = mapFocus?.mapId ?? null;
 
   if (cachedItemsRaw) {
     try {
       const items = JSON.parse(cachedItemsRaw) as unknown;
       if (Array.isArray(items)) {
-        socket.emit('items:sync', { sessionId, items });
+        socket.emit('items:sync', { sessionId, items, activeMapId });
         emitMapFocus();
         return;
       }
@@ -99,7 +116,7 @@ async function hydrateSessionFromCache(socket: Socket, sessionId: string): Promi
       /* fall through */
     }
   }
-  socket.emit('items:sync', { sessionId, items: [] });
+  socket.emit('items:sync', { sessionId, items: [], activeMapId });
   emitMapFocus();
 }
 
@@ -308,17 +325,17 @@ export function initSocket(httpServer: HttpServer): Server {
     // ── Generic scene items (unified editor) — relay only; clients persist locally ──
     socket.on('item:add', (payload: ItemAddPayload) => {
       if (!isJoinedSession(socket, payload.sessionId)) return;
-      if (isSessionGM(socket)) void cacheItemAdd(payload);
+      void cacheItemAdd(payload);
       socket.to(payload.sessionId).emit('item:add', payload);
     });
     socket.on('item:update', (payload: ItemUpdatePayload) => {
       if (!isJoinedSession(socket, payload.sessionId)) return;
-      if (isSessionGM(socket)) void cacheItemUpdate(payload);
+      void cacheItemUpdate(payload);
       socket.to(payload.sessionId).emit('item:update', payload);
     });
     socket.on('item:remove', (payload: ItemRemovePayload) => {
       if (!isJoinedSession(socket, payload.sessionId)) return;
-      if (isSessionGM(socket)) void cacheItemRemove(payload);
+      void cacheItemRemove(payload);
       socket.to(payload.sessionId).emit('item:remove', payload);
     });
     socket.on('items:sync', (payload: ItemsSyncPayload) => {
@@ -346,7 +363,22 @@ export function initSocket(httpServer: HttpServer): Server {
       });
     };
     relayToken<TokenPlacePayload>('token:place');
-    relayToken<TokenMovePayload>('token:move');
+    socket.on('token:move', (payload: TokenMovePayload) => {
+      if (!isJoinedSession(socket, payload.sessionId)) return;
+      void cacheItemUpdate({
+        sessionId: payload.sessionId,
+        patches: [{
+          id: payload.tokenId,
+          patch: {
+            gridCol: payload.gridCol,
+            gridRow: payload.gridRow,
+            x: payload.x,
+            y: payload.y,
+          },
+        }],
+      });
+      socket.to(payload.sessionId).emit('token:move', payload);
+    });
     relayToken<TokenHpPayload>('token:hp');
     relayToken<TokenTypePayload>('token:type');
     relayToken<TokenRotatePayload>('token:rotate');
@@ -420,6 +452,7 @@ export function initSocket(httpServer: HttpServer): Server {
       if (!isJoinedSession(socket, payload.sessionId)) return;
       if (!isSessionGM(socket)) return;
       sessionMapFocus.set(payload.sessionId, payload);
+      void setSessionMapFocus(payload.sessionId, JSON.stringify(payload));
       socket.to(payload.sessionId).emit('map:focus', payload);
     });
 

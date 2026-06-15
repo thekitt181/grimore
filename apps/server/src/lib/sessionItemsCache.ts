@@ -18,7 +18,7 @@ async function saveCachedItems(sessionId: string, items: CachedItem[]): Promise<
   await setSessionItems(sessionId, JSON.stringify(items));
 }
 
-/** GM item:add — append to Redis snapshot so hydrate matches live session. */
+/** item:add — append to Redis snapshot so hydrate matches live session. */
 export async function cacheItemAdd(payload: ItemAddPayload): Promise<void> {
   const item = payload.item as CachedItem | null;
   if (!item?.id) return;
@@ -29,7 +29,7 @@ export async function cacheItemAdd(payload: ItemAddPayload): Promise<void> {
   await saveCachedItems(payload.sessionId, items);
 }
 
-/** GM item:update — patch cached snapshot. */
+/** item:update — patch cached snapshot. */
 export async function cacheItemUpdate(payload: ItemUpdatePayload): Promise<void> {
   if (!payload.patches.length) return;
   const patchById = new Map(payload.patches.map((p) => [p.id, p.patch]));
@@ -44,7 +44,7 @@ export async function cacheItemUpdate(payload: ItemUpdatePayload): Promise<void>
   if (changed) await saveCachedItems(payload.sessionId, next);
 }
 
-/** GM item:remove — drop ids from cached snapshot (fixes ghost maps on player hydrate). */
+/** item:remove — drop ids from cached snapshot (fixes ghost maps on player hydrate). */
 export async function cacheItemRemove(payload: ItemRemovePayload): Promise<void> {
   if (!payload.ids.length) return;
   const remove = new Set(payload.ids);

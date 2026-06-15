@@ -183,5 +183,5 @@ export function resetSessionMapView(): void {
 export function syncMapFocusToSession(): void {
   const mapId = useItemStore.getState().activeMapId;
   if (!mapId) return;
-  emitMapFocusFromState(mapId, true);
+  emitMapFocusFromState(mapId, false);
 }

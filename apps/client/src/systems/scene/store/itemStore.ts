@@ -22,7 +22,7 @@ interface ItemState {
   updateItem: (id: string, patch: Partial<Item>) => void;
   updateItems: (patches: Array<{ id: string; patch: Partial<Item> }>) => void;
   removeItems: (ids: string[]) => void;
-  setItems: (items: Item[]) => void;
+  setItems: (items: Item[], activeMapId?: string | null) => void;
 
   // ── Selection ──────────────────────────────────────────────────────────────
   select: (ids: string[], mode?: SelectMode) => void;
@@ -132,12 +132,15 @@ export const useItemStore = create<ItemState>((set, get) => ({
       return { items: next, selectedIds, activeMapId };
     }),
 
-  setItems: (items) =>
+  setItems: (items, activeMapId) =>
     set(() => {
       const rec: Record<string, Item> = {};
       for (const it of items) rec[it.id] = it;
-      const firstMap = items.find((i) => i.type === 'map');
-      return { items: rec, activeMapId: firstMap?.id ?? null, selectedIds: [], selectedWallIndices: [] };
+      const maps = items.filter((i) => i.type === 'map');
+      let nextActive = activeMapId ?? null;
+      if (nextActive && !rec[nextActive]) nextActive = null;
+      if (!nextActive) nextActive = maps[0]?.id ?? null;
+      return { items: rec, activeMapId: nextActive, selectedIds: [], selectedWallIndices: [] };
     }),
 
   // ── Selection ──────────────────────────────────────────────────────────────

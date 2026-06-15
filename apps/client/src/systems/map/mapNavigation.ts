@@ -1,6 +1,7 @@
 import type { Container } from 'pixi.js';
 import type { MapViewMode } from './store/mapStore';
 import { useMapStore } from './store/mapStore';
+import { getActiveMap } from '@/systems/scene/store/itemStore';
 import { pointerHitsToken } from '@/systems/scene/token/tokenPointerPick';
 import {
   clampViewportScale,
@@ -50,10 +51,11 @@ export function viewportScaleContext(
   app: { screen: { width: number; height: number } } | null,
 ): ViewportScaleContext | undefined {
   if (!app) return undefined;
+  const map = getActiveMap();
   const { mapWidth, mapHeight } = useMapStore.getState();
   return {
-    mapWidth,
-    mapHeight,
+    mapWidth: map?.width ?? mapWidth,
+    mapHeight: map?.height ?? mapHeight,
     screenW: app.screen.width,
     screenH: app.screen.height,
   };

@@ -422,3 +422,18 @@ export async function getSessionItems(sessionId: string): Promise<string | null>
   if (fromRedis != null) memorySet(`items:${sessionId}`, fromRedis);
   return fromRedis;
 }
+
+export async function setSessionMapFocus(sessionId: string, data: string): Promise<void> {
+  memorySet(`mapFocus:${sessionId}`, data);
+  await safeRedis(undefined, (client) =>
+    client.setex(`mapFocus:${sessionId}`, SESSION_TTL, data),
+  );
+}
+
+export async function getSessionMapFocus(sessionId: string): Promise<string | null> {
+  const cached = memoryGet(`mapFocus:${sessionId}`);
+  if (cached != null) return cached;
+  const fromRedis = await safeRedis(null, (client) => client.get(`mapFocus:${sessionId}`));
+  if (fromRedis != null) memorySet(`mapFocus:${sessionId}`, fromRedis);
+  return fromRedis;
+}
