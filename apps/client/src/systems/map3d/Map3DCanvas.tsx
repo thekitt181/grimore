@@ -4,7 +4,7 @@ import type { RootState } from '@react-three/fiber';
 import * as THREE from 'three';
 import { isMobileClient } from '@/lib/socket';
 import { getActiveMap, useItemStore, selectSortedItems } from '@/systems/scene/store/itemStore';
-import { sceneMapsForClient } from '@/systems/scene/sceneMapsForClient';
+import { isSceneItemOnTable, sceneMapsForClient } from '@/systems/scene/sceneMapsForClient';
 import { useSessionStore } from '@/store/sessionStore';
 import { sceneRefs } from '@/systems/scene/sceneRefs';
 import { sceneCameraRef } from './sceneCameraRef';
@@ -25,7 +25,7 @@ import { MapPickVolume } from './MapPickVolume';
 import { SceneItemTransformGroup } from './TokenTransformGroup';
 import { pixiRenderResolution } from './pixiCanvasMetrics';
 import { bindWebGLContextRecovery } from './threeWebGLContext';
-import { is3dToken } from '@/systems/scene/token/tokenRenderType';
+import { is3dToken, tokenUsesModelMesh } from '@/systems/scene/token/tokenRenderType';
 import { markThreeFrameRendered, registerThreeRenderer, resetThreeCanvasHealth, notifyThreeCanvasUnhealthy } from './threeCanvasHealth';
 import { applyPixiViewMode } from '@/systems/map/applyPixiViewMode';
 
@@ -57,7 +57,10 @@ function Map2DModelFogContent({ map }: { map: MapItem }) {
 /** 2D view: model mesh in Three; Pixi draws the selection gizmo (same as flat tokens). */
 function TokenModelOverlayLayer() {
   const { tokens, activeTurnItemId } = useVisibleSceneTokens({ modelOnly: true });
-  const modelTokens = useMemo(() => tokens.filter(is3dToken), [tokens]);
+  const modelTokens = useMemo(
+    () => tokens.filter((t) => tokenUsesModelMesh(t, '2d') || is3dToken(t)),
+    [tokens],
+  );
   if (modelTokens.length === 0) return null;
 
   return (
@@ -88,7 +91,7 @@ function TokenOverlay2DContent({ map }: { map: MapItem | null }) {
 function Map3DSceneContent() {
   const items = useItemStore(selectSortedItems);
   const activeMapId = useItemStore((s) => s.activeMapId);
-  const myRole = useSessionStore((s) => s.myRole);
+  const gm = useSessionStore((s) => s.myRole === 'GM');
   const mobile = isMobileClient();
   const activeMap = useMemo(() => {
     if (activeMapId) {
@@ -102,11 +105,11 @@ function Map3DSceneContent() {
   const wallHeightCells = useMapStore((s) => s.wallHeightCells);
 
   const maps = useMemo(
-    () => sceneMapsForClient(items, activeMapId, myRole === 'GM'),
-    [items, activeMapId, myRole],
+    () => sceneMapsForClient(items, gm),
+    [items, gm],
   );
-  const drawings = items.filter((i): i is DrawItem => i.type === 'drawing');
-  const labels = items.filter((i): i is TextItem => i.type === 'text');
+  const drawings = items.filter((i): i is DrawItem => i.type === 'drawing' && isSceneItemOnTable(i, gm));
+  const labels = items.filter((i): i is TextItem => i.type === 'text' && isSceneItemOnTable(i, gm));
 
   const gridSize = activeMap?.gridSize ?? 96;
   const wallHeight = gridSize * wallHeightCells;
@@ -231,8 +234,8 @@ export function MapSceneCanvas() {
 
   const { tokens: modelCandidates } = useVisibleSceneTokens({ modelOnly: true });
   const hasModelTokens = useMemo(
-    () => modelCandidates.some(is3dToken),
-    [modelCandidates],
+    () => modelCandidates.some((t) => tokenUsesModelMesh(t, viewMode) || is3dToken(t)),
+    [modelCandidates, viewMode],
   );
 
   const hasModelMap = Boolean(overlayMap?.modelUrl);

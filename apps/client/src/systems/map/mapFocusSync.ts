@@ -96,9 +96,9 @@ export function flushPendingMapFocus(): void {
   applyMapFocusNow(payload, item as MapItem);
 }
 
-export function emitMapFocusFromState(mapId: string, fitToMap: boolean): void {
+export function emitMapFocusFromState(mapId: string, fitToMap: boolean, force = false): void {
   if (useSessionStore.getState().myRole !== 'GM') return;
-  if (!useMapStore.getState().syncPlayerViews) return;
+  if (!force && !useMapStore.getState().syncPlayerViews) return;
   const payload = buildMapFocusPayload(mapId, fitToMap);
   if (!payload) return;
   const socket = getSocket();
@@ -180,8 +180,8 @@ export function resetSessionMapView(): void {
 }
 
 /** Push current map/view to players (e.g. after someone joins). */
-export function syncMapFocusToSession(): void {
+export function syncMapFocusToSession(opts?: { force?: boolean }): void {
   const mapId = useItemStore.getState().activeMapId;
   if (!mapId) return;
-  emitMapFocusFromState(mapId, false);
+  emitMapFocusFromState(mapId, false, opts?.force === true);
 }

@@ -4,6 +4,7 @@ import type {
   ModelAssetRequestPayload,
 } from '@grimoire/shared';
 import { getSocket } from '@/lib/socket';
+import { useSessionStore } from '@/store/sessionStore';
 import {
   hasModelAsset,
   importModelAssetBlob,
@@ -14,7 +15,9 @@ import {
 import type { Item } from '@/systems/scene/types';
 
 const CHUNK_BYTES = 384_000;
+const REQUEST_TIMEOUT_MS = 45_000;
 const pendingRequests = new Set<string>();
+const requestTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const inflightAssembly = new Map<
   string,
   {
@@ -26,6 +29,15 @@ const inflightAssembly = new Map<
   }
 >();
 
+function uint8ToBase64(bytes: Uint8Array): string {
+  let binary = '';
+  const step = 0x8000;
+  for (let i = 0; i < bytes.length; i += step) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + step));
+  }
+  return btoa(binary);
+}
+
 function collectModelUrls(items: Item[]): string[] {
   const urls = new Set<string>();
   for (const item of items) {
@@ -33,6 +45,28 @@ function collectModelUrls(items: Item[]): string[] {
     if (url && isGrimoireModelRef(url)) urls.add(url);
   }
   return [...urls];
+}
+
+function trackPendingRequest(modelUrl: string): void {
+  pendingRequests.add(modelUrl);
+  const prev = requestTimers.get(modelUrl);
+  if (prev) clearTimeout(prev);
+  requestTimers.set(
+    modelUrl,
+    setTimeout(() => {
+      requestTimers.delete(modelUrl);
+      pendingRequests.delete(modelUrl);
+    }, REQUEST_TIMEOUT_MS),
+  );
+}
+
+function clearPendingRequest(modelUrl: string): void {
+  pendingRequests.delete(modelUrl);
+  const timer = requestTimers.get(modelUrl);
+  if (timer) {
+    clearTimeout(timer);
+    requestTimers.delete(modelUrl);
+  }
 }
 
 async function requestMissingModels(
@@ -44,15 +78,17 @@ async function requestMissingModels(
   if (!socket.connected || !requesterId) return;
 
   for (const modelUrl of collectModelUrls(items)) {
+    if (await hasModelAsset(modelUrl)) {
+      clearPendingRequest(modelUrl);
+      continue;
+    }
     if (pendingRequests.has(modelUrl)) continue;
-    const has = await hasModelAsset(modelUrl);
-    if (has) continue;
     const parsed = parseGrimoireModelRef(modelUrl);
     if (!parsed) continue;
     const [, itemId] = parsed.key.split(':');
     if (!itemId) continue;
 
-    pendingRequests.add(modelUrl);
+    trackPendingRequest(modelUrl);
     socket.emit('model:request', {
       sessionId,
       itemId,
@@ -70,8 +106,7 @@ async function sendModelToRequester(
 ): Promise<void> {
   const parsed = parseGrimoireModelRef(modelUrl);
   if (!parsed) return;
-  const has = await hasModelAsset(modelUrl);
-  if (!has) return;
+  if (!(await hasModelAsset(modelUrl))) return;
 
   const blobUrl = await resolveModelAssetUrl(modelUrl);
   try {
@@ -81,18 +116,17 @@ async function sendModelToRequester(
     const bytes = new Uint8Array(buffer);
     const totalChunks = Math.max(1, Math.ceil(bytes.length / CHUNK_BYTES));
     const socket = getSocket();
+    if (!socket.connected) return;
 
     for (let i = 0; i < totalChunks; i++) {
       const slice = bytes.subarray(i * CHUNK_BYTES, (i + 1) * CHUNK_BYTES);
-      let binary = '';
-      for (let j = 0; j < slice.length; j++) binary += String.fromCharCode(slice[j]!);
       socket.emit('model:chunk', {
         sessionId,
         itemId,
         format: parsed.format,
         chunkIndex: i,
         totalChunks,
-        data: btoa(binary),
+        data: uint8ToBase64(slice),
         targetUserId,
       } satisfies ModelAssetChunkPayload);
     }
@@ -127,11 +161,30 @@ function onModelChunk(payload: ModelAssetChunkPayload, myUserId: string): void {
 
   const { sessionId, itemId, format } = assembly;
   void importModelAssetBlob(sessionId, itemId, format, new Blob([bytes])).then((ref) => {
-    pendingRequests.delete(ref);
+    clearPendingRequest(ref);
     window.dispatchEvent(
       new CustomEvent('grimoire:model-asset-ready', { detail: { itemId } }),
     );
   });
+}
+
+/** GM: push every scene GLB/STL blob to connected players (Sync scene / join). */
+export function pushSessionModelAssets(sessionId: string, items: Item[]): void {
+  if (useSessionStore.getState().myRole !== 'GM') return;
+  const targets = useSessionStore.getState().connectedUsers
+    .filter((u) => u.role === 'PLAYER')
+    .map((u) => u.id);
+  if (targets.length === 0) return;
+
+  for (const modelUrl of collectModelUrls(items)) {
+    const parsed = parseGrimoireModelRef(modelUrl);
+    if (!parsed) continue;
+    const [, itemId] = parsed.key.split(':');
+    if (!itemId) continue;
+    for (const targetUserId of targets) {
+      void sendModelToRequester(sessionId, itemId, modelUrl, targetUserId);
+    }
+  }
 }
 
 /** Relay 3D model blobs from GM IndexedDB to players missing grimoire-model:// assets. */

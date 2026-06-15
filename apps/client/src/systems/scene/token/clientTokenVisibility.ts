@@ -10,7 +10,7 @@ import { useSessionStore } from '@/store/sessionStore';
 import { isFogOverlayVisible } from '@/systems/scene/fogActiveSync';
 import type { Item, MapItem, TokenItem } from '../types';
 
-/** Tokens a player may see / interact with while fog is active. */
+/** Tokens hidden by fog of war — interaction / line-of-sight only, not table rendering. */
 export function filterPlayerTokens(
   items: Record<string, Item>,
   opts: {
@@ -77,7 +77,7 @@ export function playerCanMoveToken(
   return token.visible !== false;
 }
 
-/** Player tokens for rendering / fog visibility (not necessarily all interactable). */
+/** Tokens a player may click/drag under fog — rendering uses sceneTokensForClient instead. */
 export function playerSelectableTokens(
   items: Record<string, Item>,
   opts: {

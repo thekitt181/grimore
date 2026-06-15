@@ -1,6 +1,7 @@
 import { getSocket } from '@/lib/socket';
 import { useSessionStore } from '@/store/sessionStore';
 import { useItemStore } from './store/itemStore';
+import { pushSessionModelAssets } from '@/systems/map3d/useModelAssetSync';
 import { addDeletedIds, persistItemsLocal } from './sessionPersistence';
 import type { Item } from './types';
 
@@ -63,6 +64,7 @@ export function emitItemsSync(items: Item[]) {
   if (useSessionStore.getState().myRole !== 'GM') return;
   persistItemsLocal(s, items);
   emitIfConnected('items:sync', { sessionId: s, items, activeMapId: useItemStore.getState().activeMapId });
+  pushSessionModelAssets(s, items);
 }
 
 /** Ask server to resend cached fog + items (after listeners attach). */

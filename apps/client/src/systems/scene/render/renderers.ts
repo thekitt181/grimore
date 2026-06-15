@@ -6,7 +6,7 @@ import { tokenShowsHpBarToPlayer } from '../types';
 import { redrawGrid } from '@/systems/map/hooks/useMapGrid';
 import { loadTexture } from '@/lib/textureLoader';
 
-import { getTokenRenderType } from '../token/tokenRenderType';
+import { getTokenRenderType, tokenHidesPixiBody } from '../token/tokenRenderType';
 
 export interface RenderContext {
   gm: boolean;
@@ -193,12 +193,11 @@ function renderTokenBase(c: Container, item: TokenItem, ctx: RenderContext) {
   const radius = Math.min(w, h) / 2 - 4;
   const renderType = getTokenRenderType(item);
   /** Hide Pixi body when Three.js renders the token (3D view model, or 2D model overlay). */
-  const hidePixiBody =
-    !ctx.pixiTokenFallback &&
-    (
-      (ctx.viewMode === '3d' && Boolean(item.modelUrl)) ||
-      (renderType === '3d' && (ctx.viewMode === '3d' || Boolean(item.modelUrl)))
-    );
+  const hidePixiBody = tokenHidesPixiBody(
+    item,
+    ctx.viewMode ?? '2d',
+    Boolean(ctx.pixiTokenFallback),
+  );
   const borderColor = item.borderColour ? cssHex(item.borderColour) : 0xc9a84c;
 
   if (item.auraRadius && item.auraRadius > 0 && !hidePixiBody) {
@@ -279,13 +278,11 @@ function renderTokenBase(c: Container, item: TokenItem, ctx: RenderContext) {
 }
 
 function renderTokenOverlay(c: Container, item: TokenItem, ctx: RenderContext) {
-  const renderType = getTokenRenderType(item);
-  const hidePixiBody =
-    !ctx.pixiTokenFallback &&
-    (
-      (ctx.viewMode === '3d' && Boolean(item.modelUrl)) ||
-      (renderType === '3d' && (ctx.viewMode === '3d' || Boolean(item.modelUrl)))
-    );
+  const hidePixiBody = tokenHidesPixiBody(
+    item,
+    ctx.viewMode ?? '2d',
+    Boolean(ctx.pixiTokenFallback),
+  );
 
   const overlay = new Container();
   overlay.label = 'token-overlay';

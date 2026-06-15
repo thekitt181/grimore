@@ -150,7 +150,7 @@ export function MapCanvas() {
     const timer = setTimeout(() => {
       gmScenePushedRef.current = true;
       emitItemsSync(Object.values(useItemStore.getState().items) as Item[]);
-      syncMapFocusToSession();
+      syncMapFocusToSession({ force: true });
     }, 800);
     return () => clearTimeout(timer);
   }, [sessionId, myRole]);
@@ -365,7 +365,7 @@ export function MapCanvas() {
         emitItemsSync(Object.values(useItemStore.getState().items) as Item[]);
         emitFogSync();
         syncFogActiveToSession();
-        syncMapFocusToSession();
+        syncMapFocusToSession({ force: true });
       }, 600);
     });
 

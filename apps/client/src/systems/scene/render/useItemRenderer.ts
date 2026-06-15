@@ -10,8 +10,6 @@ import { useItemStore, getActiveMap } from '../store/itemStore';
 import { useSessionStore } from '@/store/sessionStore';
 import { useInitiativeStore } from '@/systems/map/store/initiativeStore';
 import { useMapStore } from '@/systems/map/store/mapStore';
-import { playerSelectableTokens } from '@/systems/scene/token/clientTokenVisibility';
-import { sceneMapsForClient } from '@/systems/scene/sceneMapsForClient';
 import {
   useLiveTransformStore,
 } from '../store/liveTransformStore';
@@ -60,11 +58,6 @@ export function useItemRenderer(
   );
   const viewMode = useMapStore((s) => s.viewMode);
   const activeTool = useMapStore((s) => s.activeTool);
-  const revealedCells = useMapStore((s) => s.revealedCells);
-  const fogRevision = useMapStore((s) => s.fogRevision);
-  const fogEnabled = useMapStore((s) => s.fogEnabled);
-  const sessionFogActive = useMapStore((s) => s.sessionFogActive);
-  const myUserId = useSessionStore((s) => s.myUserId);
 
   const containers = useRef<Map<string, Container>>(new Map());
   const wallContainers = useRef<Map<string, Container>>(new Map());
@@ -112,19 +105,6 @@ export function useItemRenderer(
       ...(activeTurnItemId ? { activeTurnItemId } : {}),
     };
     const activeMap = getActiveMap();
-    const playerMapIds = !gm
-      ? new Set(sceneMapsForClient(Object.values(items), activeMap?.id ?? null, false).map((m) => m.id))
-      : null;
-    const playerVisibleTokenIds = !gm
-      ? new Set(
-        playerSelectableTokens(items, {
-          myUserId,
-          selectedIds,
-          revealedCells,
-          activeMap,
-        }).map((t) => t.id),
-      )
-      : null;
 
     const liveIds = new Set(Object.keys(items));
     const liveMapIds = new Set(
@@ -153,8 +133,7 @@ export function useItemRenderer(
       const threeBodyOnly =
         item.type === 'token' &&
         viewMode === '3d' &&
-        tokenRendersInThree(item, viewMode) &&
-        !pixiTokenFallback;
+        (Boolean(item.modelUrl) || (tokenRendersInThree(item, viewMode) && !pixiTokenFallback));
       if (threeBodyOnly) {
         const stale = containers.current.get(item.id);
         if (stale) {
@@ -209,23 +188,18 @@ export function useItemRenderer(
       c.rotation = (drawRot * Math.PI) / 180;
       c.zIndex = itemDisplayZIndex(item);
 
-      // Visibility / ghosting
-      let show = item.visible || gm;
-      if (!gm && item.type === 'map' && playerMapIds) {
-        show = show && playerMapIds.has(item.id);
-      }
-      if (!gm && item.type === 'token' && playerVisibleTokenIds) {
-        show = show && playerVisibleTokenIds.has(item.id);
-      }
-      const alpha = item.visible || !gm ? 1 : 0.35;
+      // Visibility — hidden items are GM-only ghosts; otherwise everyone sees the same scene.
+      const show = item.visible !== false || gm;
+      const alpha = item.visible !== false || !gm ? 1 : 0.35;
 
       if (viewMode === '3d') {
         if (item.type === 'map' && mobileMapUnderlay) {
           c.visible = show;
           c.alpha = show ? alpha : 0;
-        } else if (item.type === 'token' && pixiTokenFallback) {
-          c.visible = show;
-          c.alpha = show ? alpha : 0;
+        } else if (item.type === 'token') {
+          const showPixiToken = pixiTokenFallback && !item.modelUrl;
+          c.visible = show && showPixiToken;
+          c.alpha = show && showPixiToken ? alpha : 0;
         } else {
           c.visible = false;
           c.alpha = 0;
@@ -281,11 +255,6 @@ export function useItemRenderer(
     activeTurnItemId,
     viewMode,
     activeTool,
-    revealedCells,
-    fogRevision,
-    fogEnabled,
-    sessionFogActive,
-    myUserId,
     threeHealthTick,
     appReady,
     layerRef,

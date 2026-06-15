@@ -263,7 +263,7 @@ export function MapToolbar() {
                 title="Push full scene to all players (fixes ghost maps)"
                 onClick={() => {
                   emitItemsSync(Object.values(useItemStore.getState().items));
-                  window.setTimeout(() => syncMapFocusToSession(), 150);
+                  window.setTimeout(() => syncMapFocusToSession({ force: true }), 150);
                 }}
                 className="w-full rounded py-0.5 font-ui text-[7px] leading-tight transition-all text-[#8a8075] hover:text-[#e8e0d0] hover:bg-[#1c1c28]"
               >

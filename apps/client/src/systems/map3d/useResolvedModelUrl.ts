@@ -106,5 +106,30 @@ export function useResolvedModelUrl(url: string | null | undefined): {
     return () => window.removeEventListener('grimoire:model-asset-ready', onReady);
   }, [url]);
 
+  // Players on mobile may join before model chunks arrive — retry IndexedDB resolve.
+  useEffect(() => {
+    if (!url || !isGrimoireModelRef(url) || status !== 'error') return;
+    let cancelled = false;
+    let attempts = 0;
+    const retry = () => {
+      if (cancelled || attempts >= 10) return;
+      attempts += 1;
+      void loadBlobUrl(url)
+        .then((blobUrl) => {
+          if (cancelled) return;
+          setResolved(blobUrl);
+          setStatus('ready');
+        })
+        .catch(() => {
+          if (!cancelled) window.setTimeout(retry, Math.min(1500 * attempts, 8000));
+        });
+    };
+    const timer = window.setTimeout(retry, 600);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [url, status]);
+
   return { resolved, status };
 }

@@ -26,9 +26,12 @@ function contextLost(): boolean {
 export function isThreeCanvasHealthy(): boolean {
   const canvas = sceneRefs.threeCanvas.current;
   if (!canvas || contextLost()) return false;
-  const w = canvas.clientWidth || canvas.width;
-  const h = canvas.clientHeight || canvas.height;
-  return w > 16 && h > 16;
+  const rect = canvas.getBoundingClientRect?.();
+  const w = canvas.clientWidth || rect?.width || canvas.width || 0;
+  const h = canvas.clientHeight || rect?.height || canvas.height || 0;
+  if (w > 16 && h > 16) return true;
+  const gl = glRef?.domElement === canvas ? glRef.getContext() : null;
+  return Boolean(gl && gl.drawingBufferWidth > 16 && gl.drawingBufferHeight > 16);
 }
 
 /** Healthy and at least one frame has been drawn — safe to hide Pixi fallbacks on mobile. */

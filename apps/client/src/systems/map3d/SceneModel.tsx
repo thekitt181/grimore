@@ -8,7 +8,7 @@ import { useResolvedModelUrl } from './useResolvedModelUrl';
 import { registerMapRaycastRoot } from './mapGroundRaycast';
 import { applyModelNormalization, applyFallbackModelNormalization } from './normalizeModelRoot';
 
-function brightenMeshMaterials(root: THREE.Object3D, miniature2d = false) {
+function brightenMeshMaterials(root: THREE.Object3D, miniature2d = false, tokenRender = false) {
   root.traverse((child) => {
     if (!(child as THREE.Mesh).isMesh) return;
     const mesh = child as THREE.Mesh;
@@ -21,6 +21,12 @@ function brightenMeshMaterials(root: THREE.Object3D, miniature2d = false) {
       if (mat.emissiveIntensity < minEmissive) {
         mat.emissive.copy(mat.color);
         mat.emissiveIntensity = minEmissive;
+      }
+      if (tokenRender) {
+        mat.depthWrite = true;
+        mat.polygonOffset = true;
+        mat.polygonOffsetFactor = -4;
+        mat.polygonOffsetUnits = -4;
       }
     }
   });
@@ -81,7 +87,7 @@ function GltfModel({
         }
       }
     });
-    if (tokenRender) brightenMeshMaterials(root, tokenRender2d);
+    if (tokenRender) brightenMeshMaterials(root, tokenRender2d, true);
     return root;
   }, [scene, tokenRender, tokenRender2d]);
 

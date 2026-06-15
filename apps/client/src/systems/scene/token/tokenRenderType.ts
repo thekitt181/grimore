@@ -27,3 +27,18 @@ export function tokenRendersInThree(token: TokenItem, viewMode: MapViewMode): bo
   if (viewMode === '3d') return true;
   return is3dToken(token) && Boolean(token.modelUrl);
 }
+
+/** Whether Pixi should skip drawing the token body (Three.js owns it). */
+export function tokenHidesPixiBody(
+  token: TokenItem,
+  viewMode: MapViewMode,
+  pixiTokenFallback: boolean,
+): boolean {
+  if (viewMode === '3d') {
+    // GLB tokens always render in Three — never bleed flat Pixi art through the transparent overlay.
+    if (token.modelUrl) return true;
+    if (pixiTokenFallback) return false;
+    return is3dToken(token);
+  }
+  return is3dToken(token) && Boolean(token.modelUrl);
+}
