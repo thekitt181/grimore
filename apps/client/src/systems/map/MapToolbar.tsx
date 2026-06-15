@@ -244,6 +244,14 @@ export function MapToolbar() {
                 >
                   Hide
                 </button>
+                <button
+                  type="button"
+                  title="Reset fog — cover the whole map again"
+                  onClick={() => useMapStore.getState().hideAll()}
+                  className="w-full rounded py-0.5 font-ui text-[8px] text-[#8a8075] hover:text-[#e8e0d0] hover:bg-[#1c1c28] transition-all"
+                >
+                  Reset
+                </button>
               </div>
             )}
           </>

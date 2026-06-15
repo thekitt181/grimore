@@ -25,7 +25,9 @@ export function applyPixiViewMode(is3d: boolean): void {
   app.canvas.style.background = 'transparent';
 
   if (sceneRefs.fog.current) {
-    sceneRefs.fog.current.alpha = is3d ? 0 : 1;
+    const showPixiFog = !is3d;
+    sceneRefs.fog.current.visible = showPixiFog;
+    sceneRefs.fog.current.alpha = showPixiFog ? 1 : 0;
   }
   if (sceneRefs.measure.current) {
     const showMeasure = !is3d || activeTool === 'measure';
@@ -50,6 +52,16 @@ export function applyPixiViewMode(is3d: boolean): void {
     } else {
       sceneRefs.items.current.alpha = 1;
       sceneRefs.items.current.visible = true;
+    }
+  }
+
+  if (sceneRefs.tokens.current) {
+    if (is3d && !mobile) {
+      sceneRefs.tokens.current.alpha = 0;
+      sceneRefs.tokens.current.visible = false;
+    } else {
+      sceneRefs.tokens.current.alpha = 1;
+      sceneRefs.tokens.current.visible = true;
     }
   }
 

@@ -146,19 +146,22 @@ export function MapCanvas() {
     sceneRefs.world.current = world;
 
     const itemsLayer = new Container(); itemsLayer.label = 'items'; itemsLayer.sortableChildren = true; world.addChild(itemsLayer);
-    const fogLayer   = new Container(); fogLayer.label = 'fog'; world.addChild(fogLayer);
+    const fogLayer   = new Container(); fogLayer.label = 'fog'; fogLayer.sortableChildren = true; world.addChild(fogLayer);
+    const tokensLayer = new Container(); tokensLayer.label = 'tokens'; tokensLayer.sortableChildren = true; world.addChild(tokensLayer);
     const drawPrev   = new Container(); drawPrev.label = 'drawPreview'; world.addChild(drawPrev);
     const measure    = new Container(); measure.label = 'measure'; world.addChild(measure);
     const overlay    = new Container(); overlay.label = 'overlay'; world.addChild(overlay);
 
     itemsLayer.eventMode = 'none';
     fogLayer.eventMode = 'none';
+    tokensLayer.eventMode = 'none';
     drawPrev.eventMode = 'none';
     measure.eventMode = 'none';
     overlay.eventMode = 'none';
 
     sceneRefs.items.current = itemsLayer;
     sceneRefs.fog.current = fogLayer;
+    sceneRefs.tokens.current = tokensLayer;
     sceneRefs.drawPreview.current = drawPrev;
     sceneRefs.measure.current = measure;
     sceneRefs.overlay.current = overlay;
@@ -180,6 +183,7 @@ export function MapCanvas() {
       sceneRefs.world.current = null;
       sceneRefs.items.current = null;
       sceneRefs.fog.current = null;
+      sceneRefs.tokens.current = null;
       sceneRefs.drawPreview.current = null;
       sceneRefs.measure.current = null;
       sceneRefs.overlay.current = null;
@@ -345,8 +349,8 @@ export function MapCanvas() {
 
   // ── Hooks ───────────────────────────────────────────────────────────────
   useMapViewport(appRef, sceneRefs.world, appReady, interactionReady);
-  useItemRenderer(sceneRefs.items, appReady);
-  useMapFogOverlay(sceneRefs.items, appReady);
+  useItemRenderer(sceneRefs.items, sceneRefs.tokens, appReady);
+  useMapFogOverlay(sceneRefs.fog, appReady);
   useSelectionTool(appReady, interactionReady);
   useAttackTargetPick(appReady);
   useAoePlacement(appReady);

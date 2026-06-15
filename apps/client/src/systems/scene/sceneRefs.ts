@@ -11,7 +11,9 @@ export const sceneRefs = {
   app:        { current: null as import('pixi.js').Application | null },
   world:      { current: null as import('pixi.js').Container | null },
   items:      { current: null as import('pixi.js').Container | null },
+  /** Fog-of-war overlays (above maps, below tokens). */
   fog:        { current: null as import('pixi.js').Container | null },
+  tokens:     { current: null as import('pixi.js').Container | null },
   drawPreview:{ current: null as import('pixi.js').Container | null },
   measure:    { current: null as import('pixi.js').Container | null },
   overlay:    { current: null as import('pixi.js').Container | null },

@@ -88,6 +88,8 @@ function syncMapFogOverlays(
       clearFogLayers(fogLayers);
     }
   }
+
+  layer.sortChildren();
 }
 
 /**
@@ -142,6 +144,7 @@ export function useMapFogOverlay(
     const layer = layerRef.current;
     if (!layer) return;
 
+    layer.sortableChildren = true;
     syncMapFogOverlays(layer, fogContainers.current, fogStateRef.current);
   }, [
     appReady,

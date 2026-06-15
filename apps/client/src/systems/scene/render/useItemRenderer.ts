@@ -16,6 +16,16 @@ import {
 import type { Item, MapItem } from '../types';
 import { itemDisplayZIndex, wallDisplayZIndex } from '../zOrder';
 import { tokenRendersInThree } from '../token/tokenRenderType';
+import { sceneRefs } from '../sceneRefs';
+
+function itemParentLayer(
+  item: Item,
+  itemsLayer: Container,
+  tokenLayer: Container | null,
+): Container {
+  if (item.type === 'token' && tokenLayer) return tokenLayer;
+  return itemsLayer;
+}
 
 /**
  * Renders all scene items into a single sortable PixiJS layer.
@@ -28,6 +38,7 @@ import { tokenRendersInThree } from '../token/tokenRenderType';
  */
 export function useItemRenderer(
   layerRef: React.RefObject<Container | null>,
+  tokenLayerRef: React.RefObject<Container | null>,
   appReady: boolean,
 ) {
   const items   = useItemStore((s) => s.items);
@@ -61,9 +72,11 @@ export function useItemRenderer(
     }
 
     const layer = layerRef.current;
+    const tokenLayer = tokenLayerRef.current;
     if (!layer) return;
 
     layer.sortableChildren = true;
+    if (tokenLayer) tokenLayer.sortableChildren = true;
     const mobile3d = viewMode === '3d' && isMobileClient();
     const gm: boolean = myRole === 'GM';
     const ctx: RenderContext = {
@@ -114,11 +127,12 @@ export function useItemRenderer(
       }
 
       let c = containers.current.get(item.id);
-      if (!c || c.parent !== layer) {
+      const parent = itemParentLayer(item, layer, tokenLayer);
+      if (!c || c.parent !== parent) {
         c = new Container();
         c.label = `item_${item.id}`;
         c.eventMode = 'none';
-        layer.addChild(c);
+        parent.addChild(c);
         containers.current.set(item.id, c);
       }
 
@@ -196,6 +210,9 @@ export function useItemRenderer(
         }
       }
     }
+
+    layer.sortChildren();
+    tokenLayer?.sortChildren();
   }, [
     items,
     selectedIds,
@@ -207,6 +224,8 @@ export function useItemRenderer(
     viewMode,
     activeTool,
     appReady,
+    layerRef,
+    tokenLayerRef,
   ]);
 
   // Cleanup on unmount
@@ -225,6 +244,12 @@ export function useItemRenderer(
 
 /** Returns the live PixiJS container for an item (used by interaction hooks). */
 export function getItemContainer(layer: Container | null, id: string): Container | null {
+  const label = `item_${id}`;
+  const tokenLayer = sceneRefs.tokens.current;
+  if (tokenLayer) {
+    const onTokens = tokenLayer.getChildByLabel(label) as Container | null;
+    if (onTokens) return onTokens;
+  }
   if (!layer) return null;
-  return (layer.getChildByLabel(`item_${id}`) as Container) ?? null;
+  return (layer.getChildByLabel(label) as Container) ?? null;
 }
