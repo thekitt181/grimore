@@ -104,13 +104,16 @@ function isInteriorCell(cx: number, cy: number, cells: Set<string>): boolean {
 }
 
 /** Wipe the canvas each frame so prior vision holes cannot linger in the GPU texture. */
-function resetFogCanvas(ctx: CanvasRenderingContext2D, width: number, height: number): void {
+function resetFogCanvas(ctx: CanvasRenderingContext2D): void {
+  const { width, height } = ctx.canvas;
+  ctx.save();
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.globalAlpha = 1;
   ctx.globalCompositeOperation = 'copy';
   ctx.fillStyle = 'rgba(0,0,0,0)';
   ctx.fillRect(0, 0, width, height);
   ctx.globalCompositeOperation = 'source-over';
+  ctx.restore();
 }
 
 /** Paint fog-of-war to a canvas (map-local coordinates). */
@@ -127,7 +130,7 @@ export function paintFogCanvas(
     return;
   }
 
-  resetFogCanvas(ctx, canvasW, canvasH);
+  resetFogCanvas(ctx);
 
   const visionTokens = getVisionTokens(
     opts.items,
@@ -209,6 +212,8 @@ export function drawFogLayers(
   ctx.setTransform(texScale, 0, 0, texScale, 0, 0);
   paintFogCanvas(ctx, map, opts);
   layers.fogTexture.source.update();
+  layers.fogSprite.width = width;
+  layers.fogSprite.height = height;
   layers.compose.visible = true;
   layers.compose.alpha = opts.isGM ? 0.5 : 1;
 }
