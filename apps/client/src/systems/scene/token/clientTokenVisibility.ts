@@ -29,7 +29,9 @@ export function filterPlayerTokens(
   const own = tokens.filter((t) => t.ownerId?.trim() === uid);
 
   if (!playerHasVisionSource(items, opts.myUserId, opts.selectedIds, map)) {
-    return own;
+    const selectedSet = new Set(opts.selectedIds);
+    const selectedOwn = own.filter((t) => selectedSet.has(t.id));
+    return selectedOwn.length > 0 ? selectedOwn : own;
   }
 
   const seen = playerSeenCellKeys(
@@ -52,4 +54,28 @@ export function filterPlayerTokens(
 export function playerOwnsToken(token: TokenItem, myUserId: string | null): boolean {
   const uid = myUserId?.trim() ?? '';
   return Boolean(uid) && token.ownerId?.trim() === uid;
+}
+
+/** Player tokens for selection/rendering — always includes owned tokens. */
+export function playerSelectableTokens(
+  items: Record<string, Item>,
+  opts: {
+    myUserId: string | null;
+    selectedIds: string[];
+    revealedCells: Set<string>;
+    activeMap: MapItem | null;
+  },
+): TokenItem[] {
+  const filtered = filterPlayerTokens(items, opts);
+  const uid = opts.myUserId?.trim() ?? '';
+  if (!uid) return filtered;
+
+  const seen = new Set(filtered.map((t) => t.id));
+  for (const i of Object.values(items)) {
+    if (i.type !== 'token' || i.visible === false) continue;
+    if (i.ownerId?.trim() !== uid || seen.has(i.id)) continue;
+    seen.add(i.id);
+    filtered.push(i);
+  }
+  return filtered;
 }

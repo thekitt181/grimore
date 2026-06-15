@@ -106,6 +106,24 @@ export async function resolveModelAssetUrl(url: string): Promise<string> {
   return URL.createObjectURL(blob);
 }
 
+export async function hasModelAsset(url: string): Promise<boolean> {
+  if (!isGrimoireModelRef(url)) return true;
+  const parsed = parseGrimoireModelRef(url);
+  if (!parsed) return false;
+  const blob = await idbGet(parsed.key);
+  return Boolean(blob);
+}
+
+export async function importModelAssetBlob(
+  sessionId: string,
+  itemId: string,
+  format: ModelAssetFormat,
+  blob: Blob,
+): Promise<string> {
+  await idbPut(assetKey(sessionId, itemId), blob);
+  return toGrimoireModelRef(sessionId, itemId, format);
+}
+
 /** Inline data URLs blow localStorage quota — store blobs in IndexedDB instead. */
 export function shouldUseModelAssetStore(file: File): boolean {
   return file.size > 256_000;

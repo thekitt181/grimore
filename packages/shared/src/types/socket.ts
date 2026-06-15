@@ -299,6 +299,25 @@ export interface ChatMessagePayload {
 
 // ─── Session lifecycle ────────────────────────────────────────────────────────
 
+export interface ModelAssetRequestPayload {
+  sessionId: string;
+  itemId: string;
+  modelUrl: string;
+  requesterId: string;
+}
+
+export interface ModelAssetChunkPayload {
+  sessionId: string;
+  itemId: string;
+  format: 'glb' | 'gltf' | 'stl';
+  chunkIndex: number;
+  totalChunks: number;
+  /** Base64-encoded binary chunk. */
+  data: string;
+  /** When set, only this socket user should apply the chunk. */
+  targetUserId?: string;
+}
+
 export interface UserJoinedPayload {
   sessionId: string;
   user: SessionUser;
@@ -360,6 +379,8 @@ export interface ServerToClientEvents {
   'chat:message':         (payload: ChatMessagePayload)       => void;
   'session:userJoined':   (payload: UserJoinedPayload)        => void;
   'session:userLeft':     (payload: UserLeftPayload)          => void;
+  'model:request':        (payload: ModelAssetRequestPayload) => void;
+  'model:chunk':          (payload: ModelAssetChunkPayload)   => void;
   'session:roomState':    (payload: { users: SessionUser[]; fogActive?: boolean }) => void;
   'compendium:updated':   (payload: CompendiumUpdatedPayload) => void;
   'compendium:catalog-rebuild': (payload: CompendiumCatalogRebuildPayload) => void;
@@ -379,6 +400,8 @@ export interface ClientToServerEvents {
   'session:join':         (payload: { sessionId: string; campaignId: string }) => void;
   'session:leave':        (payload: { sessionId: string }) => void;
   'session:requestHydrate': (payload: { sessionId: string }) => void;
+  'model:request':        (payload: ModelAssetRequestPayload) => void;
+  'model:chunk':          (payload: ModelAssetChunkPayload)   => void;
   'item:add':             (payload: ItemAddPayload)           => void;
   'item:update':          (payload: ItemUpdatePayload)        => void;
   'item:remove':          (payload: ItemRemovePayload)        => void;

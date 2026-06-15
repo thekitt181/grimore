@@ -3,7 +3,7 @@ import { Canvas, useThree } from '@react-three/fiber';
 import type { RootState } from '@react-three/fiber';
 import * as THREE from 'three';
 import { isMobileClient } from '@/lib/socket';
-import { useItemStore, selectSortedItems } from '@/systems/scene/store/itemStore';
+import { getActiveMap, useItemStore, selectSortedItems } from '@/systems/scene/store/itemStore';
 import { sceneRefs } from '@/systems/scene/sceneRefs';
 import { sceneCameraRef } from './sceneCameraRef';
 import { useMapStore } from '@/systems/map/store/mapStore';
@@ -180,12 +180,10 @@ export function MapSceneCanvas() {
   }, []);
   const items = useItemStore(selectSortedItems);
   const activeMapId = useItemStore((s) => s.activeMapId);
-  const activeMap = useMemo(() => {
-    if (activeMapId) {
-      const m = items.find((i) => i.id === activeMapId && i.type === 'map');
-      if (m) return m as MapItem;
-    }
-    return (items.find((i) => i.type === 'map') as MapItem | undefined) ?? null;
+  const overlayMap = useMemo(() => {
+    void items;
+    void activeMapId;
+    return getActiveMap();
   }, [items, activeMapId]);
 
   const { tokens: modelCandidates } = useVisibleSceneTokens({ modelOnly: true });
@@ -194,7 +192,7 @@ export function MapSceneCanvas() {
     [modelCandidates],
   );
 
-  const hasModelMap = Boolean(activeMap?.modelUrl);
+  const hasModelMap = Boolean(overlayMap?.modelUrl);
   const needsThreeOverlay = is3d || hasModelTokens || hasModelMap;
 
   const orthoDefaults = useStableOrthoCameraDefaults();
@@ -259,7 +257,7 @@ export function MapSceneCanvas() {
             <Map3DTokenGizmo />
           </>
         ) : (
-          <TokenOverlay2DContent map={activeMap} />
+          <TokenOverlay2DContent map={overlayMap} />
         )}
       </Suspense>
     </Canvas>

@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { Graphics } from 'pixi.js';
 import { useMapStore } from '@/systems/map/store/mapStore';
-import { filterPlayerTokens, playerOwnsToken } from '@/systems/scene/token/clientTokenVisibility';
+import { filterPlayerTokens, playerOwnsToken, playerSelectableTokens } from '@/systems/scene/token/clientTokenVisibility';
 import { useItemStore, getActiveMap } from '../store/itemStore';
 import { useSessionStore } from '@/store/sessionStore';
 import { itemsWithLiveTransforms } from '../store/liveTransformStore';
@@ -118,17 +118,17 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
         store.items,
         useLiveTransformStore.getState().byId,
       );
-      const all = Object.values(merged) as Item[];
-      if (gm) return all;
+      if (gm) return Object.values(merged) as Item[];
       const map = getActiveMap();
       const userId = useSessionStore.getState().myUserId;
       const selectedIds = store.selectedIds;
-      return filterPlayerTokens(merged, {
+      const filtered = playerSelectableTokens(merged, {
         myUserId: userId,
         selectedIds,
         revealedCells: useMapStore.getState().revealedCells,
         activeMap: map,
       });
+      return filtered;
     }
 
     function canManipulate(item: Item): boolean {

@@ -279,6 +279,13 @@ export function useTransformControls(appReady: boolean) {
             c.position.set(cx, cy);
             c.scale.set(newW / it.width, newH / it.height);
           }
+        } else {
+          const c = getItemContainer(layer, it.id);
+          if (c) {
+            c.pivot.set(it.width / 2, it.height / 2);
+            c.position.set(cx, cy);
+            c.scale.set(newW / it.width, newH / it.height);
+          }
         }
         useLiveTransformStore.getState().setLive(it.id, { x: nx, y: ny, width: newW, height: newH });
         return;
@@ -300,13 +307,11 @@ export function useTransformControls(appReady: boolean) {
           const nh = o.h * s;
           liveEntries.push({ id, patch: { x: nx, y: ny, width: nw, height: nh } });
           const it = useItemStore.getState().items[id];
-          if (it?.type !== 'token') {
-            const c = getItemContainer(layer, id);
-            if (c) {
-              c.pivot.set(o.w / 2, o.h / 2);
-              c.position.set(nx + nw / 2, ny + nh / 2);
-              c.scale.set(s, s);
-            }
+          const c = getItemContainer(layer, id);
+          if (c && it) {
+            c.pivot.set(it.width / 2, it.height / 2);
+            c.position.set(nx + nw / 2, ny + nh / 2);
+            c.scale.set(nw / it.width, nh / it.height);
           }
         }
         useLiveTransformStore.getState().setLiveMany(liveEntries);

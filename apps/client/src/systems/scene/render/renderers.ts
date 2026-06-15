@@ -51,7 +51,7 @@ export function itemVisualSignature(item: Item, ctx: RenderContext): string {
 export function renderItem(container: Container, item: Item, ctx: RenderContext) {
   container.removeChildren();
   switch (item.type) {
-    case 'map':     renderMap(container, item); break;
+    case 'map':     renderMap(container, item, ctx); break;
     case 'token':   renderToken(container, item, ctx); break;
     case 'drawing': renderDrawing(container, item); break;
     case 'text':    renderText(container, item); break;
@@ -61,12 +61,18 @@ export function renderItem(container: Container, item: Item, ctx: RenderContext)
 
 // ─── Map ────────────────────────────────────────────────────────────────────
 
-function renderMap(c: Container, item: MapItem) {
-  // Background placeholder (until image loads) — drawn at full item size
+function renderMap(c: Container, item: MapItem, ctx: RenderContext) {
+  /** Three.js draws the GLB in 2D — hide Pixi placeholder so it stays aligned with the gizmo. */
+  const hidePixiMapBody = Boolean(item.modelUrl) && ctx.viewMode !== '3d';
+
   const bg = new Graphics();
   bg.label = 'bg';
   bg.rect(0, 0, item.width, item.height);
-  bg.fill({ color: 0x0d0d14 });
+  if (hidePixiMapBody) {
+    bg.fill({ color: 0x0d0d14, alpha: 0.001 });
+  } else {
+    bg.fill({ color: 0x0d0d14 });
+  }
   c.addChild(bg);
 
   if (item.backgroundUrl) {
@@ -78,7 +84,7 @@ function renderMap(c: Container, item: MapItem) {
       sprite.height = item.height;
       c.addChildAt(sprite, 1);
     }).catch(() => {});
-  } else if (item.modelUrl) {
+  } else if (item.modelUrl && !hidePixiMapBody) {
     const modelBadge = new Graphics();
     modelBadge.label = 'model-badge';
     modelBadge.rect(item.width * 0.2, item.height * 0.25, item.width * 0.6, item.height * 0.5);
@@ -115,10 +121,14 @@ function renderMap(c: Container, item: MapItem) {
   );
   c.addChild(grid);
 
-  // Border
+  // Border — subtle when Three.js renders the mesh
   const border = new Graphics();
   border.label = 'border';
-  border.setStrokeStyle({ width: 2, color: 0xc9a84c, alpha: 0.4 });
+  border.setStrokeStyle({
+    width: 2,
+    color: 0xc9a84c,
+    alpha: hidePixiMapBody ? 0.15 : 0.4,
+  });
   border.rect(0, 0, item.width, item.height);
   border.stroke();
   c.addChild(border);
@@ -261,6 +271,11 @@ function renderTokenBase(c: Container, item: TokenItem, ctx: RenderContext) {
 }
 
 function renderTokenOverlay(c: Container, item: TokenItem, ctx: RenderContext) {
+  const renderType = getTokenRenderType(item);
+  const hidePixiBody =
+    renderType === '3d' &&
+    (ctx.viewMode === '3d' || Boolean(item.modelUrl));
+
   const overlay = new Container();
   overlay.label = 'token-overlay';
 
@@ -270,7 +285,7 @@ function renderTokenOverlay(c: Container, item: TokenItem, ctx: RenderContext) {
   const cy = size / 2;
   const radius = size / 2 - 4;
 
-  if (ctx.activeTurnItemId === item.id) {
+  if (ctx.activeTurnItemId === item.id && !hidePixiBody) {
     const turn = new Graphics();
     turn.label = 'turn-ring';
     turn.circle(cx, cy, radius + 6);
@@ -280,7 +295,7 @@ function renderTokenOverlay(c: Container, item: TokenItem, ctx: RenderContext) {
   }
 
   const selected = ctx.selectedIds?.includes(item.id);
-  if (selected) {
+  if (selected && !hidePixiBody) {
     const ring = new Graphics();
     ring.label = 'select-ring';
     ring.circle(cx, cy, radius + 5);

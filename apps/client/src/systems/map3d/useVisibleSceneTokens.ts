@@ -7,7 +7,7 @@ import {
   itemsWithLiveTransforms,
   useLiveTransformStore,
 } from '@/systems/scene/store/liveTransformStore';
-import { filterPlayerTokens } from '@/systems/scene/token/clientTokenVisibility';
+import { playerSelectableTokens } from '@/systems/scene/token/clientTokenVisibility';
 import type { MapItem, TokenItem } from '@/systems/scene/types';
 import { getActiveMap } from '@/systems/scene/store/itemStore';
 
@@ -41,7 +41,7 @@ export function useVisibleSceneTokens(opts?: { modelOnly?: boolean }): {
 
     if (gm) return allTokens;
 
-    return filterPlayerTokens(merged, {
+    return playerSelectableTokens(merged, {
       myUserId,
       selectedIds,
       revealedCells,

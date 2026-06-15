@@ -39,6 +39,8 @@ import {
   ItemUpdatePayload,
   ItemRemovePayload,
   ItemsSyncPayload,
+  ModelAssetChunkPayload,
+  ModelAssetRequestPayload,
   TokenConditionsPayload,
   TokenAuraPayload,
   DrawingAddPayload,
@@ -310,6 +312,17 @@ export function initSocket(httpServer: HttpServer): Server {
       if (!isSessionGM(socket)) return;
       cacheSessionItems(payload.sessionId, payload.items);
       socket.to(payload.sessionId).emit('items:sync', payload);
+    });
+
+    socket.on('model:request', (payload: ModelAssetRequestPayload) => {
+      if (!isJoinedSession(socket, payload.sessionId)) return;
+      socket.to(payload.sessionId).emit('model:request', payload);
+    });
+
+    socket.on('model:chunk', (payload: ModelAssetChunkPayload) => {
+      if (!isJoinedSession(socket, payload.sessionId)) return;
+      if (!isSessionGM(socket)) return;
+      socket.to(payload.sessionId).emit('model:chunk', payload);
     });
 
     const relayToken = <T extends { sessionId: string }>(event: string) => {

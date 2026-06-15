@@ -1,4 +1,5 @@
 import { clientToWorld } from '@/systems/scene/sceneRefs';
+import { pointInItem } from '@/systems/scene/hitTest';
 import { getPickCanvasRect } from './pickCamera';
 import { sceneCameraRef } from './sceneCameraRef';
 import { useLiveTransformStore } from '@/systems/scene/store/liveTransformStore';
@@ -15,10 +16,14 @@ function pickTokenAtScreen2d(clientX: number, clientY: number, tokens: TokenItem
 
   for (const token of tokens) {
     const b = resolveItemBounds(token, liveById[token.id]);
-    if (
-      clickWx >= b.x - pad && clickWx <= b.x + b.width + pad
-      && clickWy >= b.y - pad && clickWy <= b.y + b.height + pad
-    ) {
+    const hitItem = {
+      x: b.x,
+      y: b.y,
+      width: b.width,
+      height: b.height,
+      rotation: b.rotation,
+    };
+    if (pointInItem({ ...token, ...hitItem } as TokenItem, clickWx, clickWy)) {
       return token.id;
     }
   }

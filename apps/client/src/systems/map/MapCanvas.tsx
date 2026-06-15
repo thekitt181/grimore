@@ -54,6 +54,7 @@ import { useSessionStore } from '@/store/sessionStore';
 import { getSocket } from '@/lib/socket';
 import { MapAtmosphereLayer } from '@/systems/scene/media/MapAtmosphereLayer';
 import { MapSceneCanvas } from '@/systems/map3d/Map3DCanvas';
+import { useModelAssetSync } from '@/systems/map3d/useModelAssetSync';
 
 // Back-compat alias — some modules still import mapLayerRefs.
 export const mapLayerRefs = sceneRefs;
@@ -91,6 +92,10 @@ export function MapCanvas() {
   const viewMode = useMapStore((s) => s.viewMode);
   const items = useItemStore((s) => s.items);
   const activeMapId = useItemStore((s) => s.activeMapId);
+  const myRole = useSessionStore((s) => s.myRole);
+  const myUserId = useSessionStore((s) => s.myUserId);
+  const itemList = Object.values(items) as Item[];
+  useModelAssetSync(sessionId, itemList, myRole, myUserId);
   const initialSyncRef = useRef({ received: false, hadItems: false, pushed: false });
   const fogSyncedRef = useRef(false);
   const viewportInitializedRef = useRef(false);

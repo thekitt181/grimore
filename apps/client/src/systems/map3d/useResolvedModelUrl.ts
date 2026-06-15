@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { isGrimoireModelRef, resolveModelAssetUrl } from '@/lib/modelAssetStore';
+import { isGrimoireModelRef, resolveModelAssetUrl, parseGrimoireModelRef } from '@/lib/modelAssetStore';
 
 /** Session cache — blob URLs stay alive across component remounts (2D/3D toggle). */
 const blobCache = new Map<string, string>();
@@ -81,6 +81,29 @@ export function useResolvedModelUrl(url: string | null | undefined): {
     return () => {
       cancelled = true;
     };
+  }, [url]);
+
+  useEffect(() => {
+    if (!url || !isGrimoireModelRef(url)) return;
+    const parsed = parseGrimoireModelRef(url);
+    if (!parsed) return;
+
+    const onReady = (ev: Event) => {
+      const detail = (ev as CustomEvent<{ itemId?: string }>).detail;
+      if (!detail?.itemId || !parsed.key.endsWith(`:${detail.itemId}`)) return;
+      void loadBlobUrl(url)
+        .then((blobUrl) => {
+          setResolved(blobUrl);
+          setStatus('ready');
+        })
+        .catch(() => {
+          setResolved(null);
+          setStatus('error');
+        });
+    };
+
+    window.addEventListener('grimoire:model-asset-ready', onReady);
+    return () => window.removeEventListener('grimoire:model-asset-ready', onReady);
   }, [url]);
 
   return { resolved, status };

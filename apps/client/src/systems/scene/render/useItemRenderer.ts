@@ -5,7 +5,7 @@ import { useItemStore, getActiveMap } from '../store/itemStore';
 import { useSessionStore } from '@/store/sessionStore';
 import { useInitiativeStore } from '@/systems/map/store/initiativeStore';
 import { useMapStore } from '@/systems/map/store/mapStore';
-import { filterPlayerTokens } from '@/systems/scene/token/clientTokenVisibility';
+import { playerSelectableTokens } from '@/systems/scene/token/clientTokenVisibility';
 import {
   useLiveTransformStore,
 } from '../store/liveTransformStore';
@@ -91,7 +91,7 @@ export function useItemRenderer(
     const activeMap = getActiveMap();
     const playerVisibleTokenIds = !gm
       ? new Set(
-        filterPlayerTokens(items, {
+        playerSelectableTokens(items, {
           myUserId,
           selectedIds,
           revealedCells,
