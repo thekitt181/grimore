@@ -301,9 +301,11 @@ const DDB_ABILITY_BY_NAME: Record<string, string> = {
 export function normalizeAbilityName(idOrName: unknown): string {
   const raw = String(idOrName ?? '').trim();
   if (!raw) return '???';
-  if (DDB_ABILITY_BY_ID[raw]) return DDB_ABILITY_BY_ID[raw];
+  const byId = DDB_ABILITY_BY_ID[raw];
+  if (byId) return byId;
   const upper = raw.toUpperCase();
-  if (DDB_ABILITY_BY_NAME[upper]) return DDB_ABILITY_BY_NAME[upper];
+  const byName = DDB_ABILITY_BY_NAME[upper];
+  if (byName) return byName;
   if (/^(STR|DEX|CON|INT|WIS|CHA)$/.test(upper)) return upper;
   return upper.slice(0, 3);
 }
