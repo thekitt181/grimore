@@ -11,6 +11,13 @@ const orthoCam = new THREE.OrthographicCamera();
 /** Distance from ground center — matches legacy top-down height. */
 const ORBIT_RADIUS = 1500;
 
+/** Near/far slab for oblique ortho — widens when zoomed out so GLB terrain is not clipped. */
+function orthographicDepthSlab(halfW: number, halfH: number): { near: number; far: number } {
+  const viewSpan = Math.max(halfW, halfH, ORBIT_RADIUS * 0.35);
+  const slab = ORBIT_RADIUS + viewSpan * 2.5;
+  return { near: -slab, far: slab };
+}
+
 /** Fixed oblique view for 3D minis on the 2D map — like sitting at the table. */
 export const TABLE_MINI_VIEW_POLAR = 0.55;
 /** ~7° clockwise — mini front sits just right of camera center at 0° facing. */
@@ -25,8 +32,8 @@ export function syncOrthographicCamera(state: OrthographicCameraState): THREE.Or
   orthoCam.right = halfW;
   orthoCam.top = halfH;
   orthoCam.bottom = -halfH;
-  orthoCam.near = 0.1;
-  orthoCam.far = 8000;
+  orthoCam.near = -ORBIT_RADIUS * 3;
+  orthoCam.far = ORBIT_RADIUS * 3;
   orthoCam.zoom = 1;
   orthoCam.position.set(state.position.x, state.position.y, state.position.z);
   orthoCam.up.set(0, 0, -1);
@@ -78,8 +85,9 @@ export function applyOrthographicCameraFromViewport(
   camera.right = halfW;
   camera.top = halfH;
   camera.bottom = -halfH;
-  camera.near = 0.1;
-  camera.far = 8000;
+  const depth = orthographicDepthSlab(halfW, halfH);
+  camera.near = depth.near;
+  camera.far = depth.far;
   camera.position.set(camX, camY, camZ);
   camera.up.set(0, 0, -1);
   camera.lookAt(cx, 0, cz);

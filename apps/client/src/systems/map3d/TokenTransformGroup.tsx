@@ -58,7 +58,7 @@ export function SceneItemTransformGroup({
       g.scale.set(1, 1, 1);
     }
     g.updateMatrixWorld(true);
-  });
+  }, -100);
 
   return <group ref={ref}>{children}</group>;
 }

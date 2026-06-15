@@ -31,7 +31,7 @@ import { applyPixiViewMode } from '@/systems/map/applyPixiViewMode';
 
 /** Stable defaults — position/zoom owned by SyncedPixiOrthographicCamera (never reset on re-render). */
 function useStableOrthoCameraDefaults() {
-  return useMemo(() => ({ near: 0.1, far: 8000, zoom: 1 }), []);
+  return useMemo(() => ({ near: -4500, far: 4500, zoom: 1 }), []);
 }
 
 function TokenLayer() {
@@ -45,10 +45,10 @@ function TokenLayer() {
 }
 
 /** 2D view: GLB map + fog (Pixi fog sits under this Three overlay). */
-function Map2DModelFogContent({ map }: { map: MapItem }) {
+function Map2DModelFogContent({ map, showGizmo = false }: { map: MapItem; showGizmo?: boolean }) {
   return (
     <>
-      <Map3DMapModel map={map} />
+      <Map3DMapModel map={map} showGizmo={showGizmo} />
       <Map3DFogOfWar map={map} />
     </>
   );
@@ -72,7 +72,16 @@ function TokenModelOverlayLayer() {
 }
 
 function TokenOverlay2DContent({ map }: { map: MapItem | null }) {
+  const activeTool = useMapStore((s) => s.activeTool);
+  const selectedIds = useItemStore((s) => s.selectedIds);
   const hasModelMap = Boolean(map?.modelUrl);
+  const showMapGizmo = Boolean(
+    map &&
+      activeTool === 'select' &&
+      selectedIds.length === 1 &&
+      selectedIds[0] === map.id &&
+      map.modelUrl,
+  );
   return (
     <>
       <ambientLight intensity={0.62} color="#fff8ef" />
@@ -80,7 +89,7 @@ function TokenOverlay2DContent({ map }: { map: MapItem | null }) {
       <directionalLight position={[-360, 640, -220]} intensity={0.5} color="#ffd4a8" />
       <directionalLight position={[80, 520, -620]} intensity={0.35} color="#ffffff" />
       <Suspense fallback={null}>
-        {hasModelMap && map ? <Map2DModelFogContent map={map} /> : null}
+        {hasModelMap && map ? <Map2DModelFogContent map={map} showGizmo={showMapGizmo} /> : null}
         <TokenModelOverlayLayer />
       </Suspense>
     </>
@@ -90,7 +99,11 @@ function TokenOverlay2DContent({ map }: { map: MapItem | null }) {
 function Map3DSceneContent() {
   const items = useItemStore(selectSortedItems);
   const activeMapId = useItemStore((s) => s.activeMapId);
+  const activeTool = useMapStore((s) => s.activeTool);
+  const selectedIds = useItemStore((s) => s.selectedIds);
   const gm = useSessionStore((s) => s.myRole === 'GM');
+  const gizmoMapId =
+    activeTool === 'select' && selectedIds.length === 1 ? selectedIds[0] : undefined;
   const mobile = isMobileClient();
   const activeMap = useMemo(() => {
     if (activeMapId) {
@@ -130,9 +143,9 @@ function Map3DSceneContent() {
           {autoExtrudeWalls && !scanImageWalls && map.walls.length > 0 && (
             <Map3DWalls map={map} wallHeight={wallHeight} wallThickness={wallThickness} />
           )}
-          <Map3DMapModel map={map} />
+          <Map3DMapModel map={map} showGizmo={map.id === gizmoMapId && Boolean(map.modelUrl)} />
           <Map3DFogOfWar map={map} />
-          <MapPickGroup map={map} />
+          {!map.modelUrl && <MapPickGroup map={map} />}
         </group>
       ))}
 
@@ -286,7 +299,7 @@ export function MapSceneCanvas() {
       orthographic
       shadows={useShadows}
       frameloop="always"
-      camera={is3d ? orthoDefaults : { position: [1280, 1500, 960], zoom: 1, near: 0.1, far: 8000 }}
+      camera={is3d ? orthoDefaults : { position: [1280, 1500, 960], zoom: 1, near: -4500, far: 4500 }}
       style={canvasStyle}
       gl={glProps}
       dpr={dpr}

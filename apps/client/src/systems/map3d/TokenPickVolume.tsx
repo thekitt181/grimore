@@ -3,7 +3,7 @@ import { useFrame } from '@react-three/fiber';
 import type { Object3D } from 'three';
 import * as THREE from 'three';
 import { registerPickRoot } from './scenePickRegistry';
-import { objectBoundsInParentLocal } from './objectBoundsInParentLocal';
+import { meshSubtreeBoundsInParentLocal, objectBoundsInParentLocal } from './objectBoundsInParentLocal';
 
 const _box = new THREE.Box3();
 const _size = new THREE.Vector3();
@@ -40,15 +40,21 @@ export function TokenPickVolume({
 
     const model = modelRootRef?.current;
     const parent = mesh.parent;
-    if (model && parent && objectBoundsInParentLocal(model, parent, _box)) {
-      _box.getSize(_size);
-      _box.getCenter(_center);
-      const r = Math.max(_size.x, _size.z) * 0.52;
-      const h = Math.max(_size.y * 1.08, 8);
-      mesh.position.set(_center.x, _center.y + h * 0.02, _center.z);
-      mesh.scale.set(r, h, r);
-      mesh.updateMatrixWorld(true);
-      return;
+    if (model && parent) {
+      parent.updateWorldMatrix(true, true);
+      const ok =
+        meshSubtreeBoundsInParentLocal(model, parent, _box)
+        || objectBoundsInParentLocal(model, parent, _box);
+      if (ok) {
+        _box.getSize(_size);
+        _box.getCenter(_center);
+        const r = Math.max(_size.x, _size.z) * 0.52;
+        const h = Math.max(_size.y * 1.08, 8);
+        mesh.position.set(_center.x, _center.y + h * 0.02, _center.z);
+        mesh.scale.set(r, h, r);
+        mesh.updateMatrixWorld(true);
+        return;
+      }
     }
 
     mesh.position.set(0, y + height / 2, 0);

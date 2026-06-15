@@ -1,4 +1,4 @@
-import type { Item, TokenItem } from '../types';
+import type { Item, MapItem, TokenItem } from '../types';
 import type { MapViewMode } from '@/systems/map/store/mapStore';
 
 /** Explicit or inferred 2D (Pixi) vs 3D (Three.js) render path. */
@@ -36,6 +36,18 @@ export function tokenSelectionGizmoRendersInThree(
   if (item.type !== 'token') return false;
   if (viewMode === '3d') return true;
   return tokenRendersInThree(item, viewMode);
+}
+
+/** Selection gizmo for a GLB map is drawn in Three.js — not the Pixi overlay. */
+export function mapSelectionGizmoRendersInThree(map: MapItem): boolean {
+  return Boolean(map.modelUrl);
+}
+
+/** Whether Pixi should skip the selection gizmo (Three.js owns it). */
+export function itemSelectionGizmoRendersInThree(item: Item, viewMode: MapViewMode): boolean {
+  if (item.type === 'token') return tokenSelectionGizmoRendersInThree(item, viewMode);
+  if (item.type === 'map') return mapSelectionGizmoRendersInThree(item);
+  return false;
 }
 
 /** Whether Pixi should skip drawing the token body (Three.js owns it). */

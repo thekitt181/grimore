@@ -9,7 +9,7 @@ import { computeTokenGizmoLayout } from '../token/tokenGizmoLayout';
 import { drawPixiSelectionGizmo, hidePixiSelectionGizmo } from './pixiSelectionGizmo';
 import { syncTransformHandleRegistry } from './useTransformControls';
 import type { Item } from '../types';
-import { tokenSelectionGizmoRendersInThree } from '../token/tokenRenderType';
+import { itemSelectionGizmoRendersInThree } from '../token/tokenRenderType';
 
 function manipulableSelected(items: Record<string, Item>, selectedIds: string[], gm: boolean): Item[] {
   return selectedIds
@@ -64,7 +64,7 @@ export function usePixiSelectionGizmo(appReady: boolean) {
       const selIds = useItemStore.getState().selectedIds;
       const gm = useSessionStore.getState().myRole === 'GM';
       const selected = manipulableSelected(storeItems, selIds, gm).filter(
-        (it) => !tokenSelectionGizmoRendersInThree(it, mode),
+        (it) => !itemSelectionGizmoRendersInThree(it, mode),
       );
       const liveById = useLiveTransformStore.getState().byId;
 

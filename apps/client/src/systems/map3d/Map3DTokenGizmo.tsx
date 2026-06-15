@@ -8,8 +8,8 @@ import { useSessionStore } from '@/store/sessionStore';
 import { useLiveTransformStore } from '@/systems/scene/store/liveTransformStore';
 import { computeTokenGizmoLayout } from '@/systems/scene/token/tokenGizmoLayout';
 import { syncTransformHandleRegistry } from '@/systems/scene/interaction/useTransformControls';
-import { objectBoundsInParentLocal } from './objectBoundsInParentLocal';
-import type { Item } from '@/systems/scene/types';
+import { objectBoundsInParentLocal, meshSubtreeBoundsInParentLocal } from './objectBoundsInParentLocal';
+import type { Item, MapItem } from '@/systems/scene/types';
 import type { GizmoHandleId, TokenGizmoLayout } from '@/systems/scene/token/tokenGizmoLayout';
 
 const GOLD = '#c9a84c';
@@ -69,17 +69,50 @@ function localTokenHandlePositions(
   return handles;
 }
 
-/** Selection box + handles in item-local space — tokens only (child of transform group). */
+function applyModelBoundsGizmo(
+  box: THREE.LineLoop | null,
+  boxPts: React.MutableRefObject<THREE.Vector3[]>,
+  modelRoot: THREE.Object3D,
+  transformGroup: THREE.Object3D,
+): { hw: number; hh: number; ox: number; oz: number } | null {
+  transformGroup.updateWorldMatrix(true, true);
+  const ok =
+    meshSubtreeBoundsInParentLocal(modelRoot, transformGroup, _gizmoModelBox)
+    || objectBoundsInParentLocal(modelRoot, transformGroup, _gizmoModelBox);
+  if (!ok) return null;
+  const { min, max } = _gizmoModelBox;
+  const ox = (min.x + max.x) * 0.5;
+  const oz = (min.z + max.z) * 0.5;
+  const hw = Math.max((max.x - min.x) * 0.5, 4);
+  const hh = Math.max((max.z - min.z) * 0.5, 4);
+  const boxY = Math.max(min.y + 0.08, BOX_Y);
+  if (box) {
+    boxPts.current = [
+      new THREE.Vector3(min.x, boxY, min.z),
+      new THREE.Vector3(max.x, boxY, min.z),
+      new THREE.Vector3(max.x, boxY, max.z),
+      new THREE.Vector3(min.x, boxY, max.z),
+      new THREE.Vector3(min.x, boxY, min.z),
+    ];
+    setBoxPoints(box, boxPts.current);
+  }
+  return { hw, hh, ox, oz };
+}
+
+/** Selection box + handles in item-local space — child of transform group (or model root). */
 export function TokenSelectionGizmo({
   itemId,
   meshBaseWidth,
   meshBaseHeight,
   modelRootRef,
+  fitToModelBounds = false,
 }: {
   itemId: string;
   meshBaseWidth: number;
   meshBaseHeight: number;
   modelRootRef?: React.RefObject<THREE.Object3D | null>;
+  /** Fit box/handles to loaded GLB bounds (maps) instead of item footprint + center offset. */
+  fitToModelBounds?: boolean;
 }) {
   const meshRefs = useRef<(Mesh | null)[]>([]);
   const boxRef = useRef<THREE.LineLoop>(null);
@@ -104,19 +137,36 @@ export function TokenSelectionGizmo({
     const layout = computeTokenGizmoLayout([item], liveById, { moveOnly: !gm });
     syncTransformHandleRegistry(layout);
 
-    const hw = meshBaseWidth / 2;
-    const hh = meshBaseHeight / 2;
+    let hw = meshBaseWidth / 2;
+    let hh = meshBaseHeight / 2;
     let ox = 0;
     let oz = 0;
     const model = modelRootRef?.current;
     const parent = box?.parent ?? meshRefs.current[0]?.parent ?? null;
-    if (model && parent && objectBoundsInParentLocal(model, parent, _gizmoModelBox)) {
+
+    if (fitToModelBounds && model && parent && parent !== model) {
+      const fitted = applyModelBoundsGizmo(box, boxPts, model, parent);
+      if (fitted) {
+        hw = fitted.hw;
+        hh = fitted.hh;
+        ox = fitted.ox;
+        oz = fitted.oz;
+      }
+    } else if (model && parent && parent !== model && objectBoundsInParentLocal(model, parent, _gizmoModelBox)) {
       _gizmoModelBox.getCenter(_gizmoModelCenter);
       ox = _gizmoModelCenter.x;
       oz = _gizmoModelCenter.z;
-    }
-
-    if (box) {
+      if (box) {
+        boxPts.current = [
+          new THREE.Vector3(-hw + ox, BOX_Y, -hh + oz),
+          new THREE.Vector3(hw + ox, BOX_Y, -hh + oz),
+          new THREE.Vector3(hw + ox, BOX_Y, hh + oz),
+          new THREE.Vector3(-hw + ox, BOX_Y, hh + oz),
+          new THREE.Vector3(-hw + ox, BOX_Y, -hh + oz),
+        ];
+        setBoxPoints(box, boxPts.current);
+      }
+    } else if (box) {
       boxPts.current = [
         new THREE.Vector3(-hw + ox, BOX_Y, -hh + oz),
         new THREE.Vector3(hw + ox, BOX_Y, -hh + oz),
@@ -180,8 +230,21 @@ function WorldSelectionGizmo() {
     const storeItems = useItemStore.getState().items;
     const selectedIds = useItemStore.getState().selectedIds;
     const gm = useSessionStore.getState().myRole === 'GM';
+
+    // GLB maps render an attached gizmo inside Map3DMapModel — never duplicate in world space.
+    if (selectedIds.length === 1) {
+      const sole = storeItems[selectedIds[0]!];
+      if (sole?.type === 'map' && (sole as MapItem).modelUrl) {
+        const box = boxRef.current;
+        if (box) box.visible = false;
+        for (const m of meshRefs.current) if (m) m.visible = false;
+        return;
+      }
+    }
+
     const gizmoItems = manipulableSelected(storeItems, selectedIds, gm)
-      .filter((it) => it.type !== 'token');
+      .filter((it) => it.type !== 'token')
+      .filter((it) => !(it.type === 'map' && (it as MapItem).modelUrl && selectedIds.length === 1));
     const liveById = useLiveTransformStore.getState().byId;
     const show = activeTool === 'select' && gizmoItems.length > 0;
     const layout = show ? computeTokenGizmoLayout(gizmoItems, liveById, { moveOnly: !gm }) : EMPTY_LAYOUT;

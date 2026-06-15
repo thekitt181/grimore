@@ -8,6 +8,14 @@ import { useResolvedModelUrl } from './useResolvedModelUrl';
 import { registerMapRaycastRoot } from './mapGroundRaycast';
 import { applyModelNormalization, applyFallbackModelNormalization } from './normalizeModelRoot';
 
+function configureMapMesh(mesh: THREE.Mesh): void {
+  mesh.frustumCulled = false;
+  const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+  for (const mat of mats) {
+    mat.side = THREE.DoubleSide;
+  }
+}
+
 function brightenMeshMaterials(root: THREE.Object3D, miniature2d = false, tokenRender = false) {
   root.traverse((child) => {
     if (!(child as THREE.Mesh).isMesh) return;
@@ -84,6 +92,8 @@ function GltfModel({
         if (tokenRender) {
           mesh.renderOrder = 12;
           mesh.frustumCulled = false;
+        } else {
+          configureMapMesh(mesh);
         }
       }
     });
@@ -149,6 +159,8 @@ function StlModel({
     if (tokenRender) {
       root.renderOrder = 12;
       root.frustumCulled = false;
+    } else {
+      configureMapMesh(root);
     }
     return root;
   }, [geometry, tokenRender, tokenRender2d]);
