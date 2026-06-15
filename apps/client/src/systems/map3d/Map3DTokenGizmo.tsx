@@ -9,7 +9,8 @@ import { useLiveTransformStore } from '@/systems/scene/store/liveTransformStore'
 import { computeTokenGizmoLayout } from '@/systems/scene/token/tokenGizmoLayout';
 import { syncTransformHandleRegistry } from '@/systems/scene/interaction/useTransformControls';
 import { resolveItemBounds } from './sceneItemBounds';
-import type { Item } from '@/systems/scene/types';
+import { playerCanMoveToken } from '@/systems/scene/token/clientTokenVisibility';
+import type { Item, TokenItem } from '@/systems/scene/types';
 import type { TokenGizmoLayout } from '@/systems/scene/token/tokenGizmoLayout';
 
 const GOLD = '#c9a84c';
@@ -134,12 +135,14 @@ export function TokenSelectionGizmo({
 }
 
 function manipulableSelected(items: Record<string, Item>, selectedIds: string[], gm: boolean): Item[] {
+  const myUserId = useSessionStore.getState().myUserId;
   return selectedIds
     .map((id) => items[id])
     .filter((it): it is Item => {
       if (!it || it.locked) return false;
       if (gm) return true;
-      return it.type === 'token';
+      if (it.type !== 'token') return false;
+      return playerCanMoveToken(it as TokenItem, myUserId, selectedIds);
     });
 }
 

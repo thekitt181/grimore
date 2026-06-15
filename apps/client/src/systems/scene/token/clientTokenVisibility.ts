@@ -30,6 +30,19 @@ export function filterPlayerTokens(
 
   if (!playerHasVisionSource(items, opts.myUserId, opts.selectedIds, map)) {
     const selectedSet = new Set(opts.selectedIds);
+    const selectedPc = tokens.filter((t) => {
+      if (!selectedSet.has(t.id) || !t.isPc) return false;
+      const owner = t.ownerId?.trim() ?? '';
+      return !owner || owner === uid;
+    });
+    if (selectedPc.length > 0) {
+      const seen = new Set<string>();
+      return [...own, ...selectedPc].filter((t) => {
+        if (seen.has(t.id)) return false;
+        seen.add(t.id);
+        return true;
+      });
+    }
     const selectedOwn = own.filter((t) => selectedSet.has(t.id));
     return selectedOwn.length > 0 ? selectedOwn : own;
   }
@@ -56,6 +69,24 @@ export function playerOwnsToken(token: TokenItem, myUserId: string | null): bool
   return Boolean(uid) && token.ownerId?.trim() === uid;
 }
 
+/** True when a player may drag this token (owned PC, or unassigned PC they selected). */
+export function playerCanMoveToken(
+  token: TokenItem,
+  myUserId: string | null,
+  selectedIds: readonly string[] = [],
+): boolean {
+  if (token.locked) return false;
+  if (playerOwnsToken(token, myUserId)) return true;
+
+  const uid = myUserId?.trim() ?? '';
+  if (!uid || !token.isPc) return false;
+
+  const owner = token.ownerId?.trim() ?? '';
+  if (owner && owner !== uid) return false;
+
+  return selectedIds.includes(token.id);
+}
+
 /** Player tokens for selection/rendering — always includes owned tokens. */
 export function playerSelectableTokens(
   items: Record<string, Item>,
@@ -71,11 +102,23 @@ export function playerSelectableTokens(
   if (!uid) return filtered;
 
   const seen = new Set(filtered.map((t) => t.id));
+  const add = (t: TokenItem) => {
+    if (seen.has(t.id)) return;
+    seen.add(t.id);
+    filtered.push(t);
+  };
+
   for (const i of Object.values(items)) {
     if (i.type !== 'token' || i.visible === false) continue;
-    if (i.ownerId?.trim() !== uid || seen.has(i.id)) continue;
-    seen.add(i.id);
-    filtered.push(i);
+    if (i.ownerId?.trim() === uid) add(i);
   }
+
+  for (const id of opts.selectedIds) {
+    const i = items[id];
+    if (i?.type !== 'token' || i.visible === false || !i.isPc) continue;
+    const owner = i.ownerId?.trim() ?? '';
+    if (!owner || owner === uid) add(i);
+  }
+
   return filtered;
 }

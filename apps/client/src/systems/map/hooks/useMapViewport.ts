@@ -13,6 +13,7 @@ import {
   shouldStartMapPan,
   viewportScaleContext,
 } from '../mapNavigation';
+import { isItemDragActive } from '@/systems/scene/interaction/selectionDragState';
 import { sceneRefs, getMapInteractionEl } from '@/systems/scene/sceneRefs';
 
 let viewportPersistTimer: ReturnType<typeof setTimeout> | null = null;
@@ -238,6 +239,10 @@ export function useMapViewport(
 
       const pending = pendingPan.current;
       if (pending && !isPanning.current && e.pointerId === pending.pointerId) {
+        if (isItemDragActive()) {
+          pendingPan.current = null;
+          return;
+        }
         const dx = e.clientX - pending.x;
         const dy = e.clientY - pending.y;
         if (Math.hypot(dx, dy) >= PAN_DRAG_THRESHOLD) {
@@ -263,6 +268,10 @@ export function useMapViewport(
       }
 
       if (!isPanning.current) return;
+      if (isItemDragActive()) {
+        isPanning.current = false;
+        return;
+      }
       e.preventDefault();
 
       const rawDx = e.clientX - panStart.current.x;

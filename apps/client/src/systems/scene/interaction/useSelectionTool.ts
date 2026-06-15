@@ -1,7 +1,8 @@
 import { useEffect } from 'react';
 import { Graphics } from 'pixi.js';
 import { useMapStore } from '@/systems/map/store/mapStore';
-import { filterPlayerTokens, playerOwnsToken, playerSelectableTokens } from '@/systems/scene/token/clientTokenVisibility';
+import { filterPlayerTokens, playerCanMoveToken, playerSelectableTokens } from '@/systems/scene/token/clientTokenVisibility';
+import { setItemDragActive } from './selectionDragState';
 import { useItemStore, getActiveMap } from '../store/itemStore';
 import { useSessionStore } from '@/store/sessionStore';
 import { itemsWithLiveTransforms } from '../store/liveTransformStore';
@@ -135,7 +136,11 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
       if (item.locked) return false;
       if (gm) return true;
       if (item.type !== 'token') return false;
-      return playerOwnsToken(item as TokenItem, useSessionStore.getState().myUserId);
+      return playerCanMoveToken(
+        item as TokenItem,
+        useSessionStore.getState().myUserId,
+        useItemStore.getState().selectedIds,
+      );
     }
 
     function dragWorldDelta(e: PointerEvent, startScreenX: number, startScreenY: number) {
@@ -173,6 +178,7 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
         startScreenY: e.clientY,
         origins,
       };
+      setItemDragActive(true);
       interactionEl.setPointerCapture(e.pointerId);
     }
 
@@ -214,6 +220,10 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
         hit = rayHit;
       }
       if (!hit && allTokens.length) {
+        const screenPick = pickTokenAtScreen(e.clientX, e.clientY, allTokens);
+        if (screenPick && selectableIds.has(screenPick)) hit = merged[screenPick] as Item;
+      }
+      if (!hit && allTokens.length && is3dNavigate) {
         const screenPick = pickTokenAtScreen(e.clientX, e.clientY, allTokens);
         if (screenPick && selectableIds.has(screenPick)) hit = merged[screenPick] as Item;
       }
@@ -445,6 +455,11 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
     }
 
     function onUp(e: PointerEvent) {
+      if (move) {
+        // handled below
+      } else {
+        setItemDragActive(false);
+      }
       const { x: wx, y: wy } = clientToWorld(e.clientX, e.clientY);
 
       if (wallMove) {
@@ -488,10 +503,16 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
           return { id, kind: 'item' as const, patch: { x: nx, y: ny } as Partial<Item> };
         });
         if (Math.abs(dx) > 0.01 || Math.abs(dy) > 0.01) {
+          const myUserId = useSessionStore.getState().myUserId?.trim() ?? '';
+          const claimOwner = !gm && myUserId;
           for (const p of patches) {
             if (p.kind === 'token') {
               const it = useItemStore.getState().items[p.id] as TokenItem | undefined;
               if (!it || it.type !== 'token') continue;
+              if (claimOwner && it.isPc && !it.ownerId?.trim()) {
+                useItemStore.getState().updateItem(p.id, { ownerId: myUserId, isPc: true });
+                emitItemUpdate([{ id: p.id, patch: { ownerId: myUserId, isPc: true } }]);
+              }
               if (snap) {
                 const bounds = tokenBoundsFromGrid(it, p.gridCol, p.gridRow);
                 emitTokenMove(p.id, bounds.gridCol, bounds.gridRow, bounds.x, bounds.y);
@@ -510,6 +531,7 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
         }
         useLiveTransformStore.getState().clear(m.ids);
         move = null;
+        setItemDragActive(false);
       }
 
       if (marquee && marqueeGfx) {
@@ -583,6 +605,7 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
     interactionEl.addEventListener('pointercancel', onUp);
 
     return () => {
+      setItemDragActive(false);
       interactionEl.removeEventListener('pointerdown', onDown);
       interactionEl.removeEventListener('dblclick', onDblClick);
       interactionEl.removeEventListener('pointermove', onMove);

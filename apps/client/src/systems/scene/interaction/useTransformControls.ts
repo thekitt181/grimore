@@ -16,8 +16,8 @@ import { resizeFromCenter } from '../resizeFromCenter';
 import { isInteriorClick } from '../hitTest';
 import { resolveItemBounds } from '@/systems/map3d/sceneItemBounds';
 import { worldToGridColRow } from '../token/tokenGrid';
+import { playerCanMoveToken } from '@/systems/scene/token/clientTokenVisibility';
 import type { Item, TokenItem } from '../types';
-
 import type { TokenGizmoLayout, GizmoHandle } from '../token/tokenGizmoLayout';
 
 // ─── Handle registry (shared with selection tool) ──────────────────────────────
@@ -135,7 +135,8 @@ export function useTransformControls(appReady: boolean) {
     const manipulable = sel.filter((it) => {
       if (it.locked) return false;
       if (gm) return true;
-      return it.type === 'token';
+      if (it.type !== 'token') return false;
+      return playerCanMoveToken(it as TokenItem, useSessionStore.getState().myUserId, selectedIds);
     });
 
     if (activeTool !== 'select' || manipulable.length === 0) {

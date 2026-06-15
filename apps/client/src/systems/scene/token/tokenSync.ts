@@ -40,7 +40,10 @@ export function emitTokenMove(tokenId: string, gridCol: number, gridRow: number,
   const patch = { x, y, gridCol, gridRow };
   useItemStore.getState().updateItem(tokenId, patch);
   emitItemUpdate([{ id: tokenId, patch }]);
-  (getSocket() as any).emit('token:move', { sessionId: s, tokenId, gridCol, gridRow, x, y });
+  const socket = getSocket();
+  if (socket.connected) {
+    socket.emit('token:move', { sessionId: s, tokenId, gridCol, gridRow, x, y });
+  }
 }
 
 export function emitTokenHp(tokenId: string, hp: number, maxHp: number) {

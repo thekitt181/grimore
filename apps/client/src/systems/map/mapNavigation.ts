@@ -1,9 +1,7 @@
 import type { Container } from 'pixi.js';
 import type { MapViewMode } from './store/mapStore';
 import { useMapStore } from './store/mapStore';
-import { useItemStore } from '@/systems/scene/store/itemStore';
-import { pickSceneItem } from '@/systems/scene/sceneRefs';
-import { pickHandle } from '@/systems/scene/interaction/useTransformControls';
+import { pointerHitsToken } from '@/systems/scene/token/tokenPointerPick';
 import {
   clampViewportScale,
   maxViewportScale,
@@ -28,11 +26,7 @@ export function toolOwnsMapPointer(activeTool: string): boolean {
 
 /** Token under cursor blocks 3D navigation; map pick volume is treated as pannable ground. */
 export function pointerTargetsToken(clientX: number, clientY: number): boolean {
-  if (pickHandle(clientX, clientY)) return true;
-  const pickId = pickSceneItem(clientX, clientY);
-  if (!pickId) return false;
-  const item = useItemStore.getState().items[pickId];
-  return item?.type === 'token';
+  return pointerHitsToken(clientX, clientY);
 }
 
 export function shouldStartMapPan(

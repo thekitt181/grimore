@@ -8,7 +8,8 @@ import { sceneRefs } from '../sceneRefs';
 import { computeTokenGizmoLayout } from '../token/tokenGizmoLayout';
 import { drawPixiSelectionGizmo, hidePixiSelectionGizmo } from './pixiSelectionGizmo';
 import { syncTransformHandleRegistry } from './useTransformControls';
-import type { Item } from '../types';
+import { playerCanMoveToken } from '@/systems/scene/token/clientTokenVisibility';
+import type { Item, TokenItem } from '../types';
 
 const EMPTY_LAYOUT = {
   mode: 'none' as const,
@@ -22,12 +23,14 @@ const EMPTY_LAYOUT = {
 };
 
 function manipulableSelected(items: Record<string, Item>, selectedIds: string[], gm: boolean): Item[] {
+  const myUserId = useSessionStore.getState().myUserId;
   return selectedIds
     .map((id) => items[id])
     .filter((it): it is Item => {
       if (!it || it.locked) return false;
       if (gm) return true;
-      return it.type === 'token';
+      if (it.type !== 'token') return false;
+      return playerCanMoveToken(it as TokenItem, myUserId, selectedIds);
     });
 }
 
