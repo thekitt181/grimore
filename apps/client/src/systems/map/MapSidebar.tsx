@@ -21,7 +21,13 @@ import { CompendiumSidebarList } from '@/systems/compendium/CompendiumSidebarLis
 import { useDdbStore } from '@/systems/ddb/ddbStore';
 import { useSceneUiStore } from '@/systems/scene/manager/sceneUiStore';
 import { useDmScreenStore } from '@/systems/dm/dmScreenStore';
-import { mapSidebarWidth, useMapSidebarStore } from './mapSidebarStore';
+import {
+  MAP_SIDEBAR_COLUMN_WIDTH,
+  MAP_SIDEBAR_RAIL_WIDTH,
+  mapSidebarWidth,
+  useMapSidebarStore,
+} from './mapSidebarStore';
+import { useCompendiumUiStore } from '@/systems/compendium/compendiumStore';
 
 const GOLD = 'var(--color-accent-gold)';
 const BD = 'var(--color-border)';
@@ -85,6 +91,11 @@ export function MapSidebar() {
   const setGmPanelCollapsed = useMapSidebarStore((s) => s.setGmPanelCollapsed);
   const setCompendiumCollapsed = useMapSidebarStore((s) => s.setCompendiumCollapsed);
 
+  function minimizeCompendium() {
+    setCompendiumCollapsed(true);
+    useCompendiumUiStore.getState().setPanelOpen(false);
+  }
+
   if (!isGM) return null;
 
   const width = mapSidebarWidth(sidebarCollapsed, gmPanelCollapsed, compendiumCollapsed);
@@ -140,11 +151,19 @@ export function MapSidebar() {
 
       <div className="flex flex-1 min-h-0 overflow-hidden">
         {gmPanelCollapsed ? (
-          <SidebarColumnRail label="Tools" onExpand={() => setGmPanelCollapsed(false)} />
+          <div
+            className="flex flex-col min-h-0 shrink-0 overflow-hidden"
+            style={{ width: MAP_SIDEBAR_RAIL_WIDTH, borderRight: `1px solid ${BD}` }}
+          >
+            <SidebarColumnRail label="Tools" onExpand={() => setGmPanelCollapsed(false)} />
+          </div>
         ) : (
           <div
-            className="flex flex-col min-h-0 min-w-0 flex-1 overflow-hidden"
-            style={{ borderRight: compendiumCollapsed ? undefined : `1px solid ${BD}` }}
+            className="flex flex-col min-h-0 min-w-0 shrink-0 overflow-hidden"
+            style={{
+              width: MAP_SIDEBAR_COLUMN_WIDTH,
+              borderRight: `1px solid ${BD}`,
+            }}
           >
             <div
               className="flex items-center justify-between gap-1 shrink-0 px-3 pt-2 pb-1"
@@ -163,10 +182,18 @@ export function MapSidebar() {
         )}
 
         {compendiumCollapsed ? (
-          <SidebarColumnRail label="Compendium" onExpand={() => setCompendiumCollapsed(false)} />
+          <div
+            className="flex flex-col min-h-0 shrink-0 overflow-hidden"
+            style={{ width: MAP_SIDEBAR_COLUMN_WIDTH }}
+          >
+            <SidebarColumnRail label="Compendium" onExpand={() => setCompendiumCollapsed(false)} />
+          </div>
         ) : (
-          <div className="flex flex-col flex-1 min-h-0 w-[220px] shrink-0 overflow-hidden p-2">
-            <CompendiumSidebarList onMinimize={() => setCompendiumCollapsed(true)} />
+          <div
+            className="flex flex-col min-h-0 shrink-0 overflow-hidden p-2"
+            style={{ width: MAP_SIDEBAR_COLUMN_WIDTH }}
+          >
+            <CompendiumSidebarList onMinimize={minimizeCompendium} />
           </div>
         )}
       </div>

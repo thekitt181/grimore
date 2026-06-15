@@ -26,18 +26,18 @@ export const useMapSidebarStore = create<MapSidebarState>()(
   ),
 );
 
-const RAIL_WIDTH = 36;
-const COLUMN_WIDTH = 220;
+export const MAP_SIDEBAR_RAIL_WIDTH = 36;
+export const MAP_SIDEBAR_COLUMN_WIDTH = 220;
 
 export function mapSidebarWidth(
   sidebarCollapsed: boolean,
   gmPanelCollapsed: boolean,
   compendiumCollapsed: boolean,
 ): number {
-  if (sidebarCollapsed) return RAIL_WIDTH;
-  const gmOpen = !gmPanelCollapsed;
-  const compOpen = !compendiumCollapsed;
-  if (!gmOpen && !compOpen) return RAIL_WIDTH;
-  if (gmOpen && compOpen) return COLUMN_WIDTH * 2;
-  return COLUMN_WIDTH;
+  if (sidebarCollapsed) return MAP_SIDEBAR_RAIL_WIDTH;
+  const gmW = gmPanelCollapsed ? MAP_SIDEBAR_RAIL_WIDTH : MAP_SIDEBAR_COLUMN_WIDTH;
+  // Reserve full compendium column width when minimized so the map does not expand.
+  void compendiumCollapsed;
+  const compW = MAP_SIDEBAR_COLUMN_WIDTH;
+  return gmW + compW;
 }
