@@ -1,7 +1,6 @@
 import { isMobileClient } from '@/lib/socket';
 import { sceneRefs } from '@/systems/scene/sceneRefs';
 import { useMapStore } from './store/mapStore';
-import { isThreeReadyForDisplay } from '@/systems/map3d/threeCanvasHealth';
 
 function usesDrawPreview(activeTool: string): boolean {
   return (
@@ -19,14 +18,9 @@ export function applyPixiViewMode(is3d: boolean): void {
 
   const mobile = isMobileClient();
   const activeTool = useMapStore.getState().activeTool;
-  const threeOk = isThreeReadyForDisplay();
-  // Mobile: hide Pixi fallbacks only after Three.js has drawn at least one frame.
-  const hidePixiSceneArt = is3d && (!mobile || threeOk);
-
-  if (mobile) {
-    if (is3d && hidePixiSceneArt) app.ticker.stop();
-    else app.ticker.start();
-  }
+  // Desktop: hide Pixi maps in 3D. Mobile: keep map images as an underlay for Three.js.
+  const hidePixiMaps = is3d && !mobile;
+  const hidePixiTokens = is3d;
 
   world.eventMode = is3d ? 'none' : 'static';
 
@@ -48,11 +42,10 @@ export function applyPixiViewMode(is3d: boolean): void {
   }
 
   if (sceneRefs.items.current) {
-    if (hidePixiSceneArt) {
+    if (hidePixiMaps) {
       sceneRefs.items.current.alpha = 0;
       sceneRefs.items.current.visible = false;
     } else if (is3d && mobile) {
-      // WebGL fallback — keep map art in Pixi under the Three overlay.
       sceneRefs.items.current.alpha = 1;
       sceneRefs.items.current.visible = true;
       for (const child of sceneRefs.items.current.children) {
@@ -65,7 +58,7 @@ export function applyPixiViewMode(is3d: boolean): void {
   }
 
   if (sceneRefs.tokens.current) {
-    if (hidePixiSceneArt) {
+    if (hidePixiTokens) {
       sceneRefs.tokens.current.alpha = 0;
       sceneRefs.tokens.current.visible = false;
     } else {

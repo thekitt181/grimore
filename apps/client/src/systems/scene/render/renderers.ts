@@ -13,6 +13,8 @@ export interface RenderContext {
   activeTurnItemId?: string;
   viewMode?: '2d' | '3d';
   selectedIds?: string[];
+  /** Mobile: show flat token art when Three.js is unavailable. */
+  pixiTokenFallback?: boolean;
 }
 
 import { tokenConditionColor } from '../token/tokenConditionColors';
@@ -62,8 +64,11 @@ export function renderItem(container: Container, item: Item, ctx: RenderContext)
 // ─── Map ────────────────────────────────────────────────────────────────────
 
 function renderMap(c: Container, item: MapItem, ctx: RenderContext) {
-  /** Three.js draws the GLB in 2D — hide Pixi placeholder so it stays aligned with the gizmo. */
-  const hidePixiMapBody = Boolean(item.modelUrl) && ctx.viewMode !== '3d';
+  const in3dView = ctx.viewMode === '3d';
+  /** Three.js draws the GLB — hide Pixi map body in 2D model preview and for model-only maps in 3D. */
+  const hidePixiMapBody =
+    Boolean(item.modelUrl) &&
+    (ctx.viewMode !== '3d' || !item.backgroundUrl);
 
   const bg = new Graphics();
   bg.label = 'bg';
@@ -84,7 +89,7 @@ function renderMap(c: Container, item: MapItem, ctx: RenderContext) {
       sprite.height = item.height;
       c.addChildAt(sprite, 1);
     }).catch(() => {});
-  } else if (item.modelUrl && !hidePixiMapBody) {
+  } else if (item.modelUrl && !item.backgroundUrl && !in3dView) {
     const modelBadge = new Graphics();
     modelBadge.label = 'model-badge';
     modelBadge.rect(item.width * 0.2, item.height * 0.25, item.width * 0.6, item.height * 0.5);
@@ -189,6 +194,7 @@ function renderTokenBase(c: Container, item: TokenItem, ctx: RenderContext) {
   const renderType = getTokenRenderType(item);
   /** Hide Pixi body when Three.js renders the token (3D view, or 2D model overlay). */
   const hidePixiBody =
+    !ctx.pixiTokenFallback &&
     renderType === '3d' &&
     (ctx.viewMode === '3d' || Boolean(item.modelUrl));
   const borderColor = item.borderColour ? cssHex(item.borderColour) : 0xc9a84c;

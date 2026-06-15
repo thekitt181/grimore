@@ -26,7 +26,7 @@ import { SceneItemTransformGroup } from './TokenTransformGroup';
 import { pixiRenderResolution } from './pixiCanvasMetrics';
 import { bindWebGLContextRecovery } from './threeWebGLContext';
 import { is3dToken } from '@/systems/scene/token/tokenRenderType';
-import { markThreeFrameRendered, registerThreeRenderer, resetThreeCanvasHealth, notifyThreeCanvasUnhealthy, THREE_READY_EVENT } from './threeCanvasHealth';
+import { markThreeFrameRendered, registerThreeRenderer, resetThreeCanvasHealth, notifyThreeCanvasUnhealthy } from './threeCanvasHealth';
 import { applyPixiViewMode } from '@/systems/map/applyPixiViewMode';
 
 /** Stable defaults — position/zoom owned by SyncedPixiOrthographicCamera (never reset on re-render). */
@@ -186,25 +186,26 @@ function ThreeReadyNotifier() {
   return null;
 }
 
-/** Opaque scene background only after Three is ready — keeps Pixi map visible underneath on mobile. */
+/** Opaque scene background on desktop 3D only — mobile stays transparent so Pixi map underlay shows through. */
 function SceneBackground() {
   const mobile = isMobileClient();
   const is3d = useMapStore((s) => s.viewMode === '3d');
-  const [opaque, setOpaque] = useState(!mobile || !is3d);
-
-  useEffect(() => {
-    if (!mobile || !is3d) {
-      setOpaque(true);
-      return;
-    }
-    setOpaque(false);
-    const onReady = () => setOpaque(true);
-    window.addEventListener(THREE_READY_EVENT, onReady);
-    return () => window.removeEventListener(THREE_READY_EVENT, onReady);
-  }, [mobile, is3d]);
-
-  if (!is3d || !opaque) return null;
+  if (!is3d || mobile) return null;
   return <color attach="background" args={['#1e1e22']} />;
+}
+
+function CanvasResizeSync() {
+  const invalidate = useThree((s) => s.invalidate);
+  useEffect(() => {
+    const sync = () => invalidate();
+    window.addEventListener('resize', sync);
+    window.addEventListener('orientationchange', sync);
+    return () => {
+      window.removeEventListener('resize', sync);
+      window.removeEventListener('orientationchange', sync);
+    };
+  }, [invalidate]);
+  return null;
 }
 
 /** Three.js overlay: full scene in 3D view; model tokens only in 2D view. */
@@ -292,6 +293,7 @@ export function MapSceneCanvas() {
     >
       <WebGLContextGuard onContextLost={onContextLost} />
       <ThreeReadyNotifier />
+      <CanvasResizeSync />
       <SyncedPixiOrthographicCamera />
       <SceneBackground />
       <Suspense fallback={null}>

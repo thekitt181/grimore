@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Container } from 'pixi.js';
 import { isMobileClient } from '@/lib/socket';
 import {
-  isThreeReadyForDisplay,
+  isThreeCanvasHealthy,
   THREE_READY_EVENT,
   THREE_UNHEALTHY_EVENT,
 } from '@/systems/map3d/threeCanvasHealth';
@@ -101,12 +101,14 @@ export function useItemRenderer(
 
     layer.sortableChildren = true;
     if (tokenLayer) tokenLayer.sortableChildren = true;
-    const pixiFallback3d = viewMode === '3d' && isMobileClient() && !isThreeReadyForDisplay();
+    const mobileMapUnderlay = viewMode === '3d' && isMobileClient();
+    const pixiTokenFallback = viewMode === '3d' && isMobileClient() && !isThreeCanvasHealthy();
     const gm: boolean = myRole === 'GM';
     const ctx: RenderContext = {
       gm,
       viewMode,
       selectedIds,
+      pixiTokenFallback,
       ...(activeTurnItemId ? { activeTurnItemId } : {}),
     };
     const activeMap = getActiveMap();
@@ -152,7 +154,7 @@ export function useItemRenderer(
         item.type === 'token' &&
         viewMode === '3d' &&
         tokenRendersInThree(item, viewMode) &&
-        !pixiFallback3d;
+        !pixiTokenFallback;
       if (threeBodyOnly) {
         const stale = containers.current.get(item.id);
         if (stale) {
@@ -217,12 +219,14 @@ export function useItemRenderer(
       }
       const alpha = item.visible || !gm ? 1 : 0.35;
 
-      if (viewMode === '3d' && !pixiFallback3d) {
-        c.visible = false;
-        c.alpha = 0;
-      } else if (viewMode === '3d' && pixiFallback3d && item.type !== 'map' && item.type !== 'token') {
-        c.visible = false;
-        c.alpha = 0;
+      if (viewMode === '3d') {
+        if (item.type === 'map' && mobileMapUnderlay) {
+          c.visible = show;
+          c.alpha = show ? alpha : 0;
+        } else {
+          c.visible = false;
+          c.alpha = 0;
+        }
       } else {
         c.visible = show;
         c.alpha = show ? alpha : 0;
