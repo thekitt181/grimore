@@ -16,7 +16,7 @@ import { useAttackTargetPick } from '@/systems/combat/useAttackTargetPick';
 import { useAoePlacement } from '@/systems/combat/useAoePlacement';
 import { useTransformControls } from '@/systems/scene/interaction/useTransformControls';
 import { usePixiSelectionGizmo } from '@/systems/scene/interaction/usePixiSelectionGizmo';
-import { sceneRefs } from '@/systems/scene/sceneRefs';
+import { sceneRefs, clientToWorld } from '@/systems/scene/sceneRefs';
 import { DEFAULT_MAP_GRID_SIZE, defaultMapGrid, gridSizeForMap } from '@/systems/scene/types';
 import { emitItemAdd, emitItemUpdate, emitItemsSync } from '@/systems/scene/sceneSync';
 import { applyFogData, emitFogSync, flushFogScene, hydrateFogFromServer, parseFogCells, resetFogPushBaseline, restoreFogFromLocal } from '@/systems/scene/fogSync';
@@ -437,14 +437,7 @@ export function MapCanvas() {
 
   // ── Drag-and-drop image placement ─────────────────────────────────────────
   function getWorldPos(sx: number, sy: number) {
-    const world = sceneRefs.world.current;
-    const canvas = sceneRefs.app.current?.canvas;
-    if (!world || !canvas) return { x: 0, y: 0 };
-    const rect = canvas.getBoundingClientRect();
-    return {
-      x: (sx - rect.left - world.x) / world.scale.x,
-      y: (sy - rect.top  - world.y) / world.scale.y,
-    };
+    return clientToWorld(sx, sy);
   }
 
   function acceptFileDrag(e: { preventDefault(): void; dataTransfer: DataTransfer | null }) {

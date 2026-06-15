@@ -1,5 +1,7 @@
 import { useMemo } from 'react';
 import { useMapStore } from '@/systems/map/store/mapStore';
+import { getMapPointerRect } from '@/systems/map3d/pixiScreenCoords';
+import { pixiScreenSize } from '@/systems/map3d/pixiCanvasMetrics';
 
 export interface MapScreenRect {
   left: number;
@@ -22,11 +24,30 @@ export function useMapScreenBounds(): MapScreenRect {
       return { left: 0, top: 0, width: 0, height: 0, visible: false };
     }
     const { x, y, scale } = viewport;
+    const resLeft = x + mapX * scale;
+    const resTop = y + mapY * scale;
+    const resWidth = mapWidth * scale;
+    const resHeight = mapHeight * scale;
+
+    const pixi = pixiScreenSize();
+    const canvas = getMapPointerRect();
+    if (!pixi || !canvas || pixi.w <= 0 || pixi.h <= 0) {
+      return {
+        left: resLeft,
+        top: resTop,
+        width: resWidth,
+        height: resHeight,
+        visible: true,
+      };
+    }
+
+    const cssScaleX = canvas.width / pixi.w;
+    const cssScaleY = canvas.height / pixi.h;
     return {
-      left: x + mapX * scale,
-      top: y + mapY * scale,
-      width: mapWidth * scale,
-      height: mapHeight * scale,
+      left: resLeft * cssScaleX,
+      top: resTop * cssScaleY,
+      width: resWidth * cssScaleX,
+      height: resHeight * cssScaleY,
       visible: true,
     };
   }, [mapX, mapY, mapWidth, mapHeight, viewport]);

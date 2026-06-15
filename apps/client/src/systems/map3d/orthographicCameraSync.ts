@@ -19,10 +19,12 @@ export const TABLE_MINI_VIEW_AZIMUTH = Math.PI / 4.2 + TABLE_MINI_VIEW_AZIMUTH_O
 
 /** Build an OrthographicCamera matching a stored snapshot (picking fallback). */
 export function syncOrthographicCamera(state: OrthographicCameraState): THREE.OrthographicCamera {
-  orthoCam.left = state.left;
-  orthoCam.right = state.right;
-  orthoCam.top = state.top;
-  orthoCam.bottom = state.bottom;
+  const halfW = (state.right - state.left) / 2;
+  const halfH = (state.top - state.bottom) / 2;
+  orthoCam.left = -halfW;
+  orthoCam.right = halfW;
+  orthoCam.top = halfH;
+  orthoCam.bottom = -halfH;
   orthoCam.near = 0.1;
   orthoCam.far = 8000;
   orthoCam.zoom = 1;

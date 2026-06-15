@@ -4,9 +4,9 @@ import { useMapStore } from '@/systems/map/store/mapStore';
 import { useItemStore } from '../store/itemStore';
 import { useSessionStore } from '@/store/sessionStore';
 import { sceneRefs, clientToWorld, getMapInteractionEl } from '../sceneRefs';
-import * as THREE from 'three';
 import { sceneCameraRef } from '@/systems/map3d/sceneCameraRef';
 import { getPickCanvasRect } from '@/systems/map3d/pickCamera';
+import { worldXZToClientScreen } from '@/systems/map3d/perspectiveCameraSync';
 import { snapAngle, snapSize } from '../snap';
 import { emitItemUpdate } from '../sceneSync';
 import { emitTokenRotate } from '../token/tokenSync';
@@ -37,7 +37,6 @@ interface HandleRegistry {
 }
 
 const registry: HandleRegistry = { mode: 'none', itemId: undefined, handles: [] };
-const worldVec = new THREE.Vector3();
 
 /** Read-only handle positions for debugging. */
 export function getTransformHandleRegistry(): Readonly<HandleRegistry> {
@@ -69,20 +68,16 @@ export function pickHandle(clientX: number, clientY: number): HandleDesc | null 
     : Math.max(10 / scale, Math.min(minDim * 0.12, 24));
 
   const rect = getPickCanvasRect();
-  const live = sceneCameraRef.liveCamera;
-  const useScreen = viewMode === '3d' && rect && live;
+  const useScreen = viewMode === '3d' && rect && sceneCameraRef.liveCamera;
 
   let best: HandleDesc | null = null;
   let bestD = tol * tol;
   for (const h of registry.handles) {
     let d: number;
     if (useScreen) {
-      live.updateMatrixWorld(true);
-      worldVec.set(h.wx, 0, h.wy);
-      worldVec.project(live);
-      const sx = rect.left + (worldVec.x * 0.5 + 0.5) * rect.width;
-      const sy = rect.top + (-worldVec.y * 0.5 + 0.5) * rect.height;
-      d = (clientX - sx) ** 2 + (clientY - sy) ** 2;
+      const projected = worldXZToClientScreen(h.wx, h.wy, rect);
+      if (!projected) continue;
+      d = (clientX - projected.x) ** 2 + (clientY - projected.y) ** 2;
     } else {
       const dx = wx - h.wx;
       const dy = wy - h.wy;

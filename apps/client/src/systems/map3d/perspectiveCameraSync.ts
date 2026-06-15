@@ -23,6 +23,23 @@ export function syncPerspectiveCamera(
   return perspCam;
 }
 
+/** Pixi world X/Z (ground) → browser client coordinates using the live Three camera. */
+export function worldXZToClientScreen(
+  wx: number,
+  wz: number,
+  rect: DOMRect,
+): { x: number; y: number } | null {
+  const live = sceneCameraRef.liveCamera;
+  if (!live) return null;
+  live.updateMatrixWorld(true);
+  worldVec.set(wx, 0, wz);
+  worldVec.project(live);
+  return {
+    x: rect.left + (worldVec.x * 0.5 + 0.5) * rect.width,
+    y: rect.top + (-worldVec.y * 0.5 + 0.5) * rect.height,
+  };
+}
+
 /** Pixi world X/Y (ground) → screen client coordinates. */
 export function worldXZToScreen(
   wx: number,

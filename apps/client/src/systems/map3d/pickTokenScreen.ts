@@ -1,18 +1,15 @@
-import { sceneRefs, clientToWorld } from '@/systems/scene/sceneRefs';
+import { clientToWorld } from '@/systems/scene/sceneRefs';
 import { getPickCanvasRect } from './pickCamera';
 import { sceneCameraRef } from './sceneCameraRef';
 import { useLiveTransformStore } from '@/systems/scene/store/liveTransformStore';
 import { useMapStore } from '@/systems/map/store/mapStore';
 import { resolveItemBounds } from '@/systems/map3d/sceneItemBounds';
-import { worldXZToScreen } from './perspectiveCameraSync';
+import { worldXZToClientScreen } from './perspectiveCameraSync';
 import type { TokenItem } from '@/systems/scene/types';
 
 function pickTokenAtScreen2d(clientX: number, clientY: number, tokens: TokenItem[]): string | null {
-  const world = sceneRefs.world.current;
-  if (!world) return null;
-
   const { x: clickWx, y: clickWy } = clientToWorld(clientX, clientY);
-  const scale = Math.max(world.scale.x, 0.08);
+  const scale = Math.max(useMapStore.getState().viewport.scale, 0.08);
   const pad = 8 / scale;
   const liveById = useLiveTransformStore.getState().byId;
 
@@ -41,11 +38,12 @@ function pickTokenAtScreen2d(clientX: number, clientY: number, tokens: TokenItem
   return bestId;
 }
 
-/** Screen pick using projected token bounds — accurate under perspective orbit. */
+/** Screen pick using projected token bounds — works for 3D orthographic + perspective cameras. */
 function pickTokenAtScreen3d(clientX: number, clientY: number, tokens: TokenItem[]): string | null {
-  const cam = sceneCameraRef.current;
   const rect = getPickCanvasRect();
-  if (!cam || cam.type !== 'perspective' || !rect) return null;
+  if (!rect || !sceneCameraRef.liveCamera) {
+    return pickTokenAtScreen2d(clientX, clientY, tokens);
+  }
 
   const liveById = useLiveTransformStore.getState().byId;
   const pad = 10;
@@ -55,19 +53,24 @@ function pickTokenAtScreen3d(clientX: number, clientY: number, tokens: TokenItem
   for (const token of tokens) {
     const b = resolveItemBounds(token, liveById[token.id]);
     const corners = [
-      worldXZToScreen(b.x, b.y, rect, cam),
-      worldXZToScreen(b.x + b.width, b.y, rect, cam),
-      worldXZToScreen(b.x + b.width, b.y + b.height, rect, cam),
-      worldXZToScreen(b.x, b.y + b.height, rect, cam),
+      worldXZToClientScreen(b.x, b.y, rect),
+      worldXZToClientScreen(b.x + b.width, b.y, rect),
+      worldXZToClientScreen(b.x + b.width, b.y + b.height, rect),
+      worldXZToClientScreen(b.x, b.y + b.height, rect),
     ];
-    const minX = Math.min(...corners.map((c) => c.x)) - pad;
-    const maxX = Math.max(...corners.map((c) => c.x)) + pad;
-    const minY = Math.min(...corners.map((c) => c.y)) - pad;
-    const maxY = Math.max(...corners.map((c) => c.y)) + pad;
+    if (corners.some((c) => c == null)) continue;
+
+    const xs = corners.map((c) => c!.x);
+    const ys = corners.map((c) => c!.y);
+    const minX = Math.min(...xs) - pad;
+    const maxX = Math.max(...xs) + pad;
+    const minY = Math.min(...ys) - pad;
+    const maxY = Math.max(...ys) + pad;
 
     if (clientX < minX || clientX > maxX || clientY < minY || clientY > maxY) continue;
 
-    const center = worldXZToScreen(b.cx, b.cz, rect, cam);
+    const center = worldXZToClientScreen(b.cx, b.cz, rect);
+    if (!center) continue;
     const dist = Math.hypot(clientX - center.x, clientY - center.y);
     if (dist < bestDist) {
       bestDist = dist;
