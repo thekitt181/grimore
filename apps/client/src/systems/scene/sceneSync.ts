@@ -4,8 +4,6 @@ import { useItemStore } from './store/itemStore';
 import { addDeletedIds, persistItemsLocal } from './sessionPersistence';
 import type { Item } from './types';
 
-let pendingServerSync: ReturnType<typeof setTimeout> | null = null;
-
 function sid(): string | null {
   return useSessionStore.getState().sessionId;
 }
@@ -14,30 +12,35 @@ function snapshotItems(): Item[] {
   return Object.values(useItemStore.getState().items) as Item[];
 }
 
-/** Save locally on every edit; full server snapshot only on explicit sync (join/remove). */
+function emitIfConnected(event: string, payload: Record<string, unknown>): boolean {
+  const socket = getSocket();
+  if (!socket.connected) return false;
+  (socket as { emit: (event: string, payload: unknown) => void }).emit(event, payload);
+  return true;
+}
+
+/** Save locally on every edit; full server snapshot only when GM explicitly syncs. */
 function persistScene(fullSync = false) {
   const s = sid();
   if (!s) return;
   persistItemsLocal(s, snapshotItems());
 
   if (!fullSync) return;
-
-  if (pendingServerSync) clearTimeout(pendingServerSync);
-  pendingServerSync = null;
-  (getSocket() as any).emit('items:sync', { sessionId: s, items: snapshotItems() });
+  if (useSessionStore.getState().myRole !== 'GM') return;
+  emitIfConnected('items:sync', { sessionId: s, items: snapshotItems() });
 }
 
 export function emitItemAdd(item: Item) {
   const s = sid();
   if (!s) return;
-  (getSocket() as any).emit('item:add', { sessionId: s, item });
+  emitIfConnected('item:add', { sessionId: s, item });
   persistScene();
 }
 
 export function emitItemUpdate(patches: Array<{ id: string; patch: Partial<Item> }>) {
   const s = sid();
   if (!s || !patches.length) return;
-  (getSocket() as any).emit('item:update', { sessionId: s, patches });
+  emitIfConnected('item:update', { sessionId: s, patches });
   persistScene();
 }
 
@@ -45,7 +48,7 @@ export function emitItemRemove(ids: string[]) {
   const s = sid();
   if (!s || !ids.length) return;
   addDeletedIds(s, ids);
-  (getSocket() as any).emit('item:remove', { sessionId: s, ids });
+  emitIfConnected('item:remove', { sessionId: s, ids });
   persistScene(true);
 }
 
@@ -53,8 +56,14 @@ export function emitItemRemove(ids: string[]) {
 export function emitItemsSync(items: Item[]) {
   const s = sid();
   if (!s) return;
-  if (pendingServerSync) clearTimeout(pendingServerSync);
-  pendingServerSync = null;
+  if (useSessionStore.getState().myRole !== 'GM') return;
   persistItemsLocal(s, items);
-  (getSocket() as any).emit('items:sync', { sessionId: s, items });
+  emitIfConnected('items:sync', { sessionId: s, items });
+}
+
+/** Ask server to resend cached fog + items (after listeners attach). */
+export function requestSceneHydrate(): void {
+  const s = sid();
+  if (!s) return;
+  emitIfConnected('session:requestHydrate', { sessionId: s });
 }

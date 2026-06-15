@@ -18,7 +18,7 @@ import { useTransformControls } from '@/systems/scene/interaction/useTransformCo
 import { usePixiSelectionGizmo } from '@/systems/scene/interaction/usePixiSelectionGizmo';
 import { sceneRefs, clientToWorld } from '@/systems/scene/sceneRefs';
 import { DEFAULT_MAP_GRID_SIZE, defaultMapGrid, gridSizeForMap } from '@/systems/scene/types';
-import { emitItemAdd, emitItemUpdate, emitItemsSync } from '@/systems/scene/sceneSync';
+import { emitItemAdd, emitItemUpdate, emitItemsSync, requestSceneHydrate } from '@/systems/scene/sceneSync';
 import { applyFogData, emitFogSync, flushFogScene, hydrateFogFromServer, parseFogCells, resetFogPushBaseline, restoreFogFromLocal } from '@/systems/scene/fogSync';
 import { mergeFogIntoCells } from '@/systems/scene/fogMerge';
 import type { FogUpdatePayload } from '@grimoire/shared';
@@ -196,24 +196,37 @@ export function MapCanvas() {
   useEffect(() => {
     if (!sessionId) return;
 
+    const forSession = <T extends { sessionId?: string }>(
+      fn: (payload: T) => void,
+    ): ((payload: T) => void) => {
+      return (payload: T) => {
+        if (payload.sessionId != null && payload.sessionId !== sessionId) return;
+        fn(payload);
+      };
+    };
+
     const persistLocal = () => {
       if (!sessionId) return;
       persistItemsLocal(sessionId, Object.values(useItemStore.getState().items) as Item[]);
     };
-    const onAdd    = ({ item }: { item: unknown }) => {
-      useItemStore.getState().upsertItem(item as Item);
+    const onAdd = forSession((payload: { sessionId?: string; item: unknown }) => {
+      useItemStore.getState().upsertItem(payload.item as Item);
       persistLocal();
-    };
-    const onUpdate = ({ patches }: { patches: Array<{ id: string; patch: Partial<Item> }> }) => {
-      useItemStore.getState().updateItems(patches);
+    });
+    const onUpdate = forSession((payload: {
+      sessionId?: string;
+      patches: Array<{ id: string; patch: Partial<Item> }>;
+    }) => {
+      useItemStore.getState().updateItems(payload.patches);
       persistLocal();
-    };
-    const onRemove = ({ ids }: { ids: string[] }) => {
-      addDeletedIds(sessionId, ids);
-      useItemStore.getState().removeItems(ids);
+    });
+    const onRemove = forSession((payload: { sessionId?: string; ids: string[] }) => {
+      addDeletedIds(sessionId, payload.ids);
+      useItemStore.getState().removeItems(payload.ids);
       persistLocal();
-    };
-    const onSync   = ({ items: list }: { items: unknown[] }) => {
+    });
+    const onSync = forSession((payload: { sessionId?: string; items: unknown[] }) => {
+      const list = payload.items;
       initialSyncRef.current.received = true;
       const serverItems = sanitizePersistedItems(list as Item[]);
       const memoryItems = Object.values(useItemStore.getState().items) as Item[];
@@ -233,7 +246,12 @@ export function MapCanvas() {
           useItemStore.getState().setItems(merged);
         }
         if (sessionId) persistItemsLocal(sessionId, merged);
-        if (serverItems.length === 0 && localItems.length > 0 && !initialSyncRef.current.pushed) {
+        if (
+          useSessionStore.getState().myRole === 'GM' &&
+          serverItems.length === 0 &&
+          localItems.length > 0 &&
+          !initialSyncRef.current.pushed
+        ) {
           initialSyncRef.current.pushed = true;
           emitItemsSync(merged);
         }
@@ -246,8 +264,8 @@ export function MapCanvas() {
         initialSyncRef.current.pushed = true;
         emitItemsSync([map]);
       }
-    };
-    const onFog = (payload: FogUpdatePayload) => {
+    });
+    const onFog = forSession((payload: FogUpdatePayload) => {
       const isGM = useSessionStore.getState().myRole === 'GM';
       const current = useMapStore.getState().revealedCells;
 
@@ -270,18 +288,14 @@ export function MapCanvas() {
         useMapStore.getState().setRevealedCells(merged, { persist: false });
         resetFogPushBaseline(merged);
       }
-    };
-    const onFogSync = ({ fogData }: { fogData: string }) => {
+    });
+    const onFogSync = forSession((payload: { sessionId?: string; fogData: string }) => {
       fogSyncedRef.current = true;
-      if (useSessionStore.getState().myRole === 'GM') {
-        hydrateFogFromServer(fogData, sessionId);
-      } else {
-        applyFogData(fogData);
-      }
-    };
+      hydrateFogFromServer(payload.fogData, sessionId);
+    });
     // When players join, GM pushes scene snapshot (debounced so bursts coalesce).
     let joinPushTimer: ReturnType<typeof setTimeout> | null = null;
-    const onUserJoined = () => {
+    const onUserJoined = forSession((_payload: { sessionId?: string }) => {
       if (useSessionStore.getState().myRole !== 'GM') return;
       if (joinPushTimer) clearTimeout(joinPushTimer);
       joinPushTimer = setTimeout(() => {
@@ -290,7 +304,7 @@ export function MapCanvas() {
         emitFogSync();
         syncFogActiveToSession();
       }, 600);
-    };
+    });
 
     function attachSceneListeners() {
       const socket = getSocket();
@@ -309,6 +323,7 @@ export function MapCanvas() {
       socket.on('fog:sync', onFogSync as any);
       socket.on('session:userJoined', onUserJoined as any);
       bindFogActiveSocket();
+      requestSceneHydrate();
     }
 
     attachSceneListeners();

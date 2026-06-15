@@ -176,6 +176,19 @@ export function initSocket(httpServer: HttpServer): Server {
           return;
         }
 
+        const gameSession = await prisma.gameSession.findFirst({
+          where: { id: sessionId, campaignId },
+        });
+        if (!gameSession) {
+          socket.emit('error', { message: 'Session not found in this campaign' });
+          return;
+        }
+
+        const prevSessionId = socket.data['sessionId'] as string | undefined;
+        if (prevSessionId && prevSessionId !== sessionId) {
+          socket.leave(prevSessionId);
+        }
+
         const role: 'GM' | 'PLAYER' = member.campaign.gmId === userId ? 'GM' : 'PLAYER';
         const avatarUrl = socket.data['avatarUrl'] as string | undefined;
         const sessionUser: SessionUser = { id: userId, username, avatarUrl, role };
@@ -274,6 +287,11 @@ export function initSocket(httpServer: HttpServer): Server {
       socket.to(sessionId).emit('session:userLeft', { sessionId, userId });
     });
 
+    socket.on('session:requestHydrate', ({ sessionId }) => {
+      if (!isJoinedSession(socket, sessionId)) return;
+      void hydrateSessionFromCache(socket, sessionId);
+    });
+
     // ── Generic scene items (unified editor) — relay only; clients persist locally ──
     socket.on('item:add', (payload: ItemAddPayload) => {
       if (!isJoinedSession(socket, payload.sessionId)) return;
@@ -289,9 +307,8 @@ export function initSocket(httpServer: HttpServer): Server {
     });
     socket.on('items:sync', (payload: ItemsSyncPayload) => {
       if (!isJoinedSession(socket, payload.sessionId)) return;
-      if (isSessionGM(socket)) {
-        cacheSessionItems(payload.sessionId, payload.items);
-      }
+      if (!isSessionGM(socket)) return;
+      cacheSessionItems(payload.sessionId, payload.items);
       socket.to(payload.sessionId).emit('items:sync', payload);
     });
 
@@ -318,17 +335,15 @@ export function initSocket(httpServer: HttpServer): Server {
 
     socket.on('map:fogUpdate', (payload: FogUpdatePayload) => {
       if (!isJoinedSession(socket, payload.sessionId)) return;
-      if (isSessionGM(socket)) {
-        cacheSessionFog(payload.sessionId, payload);
-      }
+      if (!isSessionGM(socket)) return;
+      cacheSessionFog(payload.sessionId, payload);
       socket.to(payload.sessionId).emit('map:fogUpdate', payload);
     });
 
     socket.on('fog:sync', (payload: FogSyncPayload) => {
       if (!isJoinedSession(socket, payload.sessionId)) return;
-      if (isSessionGM(socket)) {
-        cacheSessionFog(payload.sessionId, { fogData: payload.fogData });
-      }
+      if (!isSessionGM(socket)) return;
+      cacheSessionFog(payload.sessionId, { fogData: payload.fogData });
       socket.to(payload.sessionId).emit('fog:sync', payload);
     });
 

@@ -378,6 +378,7 @@ export interface ServerToClientEvents {
 export interface ClientToServerEvents {
   'session:join':         (payload: { sessionId: string; campaignId: string }) => void;
   'session:leave':        (payload: { sessionId: string }) => void;
+  'session:requestHydrate': (payload: { sessionId: string }) => void;
   'item:add':             (payload: ItemAddPayload)           => void;
   'item:update':          (payload: ItemUpdatePayload)        => void;
   'item:remove':          (payload: ItemRemovePayload)        => void;

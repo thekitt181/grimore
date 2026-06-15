@@ -70,12 +70,16 @@ export function mergeSceneItems(
   return merged;
 }
 
-/** Skip store updates when reconnect sync did not change item ids. */
+/** Skip store updates when reconnect sync did not change meaningful item data. */
 export function sameSceneItemSnapshot(items: Item[], current: Record<string, Item>): boolean {
-  const keys = Object.keys(current);
-  if (items.length !== keys.length) return false;
-  const ids = new Set(keys);
-  return items.every((i) => ids.has(i.id));
+  const merged = [...items].sort((a, b) => a.id.localeCompare(b.id));
+  const currentList = Object.values(current).sort((a, b) => a.id.localeCompare(b.id));
+  if (merged.length !== currentList.length) return false;
+  try {
+    return JSON.stringify(merged) === JSON.stringify(currentList);
+  } catch {
+    return false;
+  }
 }
 
 /** Strip dead blob URLs so maps render the placeholder instead of failing silently. */

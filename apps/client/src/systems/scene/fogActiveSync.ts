@@ -2,7 +2,7 @@ import { getSocket } from '@/lib/socket';
 import { useMapStore } from '@/systems/map/store/mapStore';
 import { useSessionStore } from '@/store/sessionStore';
 
-let fogActiveHandler: ((payload: { active: boolean }) => void) | null = null;
+let fogActiveHandler: ((payload: { active: boolean; sessionId?: string }) => void) | null = null;
 
 /** Whether the fog overlay should render for the current client. */
 export function isFogOverlayVisible(): boolean {
@@ -43,7 +43,9 @@ export function bindFogActiveSocket(): void {
   if (fogActiveHandler) {
     socket.off('fog:active', fogActiveHandler);
   }
-  fogActiveHandler = ({ active }) => {
+  fogActiveHandler = ({ active, sessionId }) => {
+    const sid = useSessionStore.getState().sessionId;
+    if (sessionId != null && sid != null && sessionId !== sid) return;
     applySessionFogActive(active);
   };
   socket.on('fog:active', fogActiveHandler);

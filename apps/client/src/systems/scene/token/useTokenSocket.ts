@@ -3,6 +3,7 @@ import { getSocket } from '@/lib/socket';
 import { applyTokenSocketPatch } from '@/systems/scene/token/tokenSync';
 
 const TOKEN_EVENTS = [
+  'token:place',
   'token:move',
   'token:hp',
   'token:type',

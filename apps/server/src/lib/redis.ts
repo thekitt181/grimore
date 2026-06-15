@@ -10,21 +10,50 @@ function isQuotaError(message: string): boolean {
   return message.includes('max requests limit') || message.includes('limit exceeded');
 }
 
-function isRedisDeadError(message: string): boolean {
-  return (
-    message.includes('Connection is closed')
-    || message.includes('ECONNREFUSED')
-    || message.includes('ENOTFOUND')
-    || message.includes('Stream isn\'t writeable')
-  );
+function quotaHelpMessage(): string {
+  return 'Upstash monthly command limit reached — upgrade the plan, wait for reset, or remove duplicate REDIS_URL_* entries pointing at the same database.';
+}
+
+/** Fix common Render/Upstash paste mistakes (missing rediss:// scheme). */
+export function normalizeRedisUrl(raw: string): string | null {
+  let url = raw.trim();
+  if (!url) return null;
+
+  if (url.startsWith('//')) {
+    url = `rediss:${url}`;
+  } else if (!/^rediss?:\/\//i.test(url)) {
+    if (url.includes('@') && !url.includes('://')) {
+      url = `rediss://${url}`;
+    } else {
+      console.warn(`[Redis] Skipping invalid URL (expected rediss://…): ${url.slice(0, 40)}…`);
+      return null;
+    }
+  }
+
+  return url;
+}
+
+function redisEndpointKey(url: string): string {
+  try {
+    const parsed = new URL(url);
+    return `${parsed.hostname}:${parsed.port || '6379'}`;
+  } catch {
+    return url;
+  }
 }
 
 /** Collect REDIS_URL, REDIS_URL_1..9, and comma-separated REDIS_URLS (deduped). */
 export function collectRedisUrls(): string[] {
   const urls: string[] = [];
+  const endpointKeys = new Set<string>();
+
   const add = (raw: string | undefined) => {
-    const trimmed = raw?.trim();
-    if (trimmed) urls.push(trimmed);
+    const normalized = raw ? normalizeRedisUrl(raw) : null;
+    if (!normalized) return;
+    const key = redisEndpointKey(normalized);
+    if (endpointKeys.has(key)) return;
+    endpointKeys.add(key);
+    urls.push(normalized);
   };
 
   add(process.env['REDIS_URL']);
@@ -38,7 +67,7 @@ export function collectRedisUrls(): string[] {
     for (const part of list.split(',')) add(part);
   }
 
-  return [...new Set(urls)];
+  return urls;
 }
 
 function createRedisClient(url: string, label: string): Redis {
@@ -59,11 +88,12 @@ function createRedisClient(url: string, label: string): Redis {
 
 const redisUrls = collectRedisUrls();
 let redisEnabled = redisUrls.length > 0;
-const endpoints: RedisEndpoint[] = redisUrls.map((url, index) => ({
-  label: redisUrls.length === 1 ? 'main' : `url-${index + 1}`,
-  client: createRedisClient(url, redisUrls.length === 1 ? 'main' : `url-${index + 1}`),
-  enabled: true,
-}));
+const endpoints: RedisEndpoint[] = redisUrls.flatMap((url, index) => {
+  const normalized = normalizeRedisUrl(url);
+  if (!normalized) return [];
+  const label = redisUrls.length === 1 ? 'main' : `url-${index + 1}`;
+  return [{ label, client: createRedisClient(normalized, label), enabled: true }];
+});
 
 let activeIndex = 0;
 
@@ -128,7 +158,8 @@ function syncRedisEnabledFlag(): void {
 function disableEndpoint(ep: RedisEndpoint, reason: string): void {
   if (!ep.enabled) return;
   ep.enabled = false;
-  console.warn(`[Redis] Endpoint ${ep.label} disabled (${reason})`);
+  const suffix = isQuotaError(reason) ? ` — ${quotaHelpMessage()}` : '';
+  console.warn(`[Redis] Endpoint ${ep.label} disabled (${reason})${suffix}`);
   try {
     ep.client.disconnect(false);
   } catch {
@@ -193,6 +224,9 @@ export async function connectRedisOptional(): Promise<boolean> {
   }
 
   console.log(`[Redis] Pool: ${endpoints.length} endpoint(s) configured`);
+  if (endpoints.length > 1) {
+    console.warn('[Redis] Multiple URLs configured — use one Upstash database to avoid burning quota');
+  }
 
   for (let i = 0; i < endpoints.length; i++) {
     const ep = endpoints[i];
@@ -217,6 +251,9 @@ export async function connectRedisOptional(): Promise<boolean> {
   }
 
   syncRedisEnabledFlag();
+  if (!redisEnabled) {
+    console.warn('[Redis] Using in-memory session cache only (fog/items hydrate works until restart)');
+  }
   return isRedisOperational();
 }
 
@@ -266,36 +303,90 @@ export function disconnectAllRedis(): void {
   }
 }
 
+function isRedisDeadError(message: string): boolean {
+  return (
+    message.includes('Connection is closed')
+    || message.includes('ECONNREFUSED')
+    || message.includes('ENOTFOUND')
+    || message.includes('ENOENT')
+    || message.includes('Stream isn\'t writeable')
+  );
+}
+
 const SESSION_TTL = 60 * 60 * 24;
+const SESSION_TTL_MS = SESSION_TTL * 1000;
+
+/** Process-local fallback when Redis is unavailable (single Render instance). */
+const memoryCache = new Map<string, { value: string; expiresAt: number }>();
+
+function memorySet(key: string, value: string): void {
+  memoryCache.set(key, { value, expiresAt: Date.now() + SESSION_TTL_MS });
+}
+
+function memoryGet(key: string): string | null {
+  const entry = memoryCache.get(key);
+  if (!entry) return null;
+  if (Date.now() > entry.expiresAt) {
+    memoryCache.delete(key);
+    return null;
+  }
+  return entry.value;
+}
 
 export async function setSessionState(sessionId: string, data: unknown): Promise<void> {
+  const json = JSON.stringify(data);
+  memorySet(`session:${sessionId}`, json);
   await safeRedis(undefined, (client) =>
-    client.setex(`session:${sessionId}`, SESSION_TTL, JSON.stringify(data)),
+    client.setex(`session:${sessionId}`, SESSION_TTL, json),
   );
 }
 
 export async function getSessionState<T>(sessionId: string): Promise<T | null> {
+  const cached = memoryGet(`session:${sessionId}`);
+  if (cached != null) {
+    try {
+      return JSON.parse(cached) as T;
+    } catch {
+      /* fall through */
+    }
+  }
   return safeRedis(null, async (client) => {
     const raw = await client.get(`session:${sessionId}`);
     if (!raw) return null;
+    memorySet(`session:${sessionId}`, raw);
     return JSON.parse(raw) as T;
   });
 }
 
 export async function deleteSessionState(sessionId: string): Promise<void> {
+  memoryCache.delete(`session:${sessionId}`);
   await safeRedis(undefined, (client) => client.del(`session:${sessionId}`));
 }
 
 export async function setRoomUsers(sessionId: string, userIds: string[]): Promise<void> {
+  const json = JSON.stringify(userIds);
+  memorySet(`room:${sessionId}:users`, json);
   await safeRedis(undefined, (client) =>
-    client.setex(`room:${sessionId}:users`, SESSION_TTL, JSON.stringify(userIds)),
+    client.setex(`room:${sessionId}:users`, SESSION_TTL, json),
   );
 }
 
 export async function getRoomUsers(sessionId: string): Promise<string[]> {
+  const cached = memoryGet(`room:${sessionId}:users`);
+  if (cached != null) {
+    try {
+      const parsed: unknown = JSON.parse(cached);
+      if (Array.isArray(parsed)) {
+        return parsed.filter((id): id is string => typeof id === 'string');
+      }
+    } catch {
+      /* fall through */
+    }
+  }
   return safeRedis([], async (client) => {
     const raw = await client.get(`room:${sessionId}:users`);
     if (!raw) return [];
+    memorySet(`room:${sessionId}:users`, raw);
     const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
     return parsed.filter((id): id is string => typeof id === 'string');
@@ -303,21 +394,31 @@ export async function getRoomUsers(sessionId: string): Promise<string[]> {
 }
 
 export async function setSessionFog(sessionId: string, fogData: string): Promise<void> {
+  memorySet(`fog:${sessionId}`, fogData);
   await safeRedis(undefined, (client) =>
     client.setex(`fog:${sessionId}`, SESSION_TTL, fogData),
   );
 }
 
 export async function getSessionFog(sessionId: string): Promise<string | null> {
-  return safeRedis(null, (client) => client.get(`fog:${sessionId}`));
+  const cached = memoryGet(`fog:${sessionId}`);
+  if (cached != null) return cached;
+  const fromRedis = await safeRedis(null, (client) => client.get(`fog:${sessionId}`));
+  if (fromRedis != null) memorySet(`fog:${sessionId}`, fromRedis);
+  return fromRedis;
 }
 
 export async function setSessionItems(sessionId: string, itemsData: string): Promise<void> {
+  memorySet(`items:${sessionId}`, itemsData);
   await safeRedis(undefined, (client) =>
     client.setex(`items:${sessionId}`, SESSION_TTL, itemsData),
   );
 }
 
 export async function getSessionItems(sessionId: string): Promise<string | null> {
-  return safeRedis(null, (client) => client.get(`items:${sessionId}`));
+  const cached = memoryGet(`items:${sessionId}`);
+  if (cached != null) return cached;
+  const fromRedis = await safeRedis(null, (client) => client.get(`items:${sessionId}`));
+  if (fromRedis != null) memorySet(`items:${sessionId}`, fromRedis);
+  return fromRedis;
 }

@@ -32,12 +32,22 @@ export function ensureSupabaseSsl(connectionUrl) {
   }
 }
 
-/** Supabase session pooler (5432) — fallback when direct host is unreachable. */
+/** Supabase session pooler (5432) — reliable for migrate deploy from PaaS hosts. */
 export function resolvePoolerSessionDatabaseUrl(raw) {
-  const url = parseSource(raw);
+  const source = raw?.trim() ?? process.env.DATABASE_URL?.trim();
+  if (!source) return null;
+
+  let url;
+  try {
+    url = new URL(source);
+  } catch {
+    return null;
+  }
+
   if (!url.hostname.includes('pooler.supabase.com')) {
     return null;
   }
+
   url.port = '5432';
   url.searchParams.delete('pgbouncer');
   url.searchParams.delete('connection_limit');
@@ -72,7 +82,42 @@ export function resolveMigrationDatabaseUrl(raw) {
   return ensureSupabaseSsl(url.toString());
 }
 
-/** Try direct first, then Supabase session pooler. */
+/** True for db.PROJECT_REF.supabase.co (unreachable from many PaaS hosts). */
+function isDirectOnlySupabaseHost(connectionUrl) {
+  try {
+    return /^db\.[^.]+\.supabase\.co$/.test(new URL(connectionUrl).hostname);
+  } catch {
+    return false;
+  }
+}
+
+/** On Render/Fly/Railway, skip direct Supabase when a pooler URL is available. */
+function filterCloudMigrationCandidates(candidates) {
+  const onCloud =
+    process.env.RENDER === 'true'
+    || process.env.RENDER_SERVICE_ID
+    || process.env.FLY_APP_NAME
+    || process.env.RAILWAY_ENVIRONMENT;
+  if (!onCloud) return candidates;
+
+  const hasPooler = candidates.some((u) => u.includes('pooler.supabase.com'));
+  if (!hasPooler) return candidates;
+
+  const filtered = candidates.filter((u) => {
+    if (isDirectOnlySupabaseHost(u)) {
+      console.warn('[db:deploy] Skipping direct Supabase host on cloud (use pooler URL instead)');
+      return false;
+    }
+    return true;
+  });
+  return filtered.length > 0 ? filtered : candidates;
+}
+
+/**
+ * Migration URL order:
+ * - Render/cloud: session pooler first; never waste retries on db.*.supabase.co.
+ * - Local/dev: direct first (avoids pooler advisory locks edge cases).
+ */
 export function resolveMigrationUrlCandidates(raw) {
   const seen = new Set();
   const candidates = [];
@@ -84,9 +129,27 @@ export function resolveMigrationUrlCandidates(raw) {
     candidates.push(normalized);
   };
 
+  const pooler = resolvePoolerSessionDatabaseUrl(raw);
+  const directMigration = resolveMigrationDatabaseUrl(raw);
+  const onCloudHost =
+    process.env.RENDER === 'true'
+    || process.env.RENDER_SERVICE_ID
+    || process.env.FLY_APP_NAME
+    || process.env.RAILWAY_ENVIRONMENT;
+
+  if (onCloudHost) {
+    push(process.env.DATABASE_POOLER_URL?.trim());
+    push(process.env.SUPABASE_POOLER_URL?.trim());
+    push(pooler);
+    push(process.env.DATABASE_URL?.trim());
+    push(process.env.DIRECT_URL?.trim());
+    push(directMigration);
+    return filterCloudMigrationCandidates(candidates);
+  }
+
   push(process.env.DIRECT_URL?.trim());
-  push(resolveMigrationDatabaseUrl(raw));
-  push(resolvePoolerSessionDatabaseUrl(raw));
+  push(directMigration);
+  push(pooler);
   push(process.env.DATABASE_URL?.trim());
 
   if (candidates.length === 0) {

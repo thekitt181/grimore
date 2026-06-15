@@ -2,7 +2,7 @@ import WebSocket from 'ws';
 import type { Server } from 'socket.io';
 import type { DdbRollBridgePayload } from '@grimoire/shared';
 import { prisma } from '../../lib/prisma';
-import { safeRedis } from '../../lib/redis';
+import { isRedisOperational, safeRedis } from '../../lib/redis';
 import {
   cobaltCacheId,
   getBearerToken,
@@ -149,9 +149,35 @@ function emitRollPayload(io: Server, payload: DdbRollBridgePayload): void {
   );
 }
 
+const SEEN_TTL = 60 * 60 * 24;
+const ROLL_FP_TTL_SEC = 15;
+
+/** In-process dedup when Upstash quota is exhausted (single Render instance). */
+const localSeenIds = new Map<string, Set<string>>();
+const localSeededSessions = new Set<string>();
+const localFingerprints = new Map<string, number>();
+
+function localClaimMessage(sessionId: string, messageId: string): boolean {
+  let set = localSeenIds.get(sessionId);
+  if (!set) {
+    set = new Set();
+    localSeenIds.set(sessionId, set);
+  }
+  if (set.has(messageId)) return false;
+  set.add(messageId);
+  if (set.size > MAX_SEEN_IDS) {
+    const drop = [...set].slice(0, set.size - MAX_SEEN_IDS);
+    for (const id of drop) set.delete(id);
+  }
+  return true;
+}
+
 /** Atomically claim a game-log message id before emitting (shared by WS + REST poll). */
 async function claimDdbRollMessage(sessionId: string, messageId: string | null): Promise<boolean> {
   if (!messageId) return true;
+  if (!isRedisOperational()) {
+    return localClaimMessage(sessionId, messageId);
+  }
   const seenKey = `ddb:roll-seen:${sessionId}`;
   const isNew = await safeRedis<number | null>(null, (client) => client.sadd(seenKey, messageId));
   if (isNew === null) return true;
@@ -160,10 +186,27 @@ async function claimDdbRollMessage(sessionId: string, messageId: string | null):
   return true;
 }
 
-const ROLL_FP_TTL_SEC = 15;
+function localClaimFingerprint(sessionId: string, parsed: ParsedDdbRoll): boolean {
+  const fp = [
+    parsed.characterName,
+    parsed.label,
+    parsed.total,
+    parsed.notation,
+    parsed.diceResults.join(','),
+  ].join('|');
+  const key = `${sessionId}:${fp}`;
+  const now = Date.now();
+  const expires = localFingerprints.get(key);
+  if (expires != null && expires > now) return false;
+  localFingerprints.set(key, now + ROLL_FP_TTL_SEC * 1000);
+  return true;
+}
 
 /** Block duplicate emits when DDB uses different message ids for the same roll. */
 async function claimDdbRollFingerprint(sessionId: string, parsed: ParsedDdbRoll): Promise<boolean> {
+  if (!isRedisOperational()) {
+    return localClaimFingerprint(sessionId, parsed);
+  }
   const fp = [
     parsed.characterName,
     parsed.label,
@@ -503,8 +546,6 @@ export async function resolveRollBridgeUserId(campaignId: string): Promise<strin
   return null;
 }
 
-const SEEN_TTL = 60 * 60 * 24;
-
 type SessionRollContext = {
   at: number;
   ddbCampaignId: number;
@@ -567,19 +608,32 @@ export async function fetchNewDdbRollsForSession(sessionId: string): Promise<Ddb
 
   const seenKey = `ddb:roll-seen:${sessionId}`;
   const initKey = `ddb:roll-seeded:${sessionId}`;
-  const seeded = await safeRedis<string | null>(null, (client) => client.get(initKey));
 
-  if (!seeded) {
-    await safeRedis(undefined, async (client) => {
+  if (!isRedisOperational()) {
+    if (!localSeededSessions.has(sessionId)) {
       for (const msg of msgs) {
         const id = (msg as Record<string, unknown>).id;
-        if (typeof id === 'string') await client.sadd(seenKey, id);
+        if (typeof id === 'string') localClaimMessage(sessionId, id);
       }
-      await client.setex(initKey, SEEN_TTL, '1');
-      await client.expire(seenKey, SEEN_TTL);
-    });
-    console.log(`[DDB] roll poll seeded session=${sessionId} (${msgs.length} messages)`);
-    return [];
+      localSeededSessions.add(sessionId);
+      console.log(`[DDB] roll poll seeded session=${sessionId} (${msgs.length} messages, in-memory)`);
+      return [];
+    }
+  } else {
+    const seeded = await safeRedis<string | null>(null, (client) => client.get(initKey));
+
+    if (!seeded) {
+      await safeRedis(undefined, async (client) => {
+        for (const msg of msgs) {
+          const id = (msg as Record<string, unknown>).id;
+          if (typeof id === 'string') await client.sadd(seenKey, id);
+        }
+        await client.setex(initKey, SEEN_TTL, '1');
+        await client.expire(seenKey, SEEN_TTL);
+      });
+      console.log(`[DDB] roll poll seeded session=${sessionId} (${msgs.length} messages)`);
+      return [];
+    }
   }
 
   const out: DdbRollBridgePayload[] = [];

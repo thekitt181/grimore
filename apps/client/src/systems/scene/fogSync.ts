@@ -38,6 +38,8 @@ export function applyFogData(fogData: string, options?: { persist?: boolean }) {
 }
 
 function pushFogToServer(sessionId: string, cells: Set<string>) {
+  if (useSessionStore.getState().myRole !== 'GM') return;
+
   const fullJson = JSON.stringify([...cells]);
   persistFogLocal(sessionId, fullJson);
 
@@ -45,8 +47,10 @@ function pushFogToServer(sessionId: string, cells: Set<string>) {
   const { added, removed } = fogDeltaFromPrevious(cells, previous);
 
   if (shouldSendFogDelta(added, removed, fullJson)) {
-    getSocket().emit('map:fogUpdate', { sessionId, added, removed });
-  } else {
+    if (getSocket().connected) {
+      getSocket().emit('map:fogUpdate', { sessionId, added, removed });
+    }
+  } else if (getSocket().connected) {
     getSocket().emit('map:fogUpdate', { sessionId, fogData: fullJson });
   }
   lastPushedCells = new Set(cells);
@@ -87,10 +91,8 @@ export function flushFogScene(sessionId?: string | null) {
   persistFogLocal(sid, fogData);
   lastPushedCells = new Set(cells);
 
-  if (useSessionStore.getState().myRole === 'GM') {
+  if (useSessionStore.getState().myRole === 'GM' && getSocket().connected) {
     getSocket().emit('fog:sync', { sessionId: sid, fogData });
-  } else {
-    getSocket().emit('map:fogUpdate', { sessionId: sid, fogData });
   }
 }
 
@@ -103,16 +105,21 @@ export function restoreFogFromLocal(sessionId: string): void {
   lastPushedCells = new Set(local);
 }
 
-/** Merge server snapshot on join; local wins when it has more reveals. */
+/** Merge server snapshot on join; preserve local reveals when server sends empty/stale data. */
 export function hydrateFogFromServer(fogData: string, sessionId?: string | null) {
   const sid = sessionId ?? getPersistSessionId();
   const server = parseFogCells(fogData);
   const local = sid ? loadFogCells(sid) : new Set<string>();
   const inMemory = useMapStore.getState().revealedCells;
+  const isGM = useSessionStore.getState().myRole === 'GM';
+
+  if (isGM && server.size === 0 && (local.size > 0 || inMemory.size > 0)) {
+    return;
+  }
 
   let merged: Set<string>;
   if (local.size > 0) {
-    merged = new Set([...local, ...inMemory]);
+    merged = new Set([...local, ...inMemory, ...server]);
   } else if (server.size > 0) {
     merged = new Set([...server, ...inMemory]);
   } else {
@@ -124,7 +131,7 @@ export function hydrateFogFromServer(fogData: string, sessionId?: string | null)
   if (sid) persistFogLocal(sid, json);
   lastPushedCells = new Set(merged);
 
-  if (sid && merged.size > server.size && useSessionStore.getState().myRole === 'GM') {
+  if (sid && merged.size > server.size && useSessionStore.getState().myRole === 'GM' && getSocket().connected) {
     getSocket().emit('fog:sync', { sessionId: sid, fogData: json });
   }
 }

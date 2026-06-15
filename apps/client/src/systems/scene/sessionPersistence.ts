@@ -134,10 +134,19 @@ export function persistInitiativeLocal(sessionId: string, state: PersistedInitia
 
 export function loadDeletedIds(sessionId: string): Set<string> {
   try {
-    const raw = localStorage.getItem(scopedKey(DELETED_PREFIX, sessionId));
-    if (!raw) return new Set();
-    const list = JSON.parse(raw) as string[];
-    return new Set(Array.isArray(list) ? list : []);
+    const userId = useSessionStore.getState().myUserId;
+    const keys = userId
+      ? [scopedKey(DELETED_PREFIX, sessionId), `${DELETED_PREFIX}${sessionId}`]
+      : [`${DELETED_PREFIX}${sessionId}`];
+    let best = new Set<string>();
+    for (const key of keys) {
+      const raw = localStorage.getItem(key);
+      if (!raw) continue;
+      const list = JSON.parse(raw) as string[];
+      const set = new Set(Array.isArray(list) ? list : []);
+      if (set.size > best.size) best = set;
+    }
+    return best;
   } catch {
     return new Set();
   }

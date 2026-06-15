@@ -1,7 +1,8 @@
 import { getSocket } from '@/lib/socket';
 import { useSessionStore } from '@/store/sessionStore';
-import { useItemStore } from '../store/itemStore';
+import { useItemStore, getActiveMap } from '../store/itemStore';
 import { emitItemAdd, emitItemRemove, emitItemUpdate } from '../sceneSync';
+import { DEFAULT_MAP_GRID_SIZE } from '../types';
 import type { TokenItem } from '../types';
 
 function sid(): string | null {
@@ -132,6 +133,37 @@ export function applyTokenSocketPatch(
     case 'token:condition': {
       const { tokenId, conditions } = payload as { tokenId: string; conditions: string[] };
       store.updateItem(tokenId, { conditions });
+      break;
+    }
+    case 'token:place': {
+      const { token } = payload as { token: Record<string, unknown> };
+      const id = String(token.id ?? '');
+      if (!id || store.items[id]) break;
+      const map = getActiveMap();
+      const gridSize = map?.gridSize ?? DEFAULT_MAP_GRID_SIZE;
+      const gridCol = Number(token.gridCol ?? 0);
+      const gridRow = Number(token.gridRow ?? 0);
+      store.upsertItem({
+        id,
+        type: 'token',
+        name: String(token.name ?? 'Token'),
+        x: gridCol * gridSize,
+        y: gridRow * gridSize,
+        width: gridSize,
+        height: gridSize,
+        rotation: Number(token.rotation ?? 0),
+        imageUrl: String(token.image ?? ''),
+        renderType: (token.type as '2d' | '3d') ?? '2d',
+        gridCol,
+        gridRow,
+        hp: token.hp as number | undefined,
+        maxHp: token.maxHp as number | undefined,
+        conditions: (token.conditions as string[]) ?? [],
+        borderColour: String(token.borderColour ?? '#c9a84c'),
+        visible: !token.hidden,
+        ownerId: String(token.ownerId ?? '') || undefined,
+        zIndex: 1,
+      } as TokenItem);
       break;
     }
     default:
