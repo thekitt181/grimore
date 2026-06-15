@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { Container } from 'pixi.js';
 import { isMobileClient } from '@/lib/socket';
+import { isThreeCanvasHealthy } from '@/systems/map3d/threeCanvasHealth';
 import { useItemStore, getActiveMap } from '../store/itemStore';
 import { useSessionStore } from '@/store/sessionStore';
 import { useInitiativeStore } from '@/systems/map/store/initiativeStore';
@@ -85,7 +86,7 @@ export function useItemRenderer(
 
     layer.sortableChildren = true;
     if (tokenLayer) tokenLayer.sortableChildren = true;
-    const mobile3d = viewMode === '3d' && isMobileClient();
+    const mobile3d = viewMode === '3d' && isMobileClient() && !isThreeCanvasHealthy();
     const gm: boolean = myRole === 'GM';
     const ctx: RenderContext = {
       gm,

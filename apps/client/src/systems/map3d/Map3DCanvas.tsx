@@ -1,5 +1,5 @@
-import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
-import { Canvas, useThree } from '@react-three/fiber';
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import type { RootState } from '@react-three/fiber';
 import * as THREE from 'three';
 import { isMobileClient } from '@/lib/socket';
@@ -26,6 +26,7 @@ import { SceneItemTransformGroup } from './TokenTransformGroup';
 import { pixiRenderResolution } from './pixiCanvasMetrics';
 import { bindWebGLContextRecovery } from './threeWebGLContext';
 import { is3dToken } from '@/systems/scene/token/tokenRenderType';
+import { notifyThreeCanvasReady } from './threeCanvasHealth';
 
 /** Stable defaults — position/zoom owned by SyncedPixiOrthographicCamera (never reset on re-render). */
 function useStableOrthoCameraDefaults() {
@@ -174,6 +175,17 @@ function WebGLContextGuard({ onContextLost }: { onContextLost: () => void }) {
   return null;
 }
 
+/** Notify Pixi layers once Three.js has a healthy canvas (mobile fallback off). */
+function ThreeReadyNotifier() {
+  const notified = useRef(false);
+  useFrame(() => {
+    if (notified.current) return;
+    notified.current = true;
+    notifyThreeCanvasReady();
+  });
+  return null;
+}
+
 /** Three.js overlay: full scene in 3D view; model tokens only in 2D view. */
 export function MapSceneCanvas() {
   const viewMode = useMapStore((s) => s.viewMode);
@@ -254,6 +266,7 @@ export function MapSceneCanvas() {
       onCreated={handleCreated}
     >
       <WebGLContextGuard onContextLost={onContextLost} />
+      <ThreeReadyNotifier />
       <SyncedPixiOrthographicCamera />
       {is3d ? <color attach="background" args={['#1e1e22']} /> : null}
       <Suspense fallback={null}>

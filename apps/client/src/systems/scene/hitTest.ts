@@ -105,6 +105,7 @@ export function isInteriorClickBounds(
   rotation: number,
   wx: number,
   wy: number,
+  marginRatio = 0.38,
 ): boolean {
   const cx = x + width / 2;
   const cy = y + height / 2;
@@ -113,7 +114,7 @@ export function isInteriorClickBounds(
   const dy = wy - cy;
   const lx = dx * Math.cos(rad) - dy * Math.sin(rad) + width / 2;
   const ly = dx * Math.sin(rad) + dy * Math.cos(rad) + height / 2;
-  const margin = Math.max(14, Math.min(width, height) * 0.38);
+  const margin = Math.max(14, Math.min(width, height) * marginRatio);
   return (
     lx > margin && lx < width - margin &&
     ly > margin && ly < height - margin

@@ -49,6 +49,7 @@ import type { Item, MapItem, TokenItem } from '@/systems/scene/types';
 import { MapCategoryWheel, type ImageCategory } from './MapCategoryWheel';
 import { TokenTypeChoicePopup } from './TokenTypeChoicePopup';
 import { MapCameraControls } from './MapCameraControls';
+import { Map3DMobileOrbitControls } from './Map3DMobileOrbitControls';
 import { useTokenSocket } from '@/systems/scene/token/useTokenSocket';
 import { emitTokenPlace } from '@/systems/scene/token/tokenSync';
 import { tokenBoundsFromGrid, worldToGridColRow } from '@/systems/scene/token/tokenGrid';
@@ -663,6 +664,7 @@ export function MapCanvas() {
       <MapAtmosphereLayer />
 
       <MapCameraControls />
+      <Map3DMobileOrbitControls />
 
       {(viewMode === '2d' || viewMode === '3d') && isDragOver && (
         <div

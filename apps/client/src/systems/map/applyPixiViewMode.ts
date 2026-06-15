@@ -1,6 +1,7 @@
 import { isMobileClient } from '@/lib/socket';
 import { sceneRefs } from '@/systems/scene/sceneRefs';
 import { useMapStore } from './store/mapStore';
+import { isThreeCanvasHealthy } from '@/systems/map3d/threeCanvasHealth';
 
 function usesDrawPreview(activeTool: string): boolean {
   return (
@@ -18,6 +19,9 @@ export function applyPixiViewMode(is3d: boolean): void {
 
   const mobile = isMobileClient();
   const activeTool = useMapStore.getState().activeTool;
+  const threeOk = isThreeCanvasHealthy();
+  // Mobile: hide Pixi map art when Three.js is healthy (same as desktop). Fallback only if WebGL fails.
+  const hidePixiSceneArt = is3d && (!mobile || threeOk);
 
   world.eventMode = is3d ? 'none' : 'static';
 
@@ -39,11 +43,11 @@ export function applyPixiViewMode(is3d: boolean): void {
   }
 
   if (sceneRefs.items.current) {
-    if (is3d && !mobile) {
+    if (hidePixiSceneArt) {
       sceneRefs.items.current.alpha = 0;
       sceneRefs.items.current.visible = false;
     } else if (is3d && mobile) {
-      // Keep map art in Pixi under the Three overlay — mobile WebGL can fail or size to 0.
+      // WebGL fallback — keep map art in Pixi under the Three overlay.
       sceneRefs.items.current.alpha = 1;
       sceneRefs.items.current.visible = true;
       for (const child of sceneRefs.items.current.children) {
@@ -56,7 +60,7 @@ export function applyPixiViewMode(is3d: boolean): void {
   }
 
   if (sceneRefs.tokens.current) {
-    if (is3d && !mobile) {
+    if (hidePixiSceneArt) {
       sceneRefs.tokens.current.alpha = 0;
       sceneRefs.tokens.current.visible = false;
     } else {

@@ -12,7 +12,8 @@ import { screenDeltaToWorldDelta } from '@/systems/map3d/coords';
 import { resolveItemBounds } from '@/systems/map3d/sceneItemBounds';
 import { worldToGridColRow, tokenBoundsFromGrid } from '@/systems/scene/token/tokenGrid';
 import { emitTokenMove } from '@/systems/scene/token/tokenSync';
-import { hitTest, hitTestMap, isInteriorClickBounds, itemIntersectsRect } from '../hitTest';
+import { hitTest, hitTestMap, itemIntersectsRect } from '../hitTest';
+import { isTokenMoveClick } from '../token/tokenMovePick';
 import { snapPoint } from '../snap';
 import { emitItemUpdate } from '../sceneSync';
 import { focusSessionMap } from '@/systems/map/mapFocusSync';
@@ -215,9 +216,7 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
       if (tokenPick && canDragToken(tokenPick)) {
         const liveById = useLiveTransformStore.getState().byId;
         const b = resolveItemBounds(tokenPick, liveById[tokenPick.id]);
-        const { x: wx, y: wy } = clientToWorld(e.clientX, e.clientY);
-        const onInterior = isInteriorClickBounds(b.x, b.y, b.width, b.height, b.rotation, wx, wy);
-        if (onInterior || !pickHandle(e.clientX, e.clientY)) {
+        if (isTokenMoveClick(e.clientX, e.clientY, b) || !pickHandle(e.clientX, e.clientY)) {
           beginTokenDrag(tokenPick.id, e);
           return;
         }
@@ -282,8 +281,7 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
         if (freshIds.length) {
           if (hit.type === 'token' && canDragToken(hit)) {
             const b = resolveItemBounds(hit, liveById[hit.id]);
-            const onInterior = isInteriorClickBounds(b.x, b.y, b.width, b.height, b.rotation, wx, wy);
-            if (onInterior || !pickHandle(e.clientX, e.clientY)) {
+            if (isTokenMoveClick(e.clientX, e.clientY, b) || !pickHandle(e.clientX, e.clientY)) {
               beginTokenDrag(hit.id, e);
             }
           } else {

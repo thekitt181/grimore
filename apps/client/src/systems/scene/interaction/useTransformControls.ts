@@ -15,6 +15,7 @@ import { useLiveTransformStore } from '../store/liveTransformStore';
 import { resizeFromCenter } from '../resizeFromCenter';
 import { isInteriorClickBounds } from '../hitTest';
 import { resolveItemBounds } from '@/systems/map3d/sceneItemBounds';
+import { isTokenMoveClick } from '../token/tokenMovePick';
 import { worldToGridColRow } from '../token/tokenGrid';
 import type { Item, TokenItem } from '../types';
 import type { TokenGizmoLayout, GizmoHandle } from '../token/tokenGizmoLayout';
@@ -55,24 +56,34 @@ export function pickHandle(clientX: number, clientY: number): HandleDesc | null 
   if (useSessionStore.getState().myRole !== 'GM') return null;
 
   const viewMode = useMapStore.getState().viewMode;
-  const item = registry.itemId
-    ? useItemStore.getState().items[registry.itemId]
-    : undefined;
+  const items = useItemStore.getState().items;
+  const liveById = useLiveTransformStore.getState().byId;
+  const item = registry.itemId ? items[registry.itemId] : undefined;
   const { x: wx, y: wy } = clientToWorld(clientX, clientY);
 
+  if (registry.mode === 'group') {
+    for (const id of useItemStore.getState().selectedIds) {
+      const t = items[id];
+      if (t?.type !== 'token') continue;
+      const b = resolveItemBounds(t, liveById[id]);
+      if (isTokenMoveClick(clientX, clientY, b)) return null;
+    }
+  }
+
   if (item) {
-    const live = useLiveTransformStore.getState().byId[item.id];
+    const live = liveById[item.id];
     const b = resolveItemBounds(item, live);
+    if (item.type === 'token' && isTokenMoveClick(clientX, clientY, b)) return null;
     const onInterior = isInteriorClickBounds(b.x, b.y, b.width, b.height, b.rotation, wx, wy);
-    if (item.type === 'token' && onInterior) return null;
     if (viewMode !== '3d' && onInterior) return null;
   }
 
   const scale = sceneRefs.world.current?.scale.x ?? 1;
   const minDim = item ? Math.min(item.width, item.height) : 64;
+  const isToken = item?.type === 'token';
   const tol = viewMode === '3d'
-    ? Math.max(14, Math.min(minDim * 0.14, 42))
-    : Math.max(10 / scale, Math.min(minDim * 0.12, 24));
+    ? (isToken ? Math.max(10, Math.min(minDim * 0.09, 28)) : Math.max(14, Math.min(minDim * 0.14, 42)))
+    : (isToken ? Math.max(8 / scale, Math.min(minDim * 0.09, 18)) : Math.max(10 / scale, Math.min(minDim * 0.12, 24)));
 
   const rect = getPickCanvasRect();
   const useScreen = viewMode === '3d' && rect && sceneCameraRef.liveCamera;
