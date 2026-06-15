@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import type { WeatherOverlay } from '@grimoire/shared';
-import { useSceneMediaStore } from './sceneMediaStore';
+import { useSceneMediaStore, selectEffectiveWeather } from './sceneMediaStore';
 import { WeatherCanvas } from './WeatherCanvas';
 
 const WEATHER_TINT: Partial<Record<Exclude<WeatherOverlay, 'none'>, string>> = {
@@ -45,18 +45,21 @@ export function WeatherOverlay() {
   const activeScene = useSceneMediaStore((s) => s.activeScene);
   const sessionWeather = useSceneMediaStore((s) => s.sessionWeather);
   const sessionSettings = useSceneMediaStore((s) => s.sessionWeatherSettings);
-  const weather = activeScene?.weatherOverlay ?? sessionWeather;
+  const weather = useMemo(
+    () => selectEffectiveWeather({ activeScene, sessionWeather }),
+    [activeScene, sessionWeather],
+  );
   const tint = useMemo(() => {
-    if (!weather || weather === 'none') return null;
+    if (!weather) return null;
     return WEATHER_TINT[weather];
   }, [weather]);
 
   const settings = useMemo(() => {
-    if (!weather || weather === 'none') return sessionSettings;
+    if (!weather) return sessionSettings;
     return { ...sessionSettings, ...WEATHER_SETTINGS[weather] };
   }, [weather, sessionSettings]);
 
-  if (!weather || weather === 'none') return null;
+  if (!weather) return null;
 
   return (
     <>

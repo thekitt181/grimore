@@ -175,7 +175,12 @@ export function SceneManager({ campaignId, isGM, liveSessionId, onSceneActivated
                 <select
                   className="input mt-1 w-full"
                   value={scene.weatherOverlay ?? 'none'}
-                  onChange={(e) => void setSceneField(scene, { weatherOverlay: e.target.value as SceneRecord['weatherOverlay'] })}
+                  onChange={(e) => {
+                    const raw = e.target.value as SceneRecord['weatherOverlay'];
+                    void setSceneField(scene, {
+                      weatherOverlay: raw === 'none' ? null : raw,
+                    });
+                  }}
                 >
                   {WEATHER_PRESETS.map((p) => (
                     <option key={p.id} value={p.id}>{p.label}</option>

@@ -16,7 +16,7 @@ import {
   setMediaMasterVolume,
   setMusicMuted,
 } from './audioEngine';
-import { useSceneMediaStore } from './sceneMediaStore';
+import { useSceneMediaStore, normalizeWeatherOverlay } from './sceneMediaStore';
 import { hydrateSceneMap } from '../manager/hydrateSceneMap';
 
 export const SESSION_WEATHER_SCENE_ID = 'session-live-weather';
@@ -108,7 +108,8 @@ function isAtmosphereOnlyPatch(prev: SceneRecord | null, next: SceneRecord): boo
 }
 
 function applyAtmosphere(scene: SceneRecord) {
-  useSceneMediaStore.getState().setWeatherOverlay(scene.weatherOverlay);
+  const weather = normalizeWeatherOverlay(scene.weatherOverlay);
+  useSceneMediaStore.getState().setWeatherOverlay(weather);
   const gameTime = resolveGameTime(scene);
   const timeOfDay = scene.timeOfDay ?? gameTimeToTimeOfDay(gameTime);
   useSceneMediaStore.getState().setGameTime(gameTime);
@@ -266,8 +267,8 @@ export function emitSessionWeather(sessionId: string, weather: WeatherOverlay) {
 
   if (active) {
     const scene = { ...active, weatherOverlay: normalized, mediaConfig };
-    applyAtmosphere(scene);
     useSceneMediaStore.getState().setActiveScene(scene, 'none');
+    applyAtmosphere(scene);
     if (strippedWeatherAudio) {
       applySceneMediaConfig(buildMediaConfig(scene));
     }
@@ -281,8 +282,8 @@ export function emitSessionWeather(sessionId: string, weather: WeatherOverlay) {
   }
 
   const scene = createSessionWeatherScene(campaignId, normalized);
-  applyAtmosphere(scene);
   useSceneMediaStore.getState().setActiveScene(scene, 'none');
+  applyAtmosphere(scene);
   getSocket().emit('scene:change', {
     sessionId,
     sceneId: scene.id,

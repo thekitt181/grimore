@@ -17,6 +17,26 @@ export const DEFAULT_WEATHER_SETTINGS: WeatherSettings = {
   direction: 200,
 };
 
+export type ActiveWeatherOverlay = Exclude<WeatherOverlay, 'none'>;
+
+export function normalizeWeatherOverlay(
+  weather: WeatherOverlay | null | undefined,
+): ActiveWeatherOverlay | null {
+  if (!weather || weather === 'none') return null;
+  return weather;
+}
+
+/** Active weather for rendering — null means clear (never fall back when scene explicitly has none). */
+export function selectEffectiveWeather(state: {
+  activeScene: SceneRecord | null;
+  sessionWeather: WeatherOverlay | null;
+}): ActiveWeatherOverlay | null {
+  if (state.activeScene != null) {
+    return normalizeWeatherOverlay(state.activeScene.weatherOverlay);
+  }
+  return normalizeWeatherOverlay(state.sessionWeather);
+}
+
 interface SceneMediaState {
   activeScene: SceneRecord | null;
   /** Live weather when no scene is active (map context menu). */
@@ -63,12 +83,16 @@ export const useSceneMediaStore = create<SceneMediaState>((set, get) => ({
   setActiveScene: (scene, transition = 'fade') =>
     set({ activeScene: scene, transition, transitioning: true }),
   setWeatherOverlay: (weather) => {
-    const scene = get().activeScene;
-    if (scene) {
-      set({ activeScene: { ...scene, weatherOverlay: weather } });
-    } else {
-      set({ sessionWeather: weather });
-    }
+    const normalized = normalizeWeatherOverlay(weather);
+    set((s) => {
+      if (s.activeScene) {
+        return {
+          sessionWeather: normalized,
+          activeScene: { ...s.activeScene, weatherOverlay: normalized },
+        };
+      }
+      return { sessionWeather: normalized };
+    });
   },
   setTimeOfDay: (time) => {
     const scene = get().activeScene;
@@ -127,10 +151,8 @@ export function getActiveLighting(): LightingPreset {
   return useSceneMediaStore.getState().activeScene?.lightingPreset ?? 'default';
 }
 
-export function getActiveWeather(): WeatherOverlay | null {
-  const { activeScene, sessionWeather } = useSceneMediaStore.getState();
-  const w = activeScene?.weatherOverlay ?? sessionWeather;
-  return w && w !== 'none' ? w : null;
+export function getActiveWeather(): ActiveWeatherOverlay | null {
+  return selectEffectiveWeather(useSceneMediaStore.getState());
 }
 
 export function getActiveTimeOfDay(): TimeOfDay {

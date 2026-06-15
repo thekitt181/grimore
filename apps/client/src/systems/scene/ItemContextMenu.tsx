@@ -26,7 +26,7 @@ import { isMobileClient } from '@/lib/socket';
 import { isDdbPcToken } from '@/systems/ddb/ddbTokenUtils';
 import { TIME_OF_DAY_PRESETS, WEATHER_PRESETS } from '@grimoire/shared';
 import type { TimeOfDay, WeatherOverlay } from '@grimoire/shared';
-import { useSceneMediaStore } from './media/sceneMediaStore';
+import { useSceneMediaStore, selectEffectiveWeather } from './media/sceneMediaStore';
 import { emitSessionTimeOfDay, emitSessionWeather } from './media/useSceneMedia';
 import { extractApiError } from '@/lib/apiError';
 
@@ -612,12 +612,21 @@ const WEATHER_ICONS: Record<WeatherOverlay, string> = {
 function MapWeatherMenuSection({ onDone }: { onDone: () => void }) {
   const activeScene = useSceneMediaStore((s) => s.activeScene);
   const sessionWeather = useSceneMediaStore((s) => s.sessionWeather);
-  const current = activeScene?.weatherOverlay ?? sessionWeather ?? 'none';
+  const current = selectEffectiveWeather({ activeScene, sessionWeather }) ?? 'none';
 
   function pick(weather: WeatherOverlay) {
     const sessionId = getPersistSessionId();
     if (!sessionId) return;
-    emitSessionWeather(sessionId, weather);
+    const active = selectEffectiveWeather({ activeScene, sessionWeather });
+    let next: WeatherOverlay;
+    if (weather === 'none') {
+      next = 'none';
+    } else if (active === weather) {
+      next = 'none';
+    } else {
+      next = weather;
+    }
+    emitSessionWeather(sessionId, next);
     onDone();
   }
 
