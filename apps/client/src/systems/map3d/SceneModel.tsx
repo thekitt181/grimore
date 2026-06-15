@@ -77,6 +77,7 @@ function GltfModel({
         mesh.receiveShadow = !tokenRender;
         if (tokenRender) {
           mesh.renderOrder = 12;
+          mesh.frustumCulled = false;
         }
       }
     });
@@ -139,7 +140,10 @@ function StlModel({
     );
     root.castShadow = true;
     root.receiveShadow = !tokenRender;
-    if (tokenRender) root.renderOrder = 12;
+    if (tokenRender) {
+      root.renderOrder = 12;
+      root.frustumCulled = false;
+    }
     return root;
   }, [geometry, tokenRender, tokenRender2d]);
 
@@ -195,7 +199,16 @@ export function SceneModel({
   const { resolved, status } = useResolvedModelUrl(url);
   const format = modelFormatFromUrl(url);
 
+  useEffect(() => {
+    if (!resolved || format === 'stl' || format == null) return;
+    useGLTF.preload(resolved);
+  }, [resolved, format]);
+
   if (!format) return null;
+
+  if (status === 'loading') {
+    return <ModelPlaceholder targetSize={targetSize} tokenRender={tokenRender} />;
+  }
 
   if (status === 'error' || !resolved) {
     return <ModelPlaceholder targetSize={targetSize} tokenRender={tokenRender} />;

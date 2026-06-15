@@ -223,6 +223,9 @@ export function useItemRenderer(
         if (item.type === 'map' && mobileMapUnderlay) {
           c.visible = show;
           c.alpha = show ? alpha : 0;
+        } else if (item.type === 'token' && pixiTokenFallback) {
+          c.visible = show;
+          c.alpha = show ? alpha : 0;
         } else {
           c.visible = false;
           c.alpha = 0;

@@ -17,6 +17,11 @@ export function is3dToken(token: TokenItem): boolean {
   return getTokenRenderType(token) === '3d';
 }
 
+/** In 3D view, GLB/STL on a token always renders in Three.js (even if renderType is 2d). */
+export function tokenUsesModelMesh(token: TokenItem, viewMode: MapViewMode): boolean {
+  return viewMode === '3d' && Boolean(token.modelUrl);
+}
+
 /** Token body is rendered in the Three.js overlay (2D model preview or full 3D view). */
 export function tokenRendersInThree(token: TokenItem, viewMode: MapViewMode): boolean {
   if (viewMode === '3d') return true;

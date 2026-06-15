@@ -1,6 +1,7 @@
 import { isMobileClient } from '@/lib/socket';
 import { sceneRefs } from '@/systems/scene/sceneRefs';
 import { useMapStore } from './store/mapStore';
+import { isThreeCanvasHealthy } from '@/systems/map3d/threeCanvasHealth';
 
 function usesDrawPreview(activeTool: string): boolean {
   return (
@@ -20,7 +21,8 @@ export function applyPixiViewMode(is3d: boolean): void {
   const activeTool = useMapStore.getState().activeTool;
   // Desktop: hide Pixi maps in 3D. Mobile: keep map images as an underlay for Three.js.
   const hidePixiMaps = is3d && !mobile;
-  const hidePixiTokens = is3d;
+  const pixiTokenFallback = is3d && mobile && !isThreeCanvasHealthy();
+  const hidePixiTokens = is3d && !pixiTokenFallback;
 
   world.eventMode = is3d ? 'none' : 'static';
 

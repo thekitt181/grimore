@@ -192,11 +192,13 @@ function renderTokenBase(c: Container, item: TokenItem, ctx: RenderContext) {
   const cy = h / 2;
   const radius = Math.min(w, h) / 2 - 4;
   const renderType = getTokenRenderType(item);
-  /** Hide Pixi body when Three.js renders the token (3D view, or 2D model overlay). */
+  /** Hide Pixi body when Three.js renders the token (3D view model, or 2D model overlay). */
   const hidePixiBody =
     !ctx.pixiTokenFallback &&
-    renderType === '3d' &&
-    (ctx.viewMode === '3d' || Boolean(item.modelUrl));
+    (
+      (ctx.viewMode === '3d' && Boolean(item.modelUrl)) ||
+      (renderType === '3d' && (ctx.viewMode === '3d' || Boolean(item.modelUrl)))
+    );
   const borderColor = item.borderColour ? cssHex(item.borderColour) : 0xc9a84c;
 
   if (item.auraRadius && item.auraRadius > 0 && !hidePixiBody) {
@@ -279,8 +281,11 @@ function renderTokenBase(c: Container, item: TokenItem, ctx: RenderContext) {
 function renderTokenOverlay(c: Container, item: TokenItem, ctx: RenderContext) {
   const renderType = getTokenRenderType(item);
   const hidePixiBody =
-    renderType === '3d' &&
-    (ctx.viewMode === '3d' || Boolean(item.modelUrl));
+    !ctx.pixiTokenFallback &&
+    (
+      (ctx.viewMode === '3d' && Boolean(item.modelUrl)) ||
+      (renderType === '3d' && (ctx.viewMode === '3d' || Boolean(item.modelUrl)))
+    );
 
   const overlay = new Container();
   overlay.label = 'token-overlay';

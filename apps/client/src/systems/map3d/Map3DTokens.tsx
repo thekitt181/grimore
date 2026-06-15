@@ -2,7 +2,7 @@ import { useRef } from 'react';
 import { useMapStore } from '@/systems/map/store/mapStore';
 import { useItemStore } from '@/systems/scene/store/itemStore';
 import type { TokenItem } from '@/systems/scene/types';
-import { is2dToken, is3dToken } from '@/systems/scene/token/tokenRenderType';
+import { is2dToken, is3dToken, tokenUsesModelMesh } from '@/systems/scene/token/tokenRenderType';
 import { useThreeTexture } from './useThreeTexture';
 import { SceneModel } from './SceneModel';
 import { TokenPickVolume } from './TokenPickVolume';
@@ -323,6 +323,18 @@ export function Map3DTokens({
       {tokens.map((token) => {
         const activeTurn = token.id === activeTurnItemId;
         const showGizmo = token.id === gizmoTokenId;
+
+        if (!view2d && tokenUsesModelMesh(token, '3d')) {
+          return (
+            <Token3DModel
+              key={token.id}
+              token={token}
+              view2d={false}
+              activeTurn={activeTurn}
+              showGizmo={showGizmo}
+            />
+          );
+        }
 
         if (is2dToken(token)) {
           return (
