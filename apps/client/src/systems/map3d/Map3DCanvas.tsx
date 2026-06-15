@@ -1,4 +1,4 @@
-import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import type { RootState } from '@react-three/fiber';
 import * as THREE from 'three';
@@ -26,7 +26,8 @@ import { SceneItemTransformGroup } from './TokenTransformGroup';
 import { pixiRenderResolution } from './pixiCanvasMetrics';
 import { bindWebGLContextRecovery } from './threeWebGLContext';
 import { is3dToken } from '@/systems/scene/token/tokenRenderType';
-import { notifyThreeCanvasReady } from './threeCanvasHealth';
+import { markThreeFrameRendered, registerThreeRenderer, resetThreeCanvasHealth, notifyThreeCanvasUnhealthy, THREE_READY_EVENT } from './threeCanvasHealth';
+import { applyPixiViewMode } from '@/systems/map/applyPixiViewMode';
 
 /** Stable defaults — position/zoom owned by SyncedPixiOrthographicCamera (never reset on re-render). */
 function useStableOrthoCameraDefaults() {
@@ -162,7 +163,9 @@ function onThreeCanvasCreated(state: RootState): void {
   gl.domElement.style.pointerEvents = 'none';
   gl.domElement.style.width = '100%';
   gl.domElement.style.height = '100%';
+  gl.domElement.style.display = 'block';
   sceneRefs.threeCanvas.current = gl.domElement;
+  registerThreeRenderer(gl);
 
   if (state.camera instanceof THREE.OrthographicCamera) {
     applyOrthographicCameraFromViewport(state.camera, state.size.width, state.size.height);
@@ -175,15 +178,33 @@ function WebGLContextGuard({ onContextLost }: { onContextLost: () => void }) {
   return null;
 }
 
-/** Notify Pixi layers once Three.js has a healthy canvas (mobile fallback off). */
+/** Notify Pixi layers once Three.js has drawn a healthy frame (mobile fallback off). */
 function ThreeReadyNotifier() {
-  const notified = useRef(false);
   useFrame(() => {
-    if (notified.current) return;
-    notified.current = true;
-    notifyThreeCanvasReady();
+    markThreeFrameRendered();
   });
   return null;
+}
+
+/** Opaque scene background only after Three is ready — keeps Pixi map visible underneath on mobile. */
+function SceneBackground() {
+  const mobile = isMobileClient();
+  const is3d = useMapStore((s) => s.viewMode === '3d');
+  const [opaque, setOpaque] = useState(!mobile || !is3d);
+
+  useEffect(() => {
+    if (!mobile || !is3d) {
+      setOpaque(true);
+      return;
+    }
+    setOpaque(false);
+    const onReady = () => setOpaque(true);
+    window.addEventListener(THREE_READY_EVENT, onReady);
+    return () => window.removeEventListener(THREE_READY_EVENT, onReady);
+  }, [mobile, is3d]);
+
+  if (!is3d || !opaque) return null;
+  return <color attach="background" args={['#1e1e22']} />;
 }
 
 /** Three.js overlay: full scene in 3D view; model tokens only in 2D view. */
@@ -194,6 +215,9 @@ export function MapSceneCanvas() {
   const onContextLost = useCallback(() => {
     sceneRefs.threeCanvas.current = null;
     sceneCameraRef.liveCamera = null;
+    resetThreeCanvasHealth();
+    notifyThreeCanvasUnhealthy();
+    applyPixiViewMode(useMapStore.getState().viewMode === '3d');
     setGlKey((k) => k + 1);
   }, []);
   const items = useItemStore(selectSortedItems);
@@ -228,6 +252,7 @@ export function MapSceneCanvas() {
   useEffect(() => () => {
     sceneRefs.threeCanvas.current = null;
     sceneCameraRef.liveCamera = null;
+    resetThreeCanvasHealth();
   }, [glKey]);
 
   useEffect(() => {
@@ -268,7 +293,7 @@ export function MapSceneCanvas() {
       <WebGLContextGuard onContextLost={onContextLost} />
       <ThreeReadyNotifier />
       <SyncedPixiOrthographicCamera />
-      {is3d ? <color attach="background" args={['#1e1e22']} /> : null}
+      <SceneBackground />
       <Suspense fallback={null}>
         {is3d ? (
           <>

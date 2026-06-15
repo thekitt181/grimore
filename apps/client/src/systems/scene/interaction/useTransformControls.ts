@@ -19,6 +19,7 @@ import { isTokenMoveClick } from '../token/tokenMovePick';
 import { worldToGridColRow } from '../token/tokenGrid';
 import type { Item, TokenItem } from '../types';
 import type { TokenGizmoLayout, GizmoHandle } from '../token/tokenGizmoLayout';
+import { formatResizeFeetLabel, hideResizeSizeLabel, showResizeSizeLabel } from './resizeSizeLabel';
 
 // ─── Handle registry (shared with selection tool) ──────────────────────────────
 
@@ -309,6 +310,8 @@ export function useTransformControls(appReady: boolean) {
           }
         }
         useLiveTransformStore.getState().setLive(it.id, { x: nx, y: ny, width: newW, height: newH });
+        const feetLabel = formatResizeFeetLabel(it, newW, newH, drag.w0);
+        if (feetLabel) showResizeSizeLabel(e.clientX, e.clientY, feetLabel);
         return;
       }
 
@@ -405,6 +408,7 @@ export function useTransformControls(appReady: boolean) {
         emitItemUpdate(patches);
       }
       if (clearedIds.length) liveStore.clear(clearedIds);
+      hideResizeSizeLabel();
       drag = null;
     }
 
@@ -414,6 +418,7 @@ export function useTransformControls(appReady: boolean) {
     canvas.addEventListener('pointercancel', onUp);
 
     return () => {
+      hideResizeSizeLabel();
       canvas.removeEventListener('pointerdown', onDown, true);
       canvas.removeEventListener('pointermove', onMove);
       canvas.removeEventListener('pointerup', onUp);

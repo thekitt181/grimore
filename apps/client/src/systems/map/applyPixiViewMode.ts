@@ -1,7 +1,7 @@
 import { isMobileClient } from '@/lib/socket';
 import { sceneRefs } from '@/systems/scene/sceneRefs';
 import { useMapStore } from './store/mapStore';
-import { isThreeCanvasHealthy } from '@/systems/map3d/threeCanvasHealth';
+import { isThreeReadyForDisplay } from '@/systems/map3d/threeCanvasHealth';
 
 function usesDrawPreview(activeTool: string): boolean {
   return (
@@ -19,9 +19,14 @@ export function applyPixiViewMode(is3d: boolean): void {
 
   const mobile = isMobileClient();
   const activeTool = useMapStore.getState().activeTool;
-  const threeOk = isThreeCanvasHealthy();
-  // Mobile: hide Pixi map art when Three.js is healthy (same as desktop). Fallback only if WebGL fails.
+  const threeOk = isThreeReadyForDisplay();
+  // Mobile: hide Pixi fallbacks only after Three.js has drawn at least one frame.
   const hidePixiSceneArt = is3d && (!mobile || threeOk);
+
+  if (mobile) {
+    if (is3d && hidePixiSceneArt) app.ticker.stop();
+    else app.ticker.start();
+  }
 
   world.eventMode = is3d ? 'none' : 'static';
 

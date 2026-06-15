@@ -61,12 +61,9 @@ export function computeTokenGizmoLayout(
     const minDim = Math.min(w, h);
     const compact = minDim < 96;
     const handleOutset = compact ? Math.max(12, minDim * 0.16) : Math.max(8, minDim * 0.08);
-    const defs: Array<[GizmoHandleId, number, number]> = compact
-      ? [['nw', -1, -1], ['ne', 1, -1], ['se', 1, 1], ['sw', -1, 1]]
-      : [
-          ['nw', -1, -1], ['ne', 1, -1], ['se', 1, 1], ['sw', -1, 1],
-          ['n', 0, -1], ['e', 1, 0], ['s', 0, 1], ['w', -1, 0],
-        ];
+    const defs: Array<[GizmoHandleId, number, number]> = [
+      ['nw', -1, -1], ['ne', 1, -1], ['se', 1, 1], ['sw', -1, 1],
+    ];
     const handles: GizmoHandle[] = defs.map(([id, sx, sy]) => {
       const pt = toWorld(sx * (hw + handleOutset), sy * (hh + handleOutset));
       return { id, wx: pt.x, wy: pt.y, sx, sy };

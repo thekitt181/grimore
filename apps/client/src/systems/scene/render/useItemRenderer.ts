@@ -1,7 +1,11 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Container } from 'pixi.js';
 import { isMobileClient } from '@/lib/socket';
-import { isThreeCanvasHealthy } from '@/systems/map3d/threeCanvasHealth';
+import {
+  isThreeReadyForDisplay,
+  THREE_READY_EVENT,
+  THREE_UNHEALTHY_EVENT,
+} from '@/systems/map3d/threeCanvasHealth';
 import { useItemStore, getActiveMap } from '../store/itemStore';
 import { useSessionStore } from '@/store/sessionStore';
 import { useInitiativeStore } from '@/systems/map/store/initiativeStore';
@@ -67,6 +71,17 @@ export function useItemRenderer(
   const signatures = useRef<Map<string, string>>(new Map());
   const overlaySignatures = useRef<Map<string, string>>(new Map());
   const wallSignatures = useRef<Map<string, string>>(new Map());
+  const [threeHealthTick, setThreeHealthTick] = useState(0);
+
+  useEffect(() => {
+    const bump = () => setThreeHealthTick((t) => t + 1);
+    window.addEventListener(THREE_READY_EVENT, bump);
+    window.addEventListener(THREE_UNHEALTHY_EVENT, bump);
+    return () => {
+      window.removeEventListener(THREE_READY_EVENT, bump);
+      window.removeEventListener(THREE_UNHEALTHY_EVENT, bump);
+    };
+  }, []);
 
   useEffect(() => {
     if (!appReady) {
@@ -86,7 +101,7 @@ export function useItemRenderer(
 
     layer.sortableChildren = true;
     if (tokenLayer) tokenLayer.sortableChildren = true;
-    const mobile3d = viewMode === '3d' && isMobileClient() && !isThreeCanvasHealthy();
+    const pixiFallback3d = viewMode === '3d' && isMobileClient() && !isThreeReadyForDisplay();
     const gm: boolean = myRole === 'GM';
     const ctx: RenderContext = {
       gm,
@@ -136,7 +151,8 @@ export function useItemRenderer(
       const threeBodyOnly =
         item.type === 'token' &&
         viewMode === '3d' &&
-        tokenRendersInThree(item, viewMode);
+        tokenRendersInThree(item, viewMode) &&
+        !pixiFallback3d;
       if (threeBodyOnly) {
         const stale = containers.current.get(item.id);
         if (stale) {
@@ -201,7 +217,10 @@ export function useItemRenderer(
       }
       const alpha = item.visible || !gm ? 1 : 0.35;
 
-      if (viewMode === '3d' && (item.type !== 'map' || !mobile3d)) {
+      if (viewMode === '3d' && !pixiFallback3d) {
+        c.visible = false;
+        c.alpha = 0;
+      } else if (viewMode === '3d' && pixiFallback3d && item.type !== 'map' && item.type !== 'token') {
         c.visible = false;
         c.alpha = 0;
       } else {
@@ -260,6 +279,7 @@ export function useItemRenderer(
     fogEnabled,
     sessionFogActive,
     myUserId,
+    threeHealthTick,
     appReady,
     layerRef,
     tokenLayerRef,
