@@ -7,12 +7,7 @@ import {
   itemsWithLiveTransforms,
   useLiveTransformStore,
 } from '@/systems/scene/store/liveTransformStore';
-import {
-  isTokenVisibleToPlayer,
-  playerHasVisionSource,
-  playerSeenCellKeys,
-} from '@/systems/map/fogLos';
-import { isFogOverlayVisible } from '@/systems/scene/fogActiveSync';
+import { filterPlayerTokens } from '@/systems/scene/token/clientTokenVisibility';
 import type { MapItem, TokenItem } from '@/systems/scene/types';
 import { getActiveMap } from '@/systems/scene/store/itemStore';
 
@@ -41,25 +36,17 @@ export function useVisibleSceneTokens(opts?: { modelOnly?: boolean }): {
       if (i.type !== 'token') return false;
       if (opts?.modelOnly && !i.modelUrl) return false;
       if (gm) return true;
-      return i.visible;
+      return i.visible !== false;
     });
 
-    if (gm || !isFogOverlayVisible() || !activeMap) return allTokens;
+    if (gm) return allTokens;
 
-    if (!playerHasVisionSource(merged, myUserId, selectedIds, activeMap)) {
-      return allTokens.filter((t) => t.ownerId === myUserId);
-    }
-
-    const seenCells = playerSeenCellKeys(
-      revealedCells,
-      activeMap,
-      merged,
+    return filterPlayerTokens(merged, {
       myUserId,
       selectedIds,
-      activeMap.gridSize,
-    );
-
-    return allTokens.filter((t) => isTokenVisibleToPlayer(t, activeMap, seenCells));
+      revealedCells,
+      activeMap,
+    }).filter((t) => !opts?.modelOnly || Boolean(t.modelUrl));
   }, [
     items,
     selectedIds,

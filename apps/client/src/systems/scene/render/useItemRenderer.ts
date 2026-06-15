@@ -5,6 +5,7 @@ import { useItemStore, getActiveMap } from '../store/itemStore';
 import { useSessionStore } from '@/store/sessionStore';
 import { useInitiativeStore } from '@/systems/map/store/initiativeStore';
 import { useMapStore } from '@/systems/map/store/mapStore';
+import { filterPlayerTokens } from '@/systems/scene/token/clientTokenVisibility';
 import {
   useLiveTransformStore,
 } from '../store/liveTransformStore';
@@ -52,6 +53,8 @@ export function useItemRenderer(
   );
   const viewMode = useMapStore((s) => s.viewMode);
   const activeTool = useMapStore((s) => s.activeTool);
+  const revealedCells = useMapStore((s) => s.revealedCells);
+  const myUserId = useSessionStore((s) => s.myUserId);
 
   const containers = useRef<Map<string, Container>>(new Map());
   const wallContainers = useRef<Map<string, Container>>(new Map());
@@ -86,6 +89,16 @@ export function useItemRenderer(
       ...(activeTurnItemId ? { activeTurnItemId } : {}),
     };
     const activeMap = getActiveMap();
+    const playerVisibleTokenIds = !gm
+      ? new Set(
+        filterPlayerTokens(items, {
+          myUserId,
+          selectedIds,
+          revealedCells,
+          activeMap,
+        }).map((t) => t.id),
+      )
+      : null;
 
     const liveIds = new Set(Object.keys(items));
     const liveMapIds = new Set(
@@ -128,12 +141,15 @@ export function useItemRenderer(
 
       let c = containers.current.get(item.id);
       const parent = itemParentLayer(item, layer, tokenLayer);
-      if (!c || c.parent !== parent) {
+      if (!c) {
         c = new Container();
         c.label = `item_${item.id}`;
         c.eventMode = 'none';
-        parent.addChild(c);
         containers.current.set(item.id, c);
+      }
+      if (c.parent !== parent) {
+        c.parent?.removeChild(c);
+        parent.addChild(c);
       }
 
       // Rebuild children only when visual data changed.
@@ -167,7 +183,10 @@ export function useItemRenderer(
       c.zIndex = itemDisplayZIndex(item);
 
       // Visibility / ghosting
-      const show = item.visible || gm;
+      let show = item.visible || gm;
+      if (!gm && item.type === 'token' && playerVisibleTokenIds) {
+        show = show && playerVisibleTokenIds.has(item.id);
+      }
       const alpha = item.visible || !gm ? 1 : 0.35;
 
       if (viewMode === '3d' && (item.type !== 'map' || !mobile3d)) {
@@ -223,6 +242,8 @@ export function useItemRenderer(
     activeTurnItemId,
     viewMode,
     activeTool,
+    revealedCells,
+    myUserId,
     appReady,
     layerRef,
     tokenLayerRef,

@@ -1,12 +1,7 @@
 import { useEffect } from 'react';
 import { Graphics } from 'pixi.js';
 import { useMapStore } from '@/systems/map/store/mapStore';
-import { isFogOverlayVisible } from '@/systems/scene/fogActiveSync';
-import {
-  isTokenVisibleToPlayer,
-  playerHasVisionSource,
-  playerSeenCellKeys,
-} from '@/systems/map/fogLos';
+import { filterPlayerTokens, playerOwnsToken } from '@/systems/scene/token/clientTokenVisibility';
 import { useItemStore, getActiveMap } from '../store/itemStore';
 import { useSessionStore } from '@/store/sessionStore';
 import { itemsWithLiveTransforms } from '../store/liveTransformStore';
@@ -125,36 +120,22 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
       );
       const all = Object.values(merged) as Item[];
       if (gm) return all;
-      let tokens = all.filter((i) => i.visible && i.type === 'token');
-      if (!isFogOverlayVisible()) return tokens;
       const map = getActiveMap();
-      if (!map) return [];
-      const itemsForVision = itemsWithLiveTransforms(
-        useItemStore.getState().items,
-        useLiveTransformStore.getState().byId,
-      );
       const userId = useSessionStore.getState().myUserId;
-      const selectedIds = useItemStore.getState().selectedIds;
-      if (!playerHasVisionSource(itemsForVision, userId, selectedIds, map)) {
-        return [];
-      }
-      const seen = playerSeenCellKeys(
-        useMapStore.getState().revealedCells,
-        map,
-        itemsForVision,
-        userId,
+      const selectedIds = store.selectedIds;
+      return filterPlayerTokens(merged, {
+        myUserId: userId,
         selectedIds,
-        map.gridSize,
-      );
-      return tokens.filter((i) =>
-        isTokenVisibleToPlayer(i as TokenItem, map, seen),
-      );
+        revealedCells: useMapStore.getState().revealedCells,
+        activeMap: map,
+      });
     }
 
     function canManipulate(item: Item): boolean {
       if (item.locked) return false;
       if (gm) return true;
-      return item.type === 'token';
+      if (item.type !== 'token') return false;
+      return playerOwnsToken(item as TokenItem, useSessionStore.getState().myUserId);
     }
 
     function dragWorldDelta(e: PointerEvent, startScreenX: number, startScreenY: number) {
@@ -219,21 +200,22 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
       const viewMode = useMapStore.getState().viewMode;
       const is3dNavigate = viewMode === '3d' && !e.shiftKey;
 
-      const clickable = selectableItems().filter((i) => i.type !== 'map');
-      const allTokens = clickable.filter((i): i is TokenItem => i.type === 'token');
-      const pick2dPool = clickable.filter((i) => i.type !== 'token');
+      const selectable = selectableItems();
+      const selectableIds = new Set(selectable.map((i) => i.id));
+      const allTokens = selectable.filter((i): i is TokenItem => i.type === 'token');
+      const pick2dPool = selectable.filter((i) => i.type !== 'token');
 
       let hit: Item | undefined;
       const pickId = pickSceneItem(e.clientX, e.clientY);
       const rayHit = pickId ? merged[pickId] : undefined;
-      if (rayHit?.type === 'token') {
+      if (rayHit?.type === 'token' && selectableIds.has(rayHit.id)) {
         hit = rayHit;
-      } else if (rayHit && (!is3dNavigate || rayHit.type === 'map')) {
+      } else if (rayHit && (!is3dNavigate || rayHit.type === 'map') && selectableIds.has(rayHit.id)) {
         hit = rayHit;
       }
       if (!hit && allTokens.length) {
         const screenPick = pickTokenAtScreen(e.clientX, e.clientY, allTokens);
-        if (screenPick && merged[screenPick]) hit = merged[screenPick] as Item;
+        if (screenPick && selectableIds.has(screenPick)) hit = merged[screenPick] as Item;
       }
       if (!hit && !is3dNavigate) {
         hit = hitTest(pick2dPool, wx, wy, { includeLocked: true }) ?? undefined;
