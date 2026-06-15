@@ -7,6 +7,7 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
+    "start:render": "node scripts/deploy-db.mjs --required && node dist/index.js",
     "lint": "eslint src --ext .ts",
     "type-check": "tsc --noEmit",
     "db:migrate": "prisma migrate dev",

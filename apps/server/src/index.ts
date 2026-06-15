@@ -27,6 +27,7 @@ import { reconcileRawGlobalStorage } from './services/compendiumOwlbearPersist';
 import { warmCompendiumCatalog } from './services/compendiumSync';
 import { mountClientSpa } from './lib/serveClient';
 import { isFloorplanScanConfigured } from './services/floorplan/floorplanScanService';
+import { runMigrationsInBackground } from './lib/runMigrationsInBackground';
 
 const app = express();
 const httpServer = http.createServer(app);
@@ -261,6 +262,9 @@ function start() {
     console.log(`[Server] GrimoireVTT listening on port ${PORT}`);
     console.log(`[Server] Allowed client origins: ${clientOrigins.join(', ')}`);
     console.log(`[Server] Public app URL (invites): ${getPrimaryClientUrl()}`);
+    if (process.env['NODE_ENV'] === 'production') {
+      runMigrationsInBackground();
+    }
     void bootServices();
   });
 }

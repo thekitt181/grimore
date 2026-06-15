@@ -1,4 +1,18 @@
 /** Runtime Postgres URL with safe pool settings (Supabase-friendly). */
+function withSupabaseSsl(connectionUrl: string): string {
+  try {
+    const url = new URL(connectionUrl);
+    if (url.hostname.includes('supabase.com') || url.hostname.includes('supabase.co')) {
+      if (!url.searchParams.has('sslmode')) {
+        url.searchParams.set('sslmode', 'require');
+      }
+    }
+    return url.toString();
+  } catch {
+    return connectionUrl;
+  }
+}
+
 export function resolveDatabaseUrl(raw?: string): string {
   const source = raw?.trim() ?? process.env['DATABASE_URL']?.trim();
   if (!source) {
@@ -30,5 +44,42 @@ export function resolveDatabaseUrl(raw?: string): string {
     url.searchParams.set('pool_timeout', '20');
   }
 
-  return url.toString();
+  return withSupabaseSsl(url.toString());
+}
+
+/** Prisma migrate needs direct Postgres — not the PgBouncer transaction pooler. */
+export function resolveMigrationDatabaseUrl(raw?: string): string {
+  const direct = process.env['DIRECT_URL']?.trim();
+  if (direct) return withSupabaseSsl(direct);
+
+  const source = raw?.trim() ?? process.env['DATABASE_URL']?.trim();
+  if (!source) {
+    throw new Error('DATABASE_URL is not set');
+  }
+
+  let url: URL;
+  try {
+    url = new URL(source);
+  } catch {
+    throw new Error('DATABASE_URL is not a valid URL');
+  }
+
+  if (url.hostname.includes('pooler.supabase.com')) {
+    const user = decodeURIComponent(url.username);
+    const projectRef = user.startsWith('postgres.') ? user.slice('postgres.'.length) : null;
+    if (projectRef) {
+      url.hostname = `db.${projectRef}.supabase.co`;
+      url.port = '5432';
+      url.username = 'postgres';
+      url.searchParams.delete('pgbouncer');
+      url.searchParams.delete('connection_limit');
+      url.searchParams.delete('pool_timeout');
+      return withSupabaseSsl(url.toString());
+    }
+  }
+
+  if (url.searchParams.get('pgbouncer') === 'true') {
+    url.searchParams.delete('pgbouncer');
+  }
+  return withSupabaseSsl(url.toString());
 }
