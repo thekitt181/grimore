@@ -170,8 +170,7 @@ export function useMapFogOverlay(
       const state = fogStateRef.current;
       if (!state.showFogOverlay) return;
       const live = useLiveTransformStore.getState();
-      const previewVision = state.isGM && state.selectedIds.length > 0;
-      if (Object.keys(live.byId).length === 0 && !previewVision) return;
+      if (Object.keys(live.byId).length === 0) return;
       syncMapFogOverlays(layer, fogContainers.current, {
         ...state,
         liveById: live.byId,

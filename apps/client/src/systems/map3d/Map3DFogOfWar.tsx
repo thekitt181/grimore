@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { useItemStore, getActiveMap } from '@/systems/scene/store/itemStore';
 import { useMapStore } from '@/systems/map/store/mapStore';
@@ -8,12 +8,14 @@ import {
 } from '@/systems/scene/store/liveTransformStore';
 import { useSessionStore } from '@/store/sessionStore';
 import { paintFogCanvas } from '@/systems/map/fogRender';
+import { fogTextureDimensions } from '@/systems/map/fogTextureSize';
 import { isFogOverlayVisible } from '@/systems/scene/fogActiveSync';
 import type { MapItem } from '@/systems/scene/types';
 import { SceneItemTransformGroup } from './TokenTransformGroup';
 
-const FOG_Y = 0.06;
-const FOG_RENDER_ORDER = 12;
+const FOG_Y = 0.1;
+/** Above map mesh (0) but below tokens (12+) so minis stay visible on lit squares. */
+const FOG_RENDER_ORDER = 11;
 
 function useFogDrawState(map: MapItem) {
   const revealedCells = useMapStore((s) => s.revealedCells);
@@ -54,23 +56,20 @@ function useFogDrawState(map: MapItem) {
 export function Map3DFogOfWar({ map }: { map: MapItem }) {
   const state = useFogDrawState(map);
 
-  const { canvas, texture } = useMemo(() => {
+  const { canvas, texture, texScale } = useMemo(() => {
+    const { width, height, scale } = fogTextureDimensions(map.width, map.height);
     const c = document.createElement('canvas');
-    c.width = Math.max(1, Math.round(map.width));
-    c.height = Math.max(1, Math.round(map.height));
+    c.width = width;
+    c.height = height;
     const t = new THREE.CanvasTexture(c);
     t.minFilter = THREE.LinearFilter;
     t.magFilter = THREE.LinearFilter;
-    return { canvas: c, texture: t };
+    return { canvas: c, texture: t, texScale: scale };
   }, [map.width, map.height]);
 
   const materialRef = useRef<THREE.MeshBasicMaterial | null>(null);
 
-  useEffect(() => () => {
-    texture.dispose();
-  }, [texture]);
-
-  useEffect(() => {
+  const repaintFog = useCallback(() => {
     if (!state.visible) {
       if (materialRef.current) materialRef.current.visible = false;
       return;
@@ -79,6 +78,7 @@ export function Map3DFogOfWar({ map }: { map: MapItem }) {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
+    ctx.setTransform(texScale, 0, 0, texScale, 0, 0);
     paintFogCanvas(ctx, map, {
       revealedCells: state.revealedCells,
       gridSize: map.gridSize,
@@ -96,17 +96,30 @@ export function Map3DFogOfWar({ map }: { map: MapItem }) {
     }
   }, [
     canvas,
-    texture,
     map,
     state.visible,
     state.isGM,
     state.revealedCells,
-    state.revealedCount,
     state.itemsForFog,
     state.selectedIds,
     state.myUserId,
-    state.liveTick,
+    texScale,
+    texture,
   ]);
+
+  useEffect(() => () => {
+    texture.dispose();
+  }, [texture]);
+
+  useEffect(() => {
+    repaintFog();
+  }, [repaintFog, state.liveTick, state.revealedCount]);
+
+  useEffect(() => {
+    if (!state.visible && materialRef.current) {
+      materialRef.current.visible = false;
+    }
+  }, [state.visible]);
 
   if (!state.visible) return null;
 
@@ -119,6 +132,7 @@ export function Map3DFogOfWar({ map }: { map: MapItem }) {
           map={texture}
           transparent
           opacity={state.isGM ? (map.visible ? 0.5 : 0.35) : 1}
+          depthTest={false}
           depthWrite={false}
           toneMapped={false}
         />

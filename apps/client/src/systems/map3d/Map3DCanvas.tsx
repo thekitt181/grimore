@@ -1,7 +1,6 @@
-import { Suspense, useEffect, useMemo } from 'react';
-import { Canvas } from '@react-three/fiber';
+import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
+import { Canvas, useThree } from '@react-three/fiber';
 import type { RootState } from '@react-three/fiber';
-import type { WebGLRenderer } from 'three';
 import * as THREE from 'three';
 import { isMobileClient } from '@/lib/socket';
 import { useItemStore, selectSortedItems } from '@/systems/scene/store/itemStore';
@@ -16,13 +15,14 @@ import { Map3DTokens } from './Map3DTokens';
 import { Map3DDrawings } from './Map3DDrawings';
 import { Map3DMapModel } from './Map3DMapModel';
 import { Map3DFogOfWar } from './Map3DFogOfWar';
-import { SyncedPixiOrthographicCamera, SyncedPixiPerspectiveCamera } from './SyncedPixiCamera';
+import { SyncedPixiOrthographicCamera } from './SyncedPixiCamera';
 import { applyOrthographicCameraFromViewport } from './orthographicCameraSync';
 import { useVisibleSceneTokens } from './useVisibleSceneTokens';
 import { Map3DTokenGizmo } from './Map3DTokenGizmo';
 import { MapPickVolume } from './MapPickVolume';
 import { SceneItemTransformGroup } from './TokenTransformGroup';
 import { pixiRenderResolution } from './pixiCanvasMetrics';
+import { bindWebGLContextRecovery } from './threeWebGLContext';
 import { is3dToken } from '@/systems/scene/token/tokenRenderType';
 
 /** Stable defaults — position/zoom owned by SyncedPixiOrthographicCamera (never reset on re-render). */
@@ -37,6 +37,16 @@ function TokenLayer() {
       tokens={tokens}
       {...(activeTurnItemId ? { activeTurnItemId } : {})}
     />
+  );
+}
+
+/** 2D view: GLB map + fog (Pixi fog sits under this Three overlay). */
+function Map2DModelFogContent({ map }: { map: MapItem }) {
+  return (
+    <>
+      <Map3DMapModel map={map} />
+      <Map3DFogOfWar map={map} />
+    </>
   );
 }
 
@@ -55,15 +65,16 @@ function TokenModelOverlayLayer() {
   );
 }
 
-function TokenOverlay2DContent() {
+function TokenOverlay2DContent({ map }: { map: MapItem | null }) {
+  const hasModelMap = Boolean(map?.modelUrl);
   return (
     <>
-      <SyncedPixiOrthographicCamera />
       <ambientLight intensity={0.62} color="#fff8ef" />
       <directionalLight position={[420, 920, 280]} intensity={1.45} color="#fff5e6" />
       <directionalLight position={[-360, 640, -220]} intensity={0.5} color="#ffd4a8" />
       <directionalLight position={[80, 520, -620]} intensity={0.35} color="#ffffff" />
       <Suspense fallback={null}>
+        {hasModelMap && map ? <Map2DModelFogContent map={map} /> : null}
         <TokenModelOverlayLayer />
       </Suspense>
     </>
@@ -138,26 +149,35 @@ const canvasStyle = {
   pointerEvents: 'none' as const,
 };
 
-function onThreeCanvasCreated({ gl }: { gl: WebGLRenderer }) {
+function onThreeCanvasCreated(state: RootState): void {
+  const { gl } = state;
   gl.setClearColor(0x000000, 0);
   gl.domElement.style.pointerEvents = 'none';
   gl.domElement.style.width = '100%';
   gl.domElement.style.height = '100%';
   sceneRefs.threeCanvas.current = gl.domElement;
-}
 
-/** Sync ortho camera before the first painted frame so zoom matches 2D immediately. */
-function on3dCanvasCreated(state: RootState) {
-  onThreeCanvasCreated(state);
   if (state.camera instanceof THREE.OrthographicCamera) {
     applyOrthographicCameraFromViewport(state.camera, state.size.width, state.size.height);
   }
+}
+
+function WebGLContextGuard({ onContextLost }: { onContextLost: () => void }) {
+  const gl = useThree((s) => s.gl);
+  useEffect(() => bindWebGLContextRecovery(gl, onContextLost), [gl, onContextLost]);
+  return null;
 }
 
 /** Three.js overlay: full scene in 3D view; model tokens only in 2D view. */
 export function MapSceneCanvas() {
   const viewMode = useMapStore((s) => s.viewMode);
   const is3d = viewMode === '3d';
+  const [glKey, setGlKey] = useState(0);
+  const onContextLost = useCallback(() => {
+    sceneRefs.threeCanvas.current = null;
+    sceneCameraRef.liveCamera = null;
+    setGlKey((k) => k + 1);
+  }, []);
   const items = useItemStore(selectSortedItems);
   const activeMapId = useItemStore((s) => s.activeMapId);
   const activeMap = useMemo(() => {
@@ -174,6 +194,9 @@ export function MapSceneCanvas() {
     [modelCandidates],
   );
 
+  const hasModelMap = Boolean(activeMap?.modelUrl);
+  const needsThreeOverlay = is3d || hasModelTokens || hasModelMap;
+
   const orthoDefaults = useStableOrthoCameraDefaults();
 
   const mobile = isMobileClient();
@@ -184,15 +207,15 @@ export function MapSceneCanvas() {
     failIfMajorPerformanceCaveat: false,
   };
   const dpr = pixiRenderResolution();
-  const useShadows = !mobile;
+  const useShadows = !mobile && is3d;
 
   useEffect(() => () => {
     sceneRefs.threeCanvas.current = null;
     sceneCameraRef.liveCamera = null;
-  }, [is3d, hasModelTokens]);
+  }, [glKey]);
 
   useEffect(() => {
-    if (!is3d && !hasModelTokens) return;
+    if (!needsThreeOverlay) return;
     const onResize = () => {
       const canvas = sceneRefs.threeCanvas.current;
       if (!canvas) return;
@@ -205,43 +228,39 @@ export function MapSceneCanvas() {
       window.removeEventListener('resize', onResize);
       window.removeEventListener('orientationchange', onResize);
     };
-  }, [is3d, hasModelTokens]);
+  }, [needsThreeOverlay]);
 
-  if (!is3d && !hasModelTokens) return null;
+  const handleCreated = useCallback((state: RootState) => {
+    onThreeCanvasCreated(state);
+  }, []);
 
-  if (!is3d) {
-    return (
-      <Canvas
-        orthographic
-        frameloop="always"
-        camera={{ position: [1280, 1500, 960], zoom: 1, near: 0.1, far: 8000 }}
-        style={canvasStyle}
-        gl={glProps}
-        dpr={dpr}
-        onCreated={onThreeCanvasCreated}
-      >
-        <TokenOverlay2DContent />
-      </Canvas>
-    );
-  }
+  if (!needsThreeOverlay) return null;
 
   return (
     <Canvas
+      key={glKey}
       orthographic
       shadows={useShadows}
       frameloop="always"
-      camera={orthoDefaults}
+      camera={is3d ? orthoDefaults : { position: [1280, 1500, 960], zoom: 1, near: 0.1, far: 8000 }}
       style={canvasStyle}
       gl={glProps}
       dpr={dpr}
       resize={{ scroll: false, debounce: 0 }}
-      onCreated={on3dCanvasCreated}
+      onCreated={handleCreated}
     >
-      <color attach="background" args={['#1e1e22']} />
+      <WebGLContextGuard onContextLost={onContextLost} />
       <SyncedPixiOrthographicCamera />
+      {is3d ? <color attach="background" args={['#1e1e22']} /> : null}
       <Suspense fallback={null}>
-        <Map3DSceneContent />
-        <Map3DTokenGizmo />
+        {is3d ? (
+          <>
+            <Map3DSceneContent />
+            <Map3DTokenGizmo />
+          </>
+        ) : (
+          <TokenOverlay2DContent map={activeMap} />
+        )}
       </Suspense>
     </Canvas>
   );

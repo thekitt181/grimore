@@ -12,6 +12,7 @@ import {
   losPolygons,
   losVisibleCellKeys,
 } from './fogLos';
+import { fogTextureDimensions } from './fogTextureSize';
 
 export interface FogDrawOptions {
   revealedCells: Set<string>;
@@ -64,13 +65,13 @@ export function ensureFogLayers(fc: Container): FogLayers {
   return layers;
 }
 
-function resizeFogCanvas(layers: FogLayers, width: number, height: number): void {
-  const w = Math.max(1, Math.round(width));
-  const h = Math.max(1, Math.round(height));
-  if (layers.fogCanvas.width === w && layers.fogCanvas.height === h) return;
+function resizeFogCanvas(layers: FogLayers, width: number, height: number): number {
+  const { width: w, height: h, scale } = fogTextureDimensions(width, height);
+  if (layers.fogCanvas.width === w && layers.fogCanvas.height === h) return scale;
   layers.fogCanvas.width = w;
   layers.fogCanvas.height = h;
   layers.fogTexture.source.resize(w, h);
+  return scale;
 }
 
 export function clearFogLayers(layers: FogLayers): void {
@@ -204,6 +205,8 @@ export function drawFogLayers(
   const ctx = layers.fogCanvas.getContext('2d');
   if (!ctx) return;
 
+  const texScale = fogTextureDimensions(width, height).scale;
+  ctx.setTransform(texScale, 0, 0, texScale, 0, 0);
   paintFogCanvas(ctx, map, opts);
   layers.fogTexture.source.update();
   layers.compose.visible = true;

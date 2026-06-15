@@ -186,6 +186,7 @@ export function DiceTrayOverlay() {
       >
         <Canvas
           shadows
+          dpr={Math.min(window.devicePixelRatio || 1, 1.5)}
           camera={{ position: [0, 3.2, 5.5], fov: 42 }}
           onCreated={({ gl }) => {
             gl.setClearColor('#0a0a0f', 0);
