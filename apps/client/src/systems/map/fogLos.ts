@@ -103,20 +103,22 @@ export function getVisionTokens(
   }
 
   const uid = userId?.trim() ?? '';
-  if (uid) {
-    const owned = Object.values(items).filter(
-      (i): i is TokenItem => i.type === 'token' && visibleOnMap(i) && i.ownerId?.trim() === uid,
-    );
-    if (owned.length > 0) return owned;
-  }
+  const selectedTokens = selectedIds
+    .map((id) => items[id])
+    .filter((i): i is TokenItem => {
+      if (i?.type !== 'token' || !visibleOnMap(i)) return false;
+      const owner = i.ownerId?.trim() ?? '';
+      return !owner || owner === uid;
+    });
 
-  if (selectedIds.length > 0) {
-    return selectedIds
-      .map((id) => items[id])
-      .filter((i): i is TokenItem => i?.type === 'token' && visibleOnMap(i));
-  }
+  // Explicit selection wins over assignment (pick which PC drives vision).
+  if (selectedTokens.length > 0) return selectedTokens;
 
-  return [];
+  if (!uid) return [];
+
+  return Object.values(items).filter(
+    (i): i is TokenItem => i.type === 'token' && visibleOnMap(i) && i.ownerId?.trim() === uid,
+  );
 }
 
 function pointInPolygon(x: number, y: number, poly: Point[]): boolean {

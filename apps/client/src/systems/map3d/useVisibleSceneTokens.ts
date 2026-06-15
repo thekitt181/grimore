@@ -17,11 +17,15 @@ export function useVisibleSceneTokens(opts?: { modelOnly?: boolean }): {
 } {
   const items = useItemStore((s) => s.items);
   const selectedIds = useItemStore((s) => s.selectedIds);
+  const activeMapId = useItemStore((s) => s.activeMapId);
   const liveById = useLiveTransformStore((s) => s.byId);
   const liveTick = useLiveTransformStore((s) => s.tick);
   const myRole = useSessionStore((s) => s.myRole);
   const myUserId = useSessionStore((s) => s.myUserId);
   const revealedCells = useMapStore((s) => s.revealedCells);
+  const fogRevision = useMapStore((s) => s.fogRevision);
+  const fogEnabled = useMapStore((s) => s.fogEnabled);
+  const sessionFogActive = useMapStore((s) => s.sessionFogActive);
   const activeTurnItemId = useInitiativeStore((s) =>
     s.isActive && s.combatants[s.currentIndex] ? s.combatants[s.currentIndex]!.tokenId : undefined,
   );
@@ -50,11 +54,15 @@ export function useVisibleSceneTokens(opts?: { modelOnly?: boolean }): {
   }, [
     items,
     selectedIds,
+    activeMapId,
     liveById,
     liveTick,
     myRole,
     myUserId,
     revealedCells,
+    fogRevision,
+    fogEnabled,
+    sessionFogActive,
     opts?.modelOnly,
   ]);
 

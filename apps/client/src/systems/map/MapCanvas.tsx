@@ -23,6 +23,7 @@ import { applyFogData, emitFogSync, flushFogScene, hydrateFogFromServer, parseFo
 import { mergeFogIntoCells } from '@/systems/scene/fogMerge';
 import type { FogUpdatePayload } from '@grimoire/shared';
 import { bindFogActiveSocket, syncFogActiveToSession } from '@/systems/scene/fogActiveSync';
+import { bindFogRepaintSubscriptions } from '@/systems/map/fogRepaintBridge';
 import { bindMapFocusSocket, flushPendingMapFocus, focusSessionMap, syncMapFocusToSession } from '@/systems/map/mapFocusSync';
 import { useParams } from 'react-router-dom';
 import {
@@ -102,6 +103,10 @@ export function MapCanvas() {
   const gmScenePushedRef = useRef(false);
   const fogSyncedRef = useRef(false);
   const viewportInitializedRef = useRef(false);
+
+  useEffect(() => {
+    bindFogRepaintSubscriptions();
+  }, []);
 
   useEffect(() => {
     initialSyncRef.current = { received: false, hadItems: false, pushed: false };

@@ -45,6 +45,7 @@ export function useItemRenderer(
 ) {
   const items   = useItemStore((s) => s.items);
   const selectedIds = useItemStore((s) => s.selectedIds);
+  const activeMapId = useItemStore((s) => s.activeMapId);
   const selectedWallIndices = useItemStore((s) => s.selectedWallIndices);
   const myRole  = useSessionStore((s) => s.myRole);
   const liveById = useLiveTransformStore((s) => s.byId);
@@ -55,6 +56,9 @@ export function useItemRenderer(
   const viewMode = useMapStore((s) => s.viewMode);
   const activeTool = useMapStore((s) => s.activeTool);
   const revealedCells = useMapStore((s) => s.revealedCells);
+  const fogRevision = useMapStore((s) => s.fogRevision);
+  const fogEnabled = useMapStore((s) => s.fogEnabled);
+  const sessionFogActive = useMapStore((s) => s.sessionFogActive);
   const myUserId = useSessionStore((s) => s.myUserId);
 
   const containers = useRef<Map<string, Container>>(new Map());
@@ -242,6 +246,7 @@ export function useItemRenderer(
   }, [
     items,
     selectedIds,
+    activeMapId,
     selectedWallIndices,
     myRole,
     liveById,
@@ -250,6 +255,9 @@ export function useItemRenderer(
     viewMode,
     activeTool,
     revealedCells,
+    fogRevision,
+    fogEnabled,
+    sessionFogActive,
     myUserId,
     appReady,
     layerRef,

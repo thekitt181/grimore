@@ -1,11 +1,22 @@
 import { useItemStore } from '@/systems/scene/store/itemStore';
 import { useLiveTransformStore } from '@/systems/scene/store/liveTransformStore';
+import { useMapStore } from '@/systems/map/store/mapStore';
 
 type FogRepaintListener = () => void;
 
 const listeners = new Set<FogRepaintListener>();
 let subscriptionsBound = false;
 let pendingRepaint = false;
+
+function bumpFogRevision(): void {
+  useMapStore.setState((s) => ({ fogRevision: s.fogRevision + 1 }));
+}
+
+/** Notify Pixi item layers + fog overlays that visibility changed. */
+export function requestSceneVisibilityUpdate(): void {
+  bumpFogRevision();
+  requestFogRepaint();
+}
 
 /** Register an imperative fog repaint (Pixi / Three overlays). */
 export function registerFogRepaintListener(listener: FogRepaintListener): () => void {
@@ -39,12 +50,16 @@ export function bindFogRepaintSubscriptions(): void {
   subscriptionsBound = true;
 
   useLiveTransformStore.subscribe((state, prev) => {
-    if (state.tick !== prev.tick) requestFogRepaint();
+    if (state.tick !== prev.tick) requestSceneVisibilityUpdate();
   });
 
   useItemStore.subscribe((state, prev) => {
     if (state.selectedIds.join(',') !== prev.selectedIds.join(',')) {
-      requestFogRepaint();
+      requestSceneVisibilityUpdate();
+      return;
+    }
+    if (state.activeMapId !== prev.activeMapId) {
+      requestSceneVisibilityUpdate();
       return;
     }
     for (const id of Object.keys(state.items)) {
@@ -56,10 +71,21 @@ export function bindFogRepaintSubscriptions(): void {
         || it.y !== was.y
         || it.rotation !== was.rotation
         || it.ownerId !== was.ownerId
+        || it.visible !== was.visible
       ) {
-        requestFogRepaint();
+        requestSceneVisibilityUpdate();
         return;
       }
+    }
+  });
+
+  useMapStore.subscribe((state, prev) => {
+    if (
+      state.fogEnabled !== prev.fogEnabled
+      || state.sessionFogActive !== prev.sessionFogActive
+      || state.fogRevision !== prev.fogRevision
+    ) {
+      requestFogRepaint();
     }
   });
 }

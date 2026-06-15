@@ -239,11 +239,11 @@ export const useMapStore = create<SceneState>((set, get) => ({
   setViewport:    (viewport) => set({ viewport }),
   setFogBrushSize:(fogBrushSize) => set({ fogBrushSize }),
   setFogEnabled: (fogEnabled) => {
-    set({ fogEnabled });
+    set((s) => ({ fogEnabled, fogRevision: s.fogRevision + 1 }));
     requestFogRepaint();
   },
   setSessionFogActive: (sessionFogActive) => {
-    set({ sessionFogActive });
+    set((s) => ({ sessionFogActive, fogRevision: s.fogRevision + 1 }));
     requestFogRepaint();
   },
   setSyncPlayerViews: (syncPlayerViews) => set({ syncPlayerViews }),
