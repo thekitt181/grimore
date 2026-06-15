@@ -177,6 +177,9 @@ importers:
       nanoid:
         specifier: ^3.3.7
         version: 3.3.12
+      prisma:
+        specifier: ^5.14.0
+        version: 5.22.0
       socket.io:
         specifier: ^4.7.5
         version: 4.8.3
@@ -205,9 +208,6 @@ importers:
       '@types/ws':
         specifier: ^8.5.12
         version: 8.18.1
-      prisma:
-        specifier: ^5.14.0
-        version: 5.22.0
       sharp:
         specifier: ^0.35.1
         version: 0.35.1

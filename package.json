@@ -8,6 +8,7 @@
     "node": ">=20.0.0"
   },
   "scripts": {
+    "prebuild": "node scripts/ensure-build-deps.mjs",
     "dev": "pnpm dev:kill-ports && pnpm --filter @grimoire/shared build && node scripts/dev-supervisor.mjs",
     "dev:raw": "pnpm --filter @grimoire/shared build && concurrently -k -n server,client -c blue,green \"pnpm --filter @grimoire/server dev\" \"pnpm --filter @grimoire/client dev\"",
     "dev:kill-ports": "node scripts/kill-dev-ports.mjs",
