@@ -90,6 +90,7 @@ export function MapCanvas() {
   const sessionId = storeSessionId ?? routeSessionId ?? null;
   const viewMode = useMapStore((s) => s.viewMode);
   const items = useItemStore((s) => s.items);
+  const activeMapId = useItemStore((s) => s.activeMapId);
   const initialSyncRef = useRef({ received: false, hadItems: false, pushed: false });
   const fogSyncedRef = useRef(false);
   const viewportInitializedRef = useRef(false);
@@ -428,7 +429,7 @@ export function MapCanvas() {
       mapX: map.x,
       mapY: map.y,
     });
-  }, [items]);
+  }, [items, activeMapId]);
 
   // Block native HTML drags on the Pixi canvas (marquee select) and clear stale drop overlay.
   useEffect(() => {

@@ -62,7 +62,9 @@ function resolveContextMenu(
     const mapAt = hit?.type === 'map' ? hit : hitTestMap(visible, wx, wy);
     // Right-click map surface: select map for lock/unlock/delete (shift = ground menu).
     if (!shiftKey && mapAt?.type === 'map') {
-      useItemStore.getState().select([mapAt.id], 'set');
+      const store = useItemStore.getState();
+      store.select([mapAt.id], 'set');
+      store.setActiveMap(mapAt.id);
       return { x: clientX, y: clientY, kind: 'item' };
     }
     useItemStore.getState().clearSelection();
@@ -492,7 +494,7 @@ export function ItemContextMenu() {
       {single?.type === 'map' && isGM && (
         <>
           <div className="gold-divider my-1" />
-          <MapWeatherMenuSection onDone={close} />
+          <MapWeatherMenuSection mapId={single.id} onDone={close} />
           <MapTimeMenuSection onDone={close} />
           <div className="gold-divider my-1" />
           <Btn label="⊹ Auto-sync grid" onClick={() => {
@@ -609,7 +611,7 @@ const WEATHER_ICONS: Record<WeatherOverlay, string> = {
   aurora: '🌌',
 };
 
-function MapWeatherMenuSection({ onDone }: { onDone: () => void }) {
+function MapWeatherMenuSection({ mapId, onDone }: { mapId?: string; onDone: () => void }) {
   const activeScene = useSceneMediaStore((s) => s.activeScene);
   const sessionWeather = useSceneMediaStore((s) => s.sessionWeather);
   const current = selectEffectiveWeather({ activeScene, sessionWeather }) ?? 'none';
@@ -617,6 +619,9 @@ function MapWeatherMenuSection({ onDone }: { onDone: () => void }) {
   function pick(weather: WeatherOverlay) {
     const sessionId = getPersistSessionId();
     if (!sessionId) return;
+    if (mapId) {
+      useItemStore.getState().setActiveMap(mapId);
+    }
     const active = selectEffectiveWeather({ activeScene, sessionWeather });
     let next: WeatherOverlay;
     if (weather === 'none') {
