@@ -13,10 +13,9 @@ import { emitTokenRotate } from '../token/tokenSync';
 import { getItemContainer } from '../render/useItemRenderer';
 import { useLiveTransformStore } from '../store/liveTransformStore';
 import { resizeFromCenter } from '../resizeFromCenter';
-import { isInteriorClick } from '../hitTest';
+import { isInteriorClickBounds } from '../hitTest';
 import { resolveItemBounds } from '@/systems/map3d/sceneItemBounds';
 import { worldToGridColRow } from '../token/tokenGrid';
-import { playerCanMoveToken } from '@/systems/scene/token/clientTokenVisibility';
 import type { Item, TokenItem } from '../types';
 import type { TokenGizmoLayout, GizmoHandle } from '../token/tokenGizmoLayout';
 
@@ -53,13 +52,21 @@ export function syncTransformHandleRegistry(layout: TokenGizmoLayout): void {
 /** Picks a transform handle near the pointer (screen space in 3D, world space in 2D). */
 export function pickHandle(clientX: number, clientY: number): HandleDesc | null {
   if (registry.mode === 'none' || registry.handles.length === 0) return null;
+  if (useSessionStore.getState().myRole !== 'GM') return null;
+
   const viewMode = useMapStore.getState().viewMode;
   const item = registry.itemId
     ? useItemStore.getState().items[registry.itemId]
     : undefined;
   const { x: wx, y: wy } = clientToWorld(clientX, clientY);
-  // In 2D, interior clicks prefer move over edge handles; 3D uses screen-space handle pick.
-  if (item && viewMode !== '3d' && isInteriorClick(item, wx, wy)) return null;
+
+  if (item) {
+    const live = useLiveTransformStore.getState().byId[item.id];
+    const b = resolveItemBounds(item, live);
+    const onInterior = isInteriorClickBounds(b.x, b.y, b.width, b.height, b.rotation, wx, wy);
+    if (item.type === 'token' && onInterior) return null;
+    if (viewMode !== '3d' && onInterior) return null;
+  }
 
   const scale = sceneRefs.world.current?.scale.x ?? 1;
   const minDim = item ? Math.min(item.width, item.height) : 64;
@@ -131,12 +138,14 @@ export function useTransformControls(appReady: boolean) {
     hidePixiControls();
 
     const gm = myRole === 'GM';
+    if (!gm) {
+      return;
+    }
+
     const sel = selectedIds.map((id) => items[id]).filter(Boolean) as Item[];
     const manipulable = sel.filter((it) => {
       if (it.locked) return false;
-      if (gm) return true;
-      if (it.type !== 'token') return false;
-      return playerCanMoveToken(it as TokenItem, useSessionStore.getState().myUserId, selectedIds);
+      return true;
     });
 
     if (activeTool !== 'select' || manipulable.length === 0) {

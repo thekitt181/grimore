@@ -81,6 +81,17 @@ export interface MapGridOffsetPayload {
   offsetY: number;
 }
 
+/** GM pushes active map + camera to players (select map / reset view). */
+export interface MapFocusPayload {
+  sessionId: string;
+  mapId: string;
+  viewport: { x: number; y: number; scale: number };
+  view3dOrbit: { azimuth: number; polar: number };
+  viewMode: '2d' | '3d';
+  /** When true, clients fit the map to screen (Reset View / map select). */
+  fitToMap?: boolean;
+}
+
 // ─── Generic scene-item events (unified editor) ─────────────────────────────────
 
 export interface ItemAddPayload {
@@ -365,6 +376,7 @@ export interface ServerToClientEvents {
   'map:mapDelete':        (payload: MapDeletePayload)         => void;
   'map:gridStyle':        (payload: MapGridStylePayload)      => void;
   'map:gridOffset':       (payload: MapGridOffsetPayload)     => void;
+  'map:focus':            (payload: MapFocusPayload)          => void;
   'map:tokenConditions':  (payload: TokenConditionsPayload)   => void;
   'map:tokenAura':        (payload: TokenAuraPayload)         => void;
   'drawing:add':          (payload: DrawingAddPayload)        => void;
@@ -426,6 +438,7 @@ export interface ClientToServerEvents {
   'map:mapDelete':        (payload: MapDeletePayload)         => void;
   'map:gridStyle':        (payload: MapGridStylePayload)      => void;
   'map:gridOffset':       (payload: MapGridOffsetPayload)     => void;
+  'map:focus':            (payload: MapFocusPayload)          => void;
   'map:tokenConditions':  (payload: TokenConditionsPayload)   => void;
   'map:tokenAura':        (payload: TokenAuraPayload)         => void;
   'drawing:add':          (payload: DrawingAddPayload)        => void;

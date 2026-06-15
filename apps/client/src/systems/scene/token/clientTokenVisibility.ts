@@ -29,9 +29,26 @@ export function filterPlayerTokens(
   const own = tokens.filter((t) => t.ownerId?.trim() === uid);
 
   if (!playerHasVisionSource(items, opts.myUserId, opts.selectedIds, map)) {
+    const dedupe = (list: TokenItem[]) => {
+      const seen = new Set<string>();
+      return list.filter((t) => {
+        if (seen.has(t.id)) return false;
+        seen.add(t.id);
+        return true;
+      });
+    };
+
+    if (opts.revealedCells.size > 0) {
+      const inReveal = tokens.filter((t) =>
+        isTokenVisibleToPlayer(t, map, opts.revealedCells),
+      );
+      return dedupe([...own, ...inReveal]);
+    }
+
     const selectedSet = new Set(opts.selectedIds);
     const selectedPc = tokens.filter((t) => {
-      if (!selectedSet.has(t.id) || !t.isPc) return false;
+      if (!selectedSet.has(t.id)) return false;
+      if (!isPlayerCharacterToken(t)) return false;
       const owner = t.ownerId?.trim() ?? '';
       return !owner || owner === uid;
     });
@@ -69,25 +86,22 @@ export function playerOwnsToken(token: TokenItem, myUserId: string | null): bool
   return Boolean(uid) && token.ownerId?.trim() === uid;
 }
 
-/** True when a player may drag this token (owned PC, or unassigned PC they selected). */
-export function playerCanMoveToken(
-  token: TokenItem,
-  myUserId: string | null,
-  selectedIds: readonly string[] = [],
-): boolean {
-  if (token.locked) return false;
-  if (playerOwnsToken(token, myUserId)) return true;
-
-  const uid = myUserId?.trim() ?? '';
-  if (!uid || !token.isPc) return false;
-
-  const owner = token.ownerId?.trim() ?? '';
-  if (owner && owner !== uid) return false;
-
-  return selectedIds.includes(token.id);
+/** PC / player character — includes DDB imports without explicit isPc. */
+export function isPlayerCharacterToken(token: TokenItem): boolean {
+  return Boolean(token.isPc || token.ddbCharacterId);
 }
 
-/** Player tokens for selection/rendering — always includes owned tokens. */
+/** True when a client may drag this token (same rules for GM and players). */
+export function playerCanMoveToken(
+  token: TokenItem,
+  _myUserId: string | null = null,
+  _selectedIds: readonly string[] = [],
+): boolean {
+  if (token.locked) return false;
+  return token.visible !== false;
+}
+
+/** Player tokens for rendering / fog visibility (not necessarily all interactable). */
 export function playerSelectableTokens(
   items: Record<string, Item>,
   opts: {
@@ -97,28 +111,20 @@ export function playerSelectableTokens(
     activeMap: MapItem | null;
   },
 ): TokenItem[] {
-  const filtered = filterPlayerTokens(items, opts);
-  const uid = opts.myUserId?.trim() ?? '';
-  if (!uid) return filtered;
+  const allVisible = Object.values(items).filter(
+    (i): i is TokenItem => i.type === 'token' && i.visible !== false,
+  );
 
-  const seen = new Set(filtered.map((t) => t.id));
-  const add = (t: TokenItem) => {
-    if (seen.has(t.id)) return;
-    seen.add(t.id);
-    filtered.push(t);
-  };
-
-  for (const i of Object.values(items)) {
-    if (i.type !== 'token' || i.visible === false) continue;
-    if (i.ownerId?.trim() === uid) add(i);
+  if (!isFogOverlayVisible() || !opts.activeMap) {
+    return allVisible;
   }
 
-  for (const id of opts.selectedIds) {
-    const i = items[id];
-    if (i?.type !== 'token' || i.visible === false || !i.isPc) continue;
-    const owner = i.ownerId?.trim() ?? '';
-    if (!owner || owner === uid) add(i);
-  }
+  return filterPlayerTokens(items, opts);
+}
 
-  return filtered;
+/** All visible unlocked tokens — used for player drag / hit-testing. */
+export function playerInteractableTokens(items: Record<string, Item>): TokenItem[] {
+  return Object.values(items).filter(
+    (i): i is TokenItem => i.type === 'token' && i.visible !== false && !i.locked,
+  );
 }

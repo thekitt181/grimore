@@ -35,6 +35,7 @@ const ROT_DIST = 28;
 export function computeTokenGizmoLayout(
   items: Item[],
   liveById: Record<string, LiveTransform>,
+  opts?: { moveOnly?: boolean },
 ): TokenGizmoLayout {
   if (items.length === 0) {
     return { mode: 'none', cx: 0, cy: 0, width: 0, height: 0, rotation: 0, handles: [], boxCorners: [] };
@@ -72,7 +73,17 @@ export function computeTokenGizmoLayout(
     const rotDist = compact ? Math.max(ROT_DIST, minDim * 0.55) : ROT_DIST;
     const rotPt = toWorld(0, -hh - rotDist);
     handles.push({ id: 'rotate', wx: rotPt.x, wy: rotPt.y, sx: 0, sy: 0 });
-    return { mode: 'single', itemId: it.id, cx, cy, width: w, height: h, rotation, handles, boxCorners };
+    return {
+      mode: 'single',
+      itemId: it.id,
+      cx,
+      cy,
+      width: w,
+      height: h,
+      rotation,
+      handles: opts?.moveOnly ? [] : handles,
+      boxCorners,
+    };
   }
 
   let minX = Infinity;
@@ -104,7 +115,7 @@ export function computeTokenGizmoLayout(
     width: w,
     height: h,
     rotation: 0,
-    handles,
+    handles: opts?.moveOnly ? [] : handles,
     boxCorners: [
       { x: minX, y: minY },
       { x: maxX, y: minY },

@@ -26,12 +26,19 @@ function mergeMapItem(server: MapItem, local: MapItem): MapItem {
   };
 }
 
+export type MergeSceneOptions = {
+  /** Keep local-only items absent from server (GM offline edits). Players should pass false. */
+  keepLocalOnly?: boolean;
+};
+
 /** Prefer local map images/walls when server snapshot is stale or incomplete. */
 export function mergeSceneItems(
   server: Item[],
   local: Item[],
   deletedIds: Set<string> = new Set(),
+  opts: MergeSceneOptions = {},
 ): Item[] {
+  const keepLocalOnly = opts.keepLocalOnly !== false;
   const localById = new Map(local.map((i) => [i.id, i]));
   const seen = new Set<string>();
   const merged: Item[] = [];
@@ -63,8 +70,10 @@ export function mergeSceneItems(
     }
   }
 
-  for (const item of local) {
-    if (!seen.has(item.id) && !deletedIds.has(item.id)) merged.push(item);
+  if (keepLocalOnly) {
+    for (const item of local) {
+      if (!seen.has(item.id) && !deletedIds.has(item.id)) merged.push(item);
+    }
   }
 
   return merged;

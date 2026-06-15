@@ -2,9 +2,8 @@ import { useState } from 'react';
 import { useMapStore, type MapTool, type WallMode } from './store/mapStore';
 import { useItemStore, getActiveMap } from '@/systems/scene/store/itemStore';
 import { useSessionStore } from '@/store/sessionStore';
-import { fitMapToScreen } from './hooks/useMapViewport';
-import { mapLayerRefs } from './MapCanvas';
-import { emitItemUpdate, emitItemRemove } from '@/systems/scene/sceneSync';
+import { resetSessionMapView, syncMapFocusToSession } from '@/systems/map/mapFocusSync';
+import { emitItemUpdate, emitItemRemove, emitItemsSync } from '@/systems/scene/sceneSync';
 import { clsx } from 'clsx';
 import { setFogVisibleForSession } from '@/systems/scene/fogActiveSync';
 import { DRAW_COLOR_PRESETS, DEFAULT_TEXT_FONT_SIZE, MAX_TEXT_FONT_SIZE, MIN_TEXT_FONT_SIZE } from './drawColors';
@@ -22,7 +21,7 @@ const GM_TOOLS: ToolDef[] = [
 ];
 
 const PLAYER_TOOLS: ToolDef[] = [
-  { id: 'select',  label: 'Select',  icon: '↖',  title: 'Select & move your token' },
+  { id: 'select',  label: 'Select',  icon: '↖',  title: 'Select & move tokens' },
   { id: 'pan',     label: 'Pan',     icon: '✋',  title: 'Pan the map (pinch to zoom)' },
   { id: 'measure', label: 'Measure', icon: '📏', title: 'Measure distance' },
 ];
@@ -69,6 +68,12 @@ export function MapToolbar() {
   const setScanImageWalls = useMapStore((s) => s.setScanImageWalls);
   const setWallScanThreshold = useMapStore((s) => s.setWallScanThreshold);
   const viewMode = useMapStore((s) => s.viewMode);
+  const syncPlayerViews = useMapStore((s) => s.syncPlayerViews);
+  const gmMovePlayerTokens = useMapStore((s) => s.gmMovePlayerTokens);
+  const playersCanMoveTokens = useMapStore((s) => s.playersCanMoveTokens);
+  const setSyncPlayerViews = useMapStore((s) => s.setSyncPlayerViews);
+  const setGmMovePlayerTokens = useMapStore((s) => s.setGmMovePlayerTokens);
+  const setPlayersCanMoveTokens = useMapStore((s) => s.setPlayersCanMoveTokens);
   const snapToGrid = useItemStore((s) => s.snapToGrid);
   const setSnap = useItemStore((s) => s.setSnap);
   const items = useItemStore((s) => s.items);
@@ -88,9 +93,7 @@ export function MapToolbar() {
   );
 
   function handleFit() {
-    const app = mapLayerRefs.app.current;
-    const world = mapLayerRefs.world.current;
-    if (app && world) fitMapToScreen(app, world);
+    resetSessionMapView();
   }
 
   function handleToggleGrid() {
@@ -254,6 +257,52 @@ export function MapToolbar() {
                 </button>
               </div>
             )}
+            <div className="flex flex-col gap-0.5 w-9 mt-1">
+              <button
+                type="button"
+                title="Push full scene to all players (fixes ghost maps)"
+                onClick={() => {
+                  emitItemsSync(Object.values(useItemStore.getState().items));
+                  syncMapFocusToSession();
+                }}
+                className="w-full rounded py-0.5 font-ui text-[7px] leading-tight transition-all text-[#8a8075] hover:text-[#e8e0d0] hover:bg-[#1c1c28]"
+              >
+                Sync scene
+              </button>
+              <button
+                type="button"
+                title={syncPlayerViews ? 'Sync map & view to players: ON' : 'Sync map & view to players: OFF'}
+                onClick={() => setSyncPlayerViews(!syncPlayerViews)}
+                className={clsx(
+                  'w-full rounded py-0.5 font-ui text-[7px] leading-tight transition-all',
+                  syncPlayerViews ? ACTIVE_BTN : 'text-[#8a8075] hover:text-[#e8e0d0] hover:bg-[#1c1c28]',
+                )}
+              >
+                Sync view
+              </button>
+              <button
+                type="button"
+                title={gmMovePlayerTokens ? 'DM can move player tokens: ON' : 'DM can move player tokens: OFF'}
+                onClick={() => setGmMovePlayerTokens(!gmMovePlayerTokens)}
+                className={clsx(
+                  'w-full rounded py-0.5 font-ui text-[7px] leading-tight transition-all',
+                  gmMovePlayerTokens ? ACTIVE_BTN : 'text-[#8a8075] hover:text-[#e8e0d0] hover:bg-[#1c1c28]',
+                )}
+              >
+                DM move
+              </button>
+              <button
+                type="button"
+                title={playersCanMoveTokens ? 'Players can move tokens: ON' : 'Players can move tokens: OFF'}
+                onClick={() => setPlayersCanMoveTokens(!playersCanMoveTokens)}
+                className={clsx(
+                  'w-full rounded py-0.5 font-ui text-[7px] leading-tight transition-all',
+                  playersCanMoveTokens ? ACTIVE_BTN : 'text-[#8a8075] hover:text-[#e8e0d0] hover:bg-[#1c1c28]',
+                )}
+              >
+                Plr move
+              </button>
+            </div>
           </>
         )}
       </div>

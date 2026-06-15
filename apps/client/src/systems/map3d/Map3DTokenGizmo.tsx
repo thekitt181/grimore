@@ -9,8 +9,7 @@ import { useLiveTransformStore } from '@/systems/scene/store/liveTransformStore'
 import { computeTokenGizmoLayout } from '@/systems/scene/token/tokenGizmoLayout';
 import { syncTransformHandleRegistry } from '@/systems/scene/interaction/useTransformControls';
 import { resolveItemBounds } from './sceneItemBounds';
-import { playerCanMoveToken } from '@/systems/scene/token/clientTokenVisibility';
-import type { Item, TokenItem } from '@/systems/scene/types';
+import type { Item } from '@/systems/scene/types';
 import type { TokenGizmoLayout } from '@/systems/scene/token/tokenGizmoLayout';
 
 const GOLD = '#c9a84c';
@@ -81,7 +80,8 @@ export function TokenSelectionGizmo({
     const liveById = useLiveTransformStore.getState().byId;
     const live = liveById[itemId];
     const b = resolveItemBounds(item, live);
-    const layout = computeTokenGizmoLayout([item], liveById);
+    const gm = useSessionStore.getState().myRole === 'GM';
+    const layout = computeTokenGizmoLayout([item], liveById, { moveOnly: !gm });
     syncTransformHandleRegistry(layout);
 
     const hw = meshBaseWidth / 2;
@@ -135,14 +135,12 @@ export function TokenSelectionGizmo({
 }
 
 function manipulableSelected(items: Record<string, Item>, selectedIds: string[], gm: boolean): Item[] {
-  const myUserId = useSessionStore.getState().myUserId;
   return selectedIds
     .map((id) => items[id])
     .filter((it): it is Item => {
       if (!it || it.locked) return false;
-      if (gm) return true;
-      if (it.type !== 'token') return false;
-      return playerCanMoveToken(it as TokenItem, myUserId, selectedIds);
+      if (it.type === 'token') return it.visible !== false;
+      return gm;
     });
 }
 
@@ -161,7 +159,7 @@ function WorldSelectionGizmo() {
       .filter((it) => it.type !== 'token');
     const liveById = useLiveTransformStore.getState().byId;
     const show = activeTool === 'select' && gizmoItems.length > 0;
-    const layout = show ? computeTokenGizmoLayout(gizmoItems, liveById) : EMPTY_LAYOUT;
+    const layout = show ? computeTokenGizmoLayout(gizmoItems, liveById, { moveOnly: !gm }) : EMPTY_LAYOUT;
 
     syncTransformHandleRegistry(show && layout.mode !== 'none' ? layout : EMPTY_LAYOUT);
 

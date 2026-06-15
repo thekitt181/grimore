@@ -1,10 +1,12 @@
 import { sceneRefs } from '@/systems/scene/sceneRefs';
 import { useMapStore } from '@/systems/map/store/mapStore';
 import { useItemStore } from '@/systems/scene/store/itemStore';
-import { fitMapToScreen } from '@/systems/map/hooks/useMapViewport';
+import { resetSessionMapView } from '@/systems/map/mapFocusSync';
 import { clampViewportScale, maxViewportScale } from '@/systems/map/viewportLimits';
 import { viewportScaleContext } from '@/systems/map/mapNavigation';
 import { isMobileClient } from '@/lib/socket';
+
+const btn = 'btn-ghost text-xs px-2 py-1 rounded border border-[var(--color-border-gold)]';
 
 function zoomBy(factor: number) {
   const world = sceneRefs.world.current;
@@ -27,7 +29,6 @@ function zoomBy(factor: number) {
 export function MapCameraControls() {
   const viewMode = useMapStore((s) => s.viewMode);
   const adjustView3dOrbit = useMapStore((s) => s.adjustView3dOrbit);
-  const resetView3dOrbit = useMapStore((s) => s.resetView3dOrbit);
   const selectedKey = useItemStore((s) =>
     s.selectedIds.length === 1 ? s.selectedIds[0]! : '',
   );
@@ -42,15 +43,6 @@ export function MapCameraControls() {
     adjustView3dOrbit(deltaAzimuth, deltaPolar, orbitTokenId());
   }
 
-  function resetView() {
-    const app = sceneRefs.app.current;
-    const world = sceneRefs.world.current;
-    if (app && world) fitMapToScreen(app, world);
-    if (viewMode === '3d') resetView3dOrbit();
-  }
-
-  const btn = 'btn-ghost text-xs px-2 py-1 rounded border border-[var(--color-border-gold)]';
-
   return (
     <div
       className="absolute top-4 right-4 z-40 flex flex-wrap gap-1 max-w-[280px] justify-end"
@@ -58,7 +50,7 @@ export function MapCameraControls() {
     >
       <button type="button" className={btn} onClick={() => zoomBy(1.15)}>Zoom In</button>
       <button type="button" className={btn} onClick={() => zoomBy(1 / 1.15)}>Zoom Out</button>
-      <button type="button" className={btn} onClick={resetView}>Reset View</button>
+      <button type="button" className={btn} onClick={resetSessionMapView}>Reset View</button>
       {viewMode === '3d' && (
         <>
           <button type="button" className={btn} onClick={() => adjustOrbit(-0.25, 0)}>Rotate Left</button>

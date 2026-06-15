@@ -35,6 +35,7 @@ import {
   MapDeletePayload,
   MapGridStylePayload,
   MapGridOffsetPayload,
+  MapFocusPayload,
   ItemAddPayload,
   ItemUpdatePayload,
   ItemRemovePayload,
@@ -58,9 +59,12 @@ import { setCompendiumSocketServer } from '../services/compendiumBroadcast';
 import { startRollBridge, stopRollBridge, isRollBridgeActive, resolveRollBridgeUserId } from '../services/ddb/ddbRollBridge';
 import { persistSessionFogCache } from '../lib/fogSessionCache';
 import { isClientOriginAllowed } from '../lib/clientOrigins';
+import { cacheItemAdd, cacheItemRemove, cacheItemUpdate } from '../lib/sessionItemsCache';
 
 /** Per-session fog active flag (GM toggles off during prep). */
 const sessionFogActive = new Map<string, boolean>();
+/** Last GM map focus (active map + viewport) for joining players. */
+const sessionMapFocus = new Map<string, MapFocusPayload>();
 
 function isJoinedSession(socket: Socket, sessionId: string): boolean {
   return socket.data['sessionId'] === sessionId;
@@ -78,11 +82,17 @@ async function hydrateSessionFromCache(socket: Socket, sessionId: string): Promi
 
   socket.emit('fog:sync', { sessionId, fogData: cachedFog ?? '[]' });
 
+  const emitMapFocus = () => {
+    const mapFocus = sessionMapFocus.get(sessionId);
+    if (mapFocus) socket.emit('map:focus', mapFocus);
+  };
+
   if (cachedItemsRaw) {
     try {
       const items = JSON.parse(cachedItemsRaw) as unknown;
       if (Array.isArray(items)) {
         socket.emit('items:sync', { sessionId, items });
+        emitMapFocus();
         return;
       }
     } catch {
@@ -90,6 +100,7 @@ async function hydrateSessionFromCache(socket: Socket, sessionId: string): Promi
     }
   }
   socket.emit('items:sync', { sessionId, items: [] });
+  emitMapFocus();
 }
 
 function cacheSessionFog(
@@ -297,14 +308,17 @@ export function initSocket(httpServer: HttpServer): Server {
     // ── Generic scene items (unified editor) — relay only; clients persist locally ──
     socket.on('item:add', (payload: ItemAddPayload) => {
       if (!isJoinedSession(socket, payload.sessionId)) return;
+      if (isSessionGM(socket)) void cacheItemAdd(payload);
       socket.to(payload.sessionId).emit('item:add', payload);
     });
     socket.on('item:update', (payload: ItemUpdatePayload) => {
       if (!isJoinedSession(socket, payload.sessionId)) return;
+      if (isSessionGM(socket)) void cacheItemUpdate(payload);
       socket.to(payload.sessionId).emit('item:update', payload);
     });
     socket.on('item:remove', (payload: ItemRemovePayload) => {
       if (!isJoinedSession(socket, payload.sessionId)) return;
+      if (isSessionGM(socket)) void cacheItemRemove(payload);
       socket.to(payload.sessionId).emit('item:remove', payload);
     });
     socket.on('items:sync', (payload: ItemsSyncPayload) => {
@@ -401,6 +415,14 @@ export function initSocket(httpServer: HttpServer): Server {
       if (!isJoinedSession(socket, payload.sessionId)) return;
       socket.to(payload.sessionId).emit('map:gridOffset', payload);
     });
+
+    socket.on('map:focus', (payload: MapFocusPayload) => {
+      if (!isJoinedSession(socket, payload.sessionId)) return;
+      if (!isSessionGM(socket)) return;
+      sessionMapFocus.set(payload.sessionId, payload);
+      socket.to(payload.sessionId).emit('map:focus', payload);
+    });
+
     socket.on('map:tokenConditions', (payload: TokenConditionsPayload) => {
       if (!isJoinedSession(socket, payload.sessionId)) return;
       socket.to(payload.sessionId).emit('map:tokenConditions', payload);

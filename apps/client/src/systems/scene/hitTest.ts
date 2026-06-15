@@ -86,17 +86,37 @@ export function itemAABB(item: BaseItem): { minX: number; minY: number; maxX: nu
  * Used so drag-to-move wins over resize handles on small tokens.
  */
 export function isInteriorClick(item: BaseItem, wx: number, wy: number): boolean {
-  const cx = item.x + item.width / 2;
-  const cy = item.y + item.height / 2;
-  const rad = (-item.rotation * Math.PI) / 180;
+  return isInteriorClickBounds(
+    item.x,
+    item.y,
+    item.width,
+    item.height,
+    item.rotation ?? 0,
+    wx,
+    wy,
+  );
+}
+
+export function isInteriorClickBounds(
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  rotation: number,
+  wx: number,
+  wy: number,
+): boolean {
+  const cx = x + width / 2;
+  const cy = y + height / 2;
+  const rad = (-rotation * Math.PI) / 180;
   const dx = wx - cx;
   const dy = wy - cy;
-  const lx = dx * Math.cos(rad) - dy * Math.sin(rad) + item.width / 2;
-  const ly = dx * Math.sin(rad) + dy * Math.cos(rad) + item.height / 2;
-  const margin = Math.max(10, Math.min(item.width, item.height) * 0.28);
+  const lx = dx * Math.cos(rad) - dy * Math.sin(rad) + width / 2;
+  const ly = dx * Math.sin(rad) + dy * Math.cos(rad) + height / 2;
+  const margin = Math.max(14, Math.min(width, height) * 0.38);
   return (
-    lx > margin && lx < item.width - margin &&
-    ly > margin && ly < item.height - margin
+    lx > margin && lx < width - margin &&
+    ly > margin && ly < height - margin
   );
 }
 

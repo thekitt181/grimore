@@ -1,20 +1,21 @@
 import { useEffect } from 'react';
 import { Graphics } from 'pixi.js';
 import { useMapStore } from '@/systems/map/store/mapStore';
-import { filterPlayerTokens, playerCanMoveToken, playerSelectableTokens } from '@/systems/scene/token/clientTokenVisibility';
+import { isPlayerCharacterToken } from '@/systems/scene/token/clientTokenVisibility';
+import { pickInteractableTokenAt } from '@/systems/scene/token/pickInteractableToken';
 import { setItemDragActive } from './selectionDragState';
 import { useItemStore, getActiveMap } from '../store/itemStore';
 import { useSessionStore } from '@/store/sessionStore';
 import { itemsWithLiveTransforms } from '../store/liveTransformStore';
 import { sceneRefs, clientToWorld, pickSceneItem, getMapInteractionEl } from '../sceneRefs';
 import { screenDeltaToWorldDelta } from '@/systems/map3d/coords';
-import { pickTokenAtScreen } from '@/systems/map3d/pickTokenScreen';
 import { resolveItemBounds } from '@/systems/map3d/sceneItemBounds';
 import { worldToGridColRow, tokenBoundsFromGrid } from '@/systems/scene/token/tokenGrid';
 import { emitTokenMove } from '@/systems/scene/token/tokenSync';
-import { hitTest, hitTestMap, itemIntersectsRect } from '../hitTest';
+import { hitTest, hitTestMap, isInteriorClickBounds, itemIntersectsRect } from '../hitTest';
 import { snapPoint } from '../snap';
 import { emitItemUpdate } from '../sceneSync';
+import { focusSessionMap } from '@/systems/map/mapFocusSync';
 import { getItemContainer } from '../render/useItemRenderer';
 import { useLiveTransformStore } from '../store/liveTransformStore';
 import { pickHandle } from './useTransformControls';
@@ -77,7 +78,33 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
     const rawInteractionEl = getMapInteractionEl();
     if (!rawInteractionEl) return;
     const interactionEl: HTMLElement = rawInteractionEl;
-    const gm = myRole === 'GM';
+
+    function isGm(): boolean {
+      return useSessionStore.getState().myRole === 'GM';
+    }
+
+    function canDragToken(item: Item): item is TokenItem {
+      return item.type === 'token' && !item.locked && item.visible !== false;
+    }
+
+    function beginTokenDrag(tokenId: string, e: PointerEvent) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      setItemDragActive(true);
+      const store = useItemStore.getState();
+      const additive = e.shiftKey;
+      const alreadySelected = store.selectedIds.includes(tokenId);
+      if (additive) store.select([tokenId], 'toggle');
+      else if (!alreadySelected) {
+        store.select([tokenId], 'set');
+        store.clearWallSelection();
+      }
+      const ids = useItemStore.getState().selectedIds.filter((id) => {
+        const it = useItemStore.getState().items[id];
+        return it && canDragToken(it);
+      });
+      if (ids.length) beginMove(ids, e);
+    }
 
     let move: MoveState | null = null;
     let wallMove: WallMoveState | null = null;
@@ -103,7 +130,7 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
     }
 
     let cleanupHandleSub: (() => void) | undefined;
-    if (gm) {
+    if (isGm()) {
       wallHandleGfx = new Graphics();
       wallHandleGfx.label = 'wall-handles';
       overlay.addChild(wallHandleGfx);
@@ -119,28 +146,14 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
         store.items,
         useLiveTransformStore.getState().byId,
       );
-      if (gm) return Object.values(merged) as Item[];
-      const map = getActiveMap();
-      const userId = useSessionStore.getState().myUserId;
-      const selectedIds = store.selectedIds;
-      const filtered = playerSelectableTokens(merged, {
-        myUserId: userId,
-        selectedIds,
-        revealedCells: useMapStore.getState().revealedCells,
-        activeMap: map,
-      });
-      return filtered;
+      if (isGm()) return Object.values(merged) as Item[];
+      return Object.values(merged).filter((i): i is TokenItem => canDragToken(i));
     }
 
     function canManipulate(item: Item): boolean {
+      if (canDragToken(item)) return true;
       if (item.locked) return false;
-      if (gm) return true;
-      if (item.type !== 'token') return false;
-      return playerCanMoveToken(
-        item as TokenItem,
-        useSessionStore.getState().myUserId,
-        useItemStore.getState().selectedIds,
-      );
+      return isGm();
     }
 
     function dragWorldDelta(e: PointerEvent, startScreenX: number, startScreenY: number) {
@@ -197,6 +210,19 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
       if (e.button !== 0) return;
       // Space+drag, middle-mouse, and 3D map drag pan via useMapViewport (capture phase).
       if (e.getModifierState('Space')) return;
+
+      const tokenPick = pickInteractableTokenAt(e.clientX, e.clientY);
+      if (tokenPick && canDragToken(tokenPick)) {
+        const liveById = useLiveTransformStore.getState().byId;
+        const b = resolveItemBounds(tokenPick, liveById[tokenPick.id]);
+        const { x: wx, y: wy } = clientToWorld(e.clientX, e.clientY);
+        const onInterior = isInteriorClickBounds(b.x, b.y, b.width, b.height, b.rotation, wx, wy);
+        if (onInterior || !pickHandle(e.clientX, e.clientY)) {
+          beginTokenDrag(tokenPick.id, e);
+          return;
+        }
+      }
+
       const { x: wx, y: wy } = clientToWorld(e.clientX, e.clientY);
       const store = useItemStore.getState();
       const merged = itemsWithLiveTransforms(
@@ -208,32 +234,24 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
 
       const selectable = selectableItems();
       const selectableIds = new Set(selectable.map((i) => i.id));
-      const allTokens = selectable.filter((i): i is TokenItem => i.type === 'token');
       const pick2dPool = selectable.filter((i) => i.type !== 'token');
+      const liveById = useLiveTransformStore.getState().byId;
 
       let hit: Item | undefined;
+      if (tokenPick && canDragToken(tokenPick)) {
+        hit = merged[tokenPick.id] as Item;
+      }
+
       const pickId = pickSceneItem(e.clientX, e.clientY);
       const rayHit = pickId ? merged[pickId] : undefined;
-      if (rayHit?.type === 'token' && selectableIds.has(rayHit.id)) {
+      if (!hit && rayHit?.type === 'token' && selectableIds.has(rayHit.id)) {
         hit = rayHit;
-      } else if (rayHit && (!is3dNavigate || rayHit.type === 'map') && selectableIds.has(rayHit.id)) {
+      } else if (!hit && rayHit && (!is3dNavigate || rayHit.type === 'map') && selectableIds.has(rayHit.id)) {
         hit = rayHit;
-      }
-      if (!hit && allTokens.length) {
-        const screenPick = pickTokenAtScreen(e.clientX, e.clientY, allTokens);
-        if (screenPick && selectableIds.has(screenPick)) hit = merged[screenPick] as Item;
-      }
-      if (!hit && allTokens.length && is3dNavigate) {
-        const screenPick = pickTokenAtScreen(e.clientX, e.clientY, allTokens);
-        if (screenPick && selectableIds.has(screenPick)) hit = merged[screenPick] as Item;
       }
       if (!hit && !is3dNavigate) {
         hit = hitTest(pick2dPool, wx, wy, { includeLocked: true }) ?? undefined;
       }
-
-      // Transform handles take priority over move/drag.
-      const gizmoHandle = pickHandle(e.clientX, e.clientY);
-      if (gizmoHandle) return;
 
       function beginWallEndpoint(map: MapItem, hit: { wallIndex: number; end: WallEndpoint }, indices: number[]) {
         wallEndpoint = {
@@ -255,21 +273,37 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
           store.clearWallSelection();
         }
 
-        const ids = useItemStore.getState().selectedIds.filter((id) => {
-          const it = store.items[id];
+        const freshStore = useItemStore.getState();
+        const freshIds = freshStore.selectedIds.filter((id) => {
+          const it = freshStore.items[id];
           return it && canManipulate(it);
         });
-        if (ids.length) {
-          if (hit.type === 'token') {
-            beginMove(ids, e);
-          } else if (!is3dNavigate) {
-            beginMove(ids, e);
+
+        if (freshIds.length) {
+          if (hit.type === 'token' && canDragToken(hit)) {
+            const b = resolveItemBounds(hit, liveById[hit.id]);
+            const onInterior = isInteriorClickBounds(b.x, b.y, b.width, b.height, b.rotation, wx, wy);
+            if (onInterior || !pickHandle(e.clientX, e.clientY)) {
+              beginTokenDrag(hit.id, e);
+            }
+          } else {
+            let handleConsumed = false;
+            if (isGm()) {
+              if (pickHandle(e.clientX, e.clientY)) handleConsumed = true;
+            }
+            if (!handleConsumed && !is3dNavigate) {
+              e.preventDefault();
+              e.stopImmediatePropagation();
+              beginMove(freshIds, e);
+            }
           }
         }
         return;
       }
 
-      if (gm && !is3dNavigate) {
+      if (isGm() && pickHandle(e.clientX, e.clientY)) return;
+
+      if (isGm() && !is3dNavigate) {
         const map = getActiveMap();
         if (map) {
           const scale = sceneRefs.world.current?.scale.x ?? 1;
@@ -305,7 +339,7 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
       }
 
       // GM: 3D map pick volume or ground hit selects the map (2D / Shift+drag only).
-      if (!hit && gm && !is3dNavigate) {
+      if (!hit && isGm() && !is3dNavigate) {
         const pickId = pickSceneItem(e.clientX, e.clientY);
         const pickedItem = pickId ? merged[pickId] : undefined;
         const mapHit = pickedItem?.type === 'map'
@@ -331,7 +365,7 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
       }
 
       // GM: click map in 3D to select it (resize via gizmo; drag-to-pan uses threshold in useMapViewport).
-      if (!hit && gm && is3dNavigate) {
+      if (!hit && isGm() && is3dNavigate) {
         const pickId3d = pickSceneItem(e.clientX, e.clientY);
         const pickedItem = pickId3d ? merged[pickId3d] : undefined;
         const mapHit = pickedItem?.type === 'map'
@@ -365,6 +399,10 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
     }
 
     function onMove(e: PointerEvent) {
+      if (move) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+      }
       const { x: wx, y: wy } = clientToWorld(e.clientX, e.clientY);
 
       if (wallMove) {
@@ -456,6 +494,10 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
 
     function onUp(e: PointerEvent) {
       if (move) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+      }
+      if (move) {
         // handled below
       } else {
         setItemDragActive(false);
@@ -504,12 +546,12 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
         });
         if (Math.abs(dx) > 0.01 || Math.abs(dy) > 0.01) {
           const myUserId = useSessionStore.getState().myUserId?.trim() ?? '';
-          const claimOwner = !gm && myUserId;
+          const claimOwner = !isGm() && myUserId;
           for (const p of patches) {
             if (p.kind === 'token') {
               const it = useItemStore.getState().items[p.id] as TokenItem | undefined;
               if (!it || it.type !== 'token') continue;
-              if (claimOwner && it.isPc && !it.ownerId?.trim()) {
+              if (claimOwner && isPlayerCharacterToken(it) && !it.ownerId?.trim()) {
                 useItemStore.getState().updateItem(p.id, { ownerId: myUserId, isPc: true });
                 emitItemUpdate([{ id: p.id, patch: { ownerId: myUserId, isPc: true } }]);
               }
@@ -548,7 +590,7 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
           const mode = e.shiftKey ? 'add' : 'set';
           const itemStore = useItemStore.getState();
           itemStore.select(hits, mode);
-          if (gm) {
+          if (isGm()) {
             const map = getActiveMap();
             if (map) {
               const wallHits = wallIndicesInWorldRect(map.walls ?? [], map, x, y, w, h);
@@ -580,7 +622,7 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
         return;
       }
 
-      if (!gm) return;
+      if (!isGm()) return;
 
       // Don't steal double-click from tokens / drawings on top of the map.
       if (onTop) return;
@@ -595,22 +637,24 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
 
       const store = useItemStore.getState();
       store.setActiveMap(mapHit.id);
+      if (isGm()) focusSessionMap(mapHit.id, { fitToMap: false, select: false, emit: true });
       store.select([mapHit.id], 'set');
     }
 
-    interactionEl.addEventListener('pointerdown', onDown);
+    const captureOpts = { capture: true, passive: false } as AddEventListenerOptions;
+    interactionEl.addEventListener('pointerdown', onDown, captureOpts);
     interactionEl.addEventListener('dblclick', onDblClick);
-    interactionEl.addEventListener('pointermove', onMove);
-    interactionEl.addEventListener('pointerup', onUp);
-    interactionEl.addEventListener('pointercancel', onUp);
+    interactionEl.addEventListener('pointermove', onMove, captureOpts);
+    interactionEl.addEventListener('pointerup', onUp, captureOpts);
+    interactionEl.addEventListener('pointercancel', onUp, captureOpts);
 
     return () => {
       setItemDragActive(false);
-      interactionEl.removeEventListener('pointerdown', onDown);
+      interactionEl.removeEventListener('pointerdown', onDown, captureOpts);
       interactionEl.removeEventListener('dblclick', onDblClick);
-      interactionEl.removeEventListener('pointermove', onMove);
-      interactionEl.removeEventListener('pointerup', onUp);
-      interactionEl.removeEventListener('pointercancel', onUp);
+      interactionEl.removeEventListener('pointermove', onMove, captureOpts);
+      interactionEl.removeEventListener('pointerup', onUp, captureOpts);
+      interactionEl.removeEventListener('pointercancel', onUp, captureOpts);
       marqueeGfx?.destroy();
       marqueeGfx = null;
       wallHandleGfx?.destroy();

@@ -4,6 +4,8 @@ import type { RootState } from '@react-three/fiber';
 import * as THREE from 'three';
 import { isMobileClient } from '@/lib/socket';
 import { getActiveMap, useItemStore, selectSortedItems } from '@/systems/scene/store/itemStore';
+import { sceneMapsForClient } from '@/systems/scene/sceneMapsForClient';
+import { useSessionStore } from '@/store/sessionStore';
 import { sceneRefs } from '@/systems/scene/sceneRefs';
 import { sceneCameraRef } from './sceneCameraRef';
 import { useMapStore } from '@/systems/map/store/mapStore';
@@ -84,6 +86,7 @@ function TokenOverlay2DContent({ map }: { map: MapItem | null }) {
 function Map3DSceneContent() {
   const items = useItemStore(selectSortedItems);
   const activeMapId = useItemStore((s) => s.activeMapId);
+  const myRole = useSessionStore((s) => s.myRole);
   const mobile = isMobileClient();
   const activeMap = useMemo(() => {
     if (activeMapId) {
@@ -96,7 +99,10 @@ function Map3DSceneContent() {
   const scanImageWalls = useMapStore((s) => s.scanImageWalls);
   const wallHeightCells = useMapStore((s) => s.wallHeightCells);
 
-  const maps = items.filter((i): i is MapItem => i.type === 'map' && i.visible);
+  const maps = useMemo(
+    () => sceneMapsForClient(items, activeMapId, myRole === 'GM'),
+    [items, activeMapId, myRole],
+  );
   const drawings = items.filter((i): i is DrawItem => i.type === 'drawing');
   const labels = items.filter((i): i is TextItem => i.type === 'text');
 

@@ -6,6 +6,7 @@ import { useSessionStore } from '@/store/sessionStore';
 import { useInitiativeStore } from '@/systems/map/store/initiativeStore';
 import { useMapStore } from '@/systems/map/store/mapStore';
 import { playerSelectableTokens } from '@/systems/scene/token/clientTokenVisibility';
+import { sceneMapsForClient } from '@/systems/scene/sceneMapsForClient';
 import {
   useLiveTransformStore,
 } from '../store/liveTransformStore';
@@ -89,6 +90,9 @@ export function useItemRenderer(
       ...(activeTurnItemId ? { activeTurnItemId } : {}),
     };
     const activeMap = getActiveMap();
+    const playerMapIds = !gm
+      ? new Set(sceneMapsForClient(Object.values(items), activeMap?.id ?? null, false).map((m) => m.id))
+      : null;
     const playerVisibleTokenIds = !gm
       ? new Set(
         playerSelectableTokens(items, {
@@ -184,6 +188,9 @@ export function useItemRenderer(
 
       // Visibility / ghosting
       let show = item.visible || gm;
+      if (!gm && item.type === 'map' && playerMapIds) {
+        show = show && playerMapIds.has(item.id);
+      }
       if (!gm && item.type === 'token' && playerVisibleTokenIds) {
         show = show && playerVisibleTokenIds.has(item.id);
       }

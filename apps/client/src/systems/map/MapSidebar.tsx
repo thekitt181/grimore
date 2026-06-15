@@ -12,6 +12,7 @@ import {
 import { DEFAULT_VISION_FT, visionRadiusFromFeet } from '@/systems/map/fogLos';
 import { VisionFtDraftInput, parseVisionFt } from '@/systems/map/VisionFtInput';
 import { useMapStore } from './store/mapStore';
+import { focusSessionMap } from '@/systems/map/mapFocusSync';
 import { useSessionStore } from '@/store/sessionStore';
 import { fileToDataUrl } from '@/lib/imagePersistence';
 import { MAP_ASSET_ACCEPT, fileToAssetDataUrl, isModelFile, isModelUrl } from '@/lib/modelFormats';
@@ -442,8 +443,7 @@ function GMSidebarContent() {
                 border: m.id === activeMapId ? '1px solid var(--color-border-gold)' : '1px solid transparent',
               }}
               onClick={() => {
-                useItemStore.getState().setActiveMap(m.id);
-                useItemStore.getState().select([m.id], 'set');
+                focusSessionMap(m.id, { fitToMap: true, select: true });
                 useMapStore.getState().setTool('select');
               }}>
               <span style={{ fontSize: 13 }}>🗺️</span>

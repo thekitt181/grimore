@@ -8,8 +8,7 @@ import { sceneRefs } from '../sceneRefs';
 import { computeTokenGizmoLayout } from '../token/tokenGizmoLayout';
 import { drawPixiSelectionGizmo, hidePixiSelectionGizmo } from './pixiSelectionGizmo';
 import { syncTransformHandleRegistry } from './useTransformControls';
-import { playerCanMoveToken } from '@/systems/scene/token/clientTokenVisibility';
-import type { Item, TokenItem } from '../types';
+import type { Item } from '../types';
 
 const EMPTY_LAYOUT = {
   mode: 'none' as const,
@@ -23,14 +22,12 @@ const EMPTY_LAYOUT = {
 };
 
 function manipulableSelected(items: Record<string, Item>, selectedIds: string[], gm: boolean): Item[] {
-  const myUserId = useSessionStore.getState().myUserId;
   return selectedIds
     .map((id) => items[id])
     .filter((it): it is Item => {
       if (!it || it.locked) return false;
-      if (gm) return true;
-      if (it.type !== 'token') return false;
-      return playerCanMoveToken(it as TokenItem, myUserId, selectedIds);
+      if (it.type === 'token') return it.visible !== false;
+      return gm;
     });
 }
 
@@ -80,7 +77,7 @@ export function usePixiSelectionGizmo(appReady: boolean) {
       const selected = manipulableSelected(storeItems, selIds, gm);
       const liveById = useLiveTransformStore.getState().byId;
       const layout = selected.length
-        ? computeTokenGizmoLayout(selected, liveById)
+        ? computeTokenGizmoLayout(selected, liveById, { moveOnly: !gm })
         : EMPTY_LAYOUT;
 
       syncTransformHandleRegistry(layout);

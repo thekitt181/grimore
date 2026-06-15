@@ -23,9 +23,11 @@ import { applyFogData, emitFogSync, flushFogScene, hydrateFogFromServer, parseFo
 import { mergeFogIntoCells } from '@/systems/scene/fogMerge';
 import type { FogUpdatePayload } from '@grimoire/shared';
 import { bindFogActiveSocket, syncFogActiveToSession } from '@/systems/scene/fogActiveSync';
+import { bindMapFocusSocket, focusSessionMap, syncMapFocusToSession } from '@/systems/map/mapFocusSync';
 import { useParams } from 'react-router-dom';
 import {
   addDeletedIds,
+  clearItemsLocal,
   getPersistSessionId,
   loadDeletedIds,
   loadItemsLocal,
@@ -97,31 +99,55 @@ export function MapCanvas() {
   const itemList = Object.values(items) as Item[];
   useModelAssetSync(sessionId, itemList, myRole, myUserId);
   const initialSyncRef = useRef({ received: false, hadItems: false, pushed: false });
+  const gmScenePushedRef = useRef(false);
   const fogSyncedRef = useRef(false);
   const viewportInitializedRef = useRef(false);
 
   useEffect(() => {
     initialSyncRef.current = { received: false, hadItems: false, pushed: false };
+    gmScenePushedRef.current = false;
     fogSyncedRef.current = false;
     viewportInitializedRef.current = false;
   }, [sessionId]);
 
-  // Restore last saved scene from localStorage before the server snapshot arrives.
-  // Only reset when sessionId changes — NOT when myUserId arrives (that was wiping fog state).
+  // Reset scene on session change. Players wait for server snapshot — local cache causes ghost maps.
   useEffect(() => {
     if (!sessionId) return;
     useItemStore.getState().reset();
     useMapStore.getState().reset();
+    restoreFogFromLocal(sessionId);
+  }, [sessionId]);
+
+  // GM only: restore last saved scene from localStorage before the server snapshot arrives.
+  useEffect(() => {
+    if (!sessionId || myRole !== 'GM') return;
+    if (Object.keys(useItemStore.getState().items).length > 0) return;
 
     const localItems = loadItemsLocal(sessionId);
     if (localItems) {
       useItemStore.getState().setItems(localItems);
-    } else if (useSessionStore.getState().myRole === 'GM') {
+    } else {
       useItemStore.getState().addItem(createDefaultMap());
     }
+  }, [sessionId, myRole]);
 
-    restoreFogFromLocal(sessionId);
-  }, [sessionId]);
+  // Player: wipe stale local scene cache and re-hydrate from server (fixes ghost 3D maps).
+  useEffect(() => {
+    if (!sessionId || myRole !== 'PLAYER') return;
+    clearItemsLocal(sessionId);
+    requestSceneHydrate();
+  }, [sessionId, myRole]);
+
+  // GM: push authoritative scene snapshot once per session so server + players match.
+  useEffect(() => {
+    if (!sessionId || myRole !== 'GM' || gmScenePushedRef.current) return;
+    const timer = setTimeout(() => {
+      gmScenePushedRef.current = true;
+      emitItemsSync(Object.values(useItemStore.getState().items) as Item[]);
+      syncMapFocusToSession();
+    }, 2000);
+    return () => clearTimeout(timer);
+  }, [sessionId, myRole]);
 
   // Flush fog to storage + server before the page unloads.
   useEffect(() => {
@@ -213,6 +239,7 @@ export function MapCanvas() {
 
     const persistLocal = () => {
       if (!sessionId) return;
+      if (useSessionStore.getState().myRole === 'PLAYER') return;
       persistItemsLocal(sessionId, Object.values(useItemStore.getState().items) as Item[]);
     };
     const onAdd = forSession((payload: { sessionId?: string; item: unknown }) => {
@@ -229,23 +256,41 @@ export function MapCanvas() {
     const onRemove = forSession((payload: { sessionId?: string; ids: string[] }) => {
       addDeletedIds(sessionId, payload.ids);
       useItemStore.getState().removeItems(payload.ids);
-      persistLocal();
+      if (useSessionStore.getState().myRole === 'PLAYER' && sessionId) {
+        persistItemsLocal(sessionId, Object.values(useItemStore.getState().items) as Item[]);
+      } else {
+        persistLocal();
+      }
     });
     const onSync = forSession((payload: { sessionId?: string; items: unknown[] }) => {
       const list = payload.items;
       initialSyncRef.current.received = true;
+      const isGM = useSessionStore.getState().myRole === 'GM';
       const serverItems = sanitizePersistedItems(list as Item[]);
+
+      if (!isGM) {
+        const current = useItemStore.getState().items;
+        if (!sameSceneItemSnapshot(serverItems, current)) {
+          useItemStore.getState().setItems(serverItems);
+        }
+        if (sessionId) persistItemsLocal(sessionId, serverItems);
+        initialSyncRef.current.hadItems = serverItems.length > 0;
+        return;
+      }
+
+      const mergeOpts = { keepLocalOnly: true };
       const memoryItems = Object.values(useItemStore.getState().items) as Item[];
       const diskItems = loadItemsLocal(sessionId) ?? [];
       const deletedIds = loadDeletedIds(sessionId);
+
       const localItems = diskItems.length > 0
-        ? mergeSceneItems(diskItems, memoryItems, deletedIds)
+        ? mergeSceneItems(diskItems, memoryItems, deletedIds, mergeOpts)
         : memoryItems;
       initialSyncRef.current.hadItems = serverItems.length > 0 || localItems.length > 0;
 
       if (serverItems.length > 0 || localItems.length > 0) {
         const merged = serverItems.length > 0
-          ? mergeSceneItems(serverItems, localItems, deletedIds)
+          ? mergeSceneItems(serverItems, localItems, deletedIds, mergeOpts)
           : localItems.filter((i) => !deletedIds.has(i.id));
         const current = useItemStore.getState().items;
         if (!sameSceneItemSnapshot(merged, current)) {
@@ -253,7 +298,6 @@ export function MapCanvas() {
         }
         if (sessionId) persistItemsLocal(sessionId, merged);
         if (
-          useSessionStore.getState().myRole === 'GM' &&
           serverItems.length === 0 &&
           localItems.length > 0 &&
           !initialSyncRef.current.pushed
@@ -264,12 +308,10 @@ export function MapCanvas() {
         return;
       }
 
-      if (useSessionStore.getState().myRole === 'GM') {
-        const map = createDefaultMap();
-        useItemStore.getState().addItem(map);
-        initialSyncRef.current.pushed = true;
-        emitItemsSync([map]);
-      }
+      const map = createDefaultMap();
+      useItemStore.getState().addItem(map);
+      initialSyncRef.current.pushed = true;
+      emitItemsSync([map]);
     });
     const onFog = forSession((payload: FogUpdatePayload) => {
       const isGM = useSessionStore.getState().myRole === 'GM';
@@ -309,6 +351,7 @@ export function MapCanvas() {
         emitItemsSync(Object.values(useItemStore.getState().items) as Item[]);
         emitFogSync();
         syncFogActiveToSession();
+        syncMapFocusToSession();
       }, 600);
     });
 
@@ -329,6 +372,7 @@ export function MapCanvas() {
       socket.on('fog:sync', onFogSync as any);
       socket.on('session:userJoined', onUserJoined as any);
       bindFogActiveSocket();
+      bindMapFocusSocket();
       requestSceneHydrate();
     }
 
@@ -369,10 +413,10 @@ export function MapCanvas() {
   }, [appReady, sessionId, items]);
 
   // ── Hooks ───────────────────────────────────────────────────────────────
+  useSelectionTool(appReady, interactionReady);
   useMapViewport(appRef, sceneRefs.world, appReady, interactionReady);
   useItemRenderer(sceneRefs.items, sceneRefs.tokens, appReady);
   useMapFogOverlay(sceneRefs.fog, appReady);
-  useSelectionTool(appReady, interactionReady);
   useAttackTargetPick(appReady);
   useAoePlacement(appReady);
   useTransformControls(appReady);

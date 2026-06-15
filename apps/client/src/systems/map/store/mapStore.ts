@@ -108,6 +108,13 @@ interface SceneState extends ActiveGrid {
   /** Session-wide fog active (synced from GM). Players hide fog when false. */
   sessionFogActive: boolean;
 
+  /** GM: push map select / reset view to players. */
+  syncPlayerViews: boolean;
+  /** GM: allow dragging tokens assigned to players. */
+  gmMovePlayerTokens: boolean;
+  /** When false, only the GM can move tokens. */
+  playersCanMoveTokens: boolean;
+
   // Drawing tool settings
   drawColor: string;
   drawStroke: number;
@@ -123,6 +130,9 @@ interface SceneState extends ActiveGrid {
   setFogBrushSize: (size: number) => void;
   setFogEnabled: (enabled: boolean) => void;
   setSessionFogActive: (active: boolean) => void;
+  setSyncPlayerViews: (enabled: boolean) => void;
+  setGmMovePlayerTokens: (enabled: boolean) => void;
+  setPlayersCanMoveTokens: (enabled: boolean) => void;
   setDrawColor: (color: string) => void;
   setDrawStroke: (stroke: number) => void;
   setTextFontSize: (size: number) => void;
@@ -204,6 +214,9 @@ export const useMapStore = create<SceneState>((set, get) => ({
   fogBrushSize: 2,
   fogEnabled: false,
   sessionFogActive: false,
+  syncPlayerViews: true,
+  gmMovePlayerTokens: true,
+  playersCanMoveTokens: true,
   drawColor:    '#c9a84c',
   drawStroke:   3,
   textFontSize: 18,
@@ -223,6 +236,9 @@ export const useMapStore = create<SceneState>((set, get) => ({
   setFogBrushSize:(fogBrushSize) => set({ fogBrushSize }),
   setFogEnabled:  (fogEnabled) => set({ fogEnabled }),
   setSessionFogActive: (sessionFogActive) => set({ sessionFogActive }),
+  setSyncPlayerViews: (syncPlayerViews) => set({ syncPlayerViews }),
+  setGmMovePlayerTokens: (gmMovePlayerTokens) => set({ gmMovePlayerTokens }),
+  setPlayersCanMoveTokens: (playersCanMoveTokens) => set({ playersCanMoveTokens }),
   setDrawColor:   (drawColor) => set({ drawColor }),
   setDrawStroke:  (drawStroke) => set({ drawStroke }),
   setTextFontSize:(textFontSize) => set({ textFontSize }),
@@ -360,5 +376,8 @@ export const useMapStore = create<SceneState>((set, get) => ({
       revealedCells: new Set<string>(),
       fogEnabled: false,
       sessionFogActive: false,
+      syncPlayerViews: true,
+      gmMovePlayerTokens: true,
+      playersCanMoveTokens: true,
     }),
 }));

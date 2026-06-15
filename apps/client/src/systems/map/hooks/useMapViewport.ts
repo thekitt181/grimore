@@ -10,6 +10,7 @@ import { clampViewportScale, maxViewportScale, type ViewportScaleContext } from 
 import { pickHandle } from '@/systems/scene/interaction/useTransformControls';
 import {
   applyMapZoomAt,
+  pointerTargetsToken,
   shouldStartMapPan,
   viewportScaleContext,
 } from '../mapNavigation';
@@ -201,6 +202,7 @@ export function useMapViewport(
 
       const deferForSelect = mode === '3d' && tool === 'select' && !spaceDown.current && !e.shiftKey;
       if (deferForSelect) {
+        if (pointerTargetsToken(e.clientX, e.clientY) || isItemDragActive()) return;
         pendingPan.current = {
           pointerId: e.pointerId,
           x: e.clientX,

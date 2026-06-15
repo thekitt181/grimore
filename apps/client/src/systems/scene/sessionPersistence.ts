@@ -38,6 +38,19 @@ export function persistItemsLocal(sessionId: string, items: Item[]): void {
   }
 }
 
+/** Drop cached scene items (players re-hydrate from server). */
+export function clearItemsLocal(sessionId: string): void {
+  try {
+    const userId = useSessionStore.getState().myUserId;
+    const keys = userId
+      ? [scopedKey(ITEMS_PREFIX, sessionId), `${ITEMS_PREFIX}${sessionId}`]
+      : [`${ITEMS_PREFIX}${sessionId}`];
+    for (const key of keys) localStorage.removeItem(key);
+  } catch {
+    /* private mode */
+  }
+}
+
 export function loadItemsLocal(sessionId: string): Item[] | null {
   try {
     const userId = useSessionStore.getState().myUserId;
