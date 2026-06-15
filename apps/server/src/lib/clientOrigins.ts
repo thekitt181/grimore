@@ -42,13 +42,23 @@ function hostnameFromUrl(url: string): string | null {
   }
 }
 
-/** Apex domain for sharing auth cookies between www and non-www (e.g. grimore.co.uk). */
+const MULTI_PART_PUBLIC_SUFFIXES = ['.co.uk', '.org.uk', '.com.au', '.co.nz', '.co.jp'] as const;
+
+/** Registrable domain for sharing auth cookies between www and apex (e.g. grimore.co.uk). */
 export function getSharedAuthCookieDomain(): string | undefined {
   const primary = hostnameFromUrl(getPrimaryClientUrl());
   if (!primary || primary === 'localhost' || primary.startsWith('127.') || primary.endsWith('.onrender.com')) {
     return undefined;
   }
   const normalized = primary.startsWith('www.') ? primary.slice(4) : primary;
+
+  for (const suffix of MULTI_PART_PUBLIC_SUFFIXES) {
+    if (!normalized.endsWith(suffix)) continue;
+    const label = normalized.slice(0, -suffix.length);
+    const leaf = label.split('.').pop();
+    return leaf ? `${leaf}${suffix}` : normalized;
+  }
+
   const parts = normalized.split('.');
   if (parts.length < 2) return undefined;
   return parts.slice(-2).join('.');

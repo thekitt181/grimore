@@ -1,6 +1,6 @@
 import { createAuthClient } from 'better-auth/react';
 import { dashClient } from '@better-auth/infra/client';
-import { getPublicAppUrl, getServerOrigin } from './appUrls';
+import { getBrowserAppOrigin, getServerOrigin } from './appUrls';
 
 const BEARER_TOKEN_KEY = 'grimoire_bearer_token';
 
@@ -19,6 +19,7 @@ export const authClient = createAuthClient({
   baseURL: getServerOrigin(),
   plugins: [dashClient()] as never[],
   fetchOptions: {
+    credentials: 'include',
     auth: {
       type: 'Bearer',
       token: () => getBearerToken() ?? '',
@@ -74,7 +75,7 @@ export async function signOutAndClear(): Promise<void> {
 export async function signInWithGoogle(): Promise<string | null> {
   if (typeof window === 'undefined') return 'Google sign-in is unavailable';
 
-  const callbackURL = `${getPublicAppUrl().replace(/\/$/, '')}/`;
+  const callbackURL = `${getBrowserAppOrigin().replace(/\/$/, '')}/`;
   const result = await authClient.signIn.social({
     provider: 'google',
     callbackURL,

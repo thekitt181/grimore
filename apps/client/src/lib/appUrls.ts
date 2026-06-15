@@ -53,27 +53,26 @@ export function getApiBaseUrl(): string {
   return '/api';
 }
 
-/** Public app URL for invite links (optional override). */
-export function getPublicAppUrl(): string {
-  const override = import.meta.env['VITE_APP_URL'] as string | undefined;
-  if (override?.trim()) {
-    const url = override.trim().replace(/\/$/, '');
-    if (typeof window !== 'undefined' && isLocalhostUrl(url) && !isLocalhostUrl(window.location.origin)) {
-      return window.location.origin;
-    }
-    return url;
-  }
-  if (typeof window === 'undefined') return '';
+/** Always use the page the user is on — required for OAuth/password redirects to keep auth cookies. */
+export function getBrowserAppOrigin(): string {
+  if (typeof window !== 'undefined') return window.location.origin;
+  return '';
+}
 
-  const origin = window.location.origin;
-  try {
-    const url = new URL(origin);
-    if (url.hostname.startsWith('www.')) {
-      url.hostname = url.hostname.slice(4);
-      return url.origin;
+/** Public app URL for invite links (optional override). Never use for OAuth callbacks. */
+export function getPublicAppUrl(): string {
+  if (typeof window !== 'undefined') {
+    const override = import.meta.env['VITE_APP_URL'] as string | undefined;
+    if (override?.trim()) {
+      const url = override.trim().replace(/\/$/, '');
+      if (!isLocalhostUrl(url) || isLocalhostUrl(window.location.origin)) {
+        return url;
+      }
     }
-  } catch {
-    /* ignore */
+    return getBrowserAppOrigin();
   }
-  return origin;
+
+  const override = import.meta.env['VITE_APP_URL'] as string | undefined;
+  if (override?.trim()) return override.trim().replace(/\/$/, '');
+  return '';
 }

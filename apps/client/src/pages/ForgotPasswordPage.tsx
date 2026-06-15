@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { authClient } from '@/lib/auth-client';
-import { getPublicAppUrl } from '@/lib/appUrls';
+import { getBrowserAppOrigin } from '@/lib/appUrls';
 import { LogoMark } from '@/components/LogoMark';
 
 export function ForgotPasswordPage() {
@@ -15,7 +15,7 @@ export function ForgotPasswordPage() {
     setError(null);
     setLoading(true);
     try {
-      const redirectTo = `${getPublicAppUrl()}/reset-password`;
+      const redirectTo = `${getBrowserAppOrigin()}/reset-password`;
       const { error: resetError } = await authClient.requestPasswordReset({
         email: email.trim(),
         redirectTo,
