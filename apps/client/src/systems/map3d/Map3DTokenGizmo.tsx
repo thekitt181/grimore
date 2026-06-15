@@ -8,9 +8,9 @@ import { useSessionStore } from '@/store/sessionStore';
 import { useLiveTransformStore } from '@/systems/scene/store/liveTransformStore';
 import { computeTokenGizmoLayout } from '@/systems/scene/token/tokenGizmoLayout';
 import { syncTransformHandleRegistry } from '@/systems/scene/interaction/useTransformControls';
-import { resolveItemBounds } from './sceneItemBounds';
+import { objectBoundsInParentLocal } from './objectBoundsInParentLocal';
 import type { Item } from '@/systems/scene/types';
-import type { TokenGizmoLayout } from '@/systems/scene/token/tokenGizmoLayout';
+import type { GizmoHandleId, TokenGizmoLayout } from '@/systems/scene/token/tokenGizmoLayout';
 
 const GOLD = '#c9a84c';
 const HANDLE_Y = 0.12;
@@ -35,10 +35,9 @@ const boxMat = new THREE.LineBasicMaterial({
   depthTest: false,
 });
 
-function rot(x: number, y: number, deg: number): { x: number; y: number } {
-  const r = (deg * Math.PI) / 180;
-  return { x: x * Math.cos(r) - y * Math.sin(r), y: x * Math.sin(r) + y * Math.cos(r) };
-}
+const ROT_DIST = 28;
+const _gizmoModelBox = new THREE.Box3();
+const _gizmoModelCenter = new THREE.Vector3();
 
 function setBoxPoints(line: THREE.LineLoop, points: THREE.Vector3[]): void {
   if (points.length < 2) {
@@ -49,15 +48,38 @@ function setBoxPoints(line: THREE.LineLoop, points: THREE.Vector3[]): void {
   line.geometry.setFromPoints(points);
 }
 
+function localTokenHandlePositions(
+  hw: number,
+  hh: number,
+  moveOnly: boolean,
+): Array<{ id: GizmoHandleId; x: number; z: number }> {
+  const minDim = Math.min(hw * 2, hh * 2);
+  const compact = minDim < 96;
+  const handleOutset = compact ? Math.max(12, minDim * 0.16) : Math.max(8, minDim * 0.08);
+  const rotDist = compact ? Math.max(ROT_DIST, minDim * 0.55) : ROT_DIST;
+  const handles: Array<{ id: GizmoHandleId; x: number; z: number }> = [
+    { id: 'nw', x: -hw - handleOutset, z: -hh - handleOutset },
+    { id: 'ne', x: hw + handleOutset, z: -hh - handleOutset },
+    { id: 'se', x: hw + handleOutset, z: hh + handleOutset },
+    { id: 'sw', x: -hw - handleOutset, z: hh + handleOutset },
+  ];
+  if (!moveOnly) {
+    handles.push({ id: 'rotate', x: 0, z: -hh - rotDist });
+  }
+  return handles;
+}
+
 /** Selection box + handles in item-local space — tokens only (child of transform group). */
 export function TokenSelectionGizmo({
   itemId,
   meshBaseWidth,
   meshBaseHeight,
+  modelRootRef,
 }: {
   itemId: string;
   meshBaseWidth: number;
   meshBaseHeight: number;
+  modelRootRef?: React.RefObject<THREE.Object3D | null>;
 }) {
   const meshRefs = useRef<(Mesh | null)[]>([]);
   const boxRef = useRef<THREE.LineLoop>(null);
@@ -78,37 +100,40 @@ export function TokenSelectionGizmo({
     if (!item) return;
 
     const liveById = useLiveTransformStore.getState().byId;
-    const live = liveById[itemId];
-    const b = resolveItemBounds(item, live);
     const gm = useSessionStore.getState().myRole === 'GM';
     const layout = computeTokenGizmoLayout([item], liveById, { moveOnly: !gm });
     syncTransformHandleRegistry(layout);
 
     const hw = meshBaseWidth / 2;
     const hh = meshBaseHeight / 2;
-    const scaleX = meshBaseWidth > 0 ? b.width / meshBaseWidth : 1;
-    const scaleZ = meshBaseHeight > 0 ? b.height / meshBaseHeight : 1;
+    let ox = 0;
+    let oz = 0;
+    const model = modelRootRef?.current;
+    const parent = box?.parent ?? meshRefs.current[0]?.parent ?? null;
+    if (model && parent && objectBoundsInParentLocal(model, parent, _gizmoModelBox)) {
+      _gizmoModelBox.getCenter(_gizmoModelCenter);
+      ox = _gizmoModelCenter.x;
+      oz = _gizmoModelCenter.z;
+    }
 
     if (box) {
       boxPts.current = [
-        new THREE.Vector3(-hw, BOX_Y, -hh),
-        new THREE.Vector3(hw, BOX_Y, -hh),
-        new THREE.Vector3(hw, BOX_Y, hh),
-        new THREE.Vector3(-hw, BOX_Y, hh),
-        new THREE.Vector3(-hw, BOX_Y, -hh),
+        new THREE.Vector3(-hw + ox, BOX_Y, -hh + oz),
+        new THREE.Vector3(hw + ox, BOX_Y, -hh + oz),
+        new THREE.Vector3(hw + ox, BOX_Y, hh + oz),
+        new THREE.Vector3(-hw + ox, BOX_Y, hh + oz),
+        new THREE.Vector3(-hw + ox, BOX_Y, -hh + oz),
       ];
       setBoxPoints(box, boxPts.current);
     }
 
+    const localHandles = localTokenHandlePositions(hw, hh, !gm);
     let i = 0;
-    for (const h of layout.handles) {
+    for (const h of localHandles) {
       const mesh = meshRefs.current[i];
       if (!mesh) break;
       mesh.visible = true;
-      const dx = h.wx - b.cx;
-      const dz = h.wy - b.cz;
-      const local = rot(dx, dz, -b.rotation);
-      mesh.position.set(local.x / scaleX, HANDLE_Y, local.y / scaleZ);
+      mesh.position.set(h.x + ox, HANDLE_Y, h.z + oz);
       mesh.scale.setScalar(h.id === 'rotate' ? 1.25 : 1);
       i++;
     }

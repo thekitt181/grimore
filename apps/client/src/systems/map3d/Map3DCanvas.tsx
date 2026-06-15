@@ -54,7 +54,7 @@ function Map2DModelFogContent({ map }: { map: MapItem }) {
   );
 }
 
-/** 2D view: model mesh in Three; Pixi draws the selection gizmo (same as flat tokens). */
+/** 2D view: model mesh in Three; selection gizmo matches the Three overlay (not Pixi). */
 function TokenModelOverlayLayer() {
   const { tokens, activeTurnItemId } = useVisibleSceneTokens({ modelOnly: true });
   const modelTokens = useMemo(
@@ -66,7 +66,6 @@ function TokenModelOverlayLayer() {
   return (
     <Map3DTokens
       tokens={modelTokens}
-      showSelectionGizmo={false}
       {...(activeTurnItemId ? { activeTurnItemId } : {})}
     />
   );

@@ -1,6 +1,7 @@
 import { useRef } from 'react';
 import { useMapStore } from '@/systems/map/store/mapStore';
 import { useItemStore } from '@/systems/scene/store/itemStore';
+import type { Group } from 'three';
 import type { TokenItem } from '@/systems/scene/types';
 import { is2dToken, is3dToken, tokenUsesModelMesh } from '@/systems/scene/token/tokenRenderType';
 import { useThreeTexture } from './useThreeTexture';
@@ -21,10 +22,10 @@ function parseBorderColor(hex: string | undefined): string {
   return hex.startsWith('#') ? hex : `#${hex}`;
 }
 
-/** Mesh normalized once at this size; live resize uses group scale (matches gizmo bounds). */
+/** Mesh base size — updates when token is resized so pick/gizmo scale stays correct. */
 function useTokenMeshBase(token: TokenItem) {
-  const ref = useRef<{ w: number; h: number } | null>(null);
-  if (!ref.current) {
+  const ref = useRef({ w: token.width, h: token.height });
+  if (ref.current.w !== token.width || ref.current.h !== token.height) {
     ref.current = { w: token.width, h: token.height };
   }
   return ref.current;
@@ -79,6 +80,7 @@ function Token2DFlat({
 }) {
   const { texture } = useThreeTexture(token.imageUrl);
   const meshBase = useTokenMeshBase(token);
+  const modelRootRef = useRef<Group>(null);
   const targetSize = Math.min(meshBase.w, meshBase.h);
   const radius = targetSize / 2 - 4;
   const borderColor = parseBorderColor(token.borderColour);
@@ -92,7 +94,7 @@ function Token2DFlat({
       scaleBaseWidth={meshBase.w}
       scaleBaseHeight={meshBase.h}
     >
-      <group scale={[stretchX, 1, stretchZ]}>
+      <group ref={modelRootRef} scale={[stretchX, 1, stretchZ]}>
       <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow={false} renderOrder={10}>
         <circleGeometry args={[radius, 48]} />
         <meshStandardMaterial color="#1c1c28" roughness={0.85} metalness={0.05} />
@@ -110,25 +112,31 @@ function Token2DFlat({
         </mesh>
       )}
 
-      </group>
-
-      <TokenPickVolume itemId={token.id} radius={Math.max(meshBase.w, meshBase.h) * 0.52} height={radius * 0.5} />
       <TokenNameLabel name={token.name} localY={radius * 0.85 * stretchZ} />
       <TokenHpBar tokenId={token.id} footprint={targetSize} />
       <TokenConditionDots tokenId={token.id} radius={radius} />
 
       {activeTurn && (
-        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.08, 0]} scale={[stretchX, 1, stretchZ]}>
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.08, 0]}>
           <ringGeometry args={[radius + 2, radius + 8, 48]} />
           <meshStandardMaterial color="#ffd700" emissive="#ffd700" emissiveIntensity={0.4} />
         </mesh>
       )}
+      </group>
+
+      <TokenPickVolume
+        itemId={token.id}
+        radius={Math.max(meshBase.w, meshBase.h) * 0.52}
+        height={radius * 0.5}
+        modelRootRef={modelRootRef}
+      />
 
       {showGizmo && (
         <TokenSelectionGizmo
           itemId={token.id}
           meshBaseWidth={meshBase.w}
           meshBaseHeight={meshBase.h}
+          modelRootRef={modelRootRef}
         />
       )}
     </TokenTransformGroup>
@@ -147,12 +155,15 @@ function Token3DModel({
   showGizmo: boolean;
 }) {
   const meshBase = useTokenMeshBase(token);
+  const modelRootRef = useRef<Group>(null);
   const targetSize = Math.min(meshBase.w, meshBase.h);
   const storeToken = (useItemStore((s) => s.items[token.id]) ?? token) as TokenItem;
   const borderColor = parseBorderColor(token.borderColour);
   const baseRadius = targetSize * 0.46;
   const baseTopY = Math.max(baseRadius * 0.22, 3.5) * 0.78;
   const surfaceY = view2d ? 0.06 : 'ground';
+  const pickRadius = Math.max(meshBase.w, meshBase.h) * 0.52;
+  const pickHeight = view2d ? targetSize * 1.85 : targetSize * 1.35;
 
   return (
     <TokenTransformGroup
@@ -164,8 +175,7 @@ function Token3DModel({
       {view2d && (
         <MiniaturePedestal radius={baseRadius} borderColor={borderColor} />
       )}
-      {/* Upright on base — parent Y spin only; view orbit is camera right-drag when selected. */}
-      <group position={[0, view2d ? baseTopY : 0, 0]} rotation={[0, view2d ? MODEL_2D_IMPORT_YAW : 0, 0]}>
+      <group ref={modelRootRef} position={[0, view2d ? baseTopY : 0, 0]} rotation={[0, view2d ? MODEL_2D_IMPORT_YAW : 0, 0]}>
         <SceneModel
           url={token.modelUrl!}
           targetSize={targetSize}
@@ -174,43 +184,49 @@ function Token3DModel({
           tokenRender
           tokenRender2d={view2d}
         />
+        <TokenNameLabel name={token.name} localY={view2d ? targetSize * 1.35 : targetSize * 0.92} />
+        <TokenHpBar tokenId={token.id} footprint={targetSize} />
+        <TokenConditionDots tokenId={token.id} radius={baseRadius} y={view2d ? 0.35 : 0.25} />
+
+        {activeTurn && view2d && (
+          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.12, 0]}>
+            <ringGeometry args={[baseRadius * 1.02, baseRadius * 1.14, 40]} />
+            <meshStandardMaterial color="#ffd700" emissive="#ffd700" emissiveIntensity={0.45} />
+          </mesh>
+        )}
+
+        {activeTurn && !view2d && (
+          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, targetSize * 0.05, 0]}>
+            <ringGeometry args={[targetSize * 0.48, targetSize * 0.55, 48]} />
+            <meshStandardMaterial color="#c9a84c" emissive="#c9a84c" emissiveIntensity={0.35} />
+          </mesh>
+        )}
+
+        {token.auraRadius != null && token.auraRadius > 0 && (
+          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.15, 0]}>
+            <ringGeometry args={[targetSize * 0.45, targetSize * 0.45 + token.auraRadius * (storeToken.width / (storeToken.sizeCells || 1)), 48]} />
+            <meshBasicMaterial
+              color={token.auraColor ?? '#c9a84c'}
+              transparent
+              opacity={0.22}
+              depthWrite={false}
+            />
+          </mesh>
+        )}
       </group>
-      <TokenPickVolume itemId={token.id} radius={Math.max(meshBase.w, meshBase.h) * 0.52} height={view2d ? targetSize * 1.85 : targetSize * 1.35} />
-      <TokenNameLabel name={token.name} localY={view2d ? targetSize * 1.35 : targetSize * 0.92} />
-      <TokenHpBar tokenId={token.id} footprint={targetSize} />
-      <TokenConditionDots tokenId={token.id} radius={baseRadius} y={view2d ? 0.35 : 0.25} />
-
-      {activeTurn && view2d && (
-        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.12, 0]}>
-          <ringGeometry args={[baseRadius * 1.02, baseRadius * 1.14, 40]} />
-          <meshStandardMaterial color="#ffd700" emissive="#ffd700" emissiveIntensity={0.45} />
-        </mesh>
-      )}
-
-      {activeTurn && !view2d && (
-        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, targetSize * 0.05, 0]}>
-          <ringGeometry args={[targetSize * 0.48, targetSize * 0.55, 48]} />
-          <meshStandardMaterial color="#c9a84c" emissive="#c9a84c" emissiveIntensity={0.35} />
-        </mesh>
-      )}
-
-      {token.auraRadius != null && token.auraRadius > 0 && (
-        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.15, 0]}>
-          <ringGeometry args={[targetSize * 0.45, targetSize * 0.45 + token.auraRadius * (storeToken.width / (storeToken.sizeCells || 1)), 48]} />
-          <meshBasicMaterial
-            color={token.auraColor ?? '#c9a84c'}
-            transparent
-            opacity={0.22}
-            depthWrite={false}
-          />
-        </mesh>
-      )}
+      <TokenPickVolume
+        itemId={token.id}
+        radius={pickRadius}
+        height={pickHeight}
+        modelRootRef={modelRootRef}
+      />
 
       {showGizmo && (
         <TokenSelectionGizmo
           itemId={token.id}
           meshBaseWidth={meshBase.w}
           meshBaseHeight={meshBase.h}
+          modelRootRef={modelRootRef}
         />
       )}
     </TokenTransformGroup>
@@ -228,6 +244,7 @@ function Token3DMesh({
 }) {
   const { texture } = useThreeTexture(token.imageUrl);
   const meshBase = useTokenMeshBase(token);
+  const modelRootRef = useRef<Group>(null);
   const targetSize = Math.min(meshBase.w, meshBase.h);
   const storeToken = (useItemStore((s) => s.items[token.id]) ?? token) as TokenItem;
   const radius = targetSize / 2;
@@ -244,7 +261,7 @@ function Token3DMesh({
       scaleBaseWidth={meshBase.w}
       scaleBaseHeight={meshBase.h}
     >
-      <group scale={[stretchX, 1, stretchZ]}>
+      <group ref={modelRootRef} scale={[stretchX, 1, stretchZ]}>
       <mesh position={[0, baseHeightMesh / 2, 0]} castShadow receiveShadow={false} renderOrder={10}>
         <cylinderGeometry args={[radius, radius * 1.05, baseHeightMesh, 32]} />
         <meshStandardMaterial color="#2a2018" roughness={0.7} metalness={0.25} />
@@ -264,9 +281,7 @@ function Token3DMesh({
         <ringGeometry args={[radius * 0.95, radius * 1.02, 48]} />
         <meshStandardMaterial color="#c9a84c" roughness={0.4} metalness={0.6} />
       </mesh>
-      </group>
 
-      <TokenPickVolume itemId={token.id} radius={Math.max(meshBase.w, meshBase.h) * 0.52} height={pickHeight * 1.25} />
       <TokenNameLabel name={token.name} localY={(yTop + radius * 0.75) * stretchZ} />
       <TokenHpBar tokenId={token.id} footprint={targetSize} />
       <TokenConditionDots tokenId={token.id} radius={radius} y={yTop + 0.3} />
@@ -289,12 +304,21 @@ function Token3DMesh({
           />
         </mesh>
       )}
+      </group>
+
+      <TokenPickVolume
+        itemId={token.id}
+        radius={Math.max(meshBase.w, meshBase.h) * 0.52}
+        height={pickHeight * 1.25}
+        modelRootRef={modelRootRef}
+      />
 
       {showGizmo && (
         <TokenSelectionGizmo
           itemId={token.id}
           meshBaseWidth={meshBase.w}
           meshBaseHeight={meshBase.h}
+          modelRootRef={modelRootRef}
         />
       )}
     </TokenTransformGroup>
