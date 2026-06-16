@@ -80,6 +80,37 @@ export function resolveAuthDatabaseUrl(): string {
   return withSupabaseSsl(url.toString());
 }
 
+/** Session pooler for user-facing reads — isolated from compendium transaction pool (6543). */
+export function resolveReadDatabaseUrl(): string {
+  const source = process.env['DATABASE_URL']?.trim();
+  if (!source) {
+    throw new Error('DATABASE_URL is not set');
+  }
+
+  let url: URL;
+  try {
+    url = new URL(source);
+  } catch {
+    throw new Error('DATABASE_URL is not a valid URL');
+  }
+
+  if (url.hostname.includes('pooler.supabase.com')) {
+    url.port = '5432';
+    url.searchParams.delete('pgbouncer');
+  }
+
+  url.searchParams.set(
+    'connection_limit',
+    process.env['READ_DATABASE_CONNECTION_LIMIT']?.trim() ?? '4',
+  );
+  url.searchParams.set(
+    'pool_timeout',
+    process.env['READ_DATABASE_POOL_TIMEOUT']?.trim() ?? '20',
+  );
+
+  return withSupabaseSsl(url.toString());
+}
+
 /** Prisma migrate needs direct Postgres — not the PgBouncer transaction pooler. */
 export function resolveMigrationDatabaseUrl(raw?: string): string {
   const direct = process.env['DIRECT_URL']?.trim();

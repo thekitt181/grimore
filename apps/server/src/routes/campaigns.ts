@@ -1,7 +1,8 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { nanoid } from 'nanoid';
-import { prisma } from '../lib/prisma';
+import { prisma, readPrisma } from '../lib/prisma';
+import { isDbPoolSaturation, withDbTimeout } from '../lib/dbTimeout';
 import { requireAuth, type AuthenticatedRequest } from '../middleware/auth';
 import { INVITE_CODE_LENGTH } from '@grimoire/shared';
 import { getPrimaryClientUrl } from '../lib/clientOrigins';
@@ -33,22 +34,29 @@ const createCampaignSchema = z.object({
 
 // ─── GET /api/campaigns ───────────────────────────────────────────────────────
 
+const READ_QUERY_TIMEOUT_MS = 10_000;
+
 router.get('/', requireAuth, async (req: AuthenticatedRequest, res) => {
   try {
     const userId = req.userId!;
 
-    const memberships = await prisma.campaignMember.findMany({
-      where: { userId },
-      include: {
-        campaign: {
+    const memberships = await withDbTimeout(
+      READ_QUERY_TIMEOUT_MS,
+      () =>
+        readPrisma.campaignMember.findMany({
+          where: { userId },
           include: {
-            _count: { select: { members: true, scenes: true } },
-            sessions: activeSessionSelect,
+            campaign: {
+              include: {
+                _count: { select: { members: true, scenes: true } },
+                sessions: activeSessionSelect,
+              },
+            },
           },
-        },
-      },
-      orderBy: { joinedAt: 'desc' },
-    });
+          orderBy: { joinedAt: 'desc' },
+        }),
+      'campaigns.list',
+    );
 
     const campaigns = memberships.map((m: (typeof memberships)[number]) => ({
       ...pickActiveSession(m.campaign),
@@ -57,6 +65,10 @@ router.get('/', requireAuth, async (req: AuthenticatedRequest, res) => {
 
     res.json({ campaigns });
   } catch (err) {
+    if (isDbPoolSaturation(err)) {
+      res.status(503).json({ error: 'Database busy — try again shortly', retry: true });
+      return;
+    }
     console.error('[Campaigns] list error:', err);
     res.status(500).json({ error: 'Failed to fetch campaigns' });
   }
@@ -108,17 +120,22 @@ router.get('/:id', requireAuth, async (req: AuthenticatedRequest, res) => {
     const userId = req.userId!;
     const id = req.params['id'] as string;
 
-    const campaign = await prisma.campaign.findUnique({
-      where: { id },
-      include: {
-        members: {
-          include: { user: { select: { id: true, username: true, avatarUrl: true } } },
-        },
-        scenes: { orderBy: { sortOrder: 'asc' } },
-        sessions: activeSessionSelect,
-        _count: { select: { members: true, scenes: true } },
-      },
-    });
+    const campaign = await withDbTimeout(
+      READ_QUERY_TIMEOUT_MS,
+      () =>
+        readPrisma.campaign.findUnique({
+          where: { id },
+          include: {
+            members: {
+              include: { user: { select: { id: true, username: true, avatarUrl: true } } },
+            },
+            scenes: { orderBy: { sortOrder: 'asc' } },
+            sessions: activeSessionSelect,
+            _count: { select: { members: true, scenes: true } },
+          },
+        }),
+      'campaigns.get',
+    );
 
     if (!campaign) {
       res.status(404).json({ error: 'Campaign not found' });
@@ -134,6 +151,10 @@ router.get('/:id', requireAuth, async (req: AuthenticatedRequest, res) => {
     const myRole = campaign.gmId === userId ? 'GM' : 'PLAYER';
     res.json({ campaign: pickActiveSession(campaign), myRole });
   } catch (err) {
+    if (isDbPoolSaturation(err)) {
+      res.status(503).json({ error: 'Database busy — try again shortly', retry: true });
+      return;
+    }
     console.error('[Campaigns] get error:', err);
     res.status(500).json({ error: 'Failed to fetch campaign' });
   }

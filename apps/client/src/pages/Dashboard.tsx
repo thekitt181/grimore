@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import axios from 'axios';
 import { useGrimoireUser } from '@/hooks/useGrimoireAuth';
 import { api } from '@/lib/axios';
 import { AppShell } from '@/components/layout/AppShell';
@@ -23,6 +24,11 @@ export function Dashboard() {
     },
     refetchInterval: (query) =>
       query.state.data?.some((c) => c.activeSession?.isActive) ? 5000 : false,
+    retry: (failureCount, error) => {
+      if (axios.isAxiosError(error) && error.response?.status === 503) return failureCount < 5;
+      return failureCount < 2;
+    },
+    retryDelay: (attempt) => Math.min(2000 * attempt, 8000),
   });
 
   const campaigns = data ?? [];
