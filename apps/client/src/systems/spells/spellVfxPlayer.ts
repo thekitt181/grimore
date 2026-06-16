@@ -27,7 +27,48 @@ interface ActiveCast {
 }
 
 const activeCasts = new Set<ActiveCast>();
-const zoneSprites = new Map<string, { sprite: Sprite; source: VideoSource }>();
+const zoneSprites = new Map<string, { sprite: Sprite; source: VideoSource; video: HTMLVideoElement }>();
+
+function waitForVideoMetadata(video: HTMLVideoElement): Promise<void> {
+  if (video.videoWidth > 0 && video.videoHeight > 0) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const finish = () => {
+      if (video.videoWidth > 0 && video.videoHeight > 0) resolve();
+    };
+    video.addEventListener('loadeddata', finish, { once: true });
+    video.addEventListener('loadedmetadata', finish, { once: true });
+    video.addEventListener('error', () => reject(new Error('Video failed to load')), { once: true });
+  });
+}
+
+function detachVideoSprite(
+  layer: Container | null,
+  sprite: Sprite,
+  source: VideoSource,
+  video: HTMLVideoElement,
+): void {
+  try {
+    video.pause();
+    video.removeAttribute('src');
+    video.load();
+  } catch {
+    /* ignore teardown races */
+  }
+  if (layer && !sprite.destroyed) {
+    layer.removeChild(sprite);
+  }
+  if (!sprite.destroyed) {
+    // Destroy source explicitly — avoid textureSource:true (double-destroy → null.paused).
+    sprite.destroy({ texture: true, textureSource: false });
+  }
+  if (!source.destroyed) {
+    try {
+      source.destroy();
+    } catch {
+      /* PIXI VideoSource can throw if the element was already torn down */
+    }
+  }
+}
 
 function getOverlay(): Container | null {
   return sceneRefs.overlay.current;
@@ -90,6 +131,8 @@ async function createVideoSprite(
   video.loop = loop;
   video.preload = 'auto';
 
+  await waitForVideoMetadata(video);
+
   const source = new VideoSource({
     resource: video,
     autoPlay: true,
@@ -99,6 +142,10 @@ async function createVideoSprite(
   });
 
   await source.load();
+  if (video.videoWidth <= 0 || video.videoHeight <= 0) {
+    source.destroy();
+    throw new Error('Video has no frame dimensions');
+  }
   const texture = new Texture({ source });
   const sprite = new Sprite(texture);
   sprite.anchor.set(0.5);
@@ -151,22 +198,20 @@ async function spawnCastSprite(
   const cast: ActiveCast = {
     sprite,
     source,
-    cleanup: () => {
-      activeCasts.delete(cast);
-      if (!sprite.destroyed) {
-        layer.removeChild(sprite);
-        sprite.destroy({ texture: true, textureSource: true });
-      }
-      source.destroy();
-      video.src = '';
-      video.load();
-    },
+    cleanup: () => {},
   };
-  activeCasts.add(cast);
 
+  let finished = false;
   const finish = () => {
-    cast.cleanup();
+    if (finished) return;
+    finished = true;
+    video.removeEventListener('ended', finish);
+    detachVideoSprite(layer, sprite, source, video);
+    activeCasts.delete(cast);
   };
+  cast.cleanup = finish;
+
+  activeCasts.add(cast);
   video.addEventListener('ended', finish, { once: true });
   window.setTimeout(finish, variant.durationMs + 250);
 }
@@ -247,23 +292,19 @@ export async function syncZoneLoopVfx(
     const url = jb2aAssetUrl(baseUrl, asset, variant);
 
     try {
-      const { sprite, source } = await createVideoSprite(url, true);
+      const { sprite, source, video } = await createVideoSprite(url, true);
       positionSprite(sprite, effect, asset, variant);
       sprite.alpha = 0.85;
       layer.addChild(sprite);
-      zoneSprites.set(effect.id, { sprite, source });
+      zoneSprites.set(effect.id, { sprite, source, video });
     } catch {
       /* skip this zone */
     }
   }
 
-  for (const [id, { sprite, source }] of zoneSprites) {
+  for (const [id, { sprite, source, video }] of zoneSprites) {
     if (keep.has(id)) continue;
-    if (!sprite.destroyed) {
-      layer.removeChild(sprite);
-      sprite.destroy({ texture: true, textureSource: true });
-    }
-    source.destroy();
+    detachVideoSprite(layer, sprite, source, video);
     zoneSprites.delete(id);
   }
 }
@@ -276,12 +317,8 @@ export function clearCastVfx(): void {
 
 export function clearZoneLoopVfx(): void {
   const layer = getOverlay()?.getChildByLabel(ZONE_LAYER_LABEL) as Container | null;
-  for (const [id, { sprite, source }] of zoneSprites) {
-    if (layer && !sprite.destroyed) {
-      layer.removeChild(sprite);
-      sprite.destroy({ texture: true, textureSource: true });
-    }
-    source.destroy();
+  for (const [id, { sprite, source, video }] of zoneSprites) {
+    detachVideoSprite(layer, sprite, source, video);
     zoneSprites.delete(id);
   }
 }

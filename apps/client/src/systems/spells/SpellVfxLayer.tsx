@@ -7,7 +7,7 @@ import { useSpellEffectStore } from './effectStore';
 import { buildAoePolygon, type AoePlacement } from '@/systems/combat/aoeGeometry';
 import { getMapGridSize } from '@/systems/combat/evaluateAttack';
 import { getJb2aBaseUrl, jb2aAnimationsEnabled } from './spellVfxRegistry';
-import { playSpellCastVfx, syncZoneLoopVfx } from './spellVfxPlayer';
+import { playSpellCastVfx, syncZoneLoopVfx, clearAllSpellVideoVfx } from './spellVfxPlayer';
 import { findSpellEffectCatalogEntry, effectShowsMapZone } from './spellEffectsCatalog';
 import { spellVfxUsesScreenLayer } from './spellVfxScreenUtils';
 
@@ -114,6 +114,10 @@ export function SpellVfxLayer({ appReady }: { appReady: boolean }) {
       if (!activeIds.has(id)) playedCastIds.current.delete(id);
     }
   }, [effects]);
+
+  useEffect(() => () => {
+    clearAllSpellVideoVfx();
+  }, []);
 
   return null;
 }

@@ -72,6 +72,16 @@ export function BackgroundVideoLayer({ sessionId, allowDismiss = false }: Backgr
     void el.play().then(() => setNeedsUnmute(false)).catch(() => undefined);
   }, [popup?.volume]);
 
+  useEffect(() => {
+    return () => {
+      const el = videoRef.current;
+      if (!el) return;
+      el.pause();
+      el.removeAttribute('src');
+      el.load();
+    };
+  }, []);
+
   if (!url) return null;
 
   if (cinemaMode) {
