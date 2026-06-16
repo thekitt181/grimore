@@ -22,7 +22,7 @@ export const prisma =
 export const authPrisma =
   globalForPrisma.authPrisma ?? createClient(resolveAuthDatabaseUrl());
 
-/** User-facing reads (campaigns, dashboard) — session pooler, not transaction pool. */
+/** User-facing routes (campaigns, dashboard) — session pooler, not transaction pool. */
 export const readPrisma =
   globalForPrisma.readPrisma ?? createClient(resolveReadDatabaseUrl());
 

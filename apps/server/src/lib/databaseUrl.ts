@@ -80,7 +80,7 @@ export function resolveAuthDatabaseUrl(): string {
   return withSupabaseSsl(url.toString());
 }
 
-/** Session pooler for user-facing reads — isolated from compendium transaction pool (6543). */
+/** Session pooler for user-facing app routes — isolated from compendium transaction pool (6543). */
 export function resolveReadDatabaseUrl(): string {
   const source = process.env['DATABASE_URL']?.trim();
   if (!source) {

@@ -1,4 +1,7 @@
 export function isDbPoolSaturation(err: unknown): boolean {
+  if (typeof err === 'object' && err !== null && 'code' in err && (err as { code: string }).code === 'P2024') {
+    return true;
+  }
   if (!(err instanceof Error)) return false;
   const msg = err.message;
   return /ECHECKOUTTIMEOUT|P2024|pool after|Timed out fetching a new connection|connection pool/i.test(msg);

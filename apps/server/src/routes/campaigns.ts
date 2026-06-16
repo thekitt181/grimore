@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { nanoid } from 'nanoid';
-import { prisma, readPrisma } from '../lib/prisma';
+import { readPrisma } from '../lib/prisma';
 import { isDbPoolSaturation, withDbTimeout } from '../lib/dbTimeout';
 import { requireAuth, type AuthenticatedRequest } from '../middleware/auth';
 import { INVITE_CODE_LENGTH } from '@grimoire/shared';
@@ -34,14 +34,31 @@ const createCampaignSchema = z.object({
 
 // ─── GET /api/campaigns ───────────────────────────────────────────────────────
 
-const READ_QUERY_TIMEOUT_MS = 10_000;
+const CAMPAIGN_DB_TIMEOUT_MS = 10_000;
+const CAMPAIGN_TX_TIMEOUT_MS = 15_000;
+
+function respondCampaignDbError(
+  res: import('express').Response,
+  err: unknown,
+  logLabel: string,
+  message: string,
+): void {
+  if (isDbPoolSaturation(err)) {
+    res.status(503).json({ error: 'Database busy — try again shortly', retry: true });
+    return;
+  }
+  console.error(logLabel, err);
+  res.status(500).json({ error: message });
+}
+
+// ─── GET /api/campaigns ───────────────────────────────────────────────────────
 
 router.get('/', requireAuth, async (req: AuthenticatedRequest, res) => {
   try {
     const userId = req.userId!;
 
     const memberships = await withDbTimeout(
-      READ_QUERY_TIMEOUT_MS,
+      CAMPAIGN_DB_TIMEOUT_MS,
       () =>
         readPrisma.campaignMember.findMany({
           where: { userId },
@@ -65,12 +82,7 @@ router.get('/', requireAuth, async (req: AuthenticatedRequest, res) => {
 
     res.json({ campaigns });
   } catch (err) {
-    if (isDbPoolSaturation(err)) {
-      res.status(503).json({ error: 'Database busy — try again shortly', retry: true });
-      return;
-    }
-    console.error('[Campaigns] list error:', err);
-    res.status(500).json({ error: 'Failed to fetch campaigns' });
+    respondCampaignDbError(res, err, '[Campaigns] list error:', 'Failed to fetch campaigns');
   }
 });
 
@@ -89,27 +101,31 @@ router.post('/', requireAuth, async (req: AuthenticatedRequest, res) => {
     const { name, description, coverImageUrl, system } = parsed.data;
     const inviteCode = nanoid(INVITE_CODE_LENGTH).toUpperCase();
 
-    const campaign = await prisma.campaign.create({
-      data: {
-        name,
-        description: description ?? null,
-        coverImageUrl: coverImageUrl ?? null,
-        system,
-        inviteCode,
-        gmId: userId,
-        members: {
-          create: { userId, role: 'GM' },
-        },
-      },
-      include: {
-        _count: { select: { members: true, scenes: true } },
-      },
-    });
+    const campaign = await withDbTimeout(
+      CAMPAIGN_DB_TIMEOUT_MS,
+      () =>
+        readPrisma.campaign.create({
+          data: {
+            name,
+            description: description ?? null,
+            coverImageUrl: coverImageUrl ?? null,
+            system,
+            inviteCode,
+            gmId: userId,
+            members: {
+              create: { userId, role: 'GM' },
+            },
+          },
+          include: {
+            _count: { select: { members: true, scenes: true } },
+          },
+        }),
+      'campaigns.create',
+    );
 
     res.status(201).json({ campaign });
   } catch (err) {
-    console.error('[Campaigns] create error:', err);
-    res.status(500).json({ error: 'Failed to create campaign' });
+    respondCampaignDbError(res, err, '[Campaigns] create error:', 'Failed to create campaign');
   }
 });
 
@@ -121,7 +137,7 @@ router.get('/:id', requireAuth, async (req: AuthenticatedRequest, res) => {
     const id = req.params['id'] as string;
 
     const campaign = await withDbTimeout(
-      READ_QUERY_TIMEOUT_MS,
+      CAMPAIGN_DB_TIMEOUT_MS,
       () =>
         readPrisma.campaign.findUnique({
           where: { id },
@@ -151,12 +167,7 @@ router.get('/:id', requireAuth, async (req: AuthenticatedRequest, res) => {
     const myRole = campaign.gmId === userId ? 'GM' : 'PLAYER';
     res.json({ campaign: pickActiveSession(campaign), myRole });
   } catch (err) {
-    if (isDbPoolSaturation(err)) {
-      res.status(503).json({ error: 'Database busy — try again shortly', retry: true });
-      return;
-    }
-    console.error('[Campaigns] get error:', err);
-    res.status(500).json({ error: 'Failed to fetch campaign' });
+    respondCampaignDbError(res, err, '[Campaigns] get error:', 'Failed to fetch campaign');
   }
 });
 
@@ -167,10 +178,15 @@ router.post('/join', requireAuth, async (req: AuthenticatedRequest, res) => {
     const userId = req.userId!;
     const { inviteCode } = z.object({ inviteCode: z.string() }).parse(req.body);
 
-    const campaign = await prisma.campaign.findUnique({
-      where: { inviteCode: inviteCode.toUpperCase() },
-      include: { sessions: activeSessionSelect },
-    });
+    const campaign = await withDbTimeout(
+      CAMPAIGN_DB_TIMEOUT_MS,
+      () =>
+        readPrisma.campaign.findUnique({
+          where: { inviteCode: inviteCode.toUpperCase() },
+          include: { sessions: activeSessionSelect },
+        }),
+      'campaigns.join.lookup',
+    );
 
     if (!campaign) {
       res.status(404).json({ error: 'Invalid invite code' });
@@ -179,9 +195,14 @@ router.post('/join', requireAuth, async (req: AuthenticatedRequest, res) => {
 
     const activeSession = campaign.sessions[0] ?? null;
 
-    const existing = await prisma.campaignMember.findUnique({
-      where: { campaignId_userId: { campaignId: campaign.id, userId } },
-    });
+    const existing = await withDbTimeout(
+      CAMPAIGN_DB_TIMEOUT_MS,
+      () =>
+        readPrisma.campaignMember.findUnique({
+          where: { campaignId_userId: { campaignId: campaign.id, userId } },
+        }),
+      'campaigns.join.member',
+    );
 
     if (existing) {
       res.status(409).json({
@@ -192,14 +213,18 @@ router.post('/join', requireAuth, async (req: AuthenticatedRequest, res) => {
       return;
     }
 
-    await prisma.campaignMember.create({
-      data: { campaignId: campaign.id, userId, role: 'PLAYER' },
-    });
+    await withDbTimeout(
+      CAMPAIGN_DB_TIMEOUT_MS,
+      () =>
+        readPrisma.campaignMember.create({
+          data: { campaignId: campaign.id, userId, role: 'PLAYER' },
+        }),
+      'campaigns.join.create',
+    );
 
     res.status(201).json({ campaign: pickActiveSession(campaign), activeSession });
   } catch (err) {
-    console.error('[Campaigns] join error:', err);
-    res.status(500).json({ error: 'Failed to join campaign' });
+    respondCampaignDbError(res, err, '[Campaigns] join error:', 'Failed to join campaign');
   }
 });
 
@@ -210,27 +235,39 @@ router.post('/:id/sessions', requireAuth, async (req: AuthenticatedRequest, res)
     const userId = req.userId!;
     const campaignId = req.params['id'] as string;
 
-    const campaign = await prisma.campaign.findUnique({ where: { id: campaignId } });
+    const campaign = await withDbTimeout(
+      CAMPAIGN_DB_TIMEOUT_MS,
+      () => readPrisma.campaign.findUnique({ where: { id: campaignId } }),
+      'campaigns.sessions.lookup',
+    );
     if (!campaign || campaign.gmId !== userId) {
       res.status(403).json({ error: 'Only the GM can start a session' });
       return;
     }
 
-    // End any active sessions first
-    await prisma.gameSession.updateMany({
-      where: { campaignId, isActive: true },
-      data: { isActive: false, endedAt: new Date() },
-    });
+    await withDbTimeout(
+      CAMPAIGN_DB_TIMEOUT_MS,
+      () =>
+        readPrisma.gameSession.updateMany({
+          where: { campaignId, isActive: true },
+          data: { isActive: false, endedAt: new Date() },
+        }),
+      'campaigns.sessions.end-active',
+    );
 
-    const session = await prisma.gameSession.create({
-      data: { campaignId },
-      select: { id: true, startedAt: true, isActive: true, campaignId: true },
-    });
+    const session = await withDbTimeout(
+      CAMPAIGN_DB_TIMEOUT_MS,
+      () =>
+        readPrisma.gameSession.create({
+          data: { campaignId },
+          select: { id: true, startedAt: true, isActive: true, campaignId: true },
+        }),
+      'campaigns.sessions.create',
+    );
 
     res.status(201).json({ session });
   } catch (err) {
-    console.error('[Campaigns] start session error:', err);
-    res.status(500).json({ error: 'Failed to start session' });
+    respondCampaignDbError(res, err, '[Campaigns] start session error:', 'Failed to start session');
   }
 });
 
@@ -241,10 +278,11 @@ router.delete('/:id', requireAuth, async (req: AuthenticatedRequest, res) => {
     const userId = req.userId!;
     const id = req.params['id'] as string;
 
-    const campaign = await prisma.campaign.findUnique({
-      where: { id },
-      select: { id: true, gmId: true },
-    });
+    const campaign = await withDbTimeout(
+      CAMPAIGN_DB_TIMEOUT_MS,
+      () => readPrisma.campaign.findUnique({ where: { id }, select: { id: true, gmId: true } }),
+      'campaigns.delete.lookup',
+    );
 
     if (!campaign) {
       res.status(404).json({ error: 'Campaign not found' });
@@ -256,36 +294,45 @@ router.delete('/:id', requireAuth, async (req: AuthenticatedRequest, res) => {
       return;
     }
 
-    const sessions = await prisma.gameSession.findMany({
-      where: { campaignId: id },
-      select: { id: true },
-    });
+    const sessions = await withDbTimeout(
+      CAMPAIGN_DB_TIMEOUT_MS,
+      () =>
+        readPrisma.gameSession.findMany({
+          where: { campaignId: id },
+          select: { id: true },
+        }),
+      'campaigns.delete.sessions',
+    );
     const sessionIds = sessions.map((s) => s.id);
 
     for (const sessionId of sessionIds) {
       stopRollBridge(sessionId);
     }
 
-    await prisma.$transaction([
-      ...(sessionIds.length > 0
-        ? [
-            prisma.chatMessage.deleteMany({ where: { sessionId: { in: sessionIds } } }),
-            prisma.sessionLog.deleteMany({ where: { sessionId: { in: sessionIds } } }),
-          ]
-        : []),
-      prisma.gameSession.deleteMany({ where: { campaignId: id } }),
-      prisma.scene.deleteMany({ where: { campaignId: id } }),
-      prisma.gameMap.deleteMany({ where: { campaignId: id } }),
-      prisma.encounter.deleteMany({ where: { campaignId: id } }),
-      prisma.handout.deleteMany({ where: { campaignId: id } }),
-      prisma.note.deleteMany({ where: { campaignId: id } }),
-      prisma.campaign.delete({ where: { id } }),
-    ]);
+    await withDbTimeout(
+      CAMPAIGN_TX_TIMEOUT_MS,
+      () =>
+        readPrisma.$transaction([
+          ...(sessionIds.length > 0
+            ? [
+                readPrisma.chatMessage.deleteMany({ where: { sessionId: { in: sessionIds } } }),
+                readPrisma.sessionLog.deleteMany({ where: { sessionId: { in: sessionIds } } }),
+              ]
+            : []),
+          readPrisma.gameSession.deleteMany({ where: { campaignId: id } }),
+          readPrisma.scene.deleteMany({ where: { campaignId: id } }),
+          readPrisma.gameMap.deleteMany({ where: { campaignId: id } }),
+          readPrisma.encounter.deleteMany({ where: { campaignId: id } }),
+          readPrisma.handout.deleteMany({ where: { campaignId: id } }),
+          readPrisma.note.deleteMany({ where: { campaignId: id } }),
+          readPrisma.campaign.delete({ where: { id } }),
+        ]),
+      'campaigns.delete.tx',
+    );
 
     res.json({ ok: true });
   } catch (err) {
-    console.error('[Campaigns] delete error:', err);
-    res.status(500).json({ error: 'Failed to delete campaign' });
+    respondCampaignDbError(res, err, '[Campaigns] delete error:', 'Failed to delete campaign');
   }
 });
 
@@ -296,10 +343,15 @@ router.get('/:id/invite', requireAuth, async (req: AuthenticatedRequest, res) =>
     const userId = req.userId!;
     const id = req.params['id'] as string;
 
-    const campaign = await prisma.campaign.findUnique({
-      where: { id },
-      select: { id: true, inviteCode: true, gmId: true },
-    });
+    const campaign = await withDbTimeout(
+      CAMPAIGN_DB_TIMEOUT_MS,
+      () =>
+        readPrisma.campaign.findUnique({
+          where: { id },
+          select: { id: true, inviteCode: true, gmId: true },
+        }),
+      'campaigns.invite',
+    );
 
     if (!campaign || campaign.gmId !== userId) {
       res.status(403).json({ error: 'Only the GM can view the invite code' });
@@ -309,8 +361,7 @@ router.get('/:id/invite', requireAuth, async (req: AuthenticatedRequest, res) =>
     const inviteUrl = `${getPrimaryClientUrl()}/join/${campaign.inviteCode}`;
     res.json({ inviteCode: campaign.inviteCode, inviteUrl });
   } catch (err) {
-    console.error('[Campaigns] invite error:', err);
-    res.status(500).json({ error: 'Failed to get invite info' });
+    respondCampaignDbError(res, err, '[Campaigns] invite error:', 'Failed to get invite info');
   }
 });
 
