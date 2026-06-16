@@ -1,9 +1,14 @@
 import Redis from 'ioredis';
 
+type DisableReason = 'quota' | 'error' | 'manual';
+
 type RedisEndpoint = {
   label: string;
   client: Redis;
   enabled: boolean;
+  disableReason?: DisableReason;
+  /** When a quota-limited endpoint may be probed again. */
+  retryAfter?: number;
 };
 
 function isQuotaError(message: string): boolean {
@@ -11,8 +16,13 @@ function isQuotaError(message: string): boolean {
 }
 
 function quotaHelpMessage(): string {
-  return 'Upstash monthly command limit reached — upgrade the plan, wait for reset, or remove duplicate REDIS_URL_* entries pointing at the same database.';
+  return 'Upstash monthly command limit reached — endpoint skipped until quota resets (auto-retry enabled).';
 }
+
+const QUOTA_RETRY_MS = Number(process.env['REDIS_QUOTA_RETRY_MS'] ?? 6 * 60 * 60 * 1000);
+const QUOTA_PROBE_INTERVAL_MS = Number(process.env['REDIS_QUOTA_PROBE_MS'] ?? 60 * 60 * 1000);
+
+let quotaProbeTimer: ReturnType<typeof setInterval> | null = null;
 
 /** Fix common Render/Upstash paste mistakes (missing rediss:// scheme). */
 export function normalizeRedisUrl(raw: string): string | null {
@@ -156,8 +166,15 @@ function syncRedisEnabledFlag(): void {
 }
 
 function disableEndpoint(ep: RedisEndpoint, reason: string): void {
-  if (!ep.enabled) return;
+  if (!ep.enabled && ep.disableReason === 'quota' && isQuotaError(reason)) return;
   ep.enabled = false;
+  if (isQuotaError(reason)) {
+    ep.disableReason = 'quota';
+    ep.retryAfter = Date.now() + QUOTA_RETRY_MS;
+  } else {
+    ep.disableReason = 'error';
+    ep.retryAfter = undefined;
+  }
   const suffix = isQuotaError(reason) ? ` — ${quotaHelpMessage()}` : '';
   console.warn(`[Redis] Endpoint ${ep.label} disabled (${reason})${suffix}`);
   try {
@@ -216,6 +233,56 @@ export function getRedisPoolStatus(): Array<{ label: string; enabled: boolean; s
   }));
 }
 
+function formatRetryIn(ms: number): string {
+  const hours = Math.max(1, Math.round(ms / (60 * 60 * 1000)));
+  return `${hours}h`;
+}
+
+async function probeQuotaDisabledEndpoints(): Promise<void> {
+  const now = Date.now();
+  for (const ep of endpoints) {
+    if (ep.enabled || ep.disableReason !== 'quota') continue;
+    if (ep.retryAfter != null && now < ep.retryAfter) continue;
+
+    try {
+      if (ep.client.status === 'wait' || ep.client.status === 'end') {
+        await ep.client.connect();
+      }
+      await ep.client.ping();
+      ep.enabled = true;
+      ep.disableReason = undefined;
+      ep.retryAfter = undefined;
+      console.log(`[Redis] Endpoint ${ep.label} available again`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (isQuotaError(msg)) {
+        ep.retryAfter = Date.now() + QUOTA_RETRY_MS;
+        console.log(
+          `[Redis] ${ep.label} still quota-limited — next probe in ${formatRetryIn(QUOTA_RETRY_MS)}`,
+        );
+      } else {
+        ep.disableReason = 'error';
+        ep.retryAfter = undefined;
+        console.warn(`[Redis] ${ep.label} probe failed:`, msg);
+      }
+    }
+  }
+
+  syncRedisEnabledFlag();
+}
+
+function startQuotaProbeLoop(): void {
+  if (quotaProbeTimer || endpoints.length <= 1) return;
+
+  quotaProbeTimer = setInterval(() => {
+    void probeQuotaDisabledEndpoints();
+  }, QUOTA_PROBE_INTERVAL_MS);
+
+  if (typeof quotaProbeTimer === 'object' && quotaProbeTimer && 'unref' in quotaProbeTimer) {
+    quotaProbeTimer.unref();
+  }
+}
+
 export async function connectRedisOptional(): Promise<boolean> {
   if (!hasRedisConfigured()) {
     console.warn('[Redis] No Redis URLs configured — running without Redis cache');
@@ -225,7 +292,9 @@ export async function connectRedisOptional(): Promise<boolean> {
 
   console.log(`[Redis] Pool: ${endpoints.length} endpoint(s) configured`);
   if (endpoints.length > 1) {
-    console.warn('[Redis] Multiple URLs configured — use one Upstash database to avoid burning quota');
+    console.log(
+      '[Redis] Failover pool active — quota-limited endpoints are skipped and re-probed after reset',
+    );
   }
 
   for (let i = 0; i < endpoints.length; i++) {
@@ -240,6 +309,7 @@ export async function connectRedisOptional(): Promise<boolean> {
       activeIndex = i;
       redisEnabled = true;
       console.log(`[Redis] Using endpoint ${ep.label}`);
+      startQuotaProbeLoop();
       return true;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -289,6 +359,10 @@ export async function safeRedis<T>(fallback: T, op: (client: Redis) => Promise<T
 }
 
 export function disconnectAllRedis(): void {
+  if (quotaProbeTimer) {
+    clearInterval(quotaProbeTimer);
+    quotaProbeTimer = null;
+  }
   for (const ep of endpoints) {
     try {
       ep.client.disconnect(false);
