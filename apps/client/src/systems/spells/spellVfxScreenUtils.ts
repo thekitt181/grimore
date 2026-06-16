@@ -12,7 +12,6 @@ import type { Jb2aEffectAsset, Jb2aVariant } from './jb2aAssets';
 import {
   pickBeamVariantForWorldSpan,
   pickJb2aVariant,
-  parseVariantFeet,
   resolveSpellJb2aMapping,
   withBeamVariants,
 } from './jb2aAssets';
@@ -76,12 +75,12 @@ export function resolveDirectedBeamLayout(
   const worldSpan = placementTravelWorldSpan(placement);
   if (worldSpan < grid * 0.1) return null;
 
+  const screenDist = Math.hypot(end.x - start.x, end.y - start.y);
   const enriched = withBeamVariants(asset);
   const variant = pickBeamVariantForWorldSpan(enriched, worldSpan, grid);
-  const variantFeet = parseVariantFeet(variant.suffix) ?? (worldSpan / grid) * 5;
-  const beamWorldPx = feetToPixels(variantFeet, grid);
-  let lengthPx = worldSpanToScreenPx(placement.originX, placement.originY, beamWorldPx);
-  lengthPx = Math.max(lengthPx, minLengthPx);
+
+  // Stretch to caster→target on screen; JB2A variant picks artwork only (objectFit: fill).
+  const lengthPx = Math.max(screenDist, minLengthPx);
 
   const aspect = variant.height / Math.max(variant.width, 1);
   const heightPx = Math.max(12, lengthPx * aspect);

@@ -115,7 +115,9 @@ function pickCastVariant(
 
 function scaleForEffect(effect: ActiveSpellEffect, asset: Jb2aEffectAsset, variant: ReturnType<typeof pickJb2aVariant>): number {
   const targetPx = targetSizePx(effect, asset);
-  const native = Math.max(variant.width, variant.height);
+  const native = asset.directed
+    ? Math.max(variant.width, 1)
+    : Math.max(variant.width, variant.height);
   return native > 0 ? targetPx / native : 1;
 }
 
@@ -168,6 +170,11 @@ function positionSpriteAt(
 ): void {
   const scale = scaleForEffect(effect, asset, variant);
   sprite.scale.set(scale);
+  if (asset.directed) {
+    sprite.anchor.set(0, 0.5);
+  } else {
+    sprite.anchor.set(0.5, 0.5);
+  }
   sprite.x = asset.directed ? placement.originX : placement.centerX;
   sprite.y = asset.directed ? placement.originY : placement.centerY;
   if (asset.directed) {

@@ -92,7 +92,11 @@ function playDirectedBeamVideo(
     video,
     () => video.remove(),
     variant.durationMs,
-    () => showGoldBurst(layer, layout.x, layout.y, layout.width),
+    () => {
+      const endX = layout.x + Math.cos(layout.angleRad) * layout.width;
+      const endY = layout.y + Math.sin(layout.angleRad) * layout.width;
+      showGoldBurst(layer, endX, endY, Math.max(48, layout.height * 2));
+    },
   );
 
   return { ok: true, variant };
