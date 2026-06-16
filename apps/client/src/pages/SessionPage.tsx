@@ -20,6 +20,7 @@ import { AttackTargetPicker } from '@/systems/combat/AttackTargetPicker';
 import { AttackTargetHint } from '@/systems/combat/AttackTargetHint';
 import { SpellTargetHint } from '@/systems/spells/SpellTargetHint';
 import { AoePlacementHint } from '@/systems/combat/AoePlacementHint';
+import { TokenMoveDistanceHint } from '@/systems/scene/interaction/TokenMoveDistanceHint';
 import { ClearMapAreasButton } from '@/systems/combat/ClearMapAreasButton';
 import { CombatResultToast } from '@/systems/combat/CombatResultToast';
 import { TokenActionsPanel } from '@/systems/combat/TokenActionsPanel';
@@ -367,6 +368,7 @@ export function SessionPage() {
           <AttackTargetHint />
           <SpellTargetHint />
           <AoePlacementHint />
+          <TokenMoveDistanceHint />
           <ClearMapAreasButton />
           <EffectReminderBanner />
           {tokenActionsToken && (

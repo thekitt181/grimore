@@ -82,7 +82,7 @@ export const useItemStore = create<ItemState>((set, get) => ({
   selectedIds: [],
   selectedWallIndices: [],
   activeMapId: null,
-  snapToGrid: true,
+  snapToGrid: false,
   clipboard: [],
 
   addItem: (item) =>

@@ -4,6 +4,7 @@ import { useMapStore } from '@/systems/map/store/mapStore';
 import { isPlayerCharacterToken } from '@/systems/scene/token/clientTokenVisibility';
 import { pickInteractableTokenAt } from '@/systems/scene/token/pickInteractableToken';
 import { setItemDragActive } from './selectionDragState';
+import { useTokenDragMeasureStore } from './tokenDragMeasureStore';
 import { useItemStore, getActiveMap } from '../store/itemStore';
 import { useSessionStore } from '@/store/sessionStore';
 import { itemsWithLiveTransforms } from '../store/liveTransformStore';
@@ -26,6 +27,7 @@ import { isMobileClient } from '@/lib/socket';
 import { isDdbPcToken } from '@/systems/ddb/ddbTokenUtils';
 import { useDdbStore } from '@/systems/ddb/ddbStore';
 import { isAoePlacementActive } from '@/systems/combat/aoePlacementUtils';
+import { worldDeltaToFeet } from '@/systems/combat/attackRange';
 import { isSpellTargetPicking } from '@/systems/spells/pickSpellTargets';
 import { nearestWallIndex, wallIndicesInWorldRect, wallHandleWorldPoints, pickWallHandle, translateWallIndices, moveWallEndpoint, wallsChanged, worldToMapLocal, mapLocalToWorld, WALL_PICK_RADIUS } from '@/systems/map/wallUtils';
 import type { WallEndpoint } from '@/systems/map/wallUtils';
@@ -176,6 +178,10 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
       return { dx: wx - m.startWorldX, dy: wy - m.startWorldY };
     }
 
+    function moveIncludesOnlyTokens(ids: string[]): boolean {
+      return ids.length > 0 && ids.every((id) => useItemStore.getState().items[id]?.type === 'token');
+    }
+
     function beginMove(ids: string[], e: PointerEvent) {
       const { x: startWorldX, y: startWorldY } = clientToWorld(e.clientX, e.clientY);
       const liveById = useLiveTransformStore.getState().byId;
@@ -194,6 +200,11 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
         startScreenY: e.clientY,
         origins,
       };
+      if (moveIncludesOnlyTokens(ids)) {
+        useTokenDragMeasureStore.getState().setMeasure(0, e.clientX, e.clientY);
+      } else {
+        useTokenDragMeasureStore.getState().clear();
+      }
       setItemDragActive(true);
       interactionEl.setPointerCapture(e.pointerId);
     }
@@ -479,6 +490,11 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
           liveEntries.push({ id, patch: { x: nx, y: ny } });
         }
         if (liveEntries.length) useLiveTransformStore.getState().setLiveMany(liveEntries);
+
+        if (moveIncludesOnlyTokens(move.ids)) {
+          const feet = worldDeltaToFeet(dx, dy);
+          useTokenDragMeasureStore.getState().setMeasure(feet, e.clientX, e.clientY);
+        }
         return;
       }
 
@@ -577,6 +593,7 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
         useLiveTransformStore.getState().clear(m.ids);
         move = null;
         setItemDragActive(false);
+        useTokenDragMeasureStore.getState().clear();
       }
 
       if (marquee && marqueeGfx) {
@@ -653,6 +670,7 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
 
     return () => {
       setItemDragActive(false);
+      useTokenDragMeasureStore.getState().clear();
       interactionEl.removeEventListener('pointerdown', onDown, captureOpts);
       interactionEl.removeEventListener('dblclick', onDblClick);
       interactionEl.removeEventListener('pointermove', onMove, captureOpts);

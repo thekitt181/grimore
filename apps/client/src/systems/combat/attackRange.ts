@@ -21,6 +21,16 @@ export function getMapGridSize(): number {
   return getActiveMap()?.gridSize ?? 70;
 }
 
+/** World-space drag delta → distance in feet (5 ft per grid cell). */
+export function worldDeltaToFeet(
+  dx: number,
+  dy: number,
+  gridSize = getMapGridSize(),
+): number {
+  const distPx = Math.hypot(dx, dy);
+  return Math.round((distPx / gridSize) * FEET_PER_CELL);
+}
+
 /** Edge-to-edge distance between two tokens in feet (5 ft per grid cell). */
 export function tokenDistanceFeet(
   attacker: TokenItem,
