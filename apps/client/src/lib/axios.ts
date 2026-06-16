@@ -174,7 +174,7 @@ api.interceptors.response.use(
       }
     }
 
-    if (status !== 401 && !(status != null && WAKE_RETRY_STATUSES.has(status))) {
+    if (status !== 401 && status !== 404 && !(status != null && WAKE_RETRY_STATUSES.has(status))) {
       const data = err.response?.data as { error?: string; message?: string } | undefined;
       const msg = data?.error ?? data?.message ?? err.message;
       console.error('[API]', msg);

@@ -108,8 +108,20 @@ export async function searchMonsters(params: {
   return data;
 }
 
-export async function getMonster(id: string): Promise<CompendiumMonster> {
-  const { data } = await api.get(`/compendium/monsters/${encodeURIComponent(id)}`);
+export type CompendiumFetchOpts = {
+  /** When browsing a book source, must match search list visibility. */
+  source?: string;
+};
+
+function fetchParams(opts?: CompendiumFetchOpts): { source?: string } | undefined {
+  const source = opts?.source?.trim();
+  return source ? { source } : undefined;
+}
+
+export async function getMonster(id: string, opts?: CompendiumFetchOpts): Promise<CompendiumMonster> {
+  const { data } = await api.get(`/compendium/monsters/${encodeURIComponent(id)}`, {
+    params: fetchParams(opts),
+  });
   return data;
 }
 
@@ -138,8 +150,10 @@ export async function searchItems(params: {
   return data;
 }
 
-export async function getItem(id: string): Promise<CompendiumItem> {
-  const { data } = await api.get(`/compendium/items/${encodeURIComponent(id)}`);
+export async function getItem(id: string, opts?: CompendiumFetchOpts): Promise<CompendiumItem> {
+  const { data } = await api.get(`/compendium/items/${encodeURIComponent(id)}`, {
+    params: fetchParams(opts),
+  });
   return data;
 }
 
@@ -168,8 +182,10 @@ export async function searchSpells(params: {
   return data;
 }
 
-export async function getSpell(id: string): Promise<CompendiumSpell> {
-  const { data } = await api.get(`/compendium/spells/${encodeURIComponent(id)}`);
+export async function getSpell(id: string, opts?: CompendiumFetchOpts): Promise<CompendiumSpell> {
+  const { data } = await api.get(`/compendium/spells/${encodeURIComponent(id)}`, {
+    params: fetchParams(opts),
+  });
   return data;
 }
 
@@ -195,8 +211,11 @@ function imagePath(kind: CompendiumImageKind, id: string): string {
 export async function getEntryImages(
   kind: CompendiumImageKind,
   id: string,
+  opts?: CompendiumFetchOpts,
 ): Promise<CompendiumEntryImageState> {
-  const { data } = await api.get<CompendiumEntryImageState>(imagePath(kind, id));
+  const { data } = await api.get<CompendiumEntryImageState>(imagePath(kind, id), {
+    params: fetchParams(opts),
+  });
   return data;
 }
 

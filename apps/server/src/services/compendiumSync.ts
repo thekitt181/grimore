@@ -1505,7 +1505,27 @@ export async function searchMonsters(opts: {
   return paginate(filtered, page, limit);
 }
 
-export async function getMonsterById(id: string, opts?: { includeDrafts?: boolean }): Promise<CompendiumMonster | null> {
+export type CompendiumGetByIdOpts = {
+  includeDrafts?: boolean;
+  /** Book browse filter — must match search when source query is used. */
+  source?: string;
+};
+
+async function allowCompendiumEntryDetail(
+  kind: CompendiumKind,
+  entry: { name: string; source?: string },
+  id: string,
+  opts: CompendiumGetByIdOpts | undefined,
+  policy: CompendiumVisibilityPolicy,
+): Promise<boolean> {
+  if (opts?.includeDrafts) return true;
+  if (!isEntryDraft(kind, entry.name, entry.source, policy)) return true;
+  if (opts?.source?.trim() && entryMatchesSource(entry.source, opts.source)) return true;
+  const { isTypedImportCompendiumEntry } = await import('./compendiumPostgres');
+  return isTypedImportCompendiumEntry(kind, id);
+}
+
+export async function getMonsterById(id: string, opts?: CompendiumGetByIdOpts): Promise<CompendiumMonster | null> {
   const policy = await getCatalogPolicy();
   let hit = (await getCachedMonsters()).find((m) => m.id === id);
   if (!hit) {
@@ -1530,7 +1550,7 @@ export async function getMonsterById(id: string, opts?: { includeDrafts?: boolea
   }
   if (!hit) return null;
   const marked = markDraft('monster', hit, policy);
-  if (marked.isDraft && !opts?.includeDrafts) return null;
+  if (!(await allowCompendiumEntryDetail('monster', marked, id, opts, policy))) return null;
   const imageUrl = await resolveCompendiumEntryImageUrl('monster', hit.name, hit.image);
   const out = imageUrl ? { ...marked, imageUrl } : marked;
   return out;
@@ -1590,7 +1610,7 @@ export async function searchItems(opts: {
   return paginate(filtered, page, limit);
 }
 
-export async function getItemById(id: string, opts?: { includeDrafts?: boolean }): Promise<CompendiumItem | null> {
+export async function getItemById(id: string, opts?: CompendiumGetByIdOpts): Promise<CompendiumItem | null> {
   const policy = await getCatalogPolicy();
   let hit = (await getCachedItems()).find((i) => i.id === id);
   if (!hit) {
@@ -1620,7 +1640,7 @@ export async function getItemById(id: string, opts?: { includeDrafts?: boolean }
   }
   if (!hit) return null;
   const marked = markDraft('item', hit, policy);
-  if (marked.isDraft && !opts?.includeDrafts) return null;
+  if (!(await allowCompendiumEntryDetail('item', marked, id, opts, policy))) return null;
   const imageUrl = await resolveCompendiumEntryImageUrl('item', hit.name, hit.image);
   return imageUrl ? { ...marked, imageUrl } : marked;
 }
@@ -1679,7 +1699,7 @@ export async function searchSpells(opts: {
   return paginate(filtered, page, limit);
 }
 
-export async function getSpellById(id: string, opts?: { includeDrafts?: boolean }): Promise<CompendiumSpell | null> {
+export async function getSpellById(id: string, opts?: CompendiumGetByIdOpts): Promise<CompendiumSpell | null> {
   const policy = await getCatalogPolicy();
   let hit = (await getCachedSpells()).find((s) => s.id === id);
   if (!hit) {
@@ -1712,7 +1732,7 @@ export async function getSpellById(id: string, opts?: { includeDrafts?: boolean 
   }
   if (!hit) return null;
   const marked = markDraft('spell', hit, policy);
-  if (marked.isDraft && !opts?.includeDrafts) return null;
+  if (!(await allowCompendiumEntryDetail('spell', marked, id, opts, policy))) return null;
   const imageUrl = await resolveCompendiumEntryImageUrl('spell', hit.name, undefined);
   return imageUrl ? { ...marked, imageUrl } : marked;
 }

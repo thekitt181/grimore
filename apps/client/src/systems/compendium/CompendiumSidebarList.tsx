@@ -192,6 +192,7 @@ export function CompendiumSidebarList({ onMinimize }: { onMinimize?: () => void 
   const showSourcePicker = browseMode === 'sources' && !selectedSource;
   const showEntryList = browseMode === 'effects' || browseMode !== 'sources' || Boolean(selectedSource);
   const inBookView = browseMode === 'sources' && Boolean(selectedSource);
+  const bookFetchOpts = inBookView && selectedSource ? { source: selectedSource } : undefined;
   const inEffectsView = tab === 'spells' && browseMode === 'effects';
 
   const sourcesQ = useQuery({
@@ -582,7 +583,7 @@ export function CompendiumSidebarList({ onMinimize }: { onMinimize?: () => void 
             showDraft={Boolean(monster.isDraft)}
             selected={monster.id === selectedMonsterId}
             onClick={() => {
-              prefetchCompendiumEntry(qc, 'monsters', monster.id);
+              prefetchCompendiumEntry(qc, 'monsters', monster.id, bookFetchOpts);
               selectMonster(monster.id);
             }}
             {...(isAdmin ? { onDelete: () => handleDelete(monster.name, monster.id) } : {})}
@@ -596,7 +597,7 @@ export function CompendiumSidebarList({ onMinimize }: { onMinimize?: () => void 
             showDraft={Boolean(item.isDraft)}
             selected={item.id === selectedItemId}
             onClick={() => {
-              prefetchCompendiumEntry(qc, 'items', item.id);
+              prefetchCompendiumEntry(qc, 'items', item.id, bookFetchOpts);
               selectItem(item.id);
             }}
             {...(isAdmin ? { onDelete: () => handleDelete(item.name, item.id) } : {})}
@@ -626,7 +627,7 @@ export function CompendiumSidebarList({ onMinimize }: { onMinimize?: () => void 
             showDraft={Boolean(spell.isDraft)}
             selected={spell.id === selectedSpellId}
             onClick={() => {
-              prefetchCompendiumEntry(qc, 'spells', spell.id);
+              prefetchCompendiumEntry(qc, 'spells', spell.id, bookFetchOpts);
               selectSpell(spell.id);
             }}
             {...(isAdmin ? { onDelete: () => handleDelete(spell.name, spell.id) } : {})}

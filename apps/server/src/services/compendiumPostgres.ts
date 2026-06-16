@@ -420,7 +420,7 @@ export async function readOverrideEntryByIdFromPostgres(
 ): Promise<OwlbearMonster | OwlbearItem | OwlbearSpell | null> {
   if (isCompendiumStorageUnavailable()) return null;
   try {
-    const row = await withStorageProbe(() => prisma.compendiumEntry.findUnique({ where: { id } }));
+    const row = await withStorageProbe(() => readPrisma.compendiumEntry.findUnique({ where: { id } }));
     if (row && PRISMA_TO_KIND[row.kind] === kind) {
       return rowToEntry(kind, row);
     }
@@ -429,6 +429,22 @@ export async function readOverrideEntryByIdFromPostgres(
   }
   const rows = await readOverrideEntriesFromPostgres(kind);
   return rows.find((entry) => slugify(entry.name) === id || entryNameKey(entry.name) === entryNameKey(id)) ?? null;
+}
+
+export async function isTypedImportCompendiumEntry(
+  kind: CompendiumStorageKind,
+  id: string,
+): Promise<boolean> {
+  if (isCompendiumStorageUnavailable()) return false;
+  try {
+    const row = await readPrisma.compendiumEntry.findUnique({
+      where: { id },
+      select: { kind: true, inTypedImport: true },
+    });
+    return Boolean(row?.inTypedImport && PRISMA_TO_KIND[row.kind] === kind);
+  } catch {
+    return false;
+  }
 }
 
 export async function readOverrideCountsFromPostgres(): Promise<{

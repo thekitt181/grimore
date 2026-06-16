@@ -31,25 +31,29 @@ export function MonsterDexPanel({ onClose }: { onClose: () => void }) {
 
   const inEffectsView = tab === 'spells' && browseMode === 'effects';
 
+  const selectedSource = useCompendiumUiStore((s) => s.selectedSource);
+  const bookFetchOpts =
+    browseMode === 'sources' && selectedSource ? { source: selectedSource } : undefined;
+
   const queryOpts = { staleTime: 120_000, retry: 1 } as const;
 
   const monsterQ = useQuery({
-    queryKey: ['compendium', 'monster', selectedMonsterId],
-    queryFn: () => getMonster(selectedMonsterId!),
+    queryKey: ['compendium', 'monster', selectedMonsterId, bookFetchOpts?.source ?? ''],
+    queryFn: () => getMonster(selectedMonsterId!, bookFetchOpts),
     enabled: compendiumReady && tab === 'monsters' && !!selectedMonsterId,
     ...queryOpts,
   });
 
   const itemQ = useQuery({
-    queryKey: ['compendium', 'item', selectedItemId],
-    queryFn: () => getItem(selectedItemId!),
+    queryKey: ['compendium', 'item', selectedItemId, bookFetchOpts?.source ?? ''],
+    queryFn: () => getItem(selectedItemId!, bookFetchOpts),
     enabled: compendiumReady && tab === 'items' && !!selectedItemId,
     ...queryOpts,
   });
 
   const spellQ = useQuery({
-    queryKey: ['compendium', 'spell', selectedSpellId],
-    queryFn: () => getSpell(selectedSpellId!),
+    queryKey: ['compendium', 'spell', selectedSpellId, bookFetchOpts?.source ?? ''],
+    queryFn: () => getSpell(selectedSpellId!, bookFetchOpts),
     enabled: compendiumReady && tab === 'spells' && !!selectedSpellId,
     ...queryOpts,
   });

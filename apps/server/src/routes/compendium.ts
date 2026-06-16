@@ -195,9 +195,20 @@ router.post('/admin/entries/unpublish', ...admin, async (req, res) => {
   }
 });
 
+function compendiumGetOpts(req: AuthenticatedRequest): {
+  includeDrafts: boolean;
+  source?: string;
+} {
+  const source = typeof req.query['source'] === 'string' ? req.query['source'].trim() : undefined;
+  return {
+    includeDrafts: isCompendiumAdmin(req) || Boolean(source),
+    ...(source ? { source } : {}),
+  };
+}
+
 router.get('/monsters/:id/images', ...auth, async (req: AuthenticatedRequest, res) => {
   try {
-    const entry = await getMonsterById(req.params['id']!, { includeDrafts: isCompendiumAdmin(req) });
+    const entry = await getMonsterById(req.params['id']!, compendiumGetOpts(req));
     if (!entry) { res.status(404).json({ error: 'Not found' }); return; }
     res.json(await getEntryImageState('monster', entry.name, entry.image));
   } catch (err) {
@@ -221,7 +232,7 @@ router.put('/monsters/:id/images', ...auth, async (req, res) => {
 
 router.get('/items/:id/images', ...auth, async (req: AuthenticatedRequest, res) => {
   try {
-    const entry = await getItemById(req.params['id']!, { includeDrafts: isCompendiumAdmin(req) });
+    const entry = await getItemById(req.params['id']!, compendiumGetOpts(req));
     if (!entry) { res.status(404).json({ error: 'Not found' }); return; }
     res.json(await getEntryImageState('item', entry.name, entry.image));
   } catch (err) {
@@ -245,7 +256,7 @@ router.put('/items/:id/images', ...auth, async (req, res) => {
 
 router.get('/spells/:id/images', ...auth, async (req: AuthenticatedRequest, res) => {
   try {
-    const entry = await getSpellById(req.params['id']!, { includeDrafts: isCompendiumAdmin(req) });
+    const entry = await getSpellById(req.params['id']!, compendiumGetOpts(req));
     if (!entry) { res.status(404).json({ error: 'Not found' }); return; }
     res.json(await getEntryImageState('spell', entry.name, undefined));
   } catch (err) {
@@ -308,7 +319,7 @@ router.get('/monsters', ...auth, async (req: AuthenticatedRequest, res) => {
 
 router.get('/monsters/:id', ...auth, async (req: AuthenticatedRequest, res) => {
   try {
-    const monster = await getMonsterById(req.params['id']!, { includeDrafts: isCompendiumAdmin(req) });
+    const monster = await getMonsterById(req.params['id']!, compendiumGetOpts(req));
     if (!monster) {
       res.status(404).json({ error: 'Monster not found' });
       return;
@@ -396,7 +407,7 @@ router.get('/items', ...auth, async (req: AuthenticatedRequest, res) => {
 });
 
 router.get('/items/:id', ...auth, async (req: AuthenticatedRequest, res) => {
-  const item = await getItemById(req.params['id']!, { includeDrafts: isCompendiumAdmin(req) });
+  const item = await getItemById(req.params['id']!, compendiumGetOpts(req));
   if (!item) { res.status(404).json({ error: 'Not found' }); return; }
   res.json(item);
 });
@@ -470,7 +481,7 @@ router.get('/spells', ...auth, async (req: AuthenticatedRequest, res) => {
 });
 
 router.get('/spells/:id', ...auth, async (req: AuthenticatedRequest, res) => {
-  const spell = await getSpellById(req.params['id']!, { includeDrafts: isCompendiumAdmin(req) });
+  const spell = await getSpellById(req.params['id']!, compendiumGetOpts(req));
   if (!spell) { res.status(404).json({ error: 'Not found' }); return; }
   res.json(spell);
 });
