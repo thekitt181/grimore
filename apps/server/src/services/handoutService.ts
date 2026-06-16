@@ -1,6 +1,6 @@
 import { Prisma, type Handout, type HandoutReceipt, type HandoutType } from '@prisma/client';
 import type { HandoutItemMeta, HandoutRecord, HandoutReceiptRecord } from '@grimoire/shared';
-import { prisma } from '../lib/prisma';
+import { readPrisma } from '../lib/prisma';
 
 function parseItemMeta(raw: unknown): HandoutItemMeta | null {
   if (!raw || typeof raw !== 'object') return null;
@@ -41,7 +41,7 @@ export function serializeReceipt(row: HandoutReceipt): HandoutReceiptRecord {
 }
 
 export async function assertCampaignMember(campaignId: string, userId: string): Promise<{ isGM: boolean } | null> {
-  const campaign = await prisma.campaign.findUnique({
+  const campaign = await readPrisma.campaign.findUnique({
     where: { id: campaignId },
     select: {
       gmId: true,
@@ -55,7 +55,7 @@ export async function assertCampaignMember(campaignId: string, userId: string): 
 }
 
 export async function assertCampaignGM(campaignId: string, userId: string): Promise<boolean> {
-  const campaign = await prisma.campaign.findUnique({
+  const campaign = await readPrisma.campaign.findUnique({
     where: { id: campaignId },
     select: { gmId: true },
   });
@@ -63,7 +63,7 @@ export async function assertCampaignGM(campaignId: string, userId: string): Prom
 }
 
 export async function listCampaignHandouts(campaignId: string): Promise<HandoutRecord[]> {
-  const rows = await prisma.handout.findMany({
+  const rows = await readPrisma.handout.findMany({
     where: { campaignId },
     orderBy: [{ updatedAt: 'desc' }, { title: 'asc' }],
   });
@@ -71,7 +71,7 @@ export async function listCampaignHandouts(campaignId: string): Promise<HandoutR
 }
 
 export async function listUserHandoutJournal(userId: string, campaignId: string): Promise<HandoutReceiptRecord[]> {
-  const rows = await prisma.handoutReceipt.findMany({
+  const rows = await readPrisma.handoutReceipt.findMany({
     where: {
       userId,
       handout: { campaignId },
@@ -92,7 +92,7 @@ export type HandoutWriteInput = {
 };
 
 export async function createHandout(campaignId: string, input: HandoutWriteInput): Promise<HandoutRecord> {
-  const row = await prisma.handout.create({
+  const row = await readPrisma.handout.create({
     data: {
       campaignId,
       title: input.title,
@@ -108,9 +108,9 @@ export async function createHandout(campaignId: string, input: HandoutWriteInput
 }
 
 export async function updateHandout(id: string, input: Partial<HandoutWriteInput>): Promise<HandoutRecord | null> {
-  const existing = await prisma.handout.findUnique({ where: { id } });
+  const existing = await readPrisma.handout.findUnique({ where: { id } });
   if (!existing) return null;
-  const row = await prisma.handout.update({
+  const row = await readPrisma.handout.update({
     where: { id },
     data: {
       ...(input.title !== undefined ? { title: input.title } : {}),
@@ -129,7 +129,7 @@ export async function updateHandout(id: string, input: Partial<HandoutWriteInput
 
 export async function deleteHandout(id: string): Promise<boolean> {
   try {
-    await prisma.handout.delete({ where: { id } });
+    await readPrisma.handout.delete({ where: { id } });
     return true;
   } catch {
     return false;
@@ -137,12 +137,12 @@ export async function deleteHandout(id: string): Promise<boolean> {
 }
 
 export async function getHandout(id: string): Promise<HandoutRecord | null> {
-  const row = await prisma.handout.findUnique({ where: { id } });
+  const row = await readPrisma.handout.findUnique({ where: { id } });
   return row ? serializeHandout(row) : null;
 }
 
 export async function getReceipt(id: string): Promise<HandoutReceiptRecord | null> {
-  const row = await prisma.handoutReceipt.findUnique({ where: { id } });
+  const row = await readPrisma.handoutReceipt.findUnique({ where: { id } });
   return row ? serializeReceipt(row) : null;
 }
 
@@ -154,7 +154,7 @@ export async function resolveRevealTargets(
   if (targetUserIds !== 'all') {
     return [...new Set(targetUserIds.filter(Boolean))];
   }
-  const session = await prisma.gameSession.findUnique({
+  const session = await readPrisma.gameSession.findUnique({
     where: { id: sessionId },
     select: {
       campaign: {
@@ -199,7 +199,7 @@ export async function findHandoutBySceneItemId(
   campaignId: string,
   sceneItemId: string,
 ): Promise<HandoutRecord | null> {
-  const rows = await prisma.handout.findMany({
+  const rows = await readPrisma.handout.findMany({
     where: { campaignId, type: 'ITEM_CARD' },
     orderBy: { updatedAt: 'desc' },
   });
@@ -252,7 +252,7 @@ export async function revealHandoutToUsers(opts: {
 
   const receipts: HandoutReceiptRecord[] = [];
   for (const userId of targetUserIds) {
-    const row = await prisma.handoutReceipt.upsert({
+    const row = await readPrisma.handoutReceipt.upsert({
       where: { handoutId_userId: { handoutId: handout.id, userId } },
       create: {
         handoutId: handout.id,

@@ -2,7 +2,8 @@ import { Router } from 'express';
 import { z } from 'zod';
 import type { HandoutRevealPayload } from '@grimoire/shared';
 import { requireAuth, type AuthenticatedRequest } from '../middleware/auth';
-import { prisma } from '../lib/prisma';
+import { readPrisma } from '../lib/prisma';
+import { isDbPoolSaturation, withDbTimeout } from '../lib/dbTimeout';
 import { getSocketServer } from '../socket';
 import {
   assertCampaignGM,
@@ -25,6 +26,22 @@ import { synthesizeCompendiumItemDescription } from '@grimoire/shared';
 import { getItemById } from '../services/compendiumSync';
 
 const router = Router();
+
+const HANDOUT_DB_TIMEOUT_MS = 10_000;
+
+function respondHandoutDbError(
+  res: import('express').Response,
+  err: unknown,
+  logLabel: string,
+  message: string,
+): void {
+  if (isDbPoolSaturation(err)) {
+    res.status(503).json({ error: 'Database busy — try again shortly', retry: true });
+    return;
+  }
+  console.error(logLabel, err);
+  res.status(500).json({ error: message });
+}
 
 const handoutTypeSchema = z.enum(['TEXT', 'IMAGE', 'MAP_FRAGMENT', 'ITEM_CARD']);
 
@@ -115,7 +132,7 @@ async function resolveRevealTargetsForSession(
   sessionId: string,
   targetUserIds: string[] | 'all',
 ): Promise<string[]> {
-  const session = await prisma.gameSession.findUnique({
+  const session = await readPrisma.gameSession.findUnique({
     where: { id: sessionId },
     select: { campaign: { select: { gmId: true } } },
   });
@@ -126,7 +143,7 @@ async function resolveRevealTargetsForSession(
 }
 
 async function resolveDdbCampaignId(campaignId: string): Promise<number | null> {
-  const link = await prisma.ddbCampaignLink.findUnique({ where: { campaignId } });
+  const link = await readPrisma.ddbCampaignLink.findUnique({ where: { campaignId } });
   return link?.ddbCampaignId ?? null;
 }
 
@@ -267,7 +284,11 @@ router.get('/campaigns/:campaignId/handouts', requireAuth, async (req: Authentic
   try {
     const userId = req.userId!;
     const campaignId = req.params['campaignId'] as string;
-    const member = await assertCampaignMember(campaignId, userId);
+    const member = await withDbTimeout(
+      HANDOUT_DB_TIMEOUT_MS,
+      () => assertCampaignMember(campaignId, userId),
+      'handouts.list.access',
+    );
     if (!member) {
       res.status(404).json({ error: 'Campaign not found' });
       return;
@@ -276,11 +297,14 @@ router.get('/campaigns/:campaignId/handouts', requireAuth, async (req: Authentic
       res.status(403).json({ error: 'Only the GM can manage handouts' });
       return;
     }
-    const handouts = await listCampaignHandouts(campaignId);
+    const handouts = await withDbTimeout(
+      HANDOUT_DB_TIMEOUT_MS,
+      () => listCampaignHandouts(campaignId),
+      'handouts.list',
+    );
     res.json({ handouts });
   } catch (err) {
-    console.error('[Handouts] list error:', err);
-    res.status(500).json({ error: 'Failed to list handouts' });
+    respondHandoutDbError(res, err, '[Handouts] list error:', 'Failed to list handouts');
   }
 });
 
@@ -289,16 +313,23 @@ router.get('/campaigns/:campaignId/handout-journal', requireAuth, async (req: Au
   try {
     const userId = req.userId!;
     const campaignId = req.params['campaignId'] as string;
-    const member = await assertCampaignMember(campaignId, userId);
+    const member = await withDbTimeout(
+      HANDOUT_DB_TIMEOUT_MS,
+      () => assertCampaignMember(campaignId, userId),
+      'handouts.journal.access',
+    );
     if (!member) {
       res.status(404).json({ error: 'Campaign not found' });
       return;
     }
-    const journal = await listUserHandoutJournal(userId, campaignId);
+    const journal = await withDbTimeout(
+      HANDOUT_DB_TIMEOUT_MS,
+      () => listUserHandoutJournal(userId, campaignId),
+      'handouts.journal',
+    );
     res.json({ journal });
   } catch (err) {
-    console.error('[Handouts] journal error:', err);
-    res.status(500).json({ error: 'Failed to load journal' });
+    respondHandoutDbError(res, err, '[Handouts] journal error:', 'Failed to load journal');
   }
 });
 
@@ -383,7 +414,7 @@ router.post('/scene-reveal', requireAuth, async (req: AuthenticatedRequest, res)
       return;
     }
 
-    const session = await prisma.gameSession.findUnique({
+    const session = await readPrisma.gameSession.findUnique({
       where: { id: parsed.data.sessionId },
       select: { id: true, campaignId: true, isActive: true },
     });
@@ -486,7 +517,7 @@ router.post('/scene-reveal', requireAuth, async (req: AuthenticatedRequest, res)
       }
     }
 
-    await prisma.sessionLog.create({
+    await readPrisma.sessionLog.create({
       data: {
         sessionId: parsed.data.sessionId,
         userId,
@@ -528,7 +559,7 @@ router.post('/:id/reveal', requireAuth, async (req: AuthenticatedRequest, res) =
       return;
     }
 
-    const session = await prisma.gameSession.findUnique({
+    const session = await readPrisma.gameSession.findUnique({
       where: { id: parsed.data.sessionId },
       select: { id: true, campaignId: true, isActive: true },
     });
@@ -560,7 +591,7 @@ router.post('/:id/reveal', requireAuth, async (req: AuthenticatedRequest, res) =
       emitRevealToUsers(payload, [receipt.userId]);
     }
 
-    await prisma.sessionLog.create({
+    await readPrisma.sessionLog.create({
       data: {
         sessionId: parsed.data.sessionId,
         userId,
@@ -605,7 +636,7 @@ router.post('/receipts/:id/add-to-inventory', requireAuth, async (req: Authentic
       return;
     }
 
-    const handoutRow = await prisma.handout.findUnique({
+    const handoutRow = await readPrisma.handout.findUnique({
       where: { id: receipt.handoutId },
       select: { campaignId: true },
     });
@@ -614,7 +645,7 @@ router.post('/receipts/:id/add-to-inventory', requireAuth, async (req: Authentic
       return;
     }
 
-    const gmMember = await prisma.campaignMember.findFirst({
+    const gmMember = await readPrisma.campaignMember.findFirst({
       where: { campaignId: handoutRow.campaignId, role: 'GM' },
       select: { userId: true },
     });
@@ -666,7 +697,7 @@ router.post('/receipts/:id/gm-push-inventory', requireAuth, async (req: Authenti
       return;
     }
 
-    const handoutRow = await prisma.handout.findUnique({
+    const handoutRow = await readPrisma.handout.findUnique({
       where: { id: receipt.handoutId },
       select: { campaignId: true },
     });

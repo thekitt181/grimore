@@ -1,5 +1,6 @@
 import type { Response, NextFunction } from 'express';
-import { prisma } from '../lib/prisma';
+import { readPrisma } from '../lib/prisma';
+import { isDbPoolSaturation } from '../lib/dbTimeout';
 import type { AuthenticatedRequest } from './auth';
 
 /** Requires X-Session-Id and that the user belongs to the session's campaign. */
@@ -16,22 +17,30 @@ export async function requireSessionMember(
     return;
   }
 
-  const session = await prisma.gameSession.findUnique({
-    where: { id: sessionId },
-    select: { campaignId: true },
-  });
-  if (!session) {
-    res.status(404).json({ error: 'Session not found' });
-    return;
-  }
+  try {
+    const session = await readPrisma.gameSession.findUnique({
+      where: { id: sessionId },
+      select: { campaignId: true },
+    });
+    if (!session) {
+      res.status(404).json({ error: 'Session not found' });
+      return;
+    }
 
-  const member = await prisma.campaignMember.findFirst({
-    where: { campaignId: session.campaignId, userId },
-  });
-  if (!member) {
-    res.status(403).json({ error: 'Session access required' });
-    return;
-  }
+    const member = await readPrisma.campaignMember.findFirst({
+      where: { campaignId: session.campaignId, userId },
+    });
+    if (!member) {
+      res.status(403).json({ error: 'Session access required' });
+      return;
+    }
 
-  next();
+    next();
+  } catch (err) {
+    if (isDbPoolSaturation(err)) {
+      res.status(503).json({ error: 'Database busy — try again shortly', retry: true });
+      return;
+    }
+    throw err;
+  }
 }

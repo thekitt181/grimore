@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { prisma } from '../lib/prisma';
+import { readPrisma } from '../lib/prisma';
+import { isDbPoolSaturation, withDbTimeout } from '../lib/dbTimeout';
 import { requireAuth, type AuthenticatedRequest } from '../middleware/auth';
 import {
   mediaConfigInput,
@@ -11,6 +12,22 @@ import {
 import type { Prisma } from '@prisma/client';
 
 const router = Router();
+
+const SCENE_DB_TIMEOUT_MS = 10_000;
+
+function respondSceneDbError(
+  res: import('express').Response,
+  err: unknown,
+  logLabel: string,
+  message: string,
+): void {
+  if (isDbPoolSaturation(err)) {
+    res.status(503).json({ error: 'Database busy — try again shortly', retry: true });
+    return;
+  }
+  console.error(logLabel, err);
+  res.status(500).json({ error: message });
+}
 
 const lightingPresetSchema = z.enum([
   'default', 'torchlight', 'moonlight', 'overcast', 'underdark', 'ethereal', 'blood-moon',
@@ -87,7 +104,7 @@ const createMapSchema = z.object({
 });
 
 async function assertCampaignMember(campaignId: string, userId: string, gmOnly = false) {
-  const campaign = await prisma.campaign.findUnique({
+  const campaign = await readPrisma.campaign.findUnique({
     where: { id: campaignId },
     select: { gmId: true, members: { where: { userId }, select: { role: true } } },
   });
@@ -105,21 +122,29 @@ router.get('/campaign/:campaignId', requireAuth, async (req: AuthenticatedReques
   try {
     const userId = req.userId!;
     const campaignId = req.params['campaignId'] as string;
-    const access = await assertCampaignMember(campaignId, userId);
+    const access = await withDbTimeout(
+      SCENE_DB_TIMEOUT_MS,
+      () => assertCampaignMember(campaignId, userId),
+      'scenes.access',
+    );
     if (!access.ok) {
       res.status(access.status).json({ error: access.error });
       return;
     }
 
-    const scenes = await prisma.scene.findMany({
-      where: { campaignId },
-      include: sceneIncludeMap(),
-      orderBy: { sortOrder: 'asc' },
-    });
+    const scenes = await withDbTimeout(
+      SCENE_DB_TIMEOUT_MS,
+      () =>
+        readPrisma.scene.findMany({
+          where: { campaignId },
+          include: sceneIncludeMap(),
+          orderBy: { sortOrder: 'asc' },
+        }),
+      'scenes.list',
+    );
     res.json({ scenes: scenes.map(serializeScene) });
   } catch (err) {
-    console.error('[Scenes] list error:', err);
-    res.status(500).json({ error: 'Failed to list scenes' });
+    respondSceneDbError(res, err, '[Scenes] list error:', 'Failed to list scenes');
   }
 });
 
@@ -128,20 +153,28 @@ router.get('/campaign/:campaignId/maps', requireAuth, async (req: AuthenticatedR
   try {
     const userId = req.userId!;
     const campaignId = req.params['campaignId'] as string;
-    const access = await assertCampaignMember(campaignId, userId);
+    const access = await withDbTimeout(
+      SCENE_DB_TIMEOUT_MS,
+      () => assertCampaignMember(campaignId, userId),
+      'scenes.maps.access',
+    );
     if (!access.ok) {
       res.status(access.status).json({ error: access.error });
       return;
     }
 
-    const maps = await prisma.gameMap.findMany({
-      where: { campaignId },
-      orderBy: { createdAt: 'desc' },
-    });
+    const maps = await withDbTimeout(
+      SCENE_DB_TIMEOUT_MS,
+      () =>
+        readPrisma.gameMap.findMany({
+          where: { campaignId },
+          orderBy: { createdAt: 'desc' },
+        }),
+      'scenes.maps.list',
+    );
     res.json({ maps: maps.map(serializeGameMap) });
   } catch (err) {
-    console.error('[Scenes] maps list error:', err);
-    res.status(500).json({ error: 'Failed to list maps' });
+    respondSceneDbError(res, err, '[Scenes] maps list error:', 'Failed to list maps');
   }
 });
 
@@ -163,7 +196,7 @@ router.post('/campaign/:campaignId/maps', requireAuth, async (req: Authenticated
     }
 
     const data = parsed.data;
-    const map = await prisma.gameMap.create({
+    const map = await readPrisma.gameMap.create({
       data: {
         campaignId,
         name: data.name,
@@ -179,8 +212,7 @@ router.post('/campaign/:campaignId/maps', requireAuth, async (req: Authenticated
     });
     res.status(201).json({ map: serializeGameMap(map) });
   } catch (err) {
-    console.error('[Scenes] create map error:', err);
-    res.status(500).json({ error: 'Failed to create map' });
+    respondSceneDbError(res, err, '[Scenes] create map error:', 'Failed to create map');
   }
 });
 
@@ -201,12 +233,12 @@ router.post('/campaign/:campaignId', requireAuth, async (req: AuthenticatedReque
       return;
     }
 
-    const maxOrder = await prisma.scene.aggregate({
+    const maxOrder = await readPrisma.scene.aggregate({
       where: { campaignId },
       _max: { sortOrder: true },
     });
     const data = parsed.data;
-    const scene = await prisma.scene.create({
+    const scene = await readPrisma.scene.create({
       data: {
         campaignId,
         name: data.name,
@@ -225,8 +257,7 @@ router.post('/campaign/:campaignId', requireAuth, async (req: AuthenticatedReque
     });
     res.status(201).json({ scene: serializeScene(scene) });
   } catch (err) {
-    console.error('[Scenes] create error:', err);
-    res.status(500).json({ error: 'Failed to create scene' });
+    respondSceneDbError(res, err, '[Scenes] create error:', 'Failed to create scene');
   }
 });
 
@@ -235,7 +266,7 @@ router.patch('/:id', requireAuth, async (req: AuthenticatedRequest, res) => {
   try {
     const userId = req.userId!;
     const id = req.params['id'] as string;
-    const existing = await prisma.scene.findUnique({ where: { id } });
+    const existing = await readPrisma.scene.findUnique({ where: { id } });
     if (!existing) {
       res.status(404).json({ error: 'Scene not found' });
       return;
@@ -255,7 +286,7 @@ router.patch('/:id', requireAuth, async (req: AuthenticatedRequest, res) => {
     }
 
     const data = parsed.data;
-    const scene = await prisma.scene.update({
+    const scene = await readPrisma.scene.update({
       where: { id },
       data: {
         ...(data.name !== undefined ? { name: data.name } : {}),
@@ -276,8 +307,7 @@ router.patch('/:id', requireAuth, async (req: AuthenticatedRequest, res) => {
     });
     res.json({ scene: serializeScene(scene) });
   } catch (err) {
-    console.error('[Scenes] update error:', err);
-    res.status(500).json({ error: 'Failed to update scene' });
+    respondSceneDbError(res, err, '[Scenes] update error:', 'Failed to update scene');
   }
 });
 
@@ -286,7 +316,7 @@ router.delete('/:id', requireAuth, async (req: AuthenticatedRequest, res) => {
   try {
     const userId = req.userId!;
     const id = req.params['id'] as string;
-    const existing = await prisma.scene.findUnique({ where: { id } });
+    const existing = await readPrisma.scene.findUnique({ where: { id } });
     if (!existing) {
       res.status(404).json({ error: 'Scene not found' });
       return;
@@ -296,11 +326,10 @@ router.delete('/:id', requireAuth, async (req: AuthenticatedRequest, res) => {
       res.status(access.status).json({ error: access.error });
       return;
     }
-    await prisma.scene.delete({ where: { id } });
+    await readPrisma.scene.delete({ where: { id } });
     res.json({ ok: true });
   } catch (err) {
-    console.error('[Scenes] delete error:', err);
-    res.status(500).json({ error: 'Failed to delete scene' });
+    respondSceneDbError(res, err, '[Scenes] delete error:', 'Failed to delete scene');
   }
 });
 
@@ -316,7 +345,7 @@ router.post('/:id/activate', requireAuth, async (req: AuthenticatedRequest, res)
       return;
     }
 
-    const scene = await prisma.scene.findUnique({
+    const scene = await readPrisma.scene.findUnique({
       where: { id },
       include: sceneIncludeMap(),
     });
@@ -325,7 +354,7 @@ router.post('/:id/activate', requireAuth, async (req: AuthenticatedRequest, res)
       return;
     }
 
-    const session = await prisma.gameSession.findUnique({
+    const session = await readPrisma.gameSession.findUnique({
       where: { id: sessionId },
       include: { campaign: { select: { gmId: true } } },
     });
@@ -338,11 +367,11 @@ router.post('/:id/activate', requireAuth, async (req: AuthenticatedRequest, res)
       return;
     }
 
-    await prisma.gameSession.update({
+    await readPrisma.gameSession.update({
       where: { id: sessionId },
       data: { activeSceneId: id },
     });
-    await prisma.sessionLog.create({
+    await readPrisma.sessionLog.create({
       data: {
         sessionId,
         userId,
@@ -356,8 +385,7 @@ router.post('/:id/activate', requireAuth, async (req: AuthenticatedRequest, res)
       transition: transition.success ? transition.data : 'fade',
     });
   } catch (err) {
-    console.error('[Scenes] activate error:', err);
-    res.status(500).json({ error: 'Failed to activate scene' });
+    respondSceneDbError(res, err, '[Scenes] activate error:', 'Failed to activate scene');
   }
 });
 
