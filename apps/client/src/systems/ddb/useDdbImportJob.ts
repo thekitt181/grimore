@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import axios from 'axios';
 import type { DdbLibraryImportJob } from '@grimoire/shared';
 import {
   cancelDdbLibraryImportJob,
@@ -29,6 +30,11 @@ export function useDdbImportJob(enabled = true) {
     enabled,
     refetchInterval: (query) => (query.state.data?.status === 'running' ? 2500 : false),
     staleTime: 1000,
+    retry: (failureCount, error) => {
+      if (axios.isAxiosError(error) && error.response?.status === 503) return failureCount < 3;
+      return false;
+    },
+    retryDelay: (attempt) => Math.min(2000 * attempt, 8000),
   });
 
   const job = jobQ.data ?? null;

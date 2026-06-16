@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { DDB_HOMEBREW_SOURCE_ID } from '@grimoire/shared';
 import { prisma } from '../lib/prisma';
+import { isDbPoolSaturation } from '../lib/dbTimeout';
 import { requireAuth, type AuthenticatedRequest } from '../middleware/auth';
 import { requireSessionMember } from '../middleware/requireSessionMember';
 import {
@@ -662,6 +663,10 @@ router.post('/library/import-jobs', requireAuth, async (req: AuthenticatedReques
     const job = await startDdbLibraryImportJob(req.userId!, parsed.data);
     res.status(202).json({ job });
   } catch (err) {
+    if (isDbPoolSaturation(err)) {
+      res.status(503).json({ error: 'Database busy — try again shortly', retry: true });
+      return;
+    }
     res.status(400).json({ error: err instanceof Error ? err.message : 'Could not start import job' });
   }
 });
@@ -671,6 +676,10 @@ router.get('/library/import-jobs/active', requireAuth, async (req: Authenticated
     const job = await getActiveDdbLibraryImportJob(req.userId!);
     res.json({ job });
   } catch (err) {
+    if (isDbPoolSaturation(err)) {
+      res.status(503).json({ error: 'Database busy — try again shortly', retry: true });
+      return;
+    }
     res.status(400).json({ error: err instanceof Error ? err.message : 'Could not load import job' });
   }
 });
@@ -684,6 +693,10 @@ router.get('/library/import-jobs/:jobId', requireAuth, async (req: Authenticated
     }
     res.json({ job });
   } catch (err) {
+    if (isDbPoolSaturation(err)) {
+      res.status(503).json({ error: 'Database busy — try again shortly', retry: true });
+      return;
+    }
     res.status(400).json({ error: err instanceof Error ? err.message : 'Could not load import job' });
   }
 });
@@ -697,6 +710,10 @@ router.delete('/library/import-jobs/:jobId', requireAuth, async (req: Authentica
     }
     res.json({ job });
   } catch (err) {
+    if (isDbPoolSaturation(err)) {
+      res.status(503).json({ error: 'Database busy — try again shortly', retry: true });
+      return;
+    }
     res.status(400).json({ error: err instanceof Error ? err.message : 'Could not cancel import job' });
   }
 });

@@ -5,7 +5,7 @@ import type {
   DdbLibraryImportJobProgress,
   DdbLibraryImportResult,
 } from '@grimoire/shared';
-import { prisma } from '../../lib/prisma';
+import { prisma, readPrisma } from '../../lib/prisma';
 import { sanitizeForPostgres, stripNullBytes } from '../../lib/sanitizePostgresText';
 import { getCobaltForUser } from './ddbService';
 import { getDdbAuthContext } from './ddbAuthContext';
@@ -594,7 +594,7 @@ export async function startDdbLibraryImportJob(
     throw new Error('Select at least one source book');
   }
 
-  const failedResume = await prisma.ddbLibraryImportJob.findFirst({
+  const failedResume = await readPrisma.ddbLibraryImportJob.findFirst({
     where: { userId, status: 'FAILED' },
     orderBy: { createdAt: 'desc' },
   });
@@ -604,7 +604,7 @@ export async function startDdbLibraryImportJob(
     && hasPartialImportProgress(failedResume.progress, failedResume.result, unique)
   ) {
     console.log(`[DDB] Resuming failed import job ${failedResume.id} instead of starting over`);
-    await prisma.ddbLibraryImportJob.updateMany({
+    await readPrisma.ddbLibraryImportJob.updateMany({
       where: { userId, status: 'RUNNING' },
       data: {
         status: 'CANCELLED',
@@ -612,7 +612,7 @@ export async function startDdbLibraryImportJob(
         completedAt: new Date(),
       },
     });
-    const reopened = await prisma.ddbLibraryImportJob.update({
+    const reopened = await readPrisma.ddbLibraryImportJob.update({
       where: { id: failedResume.id },
       data: {
         status: 'RUNNING',
@@ -626,7 +626,7 @@ export async function startDdbLibraryImportJob(
     return toClientJob(reopened);
   }
 
-  await prisma.ddbLibraryImportJob.updateMany({
+  await readPrisma.ddbLibraryImportJob.updateMany({
     where: { userId, status: 'RUNNING' },
     data: {
       status: 'CANCELLED',
@@ -635,7 +635,7 @@ export async function startDdbLibraryImportJob(
     },
   });
 
-  const row = await prisma.ddbLibraryImportJob.create({
+  const row = await readPrisma.ddbLibraryImportJob.create({
     data: sanitizeForPostgres({
       userId,
       skipExisting: Boolean(opts.skipExisting),
@@ -662,7 +662,7 @@ export async function getDdbLibraryImportJob(
   userId: string,
   jobId: string,
 ): Promise<DdbLibraryImportJob | null> {
-  const row = await prisma.ddbLibraryImportJob.findFirst({
+  const row = await readPrisma.ddbLibraryImportJob.findFirst({
     where: { id: jobId, userId },
   });
   if (row?.status === 'RUNNING') kickStaleImportJobIfNeeded(row);
@@ -670,7 +670,7 @@ export async function getDdbLibraryImportJob(
 }
 
 export async function getActiveDdbLibraryImportJob(userId: string): Promise<DdbLibraryImportJob | null> {
-  const row = await prisma.ddbLibraryImportJob.findFirst({
+  const row = await readPrisma.ddbLibraryImportJob.findFirst({
     where: { userId, status: 'RUNNING' },
     orderBy: { createdAt: 'desc' },
   });
@@ -679,11 +679,11 @@ export async function getActiveDdbLibraryImportJob(userId: string): Promise<DdbL
 }
 
 export async function cancelDdbLibraryImportJob(userId: string, jobId: string): Promise<DdbLibraryImportJob | null> {
-  const row = await prisma.ddbLibraryImportJob.findFirst({
+  const row = await readPrisma.ddbLibraryImportJob.findFirst({
     where: { id: jobId, userId, status: 'RUNNING' },
   });
   if (!row) return null;
-  const updated = await prisma.ddbLibraryImportJob.update({
+  const updated = await readPrisma.ddbLibraryImportJob.update({
     where: { id: jobId },
     data: {
       status: 'CANCELLED',
