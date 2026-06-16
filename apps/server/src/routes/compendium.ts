@@ -2,6 +2,7 @@ import { Router } from 'express';
 import type { OwlbearItem, OwlbearMonster, OwlbearSpell } from '@grimoire/shared';
 import { requireAuth, type AuthenticatedRequest } from '../middleware/auth';
 import { requireCompendiumAdmin, isCompendiumAdmin, getCompendiumAdminPassword, matchesCompendiumAdminPassword } from '../middleware/requireCompendiumAdmin';
+import { ensureCompendiumStartup } from '../services/compendiumStartup';
 import {
   deleteCompendiumEntry,
   findCatalogItem,
@@ -37,6 +38,12 @@ import {
 const router = Router();
 const auth = [requireAuth] as const;
 const admin = [requireAuth, requireCompendiumAdmin] as const;
+
+router.use((req, res, next) => {
+  void ensureCompendiumStartup()
+    .then(() => next())
+    .catch(next);
+});
 
 router.post('/admin/verify', ...auth, (req: AuthenticatedRequest, res) => {
   const expected = getCompendiumAdminPassword();

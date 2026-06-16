@@ -4,10 +4,10 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
-import { prisma } from './lib/prisma';
+import { connectDatabases, disconnectDatabases } from './lib/prisma';
 import { connectRedisOptional, disconnectAllRedis, isRedisOperational } from './lib/redis';
 import { attachRedisSocketAdapter, isSocketRedisAdapterEnabled } from './lib/socketRedisAdapter';
-import { getCompendiumStorageHealthSnapshot, pingCompendiumStorage, seedBundledCompendiumIfEmpty } from './services/compendiumPostgres';
+import { getCompendiumStorageHealthSnapshot } from './services/compendiumPostgres';
 import { initSocket } from './socket';
 import campaignRoutes from './routes/campaigns';
 import userRoutes from './routes/users';
@@ -21,10 +21,7 @@ import supportRoutes, { handleSupportWebhook } from './routes/support';
 import { getCanonicalClientHostname, getClientOrigins, getPrimaryClientUrl } from './lib/clientOrigins';
 import { toNodeHandler } from 'better-auth/node';
 import { auth, getAuthBaseUrl, isBetterAuthDashboardEnabled, isGoogleOAuthEnabled } from './lib/auth';
-import { startCompendiumMongoWatch } from './services/compendiumMongoWatch';
-import { syncCompendiumStorageOnStartup } from './services/compendiumGlobal';
-import { reconcileRawGlobalStorage } from './services/compendiumOwlbearPersist';
-import { warmCompendiumCatalog } from './services/compendiumSync';
+import { scheduleCompendiumJobs } from './services/compendiumStartup';
 import { mountClientSpa } from './lib/serveClient';
 import { isFloorplanScanConfigured } from './services/floorplan/floorplanScanService';
 import { runMigrationsInBackground } from './lib/runMigrationsInBackground';
@@ -148,51 +145,6 @@ mountClientSpa(app);
 // ─── Socket.io ────────────────────────────────────────────────────────────────
 const io = initSocket(httpServer);
 
-async function startCompendiumBackground(): Promise<void> {
-  try {
-    const { warmBookSourcesCacheFromDisk } = await import('./services/compendiumBookSourcesCache');
-    warmBookSourcesCacheFromDisk();
-    await pingCompendiumStorage();
-    const seeded = await seedBundledCompendiumIfEmpty();
-    if (seeded.seeded) {
-      console.log(
-        `[Compendium] Seeded bundled catalog to Postgres (${seeded.counts.monsters} monsters, ${seeded.counts.items} items, ${seeded.counts.spells} spells)`,
-      );
-    }
-    await syncCompendiumStorageOnStartup();
-    const { ensureBundledSourcesLocked, ensureImportedSourcesUnlocked } = await import('./services/compendiumBundledLock');
-    await ensureBundledSourcesLocked('startup');
-    await ensureImportedSourcesUnlocked('startup');
-    startCompendiumMongoWatch();
-    console.log('[Compendium] PostgreSQL storage — MongoDB compendium disabled');
-  } catch (err) {
-    console.error('[Compendium] Background init failed:', err);
-  }
-  void reconcileRawGlobalStorage();
-}
-
-async function connectDatabase(maxAttempts = 6): Promise<void> {
-  const timeoutMs = 20_000;
-
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    try {
-      await Promise.race([
-        prisma.$connect(),
-        new Promise<never>((_, reject) => {
-          setTimeout(() => reject(new Error(`PostgreSQL connect timeout after ${timeoutMs}ms`)), timeoutMs);
-        }),
-      ]);
-      console.log('[DB] PostgreSQL connected');
-      return;
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      console.warn(`[DB] Connect attempt ${attempt}/${maxAttempts} failed:`, message);
-      if (attempt === maxAttempts) throw err;
-      await new Promise((resolve) => setTimeout(resolve, Math.min(2000 * attempt, 10_000)));
-    }
-  }
-}
-
 async function connectRedisInBackground(): Promise<void> {
   let redisOk = false;
   try {
@@ -213,7 +165,7 @@ async function connectRedisInBackground(): Promise<void> {
 
 async function bootServices(): Promise<void> {
   try {
-    await connectDatabase();
+    await connectDatabases();
 
     // API routes need Postgres only — don't block on Redis, compendium, or DDB jobs.
     servicesReady = true;
@@ -225,8 +177,7 @@ async function bootServices(): Promise<void> {
     }
 
     void connectRedisInBackground();
-    scheduleCompendiumBackground();
-    scheduleCompendiumCatalogWarm();
+    scheduleCompendiumJobs();
     scheduleResumeImportJobs();
   } catch (err) {
     console.error('[Server] Service boot failed — API stays unavailable until DB connects:', err);
@@ -235,31 +186,15 @@ async function bootServices(): Promise<void> {
 
 /** Defer DDB import resume so auth/API aren't starved by pool checkout at cold start. */
 function scheduleResumeImportJobs(): void {
-  const delayMs = Number(process.env['DDB_RESUME_JOBS_DELAY_MS'] ?? 120_000);
+  const isRender = process.env['RENDER'] === 'true' || Boolean(process.env['RENDER_SERVICE_ID']);
+  const defaultDelay = isRender ? 600_000 : 120_000;
+  const delayMs = Number(process.env['DDB_RESUME_JOBS_DELAY_MS'] ?? defaultDelay);
   setTimeout(() => {
     void import('./services/ddb/ddbImportJobService')
       .then(({ resumeRunningImportJobs }) => resumeRunningImportJobs())
       .catch((err) => {
         console.warn('[DDB] Could not resume import jobs:', err);
       });
-  }, delayMs);
-}
-
-function scheduleCompendiumBackground(): void {
-  const delayMs = Number(process.env['COMPENDIUM_STARTUP_DELAY_MS'] ?? 180_000);
-  setTimeout(() => {
-    void startCompendiumBackground().catch((err) => {
-      console.error('[Compendium] Background init failed:', err);
-    });
-  }, delayMs);
-}
-
-function scheduleCompendiumCatalogWarm(): void {
-  const delayMs = Number(process.env['COMPENDIUM_WARM_DELAY_MS'] ?? 360_000);
-  setTimeout(() => {
-    void warmCompendiumCatalog().catch((err) => {
-      console.warn('[Compendium] Catalog warm failed:', err);
-    });
   }, delayMs);
 }
 
@@ -312,7 +247,7 @@ process.on('unhandledRejection', (reason) => {
 process.on('SIGTERM', async () => {
   console.log('[Server] Shutting down...');
   servicesReady = false;
-  await prisma.$disconnect();
+  await disconnectDatabases();
   disconnectAllRedis();
   process.exit(0);
 });

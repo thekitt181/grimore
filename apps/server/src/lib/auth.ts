@@ -2,7 +2,7 @@ import { betterAuth } from 'better-auth';
 import { prismaAdapter } from 'better-auth/adapters/prisma';
 import { dash } from '@better-auth/infra';
 import { bearer } from 'better-auth/plugins';
-import { prisma } from './prisma';
+import { authPrisma } from './prisma';
 import { getClientOrigins, getPrimaryClientUrl, getSharedAuthCookieDomain } from './clientOrigins';
 import { sendEmail } from './email';
 
@@ -41,7 +41,7 @@ export const auth = betterAuth({
         },
       }
     : {}),
-  database: prismaAdapter(prisma, { provider: 'postgresql' }),
+  database: prismaAdapter(authPrisma, { provider: 'postgresql' }),
   emailAndPassword: {
     enabled: true,
     minPasswordLength: 8,

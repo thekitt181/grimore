@@ -36,14 +36,29 @@ export function resolveDatabaseUrl(raw?: string): string {
 
   if (!url.searchParams.has('connection_limit')) {
     const fromEnv = process.env['DATABASE_CONNECTION_LIMIT']?.trim();
-    const fallback = process.env['NODE_ENV'] === 'production' ? '3' : '5';
+    const fallback = '5';
     url.searchParams.set('connection_limit', fromEnv || fallback);
   }
 
   if (!url.searchParams.has('pool_timeout')) {
-    url.searchParams.set('pool_timeout', process.env['NODE_ENV'] === 'production' ? '10' : '20');
+    const fromEnv = process.env['DATABASE_POOL_TIMEOUT']?.trim();
+    url.searchParams.set('pool_timeout', fromEnv || '20');
   }
 
+  return withSupabaseSsl(url.toString());
+}
+
+/** Dedicated Prisma pool for Better Auth (keeps sign-in off the compendium connection pool). */
+export function resolveAuthDatabaseUrl(): string {
+  const url = new URL(resolveDatabaseUrl());
+  url.searchParams.set(
+    'connection_limit',
+    process.env['AUTH_DATABASE_CONNECTION_LIMIT']?.trim() ?? '2',
+  );
+  url.searchParams.set(
+    'pool_timeout',
+    process.env['AUTH_DATABASE_POOL_TIMEOUT']?.trim() ?? '20',
+  );
   return withSupabaseSsl(url.toString());
 }
 
