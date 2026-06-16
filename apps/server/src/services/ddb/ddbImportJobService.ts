@@ -527,48 +527,56 @@ function kickStaleImportJobIfNeeded(row: { id: string; updatedAt: Date }): void 
 }
 
 export async function resumeRunningImportJobs(): Promise<void> {
-  const rows = await prisma.ddbLibraryImportJob.findMany({
-    where: {
-      OR: [{ status: 'RUNNING' }, { status: 'FAILED' }],
-    },
-    select: { id: true, status: true, progress: true, result: true, sourceIds: true, userId: true, updatedAt: true },
-    orderBy: { createdAt: 'asc' },
-  });
-
-  const runningByUser = new Map<string, string>();
-  const failedRows: typeof rows = [];
-
-  for (const row of rows) {
-    if (row.status === 'RUNNING') {
-      runningByUser.set(row.userId, row.id);
-      if (isImportJobStale(row.updatedAt)) {
-        kickStaleImportJobIfNeeded(row);
-      }
-    } else {
-      failedRows.push(row);
-    }
-  }
-
-  for (const jobId of runningByUser.values()) {
-    if (!runningJobs.has(jobId)) {
-      void runDdbLibraryImportJob(jobId);
-    }
-  }
-
-  for (const row of failedRows) {
-    if (runningByUser.has(row.userId)) continue;
-    const accessible = row.sourceIds.filter((id) => Number.isFinite(id) && (id > 0 || id === DDB_HOMEBREW_SOURCE_ID));
-    if (!hasPartialImportProgress(row.progress, row.result, accessible)) continue;
-    console.log(`[DDB] Re-opening failed import job ${row.id} with partial progress`);
-    await prisma.ddbLibraryImportJob.update({
-      where: { id: row.id },
-      data: {
-        status: 'RUNNING',
-        errorMessage: null,
-        completedAt: null,
+  try {
+    const rows = await prisma.ddbLibraryImportJob.findMany({
+      where: {
+        OR: [{ status: 'RUNNING' }, { status: 'FAILED' }],
       },
+      select: { id: true, status: true, progress: true, result: true, sourceIds: true, userId: true, updatedAt: true },
+      orderBy: { createdAt: 'asc' },
     });
-    void runDdbLibraryImportJob(row.id);
+
+    const runningByUser = new Map<string, string>();
+    const failedRows: typeof rows = [];
+
+    for (const row of rows) {
+      if (row.status === 'RUNNING') {
+        runningByUser.set(row.userId, row.id);
+        if (isImportJobStale(row.updatedAt)) {
+          kickStaleImportJobIfNeeded(row);
+        }
+      } else {
+        failedRows.push(row);
+      }
+    }
+
+    for (const jobId of runningByUser.values()) {
+      if (!runningJobs.has(jobId)) {
+        void runDdbLibraryImportJob(jobId);
+      }
+    }
+
+    for (const row of failedRows) {
+      if (runningByUser.has(row.userId)) continue;
+      const accessible = row.sourceIds.filter((id) => Number.isFinite(id) && (id > 0 || id === DDB_HOMEBREW_SOURCE_ID));
+      if (!hasPartialImportProgress(row.progress, row.result, accessible)) continue;
+      console.log(`[DDB] Re-opening failed import job ${row.id} with partial progress`);
+      try {
+        await prisma.ddbLibraryImportJob.update({
+          where: { id: row.id },
+          data: {
+            status: 'RUNNING',
+            errorMessage: null,
+            completedAt: null,
+          },
+        });
+        void runDdbLibraryImportJob(row.id);
+      } catch (err) {
+        console.warn(`[DDB] Could not re-open failed import job ${row.id}:`, err);
+      }
+    }
+  } catch (err) {
+    console.error('[DDB] resumeRunningImportJobs failed (non-fatal — API stays up):', err);
   }
 }
 

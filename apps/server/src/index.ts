@@ -218,15 +218,22 @@ async function bootServices(): Promise<void> {
 
     void connectRedisInBackground();
     void startCompendiumBackground();
-    try {
-      const { resumeRunningImportJobs } = await import('./services/ddb/ddbImportJobService');
-      void resumeRunningImportJobs();
-    } catch (err) {
-      console.warn('[DDB] Could not resume import jobs:', err);
-    }
+    scheduleResumeImportJobs();
   } catch (err) {
     console.error('[Server] Service boot failed — API stays unavailable until DB connects:', err);
   }
+}
+
+/** Defer DDB import resume so auth/API aren't starved by pool checkout at cold start. */
+function scheduleResumeImportJobs(): void {
+  const delayMs = Number(process.env['DDB_RESUME_JOBS_DELAY_MS'] ?? 90_000);
+  setTimeout(() => {
+    void import('./services/ddb/ddbImportJobService')
+      .then(({ resumeRunningImportJobs }) => resumeRunningImportJobs())
+      .catch((err) => {
+        console.warn('[DDB] Could not resume import jobs:', err);
+      });
+  }, delayMs);
 }
 
 function start() {
@@ -270,6 +277,10 @@ function start() {
 }
 
 start();
+
+process.on('unhandledRejection', (reason) => {
+  console.error('[Server] Unhandled promise rejection (keeping process alive):', reason);
+});
 
 process.on('SIGTERM', async () => {
   console.log('[Server] Shutting down...');
