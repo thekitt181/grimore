@@ -1420,6 +1420,7 @@ export async function getSyncStatus(): Promise<CompendiumSyncStatus> {
   const postgresConnected = storageHealth.state === 'connected' && Boolean(dbVersion);
   const hasLocal = isLocalCatalogAvailable() || Boolean(file);
   const hasExtension = Boolean(extVersion);
+  const postgresBackend = storageHealth.configured && Boolean(process.env['DATABASE_URL']);
 
   let entryCounts = getCatalogEntryCounts() ?? undefined;
   if (postgresConnected && (!entryCounts || entryCounts.monsters + entryCounts.items + entryCounts.spells === 0)) {
@@ -1440,11 +1441,17 @@ export async function getSyncStatus(): Promise<CompendiumSyncStatus> {
 
   const value: CompendiumSyncStatus = {
     lastUpdated: stamps.length ? newestIso(...stamps) : new Date(0).toISOString(),
-    storage: postgresConnected ? 'postgresql' : hasLocal || hasExtension ? 'local' : 'unavailable',
+    storage: postgresConnected
+      ? 'postgresql'
+      : postgresBackend
+        ? 'postgresql'
+        : hasLocal || hasExtension
+          ? 'local'
+          : 'unavailable',
     mongoConnected: postgresConnected,
     mongoHealth: {
       state: storageHealth.state,
-      configured: storageHealth.configured,
+      configured: postgresBackend || storageHealth.configured,
       circuitOpen: storageHealth.circuitOpen,
       ...(storageHealth.lastCheckedAt ? { lastCheckedAt: storageHealth.lastCheckedAt } : {}),
       ...(storageHealth.lastSuccessAt ? { lastSuccessAt: storageHealth.lastSuccessAt } : {}),

@@ -7,7 +7,7 @@ import type {
   OwlbearSpell,
 } from '@grimoire/shared';
 import { slugify } from '@grimoire/monster-dex';
-import { prisma } from '../lib/prisma';
+import { prisma, readPrisma } from '../lib/prisma';
 import { withDbTimeout } from '../lib/dbTimeout';
 import { entryNameKey, normalizeOwlbearRawDoc } from './compendiumMerge';
 import { compendiumEntryStorageId } from './compendiumEntryIdentity';
@@ -83,7 +83,7 @@ async function withStorageProbe<T>(fn: () => Promise<T>): Promise<T> {
 
 export async function pingCompendiumStorage(): Promise<boolean> {
   try {
-    await withStorageProbe(() => prisma.compendiumMeta.findUnique({ where: { id: 'global' } }));
+    await withStorageProbe(() => readPrisma.compendiumMeta.findUnique({ where: { id: 'global' } }));
     return true;
   } catch {
     return false;
@@ -634,7 +634,7 @@ export async function readRawGlobalDocFromPostgres(
 
 export async function readPostgresGlobalVersion(): Promise<string | null> {
   try {
-    const meta = await withStorageProbe(() => prisma.compendiumMeta.findUnique({
+    const meta = await withStorageProbe(() => readPrisma.compendiumMeta.findUnique({
       where: { id: 'global' },
       select: { lastUpdated: true },
     }));

@@ -96,6 +96,29 @@ router.get('/asset/*', (req, res) => {
   }
 });
 
+router.get('/sync-status', ...auth, async (_req, res) => {
+  void ensureCompendiumStartup().catch((err) => {
+    console.warn('[Compendium] Background startup from sync-status failed:', err);
+  });
+  try {
+    res.json(await getSyncStatus());
+  } catch (err) {
+    respondCompendiumError(res, err, '[Compendium] sync-status error:', 'Failed to read sync status');
+  }
+});
+
+router.post('/reconcile-mongo', ...auth, async (req: AuthenticatedRequest, res) => {
+  const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim() : 'client-reconcile';
+  const deferCatalogRebuild = req.body?.deferCatalogRebuild === true;
+  const strict = req.body?.strict !== false;
+  try {
+    res.json(await reconcileCompendiumMongo(reason || 'client-reconcile', { deferCatalogRebuild, strict }));
+  } catch (err) {
+    console.error('[Compendium] reconcile-mongo error:', err);
+    res.status(500).json({ error: err instanceof Error ? err.message : 'Failed to reconcile compendium storage' });
+  }
+});
+
 // Catalog routes wait for startup but continue in degraded mode if it fails.
 router.use((_req, _res, next) => {
   void ensureCompendiumStartup()
@@ -241,26 +264,6 @@ router.put('/spells/:id/images', ...auth, async (req, res) => {
   } catch (err) {
     console.error('[Compendium] save spell image:', err);
     res.status(500).json({ error: err instanceof Error ? err.message : 'Failed to save image' });
-  }
-});
-
-router.get('/sync-status', ...auth, async (_req, res) => {
-  try {
-    res.json(await getSyncStatus());
-  } catch (err) {
-    respondCompendiumError(res, err, '[Compendium] sync-status error:', 'Failed to read sync status');
-  }
-});
-
-router.post('/reconcile-mongo', ...auth, async (req: AuthenticatedRequest, res) => {
-  const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim() : 'client-reconcile';
-  const deferCatalogRebuild = req.body?.deferCatalogRebuild === true;
-  const strict = req.body?.strict !== false;
-  try {
-    res.json(await reconcileCompendiumMongo(reason || 'client-reconcile', { deferCatalogRebuild, strict }));
-  } catch (err) {
-    console.error('[Compendium] reconcile-mongo error:', err);
-    res.status(500).json({ error: err instanceof Error ? err.message : 'Failed to reconcile MongoDB' });
   }
 });
 

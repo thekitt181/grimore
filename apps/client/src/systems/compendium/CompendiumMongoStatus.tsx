@@ -9,18 +9,34 @@ const GOLD = 'var(--color-accent-gold)';
 function compendiumBackendLabel(status?: CompendiumSyncStatus): string {
   if (status?.storage === 'mongodb') return 'Mongo';
   if (status?.storage === 'postgresql') return 'Postgres';
-  // mongoHealth is a legacy field name — in production it reports Postgres compendium health.
   if (status?.mongoHealth?.configured) return 'Postgres';
   return 'Local';
 }
 
-function compendiumStatusLabel(status?: CompendiumSyncStatus): { text: string; tone: 'ok' | 'warn' | 'bad' | 'off' } {
+function compendiumStatusLabel(
+  status?: CompendiumSyncStatus,
+  opts?: { loading?: boolean; error?: boolean },
+): { text: string; tone: 'ok' | 'warn' | 'bad' | 'off' } {
+  if (opts?.loading && !status) {
+    return { text: 'Checking compendium…', tone: 'warn' };
+  }
+  if (opts?.error && !status) {
+    return { text: 'Compendium status unavailable', tone: 'warn' };
+  }
+
   const health = status?.mongoHealth;
   const storage = status?.storage;
   const backend = compendiumBackendLabel(status);
 
+  if (storage === 'local' && (status?.entryCounts || status?.catalogRev)) {
+    return { text: 'Local compendium cache', tone: 'warn' };
+  }
+
   if (!health?.configured && storage !== 'postgresql' && storage !== 'mongodb') {
-    return { text: 'Compendium off (local files)', tone: 'off' };
+    if (storage === 'local') {
+      return { text: 'Local compendium files', tone: 'warn' };
+    }
+    return { text: 'Compendium unavailable', tone: 'off' };
   }
 
   switch (health?.state) {
@@ -35,7 +51,9 @@ function compendiumStatusLabel(status?: CompendiumSyncStatus): { text: string; t
       return { text: `${backend} paused (circuit)`, tone: 'bad' };
     case 'unavailable':
       return {
-        text: storage === 'postgresql' ? 'Compendium DB busy' : `${backend} unreachable`,
+        text: storage === 'postgresql' || health?.configured
+          ? 'Postgres busy — tap Heal'
+          : `${backend} unreachable`,
         tone: 'warn',
       };
     default:
@@ -67,13 +85,14 @@ function needsCompendiumHeal(status?: CompendiumSyncStatus): boolean {
 export function CompendiumMongoStatus() {
   const qc = useQueryClient();
   const [healMessage, setHealMessage] = useState<string | null>(null);
-  const { data: syncStatus } = useQuery({
+  const { data: syncStatus, isLoading, isError } = useQuery({
     queryKey: ['compendium', 'sync-status'],
     queryFn: fetchSyncStatus,
     staleTime: 15_000,
+    retry: 2,
   });
-  const label = compendiumStatusLabel(syncStatus);
-  const showHeal = needsCompendiumHeal(syncStatus);
+  const label = compendiumStatusLabel(syncStatus, { loading: isLoading, error: isError });
+  const showHeal = Boolean(syncStatus) && needsCompendiumHeal(syncStatus);
   const backend = compendiumBackendLabel(syncStatus);
 
   const healMut = useMutation({
