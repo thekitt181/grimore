@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
+import axios from 'axios';
 import { api } from '@/lib/axios';
 import { useSocket } from '@/hooks/useSocket';
 import { useSessionStore } from '@/store/sessionStore';
@@ -142,7 +143,11 @@ export function SessionPage() {
       return res.data.session;
     },
     enabled: !!sessionId,
-    retry: 2,
+    retry: (failureCount, error) => {
+      if (axios.isAxiosError(error) && error.response?.status === 503) return failureCount < 5;
+      return failureCount < 2;
+    },
+    retryDelay: (attempt) => Math.min(2000 * attempt, 8000),
   });
 
   // Set session id before child effects run (fog/items need this on first paint).
