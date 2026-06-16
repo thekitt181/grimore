@@ -150,6 +150,7 @@ async function createVideoSprite(
   const sprite = new Sprite(texture);
   sprite.anchor.set(0.5);
   sprite.eventMode = 'none';
+  sprite.blendMode = 'screen';
 
   void video.play().catch(() => {
     /* autoplay blocked — still shows first frame when allowed */

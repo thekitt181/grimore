@@ -28,6 +28,7 @@ import {
   spellVfxUsesScreenLayer,
   worldSpanToScreenPx,
 } from './spellVfxScreenUtils';
+import { bindJb2aVideoCleanup, styleJb2aVideo } from './jb2aVideoStyle';
 
 const GOLD = '#c9a84c';
 
@@ -76,25 +77,23 @@ function playDirectedBeamVideo(
   video.muted = true;
   video.playsInline = true;
   video.autoplay = true;
-  video.style.cssText = [
-    'position:fixed',
-    `left:${layout.x}px`,
-    `top:${layout.y}px`,
-    `width:${layout.width}px`,
-    `height:${layout.height}px`,
-    `transform:translate(0,-50%) rotate(${layout.angleRad}rad)`,
-    'transform-origin:0% 50%',
-    'pointer-events:none',
-  ].join(';');
+  styleJb2aVideo(video, {
+    left: `${layout.x}px`,
+    top: `${layout.y}px`,
+    width: `${layout.width}px`,
+    height: `${layout.height}px`,
+    transform: `translate(0,-50%) rotate(${layout.angleRad}rad)`,
+    transformOrigin: '0% 50%',
+    objectFit: 'fill',
+  });
   layer.appendChild(video);
 
-  const remove = () => video.remove();
-  video.addEventListener('ended', remove, { once: true });
-  window.setTimeout(remove, variant.durationMs + 300);
-  void video.play().catch(() => {
-    remove();
-    showGoldBurst(layer, layout.x, layout.y, layout.width);
-  });
+  bindJb2aVideoCleanup(
+    video,
+    () => video.remove(),
+    variant.durationMs,
+    () => showGoldBurst(layer, layout.x, layout.y, layout.width),
+  );
 
   return { ok: true, variant };
 }
@@ -119,26 +118,21 @@ function playImpactBurst(
   video.muted = true;
   video.playsInline = true;
   video.autoplay = true;
-  video.style.cssText = [
-    'position:fixed',
-    `left:${center.x}px`,
-    `top:${center.y}px`,
-    `width:${sizePx}px`,
-    `height:${sizePx}px`,
-    'transform:translate(-50%,-50%)',
-    'pointer-events:none',
-  ].join(';');
+  styleJb2aVideo(video, {
+    left: `${center.x}px`,
+    top: `${center.y}px`,
+    width: `${sizePx}px`,
+    height: `${sizePx}px`,
+    transform: 'translate(-50%, -50%)',
+  });
   layer.appendChild(video);
 
-  const remove = () => video.remove();
-  const fallback = () => {
-    remove();
-    showGoldBurst(layer, center.x, center.y, sizePx);
-  };
-  video.addEventListener('ended', remove, { once: true });
-  video.addEventListener('error', fallback, { once: true });
-  window.setTimeout(remove, variant.durationMs + 300);
-  void video.play().catch(fallback);
+  bindJb2aVideoCleanup(
+    video,
+    () => video.remove(),
+    variant.durationMs,
+    () => showGoldBurst(layer, center.x, center.y, sizePx),
+  );
   return true;
 }
 
@@ -157,34 +151,31 @@ function playCastBurst(
 
   const url = jb2aAssetUrl(baseUrl, asset, variant);
   const video = document.createElement('video');
+  video.src = url;
   video.muted = true;
   video.playsInline = true;
   video.autoplay = true;
-  video.style.position = 'fixed';
-  video.style.pointerEvents = 'none';
 
   const pt = placementWorldPoint(placement, false);
   const projected = projectWorldPoint(pt.x, pt.z);
   if (!projected) return false;
 
   const sizePx = Math.max(48, effectScreenSizePx({ ...effect, placement }, asset));
-  video.style.left = `${projected.x}px`;
-  video.style.top = `${projected.y}px`;
-  video.style.width = `${sizePx}px`;
-  video.style.height = `${sizePx}px`;
-  video.style.transform = 'translate(-50%, -50%)';
-  video.src = url;
+  styleJb2aVideo(video, {
+    left: `${projected.x}px`,
+    top: `${projected.y}px`,
+    width: `${sizePx}px`,
+    height: `${sizePx}px`,
+    transform: 'translate(-50%, -50%)',
+  });
   layer.appendChild(video);
 
-  const remove = () => video.remove();
-  const showFallback = () => {
-    remove();
-    showGoldBurst(layer, projected.x, projected.y, sizePx);
-  };
-  video.addEventListener('ended', remove, { once: true });
-  video.addEventListener('error', showFallback, { once: true });
-  window.setTimeout(remove, variant.durationMs + 300);
-  void video.play().catch(showFallback);
+  bindJb2aVideoCleanup(
+    video,
+    () => video.remove(),
+    variant.durationMs,
+    () => showGoldBurst(layer, projected.x, projected.y, sizePx),
+  );
   return true;
 }
 
@@ -437,14 +428,14 @@ export function SpellScreenVfxOverlay() {
       video.playsInline = true;
       video.loop = true;
       video.autoplay = true;
-      video.style.position = 'fixed';
-      video.style.left = `${center.x}px`;
-      video.style.top = `${center.y}px`;
-      video.style.width = `${sizePx}px`;
-      video.style.height = `${sizePx}px`;
-      video.style.transform = 'translate(-50%, -50%)';
-      video.style.opacity = '0.85';
-      video.style.pointerEvents = 'none';
+      styleJb2aVideo(video, {
+        left: `${center.x}px`,
+        top: `${center.y}px`,
+        width: `${sizePx}px`,
+        height: `${sizePx}px`,
+        transform: 'translate(-50%, -50%)',
+        opacity: '0.92',
+      });
       layer.appendChild(video);
       zoneVideos.current.set(effect.id, video);
       zoneSizes.current.set(effect.id, sizePx);
