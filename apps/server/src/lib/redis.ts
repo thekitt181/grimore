@@ -437,3 +437,18 @@ export async function getSessionMapFocus(sessionId: string): Promise<string | nu
   if (fromRedis != null) memorySet(`mapFocus:${sessionId}`, fromRedis);
   return fromRedis;
 }
+
+export async function setSessionSpellEffects(sessionId: string, data: string): Promise<void> {
+  memorySet(`spellEffects:${sessionId}`, data);
+  await safeRedis(undefined, (client) =>
+    client.setex(`spellEffects:${sessionId}`, SESSION_TTL, data),
+  );
+}
+
+export async function getSessionSpellEffects(sessionId: string): Promise<string | null> {
+  const cached = memoryGet(`spellEffects:${sessionId}`);
+  if (cached != null) return cached;
+  const fromRedis = await safeRedis(null, (client) => client.get(`spellEffects:${sessionId}`));
+  if (fromRedis != null) memorySet(`spellEffects:${sessionId}`, fromRedis);
+  return fromRedis;
+}

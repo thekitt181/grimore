@@ -12,6 +12,7 @@ import { placeItemHandout } from './placeItemHandout';
 import { useSessionStore } from '@/store/sessionStore';
 import { useCompendiumEditor } from './useCompendiumEditor';
 import { preloadCompendiumImageUrl } from './preloadCompendiumImage';
+import { SpellEffectReferencePanel } from './SpellEffectReferencePanel';
 
 export function MonsterDexPanel({ onClose }: { onClose: () => void }) {
   const { isSignedIn } = useGrimoireAuth();
@@ -24,7 +25,11 @@ export function MonsterDexPanel({ onClose }: { onClose: () => void }) {
   const selectedMonsterId = useCompendiumUiStore((s) => s.selectedMonsterId);
   const selectedItemId = useCompendiumUiStore((s) => s.selectedItemId);
   const selectedSpellId = useCompendiumUiStore((s) => s.selectedSpellId);
+  const browseMode = useCompendiumUiStore((s) => s.browseMode);
+  const selectedEffectSpellId = useCompendiumUiStore((s) => s.selectedEffectSpellId);
   const creating = useCompendiumUiStore((s) => s.creating);
+
+  const inEffectsView = tab === 'spells' && browseMode === 'effects';
 
   const queryOpts = { staleTime: 120_000, retry: 1 } as const;
 
@@ -56,13 +61,13 @@ export function MonsterDexPanel({ onClose }: { onClose: () => void }) {
 
   if (!isSignedIn) return null;
 
-  const title = tab === 'monsters' ? 'Monster Dex' : tab === 'items' ? 'Item Reference' : 'Spell Reference';
+  const title = tab === 'monsters' ? 'Monster Dex' : tab === 'items' ? 'Item Reference' : inEffectsView ? 'Spell Effects' : 'Spell Reference';
   const canEdit = isAdmin;
   const activeId =
-    tab === 'monsters' ? selectedMonsterId : tab === 'items' ? selectedItemId : selectedSpellId;
+    tab === 'monsters' ? selectedMonsterId : tab === 'items' ? selectedItemId : inEffectsView ? selectedEffectSpellId : selectedSpellId;
   const activeQ = tab === 'monsters' ? monsterQ : tab === 'items' ? itemQ : spellQ;
-  const showLoading = Boolean(activeId && activeQ.isPending && !activeQ.isError);
-  const showError = Boolean(activeId && activeQ.isError);
+  const showLoading = Boolean(!inEffectsView && activeId && activeQ.isPending && !activeQ.isError);
+  const showError = Boolean(!inEffectsView && activeId && activeQ.isError);
   const showPickHint = !creating && !activeId;
 
   return (
@@ -95,10 +100,25 @@ export function MonsterDexPanel({ onClose }: { onClose: () => void }) {
             {...(isGM ? { onPlaceHandout: () => { void placeItemHandout(itemQ.data!); } } : {})}
           />
         )}
-        {!creating && tab === 'spells' && spellQ.data && <SpellStatBlock spell={spellQ.data} editable={canEdit} />}
+        {!creating && inEffectsView && selectedEffectSpellId && (
+          <SpellEffectReferencePanel
+            catalogId={selectedEffectSpellId}
+            compendiumLoading={Boolean(selectedSpellId && spellQ.isFetching)}
+            compendiumError={Boolean(selectedSpellId && spellQ.isError)}
+            {...(spellQ.data ? { spell: spellQ.data } : {})}
+          />
+        )}
+        {!creating && !inEffectsView && tab === 'spells' && spellQ.data && (
+          <SpellStatBlock spell={spellQ.data} editable={canEdit} />
+        )}
         {showPickHint && (
           <p className="font-ui text-xs text-center py-8 leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
-            Select an entry from the <strong style={{ color: 'var(--color-text-primary)' }}>Compendium</strong> list in the right sidebar.
+            Select {inEffectsView ? 'a spell effect' : 'an entry'} from the <strong style={{ color: 'var(--color-text-primary)' }}>Compendium</strong> list in the right sidebar.
+          </p>
+        )}
+        {inEffectsView && selectedEffectSpellId && spellQ.isError && selectedSpellId && (
+          <p className="font-ui text-[10px] text-center" style={{ color: 'var(--color-accent-red-hot)' }}>
+            Could not load compendium spell — map VFX still works.
           </p>
         )}
         {showLoading && (

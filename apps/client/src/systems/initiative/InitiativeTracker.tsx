@@ -15,6 +15,9 @@ import {
 } from './initiativeTokenSync';
 import { applyDamage, applyHeal, readTempHp } from './hpUtils';
 import { rollInitiativeFromTokens } from './rollInitiative';
+import { ActiveEffectsPanel } from '@/systems/spells/ActiveEffectsPanel';
+import { SpellsWithEffectsPanel } from '@/systems/spells/SpellsWithEffectsPanel';
+import { onTokenTookDamageForConcentration } from '@/systems/spells/concentrationManager';
 
 const CONDITIONS = [
   'Blinded', 'Charmed', 'Deafened', 'Frightened', 'Grappled', 'Incapacitated',
@@ -51,6 +54,7 @@ export function InitiativeTracker({ onClose }: { onClose: () => void }) {
   const [newIsPlayer, setNewIsPlayer] = useState(false);
   const [linkTokenId, setLinkTokenId] = useState('');
   const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [effectsTab, setEffectsTab] = useState<'active' | 'spells'>('active');
 
   function handleAdd() {
     if (!newName.trim()) return;
@@ -89,6 +93,12 @@ export function InitiativeTracker({ onClose }: { onClose: () => void }) {
       const { hp, tempHp } = applyDamage(c.hp, c.tempHp, -delta);
       updateCombatant(id, { hp, tempHp });
       applyCombatantHpToToken(c, { hp, tempHp });
+      if (c.tokenId) {
+        const token = Object.values(useItemStore.getState().items).find(
+          (i): i is TokenItem => i.type === 'token' && i.id === c.tokenId,
+        );
+        if (token) onTokenTookDamageForConcentration(token, -delta, token.ownerId);
+      }
     } else {
       const hp = applyHeal(c.hp, c.maxHp, delta);
       updateCombatant(id, { hp });
@@ -328,6 +338,36 @@ export function InitiativeTracker({ onClose }: { onClose: () => void }) {
             </div>
           );
         })}
+      </div>
+
+      <div className="px-2 py-2 shrink-0" style={{ borderTop: `1px solid ${BD}` }}>
+        <div className="flex gap-1 mb-2">
+          <button
+            type="button"
+            onClick={() => setEffectsTab('active')}
+            className="font-ui text-[9px] flex-1 py-1 rounded"
+            style={{
+              background: effectsTab === 'active' ? 'rgba(201,168,76,0.15)' : 'transparent',
+              border: `1px solid ${effectsTab === 'active' ? GOLD : BD}`,
+              color: effectsTab === 'active' ? GOLD : 'var(--color-text-secondary)',
+            }}
+          >
+            Active effects
+          </button>
+          <button
+            type="button"
+            onClick={() => setEffectsTab('spells')}
+            className="font-ui text-[9px] flex-1 py-1 rounded"
+            style={{
+              background: effectsTab === 'spells' ? 'rgba(201,168,76,0.15)' : 'transparent',
+              border: `1px solid ${effectsTab === 'spells' ? GOLD : BD}`,
+              color: effectsTab === 'spells' ? GOLD : 'var(--color-text-secondary)',
+            }}
+          >
+            Spell VFX (47)
+          </button>
+        </div>
+        {effectsTab === 'active' ? <ActiveEffectsPanel /> : <SpellsWithEffectsPanel />}
       </div>
 
       {/* Add combatant form (GM only) */}

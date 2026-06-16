@@ -1,9 +1,17 @@
 import * as THREE from 'three';
 import type { PerspectiveCameraState } from './sceneCameraRef';
 import { sceneCameraRef } from './sceneCameraRef';
+import { syncOrthographicCamera } from './orthographicCameraSync';
 
 const perspCam = new THREE.PerspectiveCamera();
 const worldVec = new THREE.Vector3();
+
+function ndcToClient(rect: DOMRect): { x: number; y: number } {
+  return {
+    x: rect.left + (worldVec.x * 0.5 + 0.5) * rect.width,
+    y: rect.top + (-worldVec.y * 0.5 + 0.5) * rect.height,
+  };
+}
 
 /** Build a PerspectiveCamera matching the live 3D orbit snapshot. */
 export function syncPerspectiveCamera(
@@ -30,14 +38,24 @@ export function worldXZToClientScreen(
   rect: DOMRect,
 ): { x: number; y: number } | null {
   const live = sceneCameraRef.liveCamera;
-  if (!live) return null;
-  live.updateMatrixWorld(true);
+  if (live) {
+    live.updateMatrixWorld(true);
+    worldVec.set(wx, 0, wz);
+    worldVec.project(live);
+    return ndcToClient(rect);
+  }
+
+  const state = sceneCameraRef.current;
+  if (!state) return null;
+
+  if (state.type === 'perspective') {
+    return worldXZToScreen(wx, wz, rect, state);
+  }
+
+  const ortho = syncOrthographicCamera(state);
   worldVec.set(wx, 0, wz);
-  worldVec.project(live);
-  return {
-    x: rect.left + (worldVec.x * 0.5 + 0.5) * rect.width,
-    y: rect.top + (-worldVec.y * 0.5 + 0.5) * rect.height,
-  };
+  worldVec.project(ortho);
+  return ndcToClient(rect);
 }
 
 /** Pixi world X/Y (ground) → screen client coordinates. */

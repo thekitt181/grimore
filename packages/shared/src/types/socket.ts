@@ -2,6 +2,7 @@ import type { SessionUser } from './user';
 import type { DdbCharacterSyncPayload, DdbHpUpdatePayload, DdbRollBridgePayload } from './ddb';
 import type { CatalogRebuildProgress } from './compendium';
 import type { HandoutItemMeta, HandoutType } from './handout';
+import type { SpellEffectSyncPayload, SpellEffectReminderPayload } from './spellEffect';
 
 // ─── Map events ───────────────────────────────────────────────────────────────
 
@@ -227,6 +228,8 @@ export interface InitiativeSyncPayload {
   isActive: boolean;
 }
 
+export type { SpellEffectSyncPayload, SpellEffectReminderPayload };
+
 // ─── Combat events ────────────────────────────────────────────────────────────
 
 export interface InitiativePayload {
@@ -385,6 +388,8 @@ export interface ServerToClientEvents {
   'drawing:remove':       (payload: DrawingRemovePayload)     => void;
   'drawing:clear':        (payload: DrawingClearPayload)      => void;
   'initiative:sync':      (payload: InitiativeSyncPayload)    => void;
+  'effect:sync':          (payload: SpellEffectSyncPayload)   => void;
+  'effect:remind':        (payload: SpellEffectReminderPayload) => void;
   'combat:initiative':    (payload: InitiativePayload)        => void;
   'combat:hpUpdate':      (payload: HpUpdatePayload)          => void;
   'dice:roll':            (payload: DiceRollPayload)          => void;
@@ -447,6 +452,8 @@ export interface ClientToServerEvents {
   'drawing:remove':       (payload: DrawingRemovePayload)     => void;
   'drawing:clear':        (payload: DrawingClearPayload)      => void;
   'initiative:sync':      (payload: InitiativeSyncPayload)    => void;
+  'effect:sync':          (payload: SpellEffectSyncPayload)   => void;
+  'effect:remind':        (payload: SpellEffectReminderPayload) => void;
   'combat:initiative':    (payload: InitiativePayload)        => void;
   'combat:hpUpdate':      (payload: HpUpdatePayload)          => void;
   'dice:roll':            (payload: DiceRollPayload)          => void;

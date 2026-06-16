@@ -15,6 +15,7 @@ import { RollButton } from '@/systems/dice/RollButton';
 import { AoeTemplateBlock } from './AoeTemplateBlock';
 import { SaveAreaEffectBlock } from './SaveAreaEffectBlock';
 import { TargetedAttackButton } from './TargetedAttackButton';
+import { CastSpellEffectButton } from '@/systems/spells/CastSpellEffectButton';
 
 const GOLD = 'var(--color-accent-gold)';
 const BD = 'var(--color-border)';
@@ -101,6 +102,8 @@ function SpellRosterRow({
           damages={damages}
           aoe={aoe}
           save={{ dc: block.save.dc, stat: data!.save! }}
+          {...(data?.concentration ? { concentration: true } : {})}
+          {...(data?.description ? { description: data.description } : {})}
         />
       )}
 
@@ -111,6 +114,8 @@ function SpellRosterRow({
           aoe={aoe}
           damages={damages}
           {...(hasSave && data?.save ? { saveStat: data.save } : {})}
+          {...(data?.concentration ? { concentration: true } : {})}
+          {...(data?.description ? { description: data.description } : {})}
         />
       )}
 
@@ -140,6 +145,15 @@ function SpellRosterRow({
         <p className="font-ui text-[9px] opacity-70" style={{ color: 'var(--color-text-secondary)' }}>
           Utility — apply effect manually
         </p>
+      )}
+
+      {!isSaveArea && !hasAoe && (
+        <CastSpellEffectButton
+          spellName={spell.name}
+          token={token}
+          {...(data?.concentration ? { concentration: true } : {})}
+          {...(data?.description ? { description: data.description } : {})}
+        />
       )}
     </div>
   );

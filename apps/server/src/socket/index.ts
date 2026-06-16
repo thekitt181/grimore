@@ -11,8 +11,10 @@ import {
   getSessionFog,
   getSessionItems,
   getSessionMapFocus,
+  getSessionSpellEffects,
   setSessionItems,
   setSessionMapFocus,
+  setSessionSpellEffects,
 } from '../lib/redis';
 import {
   dedupeSessionUsers,
@@ -56,6 +58,8 @@ import {
   SceneChangePayload,
   HandoutRevealPayload,
   ChatMessagePayload,
+  SpellEffectSyncPayload,
+  SpellEffectReminderPayload,
 } from '@grimoire/shared';
 import { setCompendiumSocketServer } from '../services/compendiumBroadcast';
 import { startRollBridge, stopRollBridge, isRollBridgeActive, resolveRollBridgeUserId } from '../services/ddb/ddbRollBridge';
@@ -76,11 +80,19 @@ function isSessionGM(socket: Socket): boolean {
   return socket.data['role'] === 'GM';
 }
 
+function stripCastVfxTriggers(payload: SpellEffectSyncPayload): SpellEffectSyncPayload {
+  return {
+    ...payload,
+    effects: payload.effects.map(({ triggerCastVfx: _t, ...effect }) => effect),
+  };
+}
+
 async function hydrateSessionFromCache(socket: Socket, sessionId: string): Promise<void> {
-  const [cachedFog, cachedItemsRaw, cachedFocusRaw] = await Promise.all([
+  const [cachedFog, cachedItemsRaw, cachedFocusRaw, cachedEffectsRaw] = await Promise.all([
     getSessionFog(sessionId),
     getSessionItems(sessionId),
     getSessionMapFocus(sessionId),
+    getSessionSpellEffects(sessionId),
   ]);
 
   socket.emit('fog:sync', { sessionId, fogData: cachedFog ?? '[]' });
@@ -118,6 +130,15 @@ async function hydrateSessionFromCache(socket: Socket, sessionId: string): Promi
   }
   socket.emit('items:sync', { sessionId, items: [], activeMapId });
   emitMapFocus();
+
+  if (cachedEffectsRaw) {
+    try {
+      const payload = JSON.parse(cachedEffectsRaw) as SpellEffectSyncPayload;
+      socket.emit('effect:sync', { ...payload, sessionId });
+    } catch {
+      /* ignore corrupt cache */
+    }
+  }
 }
 
 function cacheSessionFog(
@@ -483,6 +504,19 @@ export function initSocket(httpServer: HttpServer): Server {
     socket.on('initiative:sync', (payload: InitiativeSyncPayload) => {
       if (!isJoinedSession(socket, payload.sessionId)) return;
       io.to(payload.sessionId).emit('initiative:sync', payload);
+    });
+
+    // ── Spell effects (duration, concentration, VFX) ─────────────────────────
+    socket.on('effect:sync', (payload: SpellEffectSyncPayload) => {
+      if (!isJoinedSession(socket, payload.sessionId)) return;
+      const toPersist = stripCastVfxTriggers(payload);
+      void setSessionSpellEffects(payload.sessionId, JSON.stringify(toPersist));
+      io.to(payload.sessionId).emit('effect:sync', payload);
+    });
+
+    socket.on('effect:remind', (payload: SpellEffectReminderPayload) => {
+      if (!isJoinedSession(socket, payload.sessionId)) return;
+      io.to(payload.sessionId).emit('effect:remind', payload);
     });
 
     // ── Combat ───────────────────────────────────────────────────────────────

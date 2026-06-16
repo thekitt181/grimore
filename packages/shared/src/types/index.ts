@@ -6,3 +6,4 @@ export * from './compendium';
 export * from './ddb';
 export * from './scene';
 export * from './handout';
+export * from './spellEffect';

@@ -25,6 +25,8 @@ import { useHandoutViewerStore } from '@/systems/compendium/handoutViewerStore';
 import { isMobileClient } from '@/lib/socket';
 import { isDdbPcToken } from '@/systems/ddb/ddbTokenUtils';
 import { useDdbStore } from '@/systems/ddb/ddbStore';
+import { isAoePlacementActive } from '@/systems/combat/aoePlacementUtils';
+import { isSpellTargetPicking } from '@/systems/spells/pickSpellTargets';
 import { nearestWallIndex, wallIndicesInWorldRect, wallHandleWorldPoints, pickWallHandle, translateWallIndices, moveWallEndpoint, wallsChanged, worldToMapLocal, mapLocalToWorld, WALL_PICK_RADIUS } from '@/systems/map/wallUtils';
 import type { WallEndpoint } from '@/systems/map/wallUtils';
 import type { TokenItem, WallSegment } from '../types';
@@ -209,6 +211,8 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
 
     function onDown(e: PointerEvent) {
       if (e.button !== 0) return;
+      if (isAoePlacementActive()) return;
+      if (isSpellTargetPicking()) return;
       // Space+drag, middle-mouse, and 3D map drag pan via useMapViewport (capture phase).
       if (e.getModifierState('Space')) return;
 
@@ -397,6 +401,7 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
     }
 
     function onMove(e: PointerEvent) {
+      if (isAoePlacementActive()) return;
       if (move) {
         e.preventDefault();
         e.stopImmediatePropagation();

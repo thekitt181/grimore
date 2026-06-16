@@ -13,6 +13,8 @@ import { useItemStore, getActiveMap } from '@/systems/scene/store/itemStore';
 import { useItemRenderer } from '@/systems/scene/render/useItemRenderer';
 import { useSelectionTool } from '@/systems/scene/interaction/useSelectionTool';
 import { useAttackTargetPick } from '@/systems/combat/useAttackTargetPick';
+import { useSpellEffectTargetPick } from '@/systems/spells/useSpellEffectTargetPick';
+import { useSpellTargetHighlights } from '@/systems/spells/useSpellTargetHighlights';
 import { useAoePlacement } from '@/systems/combat/useAoePlacement';
 import { useTransformControls } from '@/systems/scene/interaction/useTransformControls';
 import { usePixiSelectionGizmo } from '@/systems/scene/interaction/usePixiSelectionGizmo';
@@ -59,6 +61,8 @@ import { getSocket } from '@/lib/socket';
 import { MapAtmosphereLayer } from '@/systems/scene/media/MapAtmosphereLayer';
 import { MapSceneCanvas } from '@/systems/map3d/Map3DCanvas';
 import { useModelAssetSync } from '@/systems/map3d/useModelAssetSync';
+import { SpellVfxLayer } from '@/systems/spells/SpellVfxLayer';
+import { SpellScreenVfxOverlay } from '@/systems/spells/SpellScreenVfxOverlay';
 
 // Back-compat alias — some modules still import mapLayerRefs.
 export const mapLayerRefs = sceneRefs;
@@ -436,7 +440,9 @@ export function MapCanvas() {
   useItemRenderer(sceneRefs.items, sceneRefs.tokens, appReady);
   useMapFogOverlay(sceneRefs.fog, appReady);
   useAttackTargetPick(appReady);
-  useAoePlacement(appReady);
+  useSpellEffectTargetPick(appReady);
+  useSpellTargetHighlights(appReady);
+  useAoePlacement(appReady, interactionReady);
   useTransformControls(appReady);
   usePixiSelectionGizmo(appReady);
   useFogRenderer(appReady, interactionReady);
@@ -668,7 +674,10 @@ export function MapCanvas() {
         aria-hidden
       />
 
+      <SpellScreenVfxOverlay />
+
       <MapAtmosphereLayer />
+      <SpellVfxLayer appReady={appReady} />
 
       <MapCameraControls />
       <Map3DMobileOrbitControls />

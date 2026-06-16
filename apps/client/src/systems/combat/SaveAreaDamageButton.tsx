@@ -94,7 +94,7 @@ export function SaveAreaDamageButton({
     <div className="space-y-1">
       {!canRoll && needsPlacement && (
         <p className="font-ui text-[9px] text-center" style={{ color: 'var(--color-text-secondary)' }}>
-          Place the area on the map first
+          Move the preview on the map, then click the map to confirm
         </p>
       )}
       <button

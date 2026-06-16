@@ -25,9 +25,11 @@ export function AoePlacementHint() {
       <span className="mx-1 opacity-50">·</span>
       {label}
       <span className="mx-1 opacity-50">·</span>
-      {directed ? 'Aim from token · click to place' : 'Move area · click to place'}
+      {directed ? 'Aim from token' : 'Move over map'}
       <span className="mx-1 opacity-50">·</span>
-      Esc to cancel
+      <strong>Click the map</strong> to confirm
+      <span className="mx-1 opacity-50">·</span>
+      Esc or button again to cancel
     </div>
   );
 }

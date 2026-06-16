@@ -8,6 +8,7 @@ import { emitItemAdd } from '@/systems/scene/sceneSync';
 import type { DrawItem, TextItem, DrawShape } from '@/systems/scene/types';
 
 import { useSessionStore } from '@/store/sessionStore';
+import { isAoePlacementActive } from '@/systems/combat/aoePlacementUtils';
 import { DEFAULT_TEXT_FONT_SIZE } from '../drawColors';
 import { clientToWorld, getMapToolElement } from '../mapToolPointer';
 
@@ -76,6 +77,7 @@ export function useDrawingTool(appReady = false, interactionReady = false) {
 
     function onDown(e: PointerEvent) {
       if (e.button !== 0) return;
+      if (isAoePlacementActive()) return;
       e.stopPropagation();
       if (activeTool === 'text') {
         const wp = toWorld(e.clientX, e.clientY);

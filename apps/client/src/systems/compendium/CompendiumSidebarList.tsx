@@ -19,6 +19,9 @@ import { useSessionStore } from '@/store/sessionStore';
 import { useCompendiumEditor } from './useCompendiumEditor';
 import { CompendiumAdminUnlock } from './CompendiumAdminUnlock';
 import { CompendiumMongoStatus } from './CompendiumMongoStatus';
+import { SPELL_EFFECTS_CATALOG } from '@/systems/spells/spellEffectsCatalog';
+import { castModeLabel } from '@/systems/spells/spellCastPlacement';
+import { findCompendiumSpellMatch } from './compendiumSpellMatch';
 
 const PAGE_SIZE = 50;
 const GOLD = 'var(--color-accent-gold)';
@@ -95,10 +98,12 @@ export function CompendiumSidebarList({ onMinimize }: { onMinimize?: () => void 
   const selectMonster = useCompendiumUiStore((s) => s.selectMonster);
   const selectItem = useCompendiumUiStore((s) => s.selectItem);
   const selectSpell = useCompendiumUiStore((s) => s.selectSpell);
+  const selectEffectSpell = useCompendiumUiStore((s) => s.selectEffectSpell);
   const startCreate = useCompendiumUiStore((s) => s.startCreate);
   const selectedMonsterId = useCompendiumUiStore((s) => s.selectedMonsterId);
   const selectedItemId = useCompendiumUiStore((s) => s.selectedItemId);
   const selectedSpellId = useCompendiumUiStore((s) => s.selectedSpellId);
+  const selectedEffectSpellId = useCompendiumUiStore((s) => s.selectedEffectSpellId);
   const { isSignedIn } = useGrimoireAuth();
   const isAdmin = useCompendiumEditor();
   const qc = useQueryClient();
@@ -158,8 +163,9 @@ export function CompendiumSidebarList({ onMinimize }: { onMinimize?: () => void 
   );
 
   const showSourcePicker = browseMode === 'sources' && !selectedSource;
-  const showEntryList = browseMode !== 'sources' || Boolean(selectedSource);
+  const showEntryList = browseMode === 'effects' || browseMode !== 'sources' || Boolean(selectedSource);
   const inBookView = browseMode === 'sources' && Boolean(selectedSource);
+  const inEffectsView = tab === 'spells' && browseMode === 'effects';
 
   const sourcesQ = useQuery({
     queryKey: ['compendium', 'sources', 'books', tab, isAdmin],
@@ -210,7 +216,7 @@ export function CompendiumSidebarList({ onMinimize }: { onMinimize?: () => void 
       const next = last.page + 1;
       return next * last.limit < last.total ? next : undefined;
     },
-    enabled: compendiumReady && tab === 'spells' && showEntryList,
+    enabled: compendiumReady && tab === 'spells' && showEntryList && !inEffectsView,
     retry: 1,
     staleTime: 120_000,
     refetchOnWindowFocus: false,
@@ -283,6 +289,31 @@ export function CompendiumSidebarList({ onMinimize }: { onMinimize?: () => void 
     [tab, spellQ.data?.pages, isAdmin],
   );
 
+  const effectEntries = useMemo(() => {
+    if (!inEffectsView) return [];
+    const q = debouncedQuery.trim().toLowerCase();
+    return SPELL_EFFECTS_CATALOG.filter((e) => {
+      if (!q) return true;
+      return e.name.toLowerCase().includes(q) || e.castMode.includes(q);
+    });
+  }, [inEffectsView, debouncedQuery]);
+
+  async function handleSelectEffectSpell(catalogId: string, spellName: string) {
+    selectEffectSpell(catalogId);
+    try {
+      const res = await searchSpells({ q: spellName, limit: 50 });
+      const match = findCompendiumSpellMatch(spellName, res.items);
+      if (match) {
+        prefetchCompendiumEntry(qc, 'spells', match.id);
+        useCompendiumUiStore.setState({ selectedSpellId: match.id });
+      } else {
+        useCompendiumUiStore.setState({ selectedSpellId: null });
+      }
+    } catch {
+      useCompendiumUiStore.setState({ selectedSpellId: null });
+    }
+  }
+
   const total = activeQ.data?.pages[0]?.total ?? 0;
 
   const filteredSources = useMemo(() => {
@@ -337,16 +368,17 @@ export function CompendiumSidebarList({ onMinimize }: { onMinimize?: () => void 
 
       {/* Browse mode — hidden when viewing a book list (saves vertical space) */}
       {!inBookView && (
-        <div className="flex gap-0.5 shrink-0">
+        <div className="flex gap-0.5 shrink-0 flex-wrap">
           {([
             ['all', 'All'],
             ['sources', 'Books'],
             ['homebrew', 'Homebrew'],
+            ...(tab === 'spells' ? [['effects', `Effects (${SPELL_EFFECTS_CATALOG.length})`] as const] : []),
           ] as const).map(([mode, label]) => (
             <button
               key={mode}
               onClick={() => setBrowseMode(mode)}
-              className="text-xs px-1.5 py-0.5 rounded flex-1"
+              className="text-xs px-1.5 py-0.5 rounded flex-1 min-w-[3.5rem]"
               style={browseBtnStyle(browseMode === mode)}
             >
               {label}
@@ -391,12 +423,12 @@ export function CompendiumSidebarList({ onMinimize }: { onMinimize?: () => void 
 
       <input
         className="input-dark text-xs py-0.5 w-full shrink-0"
-        placeholder={showSourcePicker ? 'Search books…' : 'Search entries…'}
+        placeholder={showSourcePicker ? 'Search books…' : inEffectsView ? 'Search spell effects…' : 'Search entries…'}
         value={query}
         onChange={(e) => setQuery(e.target.value)}
       />
 
-      {!inBookView && (
+      {!inBookView && !inEffectsView && (
         <button className="btn-ghost w-full text-xs py-0.5 shrink-0" onClick={startCreate}>
           + New {tab === 'monsters' ? 'monster' : tab === 'items' ? 'item' : 'spell'}
         </button>
@@ -481,7 +513,7 @@ export function CompendiumSidebarList({ onMinimize }: { onMinimize?: () => void 
         ))}
 
         {/* Entry lists */}
-        {!loading && !unavailable && showEntryList && (
+        {!loading && !unavailable && showEntryList && !inEffectsView && (
           (tab === 'monsters' ? monsterEntries.length : tab === 'items' ? itemEntries.length : spellEntries.length) === 0
         ) && (
           <div className="space-y-1.5">
@@ -534,7 +566,22 @@ export function CompendiumSidebarList({ onMinimize }: { onMinimize?: () => void 
             {...(isAdmin ? { onDelete: () => handleDelete(item.name, item.id) } : {})}
           />
         ))}
-        {showEntryList && tab === 'spells' && spellEntries.map((spell) => (
+        {inEffectsView && effectEntries.length === 0 && (
+          <p className="font-ui text-xs leading-snug" style={{ color: 'var(--color-text-secondary)' }}>
+            No spell effects match your search.
+          </p>
+        )}
+        {inEffectsView && effectEntries.map((entry) => (
+          <EntryRow
+            key={entry.id}
+            name={entry.name}
+            sub={castModeLabel(entry.castMode)}
+            showHomebrew={false}
+            selected={entry.id === selectedEffectSpellId}
+            onClick={() => void handleSelectEffectSpell(entry.id, entry.name)}
+          />
+        ))}
+        {showEntryList && !inEffectsView && tab === 'spells' && spellEntries.map((spell) => (
           <EntryRow
             key={spell.id}
             name={spell.name}
@@ -550,7 +597,7 @@ export function CompendiumSidebarList({ onMinimize }: { onMinimize?: () => void 
           />
         ))}
 
-        {showEntryList && !loading && hasMore && (
+        {showEntryList && !inEffectsView && !loading && hasMore && (
           <button
             type="button"
             className="btn-ghost w-full text-xs py-1 mt-1"

@@ -10,6 +10,7 @@ import { evaluateAttackerConditions } from './attackConditions';
 import type { PendingDamageApply } from './DamageApplyPanel';
 import { itemCenter } from '@/systems/scene/types';
 import { placementFromCursor, type AoePlacement } from './aoeGeometry';
+import { aoeActionNamesMatch } from './aoePlacementUtils';
 
 export interface AttackSetup {
   attackerTokenId: string;
@@ -82,6 +83,7 @@ interface CombatState {
   cancelAoePlacement: () => void;
   confirmAoePlacement: (cursorX: number, cursorY: number) => void;
   clearAoeDisplay: () => void;
+  clearMapAoeShapes: () => void;
   clearAttackBlocked: () => void;
   openTokenActions: (token: TokenItem) => void;
   closeTokenActions: () => void;
@@ -254,6 +256,8 @@ export const useCombatStore = create<CombatState>((set, get) => ({
 
   clearAoeDisplay: () => set({ aoeDisplay: null }),
 
+  clearMapAoeShapes: () => set({ aoePlacement: null, aoeDisplay: null }),
+
   clearAttackBlocked: () => set({ attackBlocked: null }),
 
   openTokenActions: (token) => set({ tokenActionsToken: token }),
@@ -263,8 +267,10 @@ export const useCombatStore = create<CombatState>((set, get) => ({
 /** Confirmed AoE on the map for a given action (if any). */
 export function aoePlacedFor(sourceTokenId: string, actionName: string): AoeDisplayState | null {
   const d = useCombatStore.getState().aoeDisplay;
-  if (d && d.sourceTokenId === sourceTokenId && d.actionName === actionName) return d;
-  return null;
+  if (!d || d.sourceTokenId !== sourceTokenId || !aoeActionNamesMatch(d.actionName, actionName)) {
+    return null;
+  }
+  return d;
 }
 
 /** Preview range for a target while picking (UI helper). */

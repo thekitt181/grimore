@@ -9,6 +9,7 @@ import { RollButton } from '@/systems/dice/RollButton';
 import { AoeTemplateBlock } from './AoeTemplateBlock';
 import { SaveAreaEffectBlock } from './SaveAreaEffectBlock';
 import { TargetedAttackButton } from './TargetedAttackButton';
+import { CastSpellEffectButton } from '@/systems/spells/CastSpellEffectButton';
 import { formatActionRangeLabel } from './attackRange';
 
 const GOLD = 'var(--color-accent-gold)';
@@ -33,16 +34,17 @@ export function TokenActionCard({
     action.toHit !== undefined || action.damages.length > 0 || action.spells.some((s) => s.dice) || isSaveArea;
 
   if (!hasRolls) {
+    const description = action.originalText !== action.name ? action.originalText : undefined;
     const clickable = Boolean(onShowDetails);
     return (
       <div
-        className="rounded overflow-hidden"
+        className="rounded overflow-hidden space-y-1 px-2 py-1.5"
         style={{ background: 'var(--color-bg-tertiary)', border: `1px solid ${BD}` }}
       >
         {clickable ? (
           <button
             type="button"
-            className="w-full text-left px-2 py-1 hover:opacity-90 transition-opacity"
+            className="w-full text-left hover:opacity-90 transition-opacity"
             onClick={onShowDetails}
             title="View details"
           >
@@ -52,10 +54,14 @@ export function TokenActionCard({
             </span>
           </button>
         ) : (
-          <div className="px-2 py-1">
-            <span className="font-display text-[10px]" style={{ color: GOLD }}>{action.name}</span>
-          </div>
+          <span className="font-display text-[10px]" style={{ color: GOLD }}>{action.name}</span>
         )}
+        <CastSpellEffectButton
+          spellName={action.name}
+          token={token}
+          {...(action.aoe ? { aoe: action.aoe } : {})}
+          {...(description ? { description } : {})}
+        />
       </div>
     );
   }
@@ -112,6 +118,7 @@ export function TokenActionCard({
           damages={action.damages}
           aoe={action.aoe}
           save={{ dc: action.save!.dc, stat: action.save!.stat }}
+          {...(action.originalText !== action.name ? { description: action.originalText } : {})}
         />
       )}
 

@@ -68,22 +68,34 @@ export function compendiumSpellToParsedAction(
     attack?: boolean;
     aoe?: { size: number; type: string };
     secondary?: { damage: string; type: string };
+    description?: string;
   },
   opts?: { toHit?: number; saveDc?: number },
 ): ParsedAction {
-  const damages = spellDamagesFromData(spell.damage, spell.type, spell.secondary);
-  const isSaveArea = Boolean(spell.save && damages.length > 0 && hasAoeTemplate(spell.aoe) && !spell.attack);
-  const toHit = spell.attack && !isSaveArea && opts?.toHit !== undefined ? opts.toHit : undefined;
+  const enriched = enrichSpellData(spell);
+  const merged = {
+    name: spell.name,
+    damage: enriched.damage ?? spell.damage,
+    type: enriched.type ?? spell.type,
+    save: enriched.save ?? spell.save,
+    attack: enriched.attack ?? spell.attack,
+    aoe: enriched.aoe ?? spell.aoe,
+    secondary: spell.secondary,
+    description: enriched.description ?? spell.description,
+  };
+  const damages = spellDamagesFromData(merged.damage, merged.type, merged.secondary);
+  const isSaveArea = Boolean(merged.save && damages.length > 0 && hasAoeTemplate(merged.aoe) && !merged.attack);
+  const toHit = merged.attack && !isSaveArea && opts?.toHit !== undefined ? opts.toHit : undefined;
 
   return {
-    name: spell.name,
-    originalText: spell.name,
+    name: merged.name,
+    originalText: merged.description?.trim() || merged.name,
     section: 'actions',
     isTrait: false,
     ...(toHit !== undefined ? { toHit } : {}),
-    ...(spell.save ? { save: { dc: opts?.saveDc ?? 13, stat: spell.save } } : {}),
-    ...(spell.aoe ? { aoe: spell.aoe } : {}),
-    ...(!spell.aoe && toHit !== undefined ? { range: RANGED_SPELL_RANGE } : {}),
+    ...(merged.save ? { save: { dc: opts?.saveDc ?? 13, stat: merged.save } } : {}),
+    ...(merged.aoe ? { aoe: merged.aoe } : {}),
+    ...(!merged.aoe && toHit !== undefined ? { range: RANGED_SPELL_RANGE } : {}),
     damages,
     spells: [],
     isSpellcastingBlock: false,
@@ -150,6 +162,8 @@ export interface SpellLookupData {
   attack?: boolean;
   aoe?: { size: number; type: string };
   secondary?: { damage: string; type: string };
+  concentration?: boolean;
+  description?: string;
 }
 
 export type SpellLookup = (name: string) => SpellLookupData | undefined;
@@ -539,6 +553,23 @@ function normalizeSpellName(name: string): string {
   return name.trim().toLowerCase().replace(/\s+/g, ' ');
 }
 
+function parseAoeFromDescription(text: string): { size: number; type: string } | undefined {
+  const radius =
+    /(\d+)[- ]foot[- ]radius(?:\s+(sphere|cylinder))?/i.exec(text)
+    ?? /(\d+)\s*ft\.?\s*radius/i.exec(text);
+  if (radius) {
+    const kind = radius[2]?.toLowerCase() === 'cylinder' ? 'cylinder' : 'sphere';
+    return { size: Number(radius[1]), type: kind };
+  }
+  const cone = /(\d+)[- ]foot[- ]cone/i.exec(text);
+  if (cone) return { size: Number(cone[1]), type: 'cone' };
+  const line = /(\d+)[- ]foot[- ]long,\s*(\d+)[- ]foot[- ]wide\s+line/i.exec(text);
+  if (line) return { size: Number(line[1]), type: 'line' };
+  const cube = /(\d+)[- ]foot[- ]cube/i.exec(text);
+  if (cube) return { size: Number(cube[1]), type: 'cube' };
+  return undefined;
+}
+
 /** Fill attack / save / damage from spell description when compendium fields are missing. */
 export function enrichSpellData(spell: {
   name: string;
@@ -548,6 +579,7 @@ export function enrichSpellData(spell: {
   attack?: boolean;
   aoe?: { size: number; type: string };
   secondary?: { damage: string; type: string };
+  concentration?: boolean;
   description?: string;
 }): SpellLookupData {
   const text = spell.description ?? '';
@@ -576,14 +608,19 @@ export function enrichSpellData(spell: {
     attack = true;
   }
 
+  const concentration = spell.concentration ?? /concentration/i.test(text);
+  const aoe = spell.aoe ?? parseAoeFromDescription(text);
+
   return {
     name: spell.name,
     ...(damage ? { damage } : {}),
     ...(type ? { type } : {}),
     ...(save ? { save } : {}),
     ...(attack !== undefined ? { attack } : {}),
-    ...(spell.aoe ? { aoe: spell.aoe } : {}),
+    ...(aoe ? { aoe } : {}),
     ...(spell.secondary ? { secondary: spell.secondary } : {}),
+    ...(concentration ? { concentration: true } : {}),
+    ...(text ? { description: text } : {}),
   };
 }
 
@@ -596,6 +633,7 @@ export function buildSpellLookup(
     attack?: boolean;
     aoe?: { size: number; type: string };
     secondary?: { damage: string; type: string };
+    concentration?: boolean;
     description?: string;
   }>,
 ): SpellLookup {

@@ -15,6 +15,8 @@ import {
   viewportScaleContext,
 } from '../mapNavigation';
 import { isItemDragActive } from '@/systems/scene/interaction/selectionDragState';
+import { isAoePlacementActive } from '@/systems/combat/aoePlacementUtils';
+import { isSpellTargetPicking } from '@/systems/spells/pickSpellTargets';
 import { sceneRefs, getMapInteractionEl } from '@/systems/scene/sceneRefs';
 import { getActiveMap } from '@/systems/scene/store/itemStore';
 import type { MapItem } from '@/systems/scene/types';
@@ -210,6 +212,8 @@ export function useMapViewport(
 
     function onPointerDown(e: PointerEvent) {
       if (!isOverMapArea(e.clientX, e.clientY)) return;
+      if (isAoePlacementActive()) return;
+      if (isSpellTargetPicking()) return;
 
       pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
 
@@ -252,6 +256,9 @@ export function useMapViewport(
     }
 
     function onPointerMove(e: PointerEvent) {
+      if (isSpellTargetPicking()) return;
+      if (isAoePlacementActive()) return;
+
       if (pointers.current.has(e.pointerId)) {
         pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
       }

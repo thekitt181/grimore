@@ -1,8 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { Graphics, Container } from 'pixi.js';
-import { sceneRefs, clientToWorld } from '@/systems/scene/sceneRefs';
+import { sceneRefs, clientToWorld, getMapInteractionEl } from '@/systems/scene/sceneRefs';
 import { useItemStore } from '@/systems/scene/store/itemStore';
-import { useSessionStore } from '@/store/sessionStore';
 import { itemCenter, type TokenItem } from '@/systems/scene/types';
 import { getMapGridSize } from './evaluateAttack';
 import {
@@ -10,11 +9,13 @@ import {
   placementFromCursor,
   tokensInAoe,
 } from './aoeGeometry';
+import { isPointerOverMapInteraction } from './aoePlacementUtils';
 import { useCombatStore } from './combatStore';
 
 const FILL = 0xef4444;
 const STROKE = 0xfca5a5;
 const TOKEN_RING = 0xfca5a5;
+const CAPTURE_OPTS = { capture: true, passive: false } as AddEventListenerOptions;
 
 function drawPolygon(g: Graphics, poly: { x: number; y: number }[], fillAlpha: number, strokeAlpha: number) {
   if (poly.length < 2) return;
@@ -42,6 +43,15 @@ function drawTokenHighlights(g: Graphics, tokens: TokenItem[]) {
 }
 
 function ensureGfx(layer: Container, ref: React.MutableRefObject<Graphics | null>, label: string): Graphics {
+  if (ref.current?.destroyed) ref.current = null;
+
+  for (;;) {
+    const orphan = layer.getChildByLabel(label);
+    if (!orphan || orphan === ref.current) break;
+    layer.removeChild(orphan);
+    orphan.destroy({ children: true });
+  }
+
   if (!ref.current) {
     const g = new Graphics();
     g.label = label;
@@ -52,12 +62,11 @@ function ensureGfx(layer: Container, ref: React.MutableRefObject<Graphics | null
 }
 
 /** Draw save-effect AoE preview and confirmed shapes on the map overlay. */
-export function useAoePlacement(appReady: boolean) {
+export function useAoePlacement(appReady: boolean, interactionReady = false) {
   const aoePlacement = useCombatStore((s) => s.aoePlacement);
   const aoeDisplay = useCombatStore((s) => s.aoeDisplay);
   const confirm = useCombatStore((s) => s.confirmAoePlacement);
   const cancel = useCombatStore((s) => s.cancelAoePlacement);
-  const myRole = useSessionStore((s) => s.myRole);
 
   const previewGfx = useRef<Graphics | null>(null);
   const displayGfx = useRef<Graphics | null>(null);
@@ -123,22 +132,23 @@ export function useAoePlacement(appReady: boolean) {
   }, [aoePlacement]);
 
   useEffect(() => {
-    if (!appReady || !aoePlacement || myRole !== 'GM') return;
-    const app = sceneRefs.app.current;
-    if (!app) return;
+    if (!appReady || !interactionReady || !aoePlacement) return;
 
-    const canvas = app.canvas;
-    canvas.style.cursor = 'crosshair';
+    const mapEl = getMapInteractionEl();
 
     function onMove(e: PointerEvent) {
+      if (!useCombatStore.getState().aoePlacement) return;
+      if (!isPointerOverMapInteraction(e.clientX, e.clientY)) return;
       cursorRef.current = clientToWorld(e.clientX, e.clientY);
       redraw();
     }
 
     function onDown(e: PointerEvent) {
+      if (!useCombatStore.getState().aoePlacement) return;
       if (e.button !== 0) return;
+      if (!isPointerOverMapInteraction(e.clientX, e.clientY)) return;
       e.preventDefault();
-      e.stopPropagation();
+      e.stopImmediatePropagation();
       const { x, y } = clientToWorld(e.clientX, e.clientY);
       confirm(x, y);
     }
@@ -147,17 +157,18 @@ export function useAoePlacement(appReady: boolean) {
       if (e.key === 'Escape') cancel();
     }
 
-    canvas.addEventListener('pointermove', onMove);
-    canvas.addEventListener('pointerdown', onDown, true);
+    if (mapEl) mapEl.style.cursor = 'crosshair';
+    window.addEventListener('pointermove', onMove, CAPTURE_OPTS);
+    window.addEventListener('pointerdown', onDown, CAPTURE_OPTS);
     window.addEventListener('keydown', onKey);
 
     return () => {
-      canvas.removeEventListener('pointermove', onMove);
-      canvas.removeEventListener('pointerdown', onDown, true);
+      window.removeEventListener('pointermove', onMove, CAPTURE_OPTS);
+      window.removeEventListener('pointerdown', onDown, CAPTURE_OPTS);
       window.removeEventListener('keydown', onKey);
-      canvas.style.cursor = '';
+      if (mapEl) mapEl.style.cursor = '';
     };
-  }, [appReady, aoePlacement, myRole, confirm, cancel]);
+  }, [appReady, interactionReady, aoePlacement, confirm, cancel]);
 
   useEffect(() => {
     if (!appReady) return;

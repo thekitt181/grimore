@@ -18,7 +18,9 @@ import { RollToast } from '@/systems/dice/RollToast';
 import { DiceTrayOverlay } from '@/systems/dice/DiceTrayOverlay';
 import { AttackTargetPicker } from '@/systems/combat/AttackTargetPicker';
 import { AttackTargetHint } from '@/systems/combat/AttackTargetHint';
+import { SpellTargetHint } from '@/systems/spells/SpellTargetHint';
 import { AoePlacementHint } from '@/systems/combat/AoePlacementHint';
+import { ClearMapAreasButton } from '@/systems/combat/ClearMapAreasButton';
 import { CombatResultToast } from '@/systems/combat/CombatResultToast';
 import { TokenActionsPanel } from '@/systems/combat/TokenActionsPanel';
 import { PcActionsPanel } from '@/systems/ddb/PcActionsPanel';
@@ -47,8 +49,15 @@ import { CatalogRebuildBanner } from '@/systems/compendium/CatalogRebuildBanner'
 import { useCompendiumAuthRecovery } from '@/systems/compendium/useCompendiumAuthRecovery';
 import { useCompendiumUiStore } from '@/systems/compendium/compendiumStore';
 import { getSocket, isMobileClient } from '@/lib/socket';
-import type { InitiativeSyncPayload } from '@grimoire/shared';
+import type { InitiativeSyncPayload, SpellEffectSyncPayload, SpellEffectReminderPayload } from '@grimoire/shared';
 import { loadInitiativeLocal, persistInitiativeLocal } from '@/systems/scene/sessionPersistence';
+import {
+  applyEffectReminderPayload,
+  applySpellEffectSyncPayload,
+  hydrateSpellEffectsFromLocal,
+} from '@/systems/spells/effectSync';
+import { useSpellEffectEngine } from '@/systems/spells/useSpellEffectEngine';
+import { EffectReminderBanner } from '@/systems/spells/ActiveEffectsPanel';
 import { useItemStore } from '@/systems/scene/store/itemStore';
 import { useSceneMedia } from '@/systems/scene/media/useSceneMedia';
 import { BackgroundVideoLayer } from '@/systems/scene/media/BackgroundVideoLayer';
@@ -164,6 +173,29 @@ export function SessionPage() {
     return () => { socket.off('initiative:sync', onInitiativeSync); };
   }, [socketReady, sessionId]);
 
+  // ── Spell effects sync (duration, concentration, VFX) ─────────────────────
+  useEffect(() => {
+    if (!socketReady || !sessionId) return;
+
+    hydrateSpellEffectsFromLocal(sessionId);
+
+    const socket = getSocket();
+    const onEffectSync = (payload: SpellEffectSyncPayload) => {
+      if (payload.sessionId !== sessionId) return;
+      applySpellEffectSyncPayload(payload);
+    };
+    const onEffectRemind = (payload: SpellEffectReminderPayload) => {
+      if (payload.sessionId !== sessionId) return;
+      applyEffectReminderPayload(payload);
+    };
+    socket.on('effect:sync', onEffectSync);
+    socket.on('effect:remind', onEffectRemind);
+    return () => {
+      socket.off('effect:sync', onEffectSync);
+      socket.off('effect:remind', onEffectRemind);
+    };
+  }, [socketReady, sessionId]);
+
   // ── Socket room management ─────────────────────────────────────────────────
   useSocket(
     socketReady ? (sessionId ?? null) : null,
@@ -172,6 +204,7 @@ export function SessionPage() {
   );
   useHandoutRevealSocket(socketReady ? (sessionId ?? null) : null);
   useSceneMedia(socketReady ? sessionId : undefined);
+  useSpellEffectEngine();
 
   useEffect(() => {
     if (sessionInfo?.campaignId) {
@@ -332,7 +365,10 @@ export function SessionPage() {
           <CombatResultToast />
           <AttackTargetPicker />
           <AttackTargetHint />
+          <SpellTargetHint />
           <AoePlacementHint />
+          <ClearMapAreasButton />
+          <EffectReminderBanner />
           {tokenActionsToken && (
             <TokenActionsPanel token={tokenActionsToken} onClose={closeTokenActions} />
           )}

@@ -1,9 +1,7 @@
 import { useEffect } from 'react';
 import { useSessionStore } from '@/store/sessionStore';
-import { sceneRefs, clientToWorld, pickSceneItem } from '@/systems/scene/sceneRefs';
-import { hitTest } from '@/systems/scene/hitTest';
-import { useItemStore } from '@/systems/scene/store/itemStore';
-import type { TokenItem } from '@/systems/scene/types';
+import { getMapInteractionEl } from '@/systems/scene/sceneRefs';
+import { pickTargetTokenAt } from '@/systems/scene/token/pickInteractableToken';
 import { previewAttackRange, useCombatStore } from './combatStore';
 
 /** When picking an attack target, clicking a token on the canvas resolves the attack. */
@@ -14,25 +12,16 @@ export function useAttackTargetPick(appReady: boolean) {
 
   useEffect(() => {
     if (!appReady || !targetPick || myRole !== 'GM') return;
-    const app = sceneRefs.app.current;
-    if (!app) return;
+    const interactionEl = getMapInteractionEl();
+    if (!interactionEl) return;
 
-    const canvas = app.canvas;
-    let cursorSaved = false;
+    const CAPTURE_OPTS = { capture: true, passive: false } as AddEventListenerOptions;
 
     function onDown(e: PointerEvent) {
       if (e.button !== 0) return;
-      const pickId = pickSceneItem(e.clientX, e.clientY);
-      const store = useItemStore.getState();
-      const picked = pickId ? store.items[pickId] : null;
-      const { x: wx, y: wy } = clientToWorld(e.clientX, e.clientY);
-      const all = Object.values(store.items);
-      const hit = picked?.type === 'token'
-        ? picked
-        : hitTest(all, wx, wy, { includeLocked: true });
-      if (!hit || hit.type !== 'token') return;
+      const token = pickTargetTokenAt(e.clientX, e.clientY);
+      if (!token) return;
 
-      const token = hit as TokenItem;
       const pick = useCombatStore.getState().targetPick;
       if (!pick || token.id === pick.attackerTokenId) return;
 
@@ -51,17 +40,16 @@ export function useAttackTargetPick(appReady: boolean) {
       }
 
       e.preventDefault();
-      e.stopPropagation();
+      e.stopImmediatePropagation();
       resolve(token.id);
     }
 
-    canvas.style.cursor = 'crosshair';
-    cursorSaved = true;
-    canvas.addEventListener('pointerdown', onDown, true);
+    interactionEl.style.cursor = 'crosshair';
+    interactionEl.addEventListener('pointerdown', onDown, CAPTURE_OPTS);
 
     return () => {
-      canvas.removeEventListener('pointerdown', onDown, true);
-      if (cursorSaved) canvas.style.cursor = '';
+      interactionEl.removeEventListener('pointerdown', onDown, CAPTURE_OPTS);
+      interactionEl.style.cursor = '';
     };
   }, [appReady, targetPick, resolve, myRole]);
 }

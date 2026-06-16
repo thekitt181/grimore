@@ -18,7 +18,9 @@
     "type-check": "pnpm -r type-check",
     "db:migrate": "pnpm --filter @grimoire/server db:migrate",
     "db:studio": "pnpm --filter @grimoire/server db:studio",
-    "floorplan:weights": "node scripts/download-floorplan-weights.mjs"
+    "floorplan:weights": "node scripts/download-floorplan-weights.mjs",
+    "spells:validate-assets": "node scripts/validate-spell-jb2a-assets.mjs",
+    "spells:audit": "node scripts/audit-spell-effects.mjs"
   },
   "devDependencies": {
     "@typescript-eslint/eslint-plugin": "^7.0.0",
