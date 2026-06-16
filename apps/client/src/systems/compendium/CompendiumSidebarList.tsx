@@ -1,6 +1,6 @@
 import { useMemo, useState, useEffect, type CSSProperties } from 'react';
 import axios from 'axios';
-import { useGrimoireAuth } from '@/hooks/useGrimoireAuth';
+import { useGrimoireAuth, useGrimoireSignOut } from '@/hooks/useGrimoireAuth';
 import { useInfiniteQuery, useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import type { CompendiumItem, CompendiumMonster, CompendiumSource, CompendiumSpell } from '@grimoire/shared';
 import { isHomebrewEntry } from '@grimoire/shared';
@@ -10,8 +10,8 @@ import {
   patchCompendiumSourceLock,
   refetchCompendiumAfterLock,
 } from './compendiumLockCache';
-import { reloadCompendiumCatalog } from './useCompendiumAuthRecovery';
-import { isApiAuthError } from '@/lib/axios';
+import { reloadCompendiumCatalog, useCompendiumAuthRecovery } from './useCompendiumAuthRecovery';
+import { ensureApiAuthSession, isApiAuthError, isApiDbBusyError } from '@/lib/axios';
 import { isApiAuthBlocked } from '@/lib/apiAuthState';
 import { prefetchCompendiumEntry } from './prefetchCompendiumEntry';
 import { useCompendiumUiStore, type CompendiumBrowseMode, type CompendiumTab } from './compendiumStore';
@@ -26,6 +26,12 @@ import { findCompendiumSpellMatch } from './compendiumSpellMatch';
 const PAGE_SIZE = 50;
 const GOLD = 'var(--color-accent-gold)';
 const BD = 'var(--color-border)';
+
+function compendiumQueryRetry(failureCount: number, error: unknown): boolean {
+  if (isApiDbBusyError(error)) return failureCount < 4;
+  if (isApiAuthError(error)) return false;
+  return failureCount < 1;
+}
 
 function browseBtnStyle(active: boolean): CSSProperties {
   return {
@@ -52,6 +58,9 @@ function compendiumErrorHint(error: unknown): string {
     }
     if (error.response.status === 503) {
       const msg = error.response.data?.error;
+      if (typeof msg === 'string' && msg.includes('Database busy')) {
+        return 'Server database is busy — wait a few seconds and click Reload compendium.';
+      }
       if (typeof msg === 'string' && msg.includes('starting')) {
         return 'Server is still starting — wait a few seconds and refresh.';
       }
@@ -105,12 +114,30 @@ export function CompendiumSidebarList({ onMinimize }: { onMinimize?: () => void 
   const selectedSpellId = useCompendiumUiStore((s) => s.selectedSpellId);
   const selectedEffectSpellId = useCompendiumUiStore((s) => s.selectedEffectSpellId);
   const { isSignedIn } = useGrimoireAuth();
+  const { signOut } = useGrimoireSignOut();
   const isAdmin = useCompendiumEditor();
   const qc = useQueryClient();
   const [lockMessage, setLockMessage] = useState<string | null>(null);
   const [reloadingCatalog, setReloadingCatalog] = useState(false);
+  const [apiSessionOk, setApiSessionOk] = useState(false);
 
-  const compendiumReady = Boolean(isSignedIn);
+  useCompendiumAuthRecovery(Boolean(isSignedIn));
+
+  useEffect(() => {
+    if (!isSignedIn) {
+      setApiSessionOk(false);
+      return;
+    }
+    let cancelled = false;
+    void ensureApiAuthSession().then((ok) => {
+      if (!cancelled) setApiSessionOk(ok);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [isSignedIn]);
+
+  const compendiumReady = Boolean(isSignedIn && apiSessionOk && !isApiAuthBlocked());
 
   const deleteMut = useMutation({
     mutationFn: async ({ kind, id }: { kind: CompendiumTab; id: string }) => {
@@ -175,7 +202,7 @@ export function CompendiumSidebarList({ onMinimize }: { onMinimize?: () => void 
     gcTime: 7 * 24 * 60 * 60 * 1000,
     refetchOnMount: true,
     refetchOnWindowFocus: true,
-    retry: 1,
+    retry: compendiumQueryRetry,
   });
 
   const monsterQ = useInfiniteQuery({
@@ -187,7 +214,7 @@ export function CompendiumSidebarList({ onMinimize }: { onMinimize?: () => void 
       return next * last.limit < last.total ? next : undefined;
     },
     enabled: compendiumReady && tab === 'monsters' && showEntryList,
-    retry: 1,
+    retry: compendiumQueryRetry,
     staleTime: 120_000,
     refetchOnWindowFocus: false,
     placeholderData: (previousData) => previousData,
@@ -202,7 +229,7 @@ export function CompendiumSidebarList({ onMinimize }: { onMinimize?: () => void 
       return next * last.limit < last.total ? next : undefined;
     },
     enabled: compendiumReady && tab === 'items' && showEntryList,
-    retry: 1,
+    retry: compendiumQueryRetry,
     staleTime: 120_000,
     refetchOnWindowFocus: false,
     placeholderData: (previousData) => previousData,
@@ -217,7 +244,7 @@ export function CompendiumSidebarList({ onMinimize }: { onMinimize?: () => void 
       return next * last.limit < last.total ? next : undefined;
     },
     enabled: compendiumReady && tab === 'spells' && showEntryList && !inEffectsView,
-    retry: 1,
+    retry: compendiumQueryRetry,
     staleTime: 120_000,
     refetchOnWindowFocus: false,
     placeholderData: (previousData) => previousData,
@@ -440,14 +467,23 @@ export function CompendiumSidebarList({ onMinimize }: { onMinimize?: () => void 
             {compendiumErrorHint(activeError)}
           </p>
           {authBlocked && (
-            <button
-              type="button"
-              className="btn-ghost w-full text-xs py-0.5"
-              disabled={reloadingCatalog}
-              onClick={() => void handleReloadCompendium()}
-            >
-              {reloadingCatalog ? 'Reloading compendium…' : 'Reload compendium'}
-            </button>
+            <>
+              <button
+                type="button"
+                className="btn-ghost w-full text-xs py-0.5"
+                disabled={reloadingCatalog}
+                onClick={() => void handleReloadCompendium()}
+              >
+                {reloadingCatalog ? 'Reloading compendium…' : 'Reload compendium'}
+              </button>
+              <button
+                type="button"
+                className="btn-ghost w-full text-xs py-0.5"
+                onClick={() => void signOut()}
+              >
+                Sign out and sign in again
+              </button>
+            </>
           )}
         </div>
       )}

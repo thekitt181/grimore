@@ -1,6 +1,6 @@
 import type { Request, Response, NextFunction } from 'express';
 import { resolveAuthUser, type AuthUserRecord } from '../lib/authUserCache';
-import { isDbPoolSaturation } from '../lib/dbTimeout';
+import { isDbPoolSaturation, isDbTransientError } from '../lib/dbTimeout';
 import { getAuthUserIdFromHeaders } from '../lib/sessionAuth';
 
 export interface AuthenticatedRequest extends Request {
@@ -31,8 +31,8 @@ export async function requireAuth(
     req.authUser = user;
     next();
   } catch (err) {
-    if (isDbPoolSaturation(err)) {
-      console.error('[Auth] DB pool saturated during session verification:', err);
+    if (isDbPoolSaturation(err) || isDbTransientError(err)) {
+      console.error('[Auth] DB busy during session verification:', err);
       res.status(503).json({ error: 'Database busy — try again shortly', retry: true });
       return;
     }

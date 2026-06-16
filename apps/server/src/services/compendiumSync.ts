@@ -1133,10 +1133,7 @@ function tallyBooksSourceCounts(
 export async function listAllBookSources(): Promise<
   Array<{ id: string; label: string; count: number; locked?: boolean; draftCount?: number }>
 > {
-  const {
-    loadPersistedBookSources,
-    savePersistedBookSources,
-  } = await import('./compendiumBookSourcesCache');
+  const { savePersistedBookSources } = await import('./compendiumBookSourcesCache');
 
   const policy = await readVisibilityPolicyFast();
   let counts: SourceCountMap = new Map();
@@ -1185,9 +1182,6 @@ export async function listAllBookSources(): Promise<
 
   if (result.length > 0) {
     savePersistedBookSources(result);
-  } else {
-    const persisted = loadPersistedBookSources();
-    if (persisted) return persisted;
   }
 
   return result;
@@ -1747,9 +1741,6 @@ async function upsertCollectionMonstersBulk(
     const { markCompendiumWritePending } = await import('./compendiumMongoWatch');
     markCompendiumWritePending();
   }
-  if (isCompendiumStorageUnavailable()) {
-    throw new Error('PostgreSQL unavailable — monster bulk write skipped');
-  }
   await upsertTypedImportEntriesBulk('monster', entries);
   if (!opts?.skipNotify) await notifyTypedCollectionsChanged();
 }
@@ -1763,9 +1754,6 @@ async function upsertCollectionItemsBulk(
     const { markCompendiumWritePending } = await import('./compendiumMongoWatch');
     markCompendiumWritePending();
   }
-  if (isCompendiumStorageUnavailable()) {
-    throw new Error('PostgreSQL unavailable — item bulk write skipped');
-  }
   await upsertTypedImportEntriesBulk('item', entries);
   if (!opts?.skipNotify) await notifyTypedCollectionsChanged();
 }
@@ -1778,9 +1766,6 @@ async function upsertCollectionSpellsBulk(
   if (opts?.skipNotify) {
     const { markCompendiumWritePending } = await import('./compendiumMongoWatch');
     markCompendiumWritePending();
-  }
-  if (isCompendiumStorageUnavailable()) {
-    throw new Error('PostgreSQL unavailable — spell bulk write skipped');
   }
   await upsertTypedImportEntriesBulk('spell', entries);
   if (!opts?.skipNotify) await notifyTypedCollectionsChanged();
@@ -2082,7 +2067,7 @@ async function saveEntriesBulkForImport<T extends OwlbearMonster | OwlbearItem |
 
   const lastUpdated = new Date().toISOString();
   return {
-    entries: prepared.map(({ payload, saveAs }) => toResult(payload, saveAs)),
+    entries: typedMongoOk ? prepared.map(({ payload, saveAs }) => toResult(payload, saveAs)) : [],
     persist: {
       doc: normalizeOwlbearGlobalDoc({
         _id: 'global',

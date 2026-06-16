@@ -111,8 +111,9 @@ export function DdbLibraryPanel({ onClose }: { onClose: () => void }) {
     queryKey: ['ddb', 'status'],
     queryFn: fetchDdbStatus,
   });
+  const ddbReady = Boolean(ddbStatus?.linked && ddbStatus?.valid);
 
-  const importJob = useDdbImportJob(Boolean(ddbStatus?.linked));
+  const importJob = useDdbImportJob(ddbReady);
 
   useEffect(() => {
     const job = importJob.job;
@@ -355,15 +356,25 @@ export function DdbLibraryPanel({ onClose }: { onClose: () => void }) {
       }),
     onSuccess: async (result) => {
       const unlocked = result.sourcesUnlocked?.length ?? 0;
-      setMessage(
-        result.catalogRebuildPending
-          ? unlocked > 0
-            ? `Unlocked ${unlocked} book${unlocked === 1 ? '' : 's'} — rebuilding catalog in background…`
-            : 'Rebuilding compendium catalog in background…'
-          : unlocked > 0
-            ? `Compendium synced — ${unlocked} book${unlocked === 1 ? '' : 's'} unlocked. Open Compendium → Books.`
-            : 'Compendium catalog rebuilt. Open Compendium → Books to browse imported sources.',
-      );
+      const books = result.booksCount ?? 0;
+      const imported = result.importedEntryCount ?? 0;
+      if (imported === 0 && books === 0) {
+        setMessage(
+          'No imported content found yet. In D&D Beyond Library, select your owned books, click Import all, wait for the job to finish, then sync again.',
+        );
+      } else {
+        setMessage(
+          result.catalogRebuildPending
+            ? unlocked > 0
+              ? `Unlocked ${unlocked} book${unlocked === 1 ? '' : 's'} — rebuilding catalog in background…`
+              : `Rebuilding compendium catalog (${imported.toLocaleString()} entries imported)…`
+            : unlocked > 0
+              ? `Compendium synced — ${unlocked} book${unlocked === 1 ? '' : 's'} unlocked. Open Compendium → Books.`
+              : books > 0
+                ? `Compendium synced — ${books} book${books === 1 ? '' : 's'} ready. Open Compendium → Books.`
+                : `Compendium catalog rebuilt (${imported.toLocaleString()} entries). Open Compendium → Books.`,
+        );
+      }
       useCompendiumUiStore.getState().setBrowseMode('sources');
       useCompendiumUiStore.getState().setPanelOpen(true);
       await refetchCompendiumAfterImport(qc, {
@@ -511,6 +522,10 @@ export function DdbLibraryPanel({ onClose }: { onClose: () => void }) {
       {!ddbStatus?.linked ? (
         <p className="font-ui text-xs" style={{ color: '#f87171' }}>
           Link your D&amp;D Beyond account first (Account link in sidebar).
+        </p>
+      ) : !ddbStatus.valid ? (
+        <p className="font-ui text-xs" style={{ color: '#f87171' }}>
+          D&amp;D Beyond session expired — re-link your account in Account link, then try import again.
         </p>
       ) : (
         <>
@@ -759,7 +774,7 @@ export function DdbLibraryPanel({ onClose }: { onClose: () => void }) {
           <div className="flex gap-2 shrink-0 flex-wrap">
             <button
               type="button"
-              disabled={selected.size === 0 || importMut.isPending || bulkImportActive || syncCatalogMut.isPending}
+              disabled={!ddbReady || selected.size === 0 || importMut.isPending || bulkImportActive || syncCatalogMut.isPending}
               onClick={() => importMut.mutate()}
               className="font-ui text-xs flex-1 py-2 rounded font-semibold disabled:opacity-40"
               style={{
@@ -774,7 +789,7 @@ export function DdbLibraryPanel({ onClose }: { onClose: () => void }) {
             </button>
             <button
               type="button"
-              disabled={selectedSourceIds.size === 0 || importMut.isPending || bulkImportActive || syncCatalogMut.isPending}
+              disabled={!ddbReady || selectedSourceIds.size === 0 || importMut.isPending || bulkImportActive || syncCatalogMut.isPending}
               onClick={() => void handleBulkImport(false)}
               className="font-ui text-xs flex-1 py-2 rounded font-semibold disabled:opacity-40 min-w-[8rem]"
               style={{
@@ -796,7 +811,7 @@ export function DdbLibraryPanel({ onClose }: { onClose: () => void }) {
             </button>
             <button
               type="button"
-              disabled={selectedSourceIds.size === 0 || importMut.isPending || bulkImportActive || syncCatalogMut.isPending}
+              disabled={!ddbReady || selectedSourceIds.size === 0 || importMut.isPending || bulkImportActive || syncCatalogMut.isPending}
               onClick={() => void handleBulkImport(true)}
               className="font-ui text-xs flex-1 py-2 rounded font-semibold disabled:opacity-40 min-w-[8rem]"
               style={{
@@ -814,7 +829,7 @@ export function DdbLibraryPanel({ onClose }: { onClose: () => void }) {
             </button>
             <button
               type="button"
-              disabled={importMut.isPending || bulkImportActive || syncCatalogMut.isPending}
+              disabled={!ddbReady || importMut.isPending || bulkImportActive || syncCatalogMut.isPending}
               onClick={() => syncCatalogMut.mutate()}
               className="font-ui text-xs w-full py-2 rounded font-semibold disabled:opacity-40"
               style={{

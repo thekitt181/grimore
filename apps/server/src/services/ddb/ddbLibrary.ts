@@ -569,6 +569,13 @@ async function saveImportBatch<T extends OwlbearMonster | OwlbearItem | OwlbearS
     try {
       const batch = await saveBulk(payloads);
       meta.mongoPersisted = meta.mongoPersisted && batch.persist.mongoPersisted;
+      if (!batch.persist.mongoPersisted) {
+        const message = 'Could not save to compendium database — try again shortly';
+        for (const { ddbId } of slice) {
+          errors.push({ id: ddbId, message });
+        }
+        continue;
+      }
       meta.savedEntries.push(...batch.entries);
       for (let j = 0; j < batch.entries.length; j++) {
         imported.push({
@@ -586,6 +593,13 @@ async function saveImportBatch<T extends OwlbearMonster | OwlbearItem | OwlbearS
         try {
           const single = await saveBulk([{ entry, opts: resolveImportSaveOpts(entry, importSourceId) }]);
           meta.mongoPersisted = meta.mongoPersisted && single.persist.mongoPersisted;
+          if (!single.persist.mongoPersisted) {
+            errors.push({
+              id: ddbId,
+              message: 'Could not save to compendium database — try again shortly',
+            });
+            continue;
+          }
           meta.savedEntries.push(...single.entries);
           if (single.entries[0]) {
             imported.push({
@@ -1251,9 +1265,10 @@ export async function finishDdbLibraryImport(
 ): Promise<{
   catalogRev: string | null;
   sourcesUnlocked?: string[];
+  booksCount?: number;
+  importedEntryCount?: number;
   catalogRebuildPending?: boolean;
 }> {
-  const { collectImportedSourceLabels } = await import('../compendiumBundledLock');
   const unlocked: string[] = [];
 
   // ensureImportedSourcesUnlocked (inside reconcile) unlocks every override source — only add targeted unlocks.
@@ -1274,21 +1289,32 @@ export async function finishDdbLibraryImport(
       );
     }
     unlocked.push(...await unlockImportedBookSourceLabels(labelsToUnlock));
-  } else {
-    unlocked.push(...await collectImportedSourceLabels());
   }
 
-  const { reconcileCompendiumMongo } = await import('../compendiumSync');
+  const { invalidateBookSourcesCache } = await import('../compendiumBookSourcesCache');
+  invalidateBookSourcesCache();
+
+  const { reconcileCompendiumMongo, listAllBookSources } = await import('../compendiumSync');
   const status = await reconcileCompendiumMongo('ddb-finish-import', {
     deferCatalogRebuild: !opts?.awaitCatalogRebuild,
-    strict: false,
+    strict: opts?.awaitCatalogRebuild === true,
   });
-  void import('../compendiumSync')
-    .then(({ listAllBookSources }) => listAllBookSources())
-    .catch(() => undefined);
+
+  const { readOverrideCountsFromPostgres } = await import('../compendiumPostgres');
+  const importedCounts = await readOverrideCountsFromPostgres().catch(() => null);
+  const importedEntryCount =
+    (importedCounts?.monsters ?? 0) + (importedCounts?.items ?? 0) + (importedCounts?.spells ?? 0);
+
+  const books = await listAllBookSources().catch(() => []);
+  if (unlocked.length === 0 && books.length > 0 && opts?.unlockAllImportedSources) {
+    unlocked.push(...books.map((b) => b.label));
+  }
+
   return {
     catalogRev: status.catalogRev ?? null,
     sourcesUnlocked: [...new Set(unlocked)],
+    booksCount: books.length,
+    importedEntryCount,
     catalogRebuildPending: Boolean(status.catalogRebuild?.active),
   };
 }

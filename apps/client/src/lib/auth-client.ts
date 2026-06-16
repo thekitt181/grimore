@@ -41,6 +41,28 @@ export const authClient = createAuthClient({
 
 let bearerHydratePromise: Promise<string | null> | null = null;
 
+let sessionSnapshot: { at: number; hasSession: boolean } | null = null;
+const SESSION_SNAPSHOT_MS = 15_000;
+
+function invalidateSessionSnapshot(): void {
+  sessionSnapshot = null;
+}
+
+async function hasActiveAuthSession(): Promise<boolean> {
+  if (sessionSnapshot && Date.now() - sessionSnapshot.at < SESSION_SNAPSHOT_MS) {
+    return sessionSnapshot.hasSession;
+  }
+  try {
+    const { data } = await authClient.getSession();
+    const hasSession = Boolean(data?.session);
+    sessionSnapshot = { at: Date.now(), hasSession };
+    return hasSession;
+  } catch (err) {
+    console.warn('[Auth] Session snapshot check failed:', err);
+    return sessionSnapshot?.hasSession ?? true;
+  }
+}
+
 async function hydrateBearerFromSession(): Promise<string | null> {
   try {
     const { data } = await authClient.getSession({
@@ -66,19 +88,30 @@ async function hydrateBearerFromSession(): Promise<string | null> {
 export async function getAuthBearerToken(opts?: { skipCache?: boolean }): Promise<string | null> {
   if (!opts?.skipCache) {
     const cached = getBearerToken();
-    if (cached) return cached;
+    if (cached) {
+      if (!(await hasActiveAuthSession())) {
+        setBearerToken(null);
+        bearerHydratePromise = null;
+        invalidateSessionSnapshot();
+        return null;
+      }
+      return cached;
+    }
   }
 
   if (!bearerHydratePromise || opts?.skipCache) {
     bearerHydratePromise = hydrateBearerFromSession();
   }
-  return bearerHydratePromise;
+  const token = await bearerHydratePromise;
+  if (!token) setBearerToken(null);
+  return token;
 }
 
 export async function signOutAndClear(): Promise<void> {
   await authClient.signOut();
   setBearerToken(null);
   bearerHydratePromise = null;
+  invalidateSessionSnapshot();
 }
 
 /** Start Google OAuth — redirects on success; returns an error message otherwise. */

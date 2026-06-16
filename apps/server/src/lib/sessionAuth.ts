@@ -1,11 +1,18 @@
 import { fromNodeHeaders } from 'better-auth/node';
 import type { IncomingHttpHeaders } from 'node:http';
 import { auth } from './auth';
+import { isDbPoolSaturation, isDbTransientError } from './dbTimeout';
 
 export async function getSessionFromHeaders(headers: IncomingHttpHeaders) {
-  return auth.api.getSession({
-    headers: fromNodeHeaders(headers),
-  });
+  try {
+    return await auth.api.getSession({
+      headers: fromNodeHeaders(headers),
+    });
+  } catch (err) {
+    if (isDbPoolSaturation(err) || isDbTransientError(err)) throw err;
+    console.error('[Auth] getSession failed:', err);
+    return null;
+  }
 }
 
 export async function getAuthUserIdFromHeaders(headers: IncomingHttpHeaders): Promise<string | null> {
@@ -17,10 +24,16 @@ export async function getAuthUserIdFromHeaders(headers: IncomingHttpHeaders): Pr
   const authz = headers.authorization;
   const cookie = headers.cookie;
   if (authz?.startsWith('Bearer ') && cookie) {
-    const cookieSession = await auth.api.getSession({
-      headers: new Headers({ cookie }),
-    });
-    return cookieSession?.user?.id ?? null;
+    try {
+      const cookieSession = await auth.api.getSession({
+        headers: new Headers({ cookie }),
+      });
+      return cookieSession?.user?.id ?? null;
+    } catch (err) {
+      if (isDbPoolSaturation(err) || isDbTransientError(err)) throw err;
+      console.error('[Auth] cookie session lookup failed:', err);
+      return null;
+    }
   }
 
   return null;

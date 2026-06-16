@@ -429,8 +429,15 @@ export async function finishDdbLibraryImportSession(
     sourceIds?: number[];
     sourceLabels?: string[];
     unlockAllImportedSources?: boolean;
+    awaitCatalogRebuild?: boolean;
   },
-): Promise<{ catalogRev: string | null; sourcesUnlocked?: string[] }> {
+): Promise<{
+  catalogRev: string | null;
+  sourcesUnlocked?: string[];
+  booksCount?: number;
+  importedEntryCount?: number;
+  catalogRebuildPending?: boolean;
+}> {
   const ctx = await requireDdbAuth(userId);
   return finishDdbLibraryImport(ctx, opts);
 }

@@ -365,15 +365,20 @@ export async function finishDdbLibraryImport(opts?: {
   sourceIds?: number[];
   sourceLabels?: string[];
   unlockAllImportedSources?: boolean;
+  awaitCatalogRebuild?: boolean;
 }): Promise<{
   catalogRev: string | null;
   sourcesUnlocked?: string[];
+  booksCount?: number;
+  importedEntryCount?: number;
   catalogRebuildPending?: boolean;
 }> {
   try {
     const { data } = await api.post<{
       catalogRev: string | null;
       sourcesUnlocked?: string[];
+      booksCount?: number;
+      importedEntryCount?: number;
       catalogRebuildPending?: boolean;
     }>(
       '/ddb/library/finish-import',
@@ -393,11 +398,14 @@ export async function syncCompendiumAfterImport(opts?: {
 }): Promise<{
   catalogRev: string | null;
   sourcesUnlocked?: string[];
+  booksCount?: number;
+  importedEntryCount?: number;
   catalogRebuildPending?: boolean;
 }> {
   return finishDdbLibraryImport({
     ...(opts?.sourceIds?.length ? { sourceIds: opts.sourceIds } : {}),
     unlockAllImportedSources: opts?.unlockAllImportedSources ?? true,
+    awaitCatalogRebuild: true,
   });
 }
 

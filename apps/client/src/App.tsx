@@ -92,6 +92,17 @@ export default function App() {
     }
   }, [isLoaded, isSignedIn, getToken]);
 
+  useEffect(() => {
+    if (!isLoaded || !isSignedIn) return;
+    const onExpired = () => {
+      void signOutAndClear().then(() => {
+        window.location.href = '/sign-in';
+      });
+    };
+    window.addEventListener('grimoire:auth-expired', onExpired);
+    return () => window.removeEventListener('grimoire:auth-expired', onExpired);
+  }, [isLoaded, isSignedIn]);
+
   return (
     <Routes>
       {/* Public */}

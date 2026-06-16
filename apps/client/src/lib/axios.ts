@@ -169,6 +169,9 @@ api.interceptors.response.use(
 
       markApiAuthBlocked(stage >= 2 ? 'unauthorized' : 'missing-token');
       dispatchAuthEvent('grimoire:auth-expired');
+      if (stage >= 2) {
+        void import('@/lib/auth-client').then(({ signOutAndClear }) => signOutAndClear());
+      }
     }
 
     if (status !== 401 && !(status != null && WAKE_RETRY_STATUSES.has(status))) {

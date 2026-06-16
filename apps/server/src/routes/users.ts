@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { authPrisma } from '../lib/prisma';
-import { withDbTimeout, isDbPoolSaturation } from '../lib/dbTimeout';
+import { withDbTimeout, isDbPoolSaturation, isDbTransientError } from '../lib/dbTimeout';
 import { requireAuth, type AuthenticatedRequest } from '../middleware/auth';
 
 const router = Router();
@@ -36,7 +36,7 @@ router.get('/me', requireAuth, async (req: AuthenticatedRequest, res) => {
 
     res.json({ user });
   } catch (err) {
-    if (isDbPoolSaturation(err)) {
+    if (isDbPoolSaturation(err) || isDbTransientError(err)) {
       res.status(503).json({ error: 'Database busy — try again shortly', retry: true });
       return;
     }

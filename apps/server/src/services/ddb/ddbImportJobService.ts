@@ -5,7 +5,7 @@ import type {
   DdbLibraryImportJobProgress,
   DdbLibraryImportResult,
 } from '@grimoire/shared';
-import { prisma, readPrisma } from '../../lib/prisma';
+import { readPrisma } from '../../lib/prisma';
 import { sanitizeForPostgres, stripNullBytes } from '../../lib/sanitizePostgresText';
 import { getCobaltForUser } from './ddbService';
 import { getDdbAuthContext } from './ddbAuthContext';
@@ -84,7 +84,7 @@ function toClientJob(row: {
 }
 
 async function isJobCancelled(jobId: string): Promise<boolean> {
-  const row = await prisma.ddbLibraryImportJob.findUnique({
+  const row = await readPrisma.ddbLibraryImportJob.findUnique({
     where: { id: jobId },
     select: { status: true },
   });
@@ -201,7 +201,7 @@ async function persistJobPatch(
   data: Prisma.DdbLibraryImportJobUpdateInput,
 ): Promise<void> {
   const sanitized = sanitizeForPostgres(data);
-  await prisma.ddbLibraryImportJob.update({
+  await readPrisma.ddbLibraryImportJob.update({
     where: { id: jobId },
     data: sanitized,
   });
@@ -244,7 +244,7 @@ async function finishJob(
     await persistJobPatch(jobId, payload);
   } catch (err) {
     console.error(`[DDB] finishJob ${jobId} failed — saving status only:`, err);
-    await prisma.ddbLibraryImportJob.update({
+    await readPrisma.ddbLibraryImportJob.update({
       where: { id: jobId },
       data: {
         status,
@@ -355,6 +355,31 @@ async function importBookKinds(
   return bookMerged;
 }
 
+async function finalizeDdbImportJobCatalog(
+  merged: DdbLibraryImportResult,
+): Promise<DdbLibraryImportResult> {
+  const { ensureImportedSourcesUnlocked } = await import('../compendiumBundledLock');
+  const { finishBulkCompendiumImport, getCatalogRevision } = await import('../compendiumSync');
+  const { invalidateBookSourcesCache } = await import('../compendiumBookSourcesCache');
+  const { touchCompendiumMeta } = await import('../compendiumPostgres');
+  await ensureImportedSourcesUnlocked('ddb-import-job-finish');
+  invalidateBookSourcesCache();
+  const fin = await finishBulkCompendiumImport({ deferCatalogRebuild: true });
+  await touchCompendiumMeta().catch(() => undefined);
+  const next = {
+    ...merged,
+    catalogRev: fin.catalogRev ?? getCatalogRevision() ?? merged.catalogRev,
+  };
+  const { getCatalogEntryCounts } = await import('../compendiumSync');
+  console.log(
+    `[DDB] Import job catalog ready: `
+    + `${getCatalogEntryCounts()?.monsters ?? 0} monsters, `
+    + `${getCatalogEntryCounts()?.items ?? 0} items, `
+    + `${getCatalogEntryCounts()?.spells ?? 0} spells`,
+  );
+  return next;
+}
+
 async function runDdbLibraryImportJob(jobId: string): Promise<void> {
   if (runningJobs.has(jobId)) return;
   runningJobs.add(jobId);
@@ -362,7 +387,17 @@ async function runDdbLibraryImportJob(jobId: string): Promise<void> {
   const { beginCompendiumBulkImport, endCompendiumBulkImport } = await import('../compendiumMongoWatch');
   beginCompendiumBulkImport();
   try {
-    const job = await prisma.ddbLibraryImportJob.findUnique({ where: { id: jobId } });
+    const { pingCompendiumStorage } = await import('../compendiumPostgres');
+    const storageOk = await pingCompendiumStorage();
+    if (!storageOk) {
+      await finishJob(jobId, 'FAILED', {
+        errorMessage: 'Compendium database unavailable — wait a minute and try again',
+        result: merged,
+      });
+      return;
+    }
+
+    const job = await readPrisma.ddbLibraryImportJob.findUnique({ where: { id: jobId } });
     if (!job || job.status !== 'RUNNING') return;
 
     const ctx = await requireDdbAuthForUser(job.userId);
@@ -388,7 +423,24 @@ async function runDdbLibraryImportJob(jobId: string): Promise<void> {
       }
     }
 
+    if (accessible.length === 0) {
+      await finishJob(jobId, 'FAILED', {
+        errorMessage: inaccessible.length > 0
+          ? 'None of the selected books are accessible with your D&D Beyond account. Re-link or link a campaign for shared books.'
+          : 'No accessible books to import',
+        result: merged,
+      });
+      return;
+    }
+
     if (pendingAccessible.length === 0) {
+      try {
+        merged = await finalizeDdbImportJobCatalog(merged);
+      } catch (err) {
+        console.warn(`[DDB] finish-import after job ${jobId} failed:`, err);
+      }
+      const { invalidateImportSkipIndex } = await import('../compendiumImportIndex');
+      invalidateImportSkipIndex();
       await finishJob(jobId, 'COMPLETED', { result: merged });
       return;
     }
@@ -427,7 +479,7 @@ async function runDdbLibraryImportJob(jobId: string): Promise<void> {
     for (const [pendingIdx, sourceId] of pendingAccessible.entries()) {
       if (await isJobCancelled(jobId)) return;
 
-      const progressRow = await prisma.ddbLibraryImportJob.findUnique({
+      const progressRow = await readPrisma.ddbLibraryImportJob.findUnique({
         where: { id: jobId },
         select: { progress: true },
       });
@@ -475,23 +527,7 @@ async function runDdbLibraryImportJob(jobId: string): Promise<void> {
     if (await isJobCancelled(jobId)) return;
 
     try {
-      const { ensureImportedSourcesUnlocked } = await import('../compendiumBundledLock');
-      const { finishBulkCompendiumImport, getCatalogRevision } = await import('../compendiumSync');
-      const { invalidateBookSourcesCache } = await import('../compendiumBookSourcesCache');
-      await ensureImportedSourcesUnlocked('ddb-import-job-finish');
-      invalidateBookSourcesCache();
-      const fin = await finishBulkCompendiumImport({ deferCatalogRebuild: true });
-      merged = {
-        ...merged,
-        catalogRev: fin.catalogRev ?? getCatalogRevision() ?? merged.catalogRev,
-      };
-      const { getCatalogEntryCounts } = await import('../compendiumSync');
-      console.log(
-        `[DDB] Import job ${jobId} catalog ready: `
-        + `${getCatalogEntryCounts()?.monsters ?? 0} monsters, `
-        + `${getCatalogEntryCounts()?.items ?? 0} items, `
-        + `${getCatalogEntryCounts()?.spells ?? 0} spells`,
-      );
+      merged = await finalizeDdbImportJobCatalog(merged);
     } catch (err) {
       console.warn(`[DDB] finish-import after job ${jobId} failed:`, err);
     }
@@ -528,7 +564,7 @@ function kickStaleImportJobIfNeeded(row: { id: string; updatedAt: Date }): void 
 
 export async function resumeRunningImportJobs(): Promise<void> {
   try {
-    const rows = await prisma.ddbLibraryImportJob.findMany({
+    const rows = await readPrisma.ddbLibraryImportJob.findMany({
       where: {
         OR: [{ status: 'RUNNING' }, { status: 'FAILED' }],
       },
@@ -562,7 +598,7 @@ export async function resumeRunningImportJobs(): Promise<void> {
       if (!hasPartialImportProgress(row.progress, row.result, accessible)) continue;
       console.log(`[DDB] Re-opening failed import job ${row.id} with partial progress`);
       try {
-        await prisma.ddbLibraryImportJob.update({
+        await readPrisma.ddbLibraryImportJob.update({
           where: { id: row.id },
           data: {
             status: 'RUNNING',
@@ -593,6 +629,8 @@ export async function startDdbLibraryImportJob(
   if (unique.length === 0) {
     throw new Error('Select at least one source book');
   }
+
+  await requireDdbAuthForUser(userId);
 
   const failedResume = await readPrisma.ddbLibraryImportJob.findFirst({
     where: { userId, status: 'FAILED' },

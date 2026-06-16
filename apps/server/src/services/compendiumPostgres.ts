@@ -9,6 +9,7 @@ import type {
 import { slugify } from '@grimoire/monster-dex';
 import { prisma, readPrisma } from '../lib/prisma';
 import { withDbTimeout } from '../lib/dbTimeout';
+import { isCompendiumBulkImportActive } from './compendiumMongoWatch';
 import { entryNameKey, normalizeOwlbearRawDoc } from './compendiumMerge';
 import { compendiumEntryStorageId } from './compendiumEntryIdentity';
 import type { CompendiumKind } from './compendiumOwlbearPersist';
@@ -91,7 +92,7 @@ export async function pingCompendiumStorage(): Promise<boolean> {
 }
 
 async function ensureCompendiumMeta(): Promise<void> {
-  await prisma.compendiumMeta.upsert({
+  await readPrisma.compendiumMeta.upsert({
     where: { id: 'global' },
     create: {
       id: 'global',
@@ -105,7 +106,7 @@ async function ensureCompendiumMeta(): Promise<void> {
 
 export async function touchCompendiumMeta(lastUpdated = new Date()): Promise<string> {
   await ensureCompendiumMeta();
-  const row = await prisma.compendiumMeta.update({
+  const row = await readPrisma.compendiumMeta.update({
     where: { id: 'global' },
     data: { lastUpdated },
   });
@@ -193,35 +194,35 @@ export async function upsertTypedImportEntriesBulk(
   await withStorageProbe(async () => {
     for (let i = 0; i < entries.length; i += UPSERT_BATCH) {
       const batch = entries.slice(i, i + UPSERT_BATCH);
-      await prisma.$transaction(
-        batch.map(({ entry, isCustom }) => {
-          const data = buildUpsertData(kind, entry, {
-            isCustom,
+      for (const { entry, isCustom } of batch) {
+        const data = buildUpsertData(kind, entry, {
+          isCustom,
+          inTypedImport: true,
+          inGlobalOverride: !isCustom,
+          inGlobalHomebrew: isCustom,
+        });
+        await readPrisma.compendiumEntry.upsert({
+          where: { id: data.id },
+          create: data,
+          update: {
+            kind: data.kind,
+            name: data.name,
+            nameKey: data.nameKey,
+            source: data.source,
+            payload: data.payload,
+            isCustom: data.isCustom,
+            originBookName: data.originBookName,
             inTypedImport: true,
-            inGlobalOverride: !isCustom,
-            inGlobalHomebrew: isCustom,
-          });
-          return prisma.compendiumEntry.upsert({
-            where: { id: data.id },
-            create: data,
-            update: {
-              kind: data.kind,
-              name: data.name,
-              nameKey: data.nameKey,
-              source: data.source,
-              payload: data.payload,
-              isCustom: data.isCustom,
-              originBookName: data.originBookName,
-              inTypedImport: true,
-              ...(isCustom
-                ? { inGlobalHomebrew: true }
-                : { inGlobalOverride: true }),
-            },
-          });
-        }),
-      );
+            ...(isCustom
+              ? { inGlobalHomebrew: true }
+              : { inGlobalOverride: true }),
+          },
+        });
+      }
     }
-    await touchCompendiumMeta();
+    if (!isCompendiumBulkImportActive()) {
+      await touchCompendiumMeta();
+    }
   });
 }
 
@@ -238,7 +239,7 @@ async function readEntriesByKind(
 ): Promise<Array<OwlbearMonster | OwlbearItem | OwlbearSpell>> {
   if (isCompendiumStorageUnavailable()) return [];
   try {
-    const rows = await withStorageProbe(() => prisma.compendiumEntry.findMany({
+    const rows = await withStorageProbe(() => readPrisma.compendiumEntry.findMany({
       where: { kind: KIND_TO_PRISMA[kind], ...where },
       orderBy: { name: 'asc' },
     }));
@@ -292,7 +293,7 @@ export async function readTypedImportNameSourceRows(
 ): Promise<TypedImportNameSourceRow[]> {
   if (isCompendiumStorageUnavailable()) return [];
   try {
-    const rows = await withStorageProbe(() => prisma.compendiumEntry.findMany({
+    const rows = await withStorageProbe(() => readPrisma.compendiumEntry.findMany({
       where: { kind: KIND_TO_PRISMA[kind], inTypedImport: true },
       select: { name: true, source: true, payload: true },
     }));
@@ -323,9 +324,9 @@ export async function readOverrideCountsFromTypedCollections(): Promise<{
   if (isCompendiumStorageUnavailable()) return null;
   try {
     const [monsters, items, spells] = await withStorageProbe(() => Promise.all([
-      prisma.compendiumEntry.count({ where: { kind: CompendiumEntryKind.MONSTER, inTypedImport: true } }),
-      prisma.compendiumEntry.count({ where: { kind: CompendiumEntryKind.ITEM, inTypedImport: true } }),
-      prisma.compendiumEntry.count({ where: { kind: CompendiumEntryKind.SPELL, inTypedImport: true } }),
+      readPrisma.compendiumEntry.count({ where: { kind: CompendiumEntryKind.MONSTER, inTypedImport: true } }),
+      readPrisma.compendiumEntry.count({ where: { kind: CompendiumEntryKind.ITEM, inTypedImport: true } }),
+      readPrisma.compendiumEntry.count({ where: { kind: CompendiumEntryKind.SPELL, inTypedImport: true } }),
     ]));
     if (monsters + items + spells === 0) return null;
     return { monsters, items, spells };
@@ -385,19 +386,19 @@ export async function readOverrideCountsFromPostgres(): Promise<{
   if (isCompendiumStorageUnavailable()) return null;
   try {
     const [monsters, items, spells] = await withStorageProbe(() => Promise.all([
-      prisma.compendiumEntry.count({
+      readPrisma.compendiumEntry.count({
         where: {
           kind: CompendiumEntryKind.MONSTER,
           OR: [{ inGlobalOverride: true }, { inGlobalHomebrew: true }, { inTypedImport: true }],
         },
       }),
-      prisma.compendiumEntry.count({
+      readPrisma.compendiumEntry.count({
         where: {
           kind: CompendiumEntryKind.ITEM,
           OR: [{ inGlobalOverride: true }, { inGlobalHomebrew: true }, { inTypedImport: true }],
         },
       }),
-      prisma.compendiumEntry.count({
+      readPrisma.compendiumEntry.count({
         where: {
           kind: CompendiumEntryKind.SPELL,
           OR: [{ inGlobalOverride: true }, { inGlobalHomebrew: true }, { inTypedImport: true }],
@@ -419,7 +420,7 @@ export async function readImportedNameSourceRowsForBooks(): Promise<{
   const empty = { monster: [], item: [], spell: [] };
   if (isCompendiumStorageUnavailable()) return empty;
   try {
-    const rows = await withStorageProbe(() => prisma.compendiumEntry.findMany({
+    const rows = await withStorageProbe(() => readPrisma.compendiumEntry.findMany({
       where: { OR: [{ inTypedImport: true }, { inGlobalOverride: true }] },
       select: { kind: true, name: true, source: true, inTypedImport: true },
     }));
@@ -453,7 +454,7 @@ export async function collectImportedSourceLabelsFromPostgres(): Promise<BookSou
     return buckets;
   }
   try {
-    const rows = await withStorageProbe(() => prisma.compendiumEntry.findMany({
+    const rows = await withStorageProbe(() => readPrisma.compendiumEntry.findMany({
       where: {
         OR: [{ inTypedImport: true }, { inGlobalOverride: true }],
       },
@@ -901,7 +902,7 @@ export async function updateCompendiumPolicyFields(patch: {
 }): Promise<void> {
   await withStorageProbe(async () => {
     await ensureCompendiumMeta();
-    await prisma.compendiumMeta.update({
+    await readPrisma.compendiumMeta.update({
       where: { id: 'global' },
       data: {
         ...(patch.lockedSources ? { lockedSources: patch.lockedSources } : {}),

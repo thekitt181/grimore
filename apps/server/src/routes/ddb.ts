@@ -597,6 +597,7 @@ router.post('/library/finish-import', requireAuth, async (req: AuthenticatedRequ
       sourceIds?: number[];
       sourceLabels?: string[];
       unlockAllImportedSources?: boolean;
+      awaitCatalogRebuild?: boolean;
     };
     const sourceIds = Array.isArray(body.sourceIds)
       ? body.sourceIds.map((id) => Number(id)).filter((id) => Number.isFinite(id) && id > 0)
@@ -608,9 +609,14 @@ router.post('/library/finish-import', requireAuth, async (req: AuthenticatedRequ
       sourceIds,
       sourceLabels,
       unlockAllImportedSources: body.unlockAllImportedSources === true,
+      awaitCatalogRebuild: body.awaitCatalogRebuild === true,
     });
     res.json(result);
   } catch (err) {
+    if (isDbPoolSaturation(err)) {
+      res.status(503).json({ error: 'Database busy — try again shortly', retry: true });
+      return;
+    }
     console.error('[DDB] finish-import failed:', err);
     res.status(400).json({ error: err instanceof Error ? err.message : 'Import finish failed' });
   }
