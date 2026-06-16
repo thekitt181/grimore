@@ -3,7 +3,7 @@ import type { Socket } from 'socket.io';
 import { Server } from 'socket.io';
 import { getAuthUserIdFromRequest } from '../lib/sessionAuth';
 import { resolveAuthUser } from '../lib/authUserCache';
-import { prisma } from '../lib/prisma';
+import { prisma, readPrisma } from '../lib/prisma';
 import type { Prisma } from '@prisma/client';
 import {
   setRoomUsers,
@@ -217,7 +217,7 @@ export function initSocket(httpServer: HttpServer): Server {
     // ── Join session room ────────────────────────────────────────────────────
     socket.on('session:join', async ({ sessionId, campaignId }) => {
       try {
-        const member = await prisma.campaignMember.findFirst({
+        const member = await readPrisma.campaignMember.findFirst({
           where: { campaignId, userId },
           include: { campaign: { select: { gmId: true } } },
         });
@@ -227,7 +227,7 @@ export function initSocket(httpServer: HttpServer): Server {
           return;
         }
 
-        const gameSession = await prisma.gameSession.findFirst({
+        const gameSession = await readPrisma.gameSession.findFirst({
           where: { id: sessionId, campaignId },
         });
         if (!gameSession) {
@@ -280,7 +280,7 @@ export function initSocket(httpServer: HttpServer): Server {
             }
 
             if (uniqueUserIds.size > 0) {
-              const memberRecords = await prisma.campaignMember.findMany({
+              const memberRecords = await readPrisma.campaignMember.findMany({
                 where: { campaignId, userId: { in: [...uniqueUserIds] } },
                 include: { campaign: { select: { gmId: true } } },
               });
@@ -313,7 +313,7 @@ export function initSocket(httpServer: HttpServer): Server {
 
         void (async () => {
           try {
-            const ddbLink = await prisma.ddbCampaignLink.findUnique({ where: { campaignId } });
+            const ddbLink = await readPrisma.ddbCampaignLink.findUnique({ where: { campaignId } });
             if (!ddbLink) return;
             const bridgeUserId = await resolveRollBridgeUserId(campaignId);
             if (bridgeUserId) {

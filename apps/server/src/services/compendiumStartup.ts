@@ -16,6 +16,9 @@ export function shouldAutoStartCompendium(): boolean {
 
 let startupPromise: Promise<void> | null = null;
 let startupDone = false;
+let startupFailedUntil = 0;
+
+const STARTUP_RETRY_MS = 90_000;
 
 async function runCompendiumStartup(): Promise<void> {
   try {
@@ -44,6 +47,8 @@ async function runCompendiumStartup(): Promise<void> {
 /** Idempotent — safe to call from every compendium API request. */
 export function ensureCompendiumStartup(): Promise<void> {
   if (startupDone) return Promise.resolve();
+  if (Date.now() < startupFailedUntil) return Promise.resolve();
+
   if (!startupPromise) {
     startupPromise = runCompendiumStartup()
       .then(() => {
@@ -51,6 +56,7 @@ export function ensureCompendiumStartup(): Promise<void> {
       })
       .catch((err) => {
         startupPromise = null;
+        startupFailedUntil = Date.now() + STARTUP_RETRY_MS;
         throw err;
       });
   }

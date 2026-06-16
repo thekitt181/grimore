@@ -2,6 +2,7 @@ import { Router } from 'express';
 import type { OwlbearItem, OwlbearMonster, OwlbearSpell } from '@grimoire/shared';
 import { requireAuth, type AuthenticatedRequest } from '../middleware/auth';
 import { requireCompendiumAdmin, isCompendiumAdmin, getCompendiumAdminPassword, matchesCompendiumAdminPassword } from '../middleware/requireCompendiumAdmin';
+import { isDbPoolSaturation } from '../lib/dbTimeout';
 import { ensureCompendiumStartup } from '../services/compendiumStartup';
 import {
   deleteCompendiumEntry,
@@ -39,11 +40,21 @@ const router = Router();
 const auth = [requireAuth] as const;
 const admin = [requireAuth, requireCompendiumAdmin] as const;
 
-router.use((req, res, next) => {
-  void ensureCompendiumStartup()
-    .then(() => next())
-    .catch(next);
-});
+function respondCompendiumError(
+  res: import('express').Response,
+  err: unknown,
+  logLabel: string,
+  message: string,
+): void {
+  if (isDbPoolSaturation(err)) {
+    res.status(503).json({ error: 'Database busy — try again shortly', retry: true });
+    return;
+  }
+  console.error(logLabel, err);
+  res.status(500).json({ error: message });
+}
+
+// ─── Lightweight routes (no compendium DB startup) ───────────────────────────
 
 router.post('/admin/verify', ...auth, (req: AuthenticatedRequest, res) => {
   const expected = getCompendiumAdminPassword();
@@ -61,6 +72,37 @@ router.post('/admin/verify', ...auth, (req: AuthenticatedRequest, res) => {
 
 router.get('/admin/configured', ...auth, (_req, res) => {
   res.json({ configured: Boolean(getCompendiumAdminPassword()) });
+});
+
+router.get('/static-image', async (req, res) => {
+  const key = typeof req.query['key'] === 'string' ? req.query['key'] : '';
+  if (!key) {
+    res.status(400).json({ error: 'Missing key' });
+    return;
+  }
+  try {
+    await serveStaticImage(key, res);
+  } catch (err) {
+    respondCompendiumError(res, err, '[Compendium] static-image:', 'Failed to serve image');
+  }
+});
+
+router.get('/asset/*', (req, res) => {
+  const rel = (req.params as { 0?: string })['0'] ?? '';
+  try {
+    serveAssetFile(rel, res);
+  } catch (err) {
+    respondCompendiumError(res, err, '[Compendium] asset:', 'Failed to serve asset');
+  }
+});
+
+// Catalog routes wait for startup but continue in degraded mode if it fails.
+router.use((_req, _res, next) => {
+  void ensureCompendiumStartup()
+    .catch((err) => {
+      console.warn('[Compendium] Startup incomplete — continuing degraded:', err);
+    })
+    .finally(() => next());
 });
 
 router.get('/admin/visibility-policy', ...admin, async (_req, res) => {
@@ -127,30 +169,6 @@ router.post('/admin/entries/unpublish', ...admin, async (req, res) => {
   } catch (err) {
     console.error('[Compendium] unpublish entry:', err);
     res.status(500).json({ error: err instanceof Error ? err.message : 'Failed to unpublish entry' });
-  }
-});
-
-router.get('/static-image', async (req, res) => {
-  const key = typeof req.query['key'] === 'string' ? req.query['key'] : '';
-  if (!key) {
-    res.status(400).json({ error: 'Missing key' });
-    return;
-  }
-  try {
-    await serveStaticImage(key, res);
-  } catch (err) {
-    console.error('[Compendium] static-image:', err);
-    res.status(500).json({ error: 'Failed to serve image' });
-  }
-});
-
-router.get('/asset/*', (req, res) => {
-  const rel = (req.params as { 0?: string })['0'] ?? '';
-  try {
-    serveAssetFile(rel, res);
-  } catch (err) {
-    console.error('[Compendium] asset:', err);
-    res.status(500).json({ error: 'Failed to serve asset' });
   }
 });
 
@@ -230,8 +248,7 @@ router.get('/sync-status', ...auth, async (_req, res) => {
   try {
     res.json(await getSyncStatus());
   } catch (err) {
-    console.error('[Compendium] sync-status error:', err);
-    res.status(500).json({ error: 'Failed to read sync status' });
+    respondCompendiumError(res, err, '[Compendium] sync-status error:', 'Failed to read sync status');
   }
 });
 
@@ -282,8 +299,7 @@ router.get('/monsters', ...auth, async (req: AuthenticatedRequest, res) => {
     const result = await searchMonsters({ q, page, limit, crMin, crMax, source, isCustom, includeDrafts });
     res.json(result);
   } catch (err) {
-    console.error('[Compendium] search monsters:', err);
-    res.status(500).json({ error: 'Failed to search monsters' });
+    respondCompendiumError(res, err, '[Compendium] search monsters:', 'Failed to search monsters');
   }
 });
 
