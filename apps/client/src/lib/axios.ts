@@ -1,4 +1,5 @@
 import axios, { type InternalAxiosRequestConfig } from 'axios';
+import { getCompendiumAdminPassword } from '@/systems/compendium/compendiumAdminStore';
 import { getApiBaseUrl } from './appUrls';
 import {
   clearApiAuthBlocked,
@@ -72,14 +73,9 @@ async function attachAuthHeaders(config: InternalAxiosRequestConfig): Promise<vo
   } catch {
     // store unavailable during SSR/tests
   }
-  try {
-    const { getCompendiumAdminPassword } = await import('@/systems/compendium/compendiumAdminStore');
-    const adminPassword = getCompendiumAdminPassword();
-    if (adminPassword) {
-      config.headers['X-Compendium-Admin-Password'] = adminPassword;
-    }
-  } catch {
-    // ignore
+  const adminPassword = getCompendiumAdminPassword();
+  if (adminPassword) {
+    config.headers['X-Compendium-Admin-Password'] = adminPassword;
   }
 }
 
