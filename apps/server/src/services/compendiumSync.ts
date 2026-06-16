@@ -2057,13 +2057,16 @@ async function saveEntriesBulkForImport<T extends OwlbearMonster | OwlbearItem |
   });
 
   let typedMongoOk = true;
-  await upsertCollection(
-    prepared.map(({ payload, saveAs }) => ({ entry: payload, isCustom: saveAs === 'homebrew' })),
-    { skipNotify: true },
-  ).catch((err) => {
+  try {
+    await upsertCollection(
+      prepared.map(({ payload, saveAs }) => ({ entry: payload, isCustom: saveAs === 'homebrew' })),
+      { skipNotify: true },
+    );
+  } catch (err) {
     typedMongoOk = false;
     console.error('[Compendium] Typed collection bulk write failed:', err instanceof Error ? err.message : err);
-  });
+    throw err;
+  }
 
   const lastUpdated = new Date().toISOString();
   return {

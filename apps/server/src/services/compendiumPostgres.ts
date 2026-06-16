@@ -38,6 +38,7 @@ export const TYPED_IMPORT_COLLECTION: Record<CompendiumStorageKind, string> = {
 
 const UPSERT_BATCH = 100;
 const STORAGE_PROBE_TIMEOUT_MS = Number(process.env['DB_PROBE_TIMEOUT_MS'] ?? 10_000);
+const UPSERT_ENTRY_TIMEOUT_MS = Number(process.env['COMPENDIUM_UPSERT_TIMEOUT_MS'] ?? 30_000);
 
 let storageUnavailable = false;
 let lastStorageError: string | null = null;
@@ -191,39 +192,91 @@ export async function upsertTypedImportEntriesBulk(
   entries: Array<{ entry: OwlbearMonster | OwlbearItem | OwlbearSpell; isCustom: boolean }>,
 ): Promise<void> {
   if (entries.length === 0) return;
-  await withStorageProbe(async () => {
-    for (let i = 0; i < entries.length; i += UPSERT_BATCH) {
-      const batch = entries.slice(i, i + UPSERT_BATCH);
-      for (const { entry, isCustom } of batch) {
+
+  const upsertTimeoutMs = isCompendiumBulkImportActive()
+    ? Math.max(UPSERT_ENTRY_TIMEOUT_MS, 45_000)
+    : UPSERT_ENTRY_TIMEOUT_MS;
+
+  let saved = 0;
+  let lastError: string | null = null;
+
+  for (let i = 0; i < entries.length; i += UPSERT_BATCH) {
+    const batch = entries.slice(i, i + UPSERT_BATCH);
+    for (const { entry, isCustom } of batch) {
+      try {
         const data = buildUpsertData(kind, entry, {
           isCustom,
           inTypedImport: true,
           inGlobalOverride: !isCustom,
           inGlobalHomebrew: isCustom,
         });
-        await readPrisma.compendiumEntry.upsert({
-          where: { id: data.id },
-          create: data,
-          update: {
-            kind: data.kind,
-            name: data.name,
-            nameKey: data.nameKey,
-            source: data.source,
-            payload: data.payload,
-            isCustom: data.isCustom,
-            originBookName: data.originBookName,
-            inTypedImport: true,
-            ...(isCustom
-              ? { inGlobalHomebrew: true }
-              : { inGlobalOverride: true }),
-          },
-        });
+        await withDbTimeout(
+          upsertTimeoutMs,
+          () =>
+            readPrisma.compendiumEntry.upsert({
+              where: { id: data.id },
+              create: data,
+              update: {
+                kind: data.kind,
+                name: data.name,
+                nameKey: data.nameKey,
+                source: data.source,
+                payload: data.payload,
+                isCustom: data.isCustom,
+                originBookName: data.originBookName,
+                inTypedImport: true,
+                ...(isCustom
+                  ? { inGlobalHomebrew: true }
+                  : { inGlobalOverride: true }),
+              },
+            }),
+          'compendium entry upsert',
+        );
+        saved += 1;
+      } catch (err) {
+        lastError = err instanceof Error ? err.message : String(err);
+        console.warn(
+          `[Compendium] ${kind} upsert failed (${entry.name ?? dataIdPreview(kind, entry)}):`,
+          lastError,
+        );
       }
     }
-    if (!isCompendiumBulkImportActive()) {
+  }
+
+  if (saved === 0) {
+    storageUnavailable = true;
+    lastStorageError = lastError ?? 'All compendium upserts failed';
+    lastStorageCheckAt = new Date().toISOString();
+    throw new Error(lastStorageError);
+  }
+
+  storageUnavailable = false;
+  lastStorageError = null;
+  lastStorageCheckAt = new Date().toISOString();
+  lastStorageSuccessAt = lastStorageCheckAt;
+  lastStorageLatencyMs = null;
+
+  if (!isCompendiumBulkImportActive()) {
+    try {
       await touchCompendiumMeta();
+    } catch (err) {
+      console.warn(
+        '[Compendium] touchCompendiumMeta failed after import upserts (entries saved):',
+        err instanceof Error ? err.message : err,
+      );
     }
-  });
+  }
+}
+
+function dataIdPreview(
+  kind: CompendiumStorageKind,
+  entry: OwlbearMonster | OwlbearItem | OwlbearSpell,
+): string {
+  try {
+    return buildUpsertData(kind, entry, { isCustom: false, inTypedImport: true }).id;
+  } catch {
+    return entry.name ?? 'unknown';
+  }
 }
 
 export async function deleteCompendiumEntryBySlug(id: string): Promise<void> {

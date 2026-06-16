@@ -75,7 +75,9 @@ function formatImportResultMessage(result: DdbLibraryImportResult, base: string)
       .join('; ');
     msg += ` Failures: ${summary}.`;
   }
-  if (result.mongoPersisted === false) {
+  if (result.mongoPersisted === false && result.imported.length > 0) {
+    msg += ' Warning: some entries could not be saved — try Sync compendium or re-import.';
+  } else if (result.mongoPersisted === false) {
     msg += ' Warning: compendium save failed — try Sync compendium or re-import.';
   }
   return msg;

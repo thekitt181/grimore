@@ -559,8 +559,9 @@ async function saveImportBatch<T extends OwlbearMonster | OwlbearItem | OwlbearS
   meta: ImportBatchMeta,
   importSourceId?: number,
 ): Promise<void> {
-  for (let i = 0; i < pending.length; i += SAVE_BATCH) {
-    const slice = pending.slice(i, i + SAVE_BATCH);
+  async function persistSlice(
+    slice: Array<{ entry: T; ddbId: number }>,
+  ): Promise<void> {
     const payloads = slice.map(({ entry }) => ({
       entry,
       opts: resolveImportSaveOpts(entry, importSourceId),
@@ -568,13 +569,8 @@ async function saveImportBatch<T extends OwlbearMonster | OwlbearItem | OwlbearS
 
     try {
       const batch = await saveBulk(payloads);
-      meta.mongoPersisted = meta.mongoPersisted && batch.persist.mongoPersisted;
       if (!batch.persist.mongoPersisted) {
-        const message = 'Could not save to compendium database — try again shortly';
-        for (const { ddbId } of slice) {
-          errors.push({ id: ddbId, message });
-        }
-        continue;
+        throw new Error('Compendium batch save returned mongoPersisted=false');
       }
       meta.savedEntries.push(...batch.entries);
       for (let j = 0; j < batch.entries.length; j++) {
@@ -592,8 +588,8 @@ async function saveImportBatch<T extends OwlbearMonster | OwlbearItem | OwlbearS
       for (const { entry, ddbId } of slice) {
         try {
           const single = await saveBulk([{ entry, opts: resolveImportSaveOpts(entry, importSourceId) }]);
-          meta.mongoPersisted = meta.mongoPersisted && single.persist.mongoPersisted;
-          if (!single.persist.mongoPersisted) {
+          if (!single.persist.mongoPersisted || single.entries.length === 0) {
+            meta.mongoPersisted = false;
             errors.push({
               id: ddbId,
               message: 'Could not save to compendium database — try again shortly',
@@ -611,6 +607,7 @@ async function saveImportBatch<T extends OwlbearMonster | OwlbearItem | OwlbearS
             });
           }
         } catch (err) {
+          meta.mongoPersisted = false;
           errors.push({
             id: ddbId,
             message: err instanceof Error ? err.message : batchMessage,
@@ -618,6 +615,10 @@ async function saveImportBatch<T extends OwlbearMonster | OwlbearItem | OwlbearS
         }
       }
     }
+  }
+
+  for (let i = 0; i < pending.length; i += SAVE_BATCH) {
+    await persistSlice(pending.slice(i, i + SAVE_BATCH));
   }
 }
 
@@ -641,7 +642,7 @@ async function finalizeDdbImportResult(
     ...result,
     catalogRev: getCatalogRevision() ?? undefined,
     sourcesUnlocked: [...new Set([...unlockedFromIds, ...unlockedFromLabels])],
-    mongoPersisted: meta.mongoPersisted,
+    mongoPersisted: result.imported.length === 0 ? true : meta.mongoPersisted,
   };
 }
 
