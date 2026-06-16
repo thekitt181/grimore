@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { authClient, signInWithGoogle } from '@/lib/auth-client';
+import { authClient, getAuthBearerToken, signInWithGoogle } from '@/lib/auth-client';
 import { useGoogleOAuthAvailable } from '@/hooks/useGoogleOAuthAvailable';
 import { LogoMark } from '@/components/LogoMark';
 
@@ -28,6 +28,7 @@ export function SignUpPage() {
         setError(signUpError.message ?? 'Sign up failed');
         return;
       }
+      await getAuthBearerToken({ skipCache: true });
       navigate('/');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Sign up failed');

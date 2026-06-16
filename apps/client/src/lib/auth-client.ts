@@ -9,9 +9,17 @@ export function getBearerToken(): string | null {
   return localStorage.getItem(BEARER_TOKEN_KEY);
 }
 
+function normalizeBearerToken(raw: string): string {
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return raw;
+  }
+}
+
 export function setBearerToken(token: string | null): void {
   if (typeof window === 'undefined') return;
-  if (token) localStorage.setItem(BEARER_TOKEN_KEY, token);
+  if (token) localStorage.setItem(BEARER_TOKEN_KEY, normalizeBearerToken(token));
   else localStorage.removeItem(BEARER_TOKEN_KEY);
 }
 
@@ -22,7 +30,7 @@ export const authClient = createAuthClient({
     credentials: 'include',
     auth: {
       type: 'Bearer',
-      token: () => getBearerToken() ?? '',
+      token: () => getBearerToken() || undefined,
     },
     onSuccess: (ctx) => {
       const authToken = ctx.response.headers.get('set-auth-token');
@@ -35,17 +43,19 @@ let bearerHydratePromise: Promise<string | null> | null = null;
 
 async function hydrateBearerFromSession(): Promise<string | null> {
   try {
-    const { data } = await authClient.getSession();
-    if (!data?.session) return null;
-
-    const fromHeader = getBearerToken();
-    if (fromHeader) return fromHeader;
-
-    const sessionToken = (data.session as { token?: string }).token;
-    if (sessionToken) {
-      setBearerToken(sessionToken);
-      return sessionToken;
+    const { data } = await authClient.getSession({
+      fetchOptions: {
+        onSuccess: (ctx) => {
+          const authToken = ctx.response.headers.get('set-auth-token');
+          if (authToken) setBearerToken(authToken);
+        },
+      },
+    });
+    if (!data?.session) {
+      setBearerToken(null);
+      return null;
     }
+    return getBearerToken();
   } catch (err) {
     console.warn('[Auth] Bearer token hydration failed:', err);
   }

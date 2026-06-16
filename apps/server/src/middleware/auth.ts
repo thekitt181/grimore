@@ -1,10 +1,12 @@
 import type { Request, Response, NextFunction } from 'express';
-import { resolveAuthUser } from '../lib/authUserCache';
+import { resolveAuthUser, type AuthUserRecord } from '../lib/authUserCache';
+import { isDbPoolSaturation } from '../lib/dbTimeout';
 import { getAuthUserIdFromHeaders } from '../lib/sessionAuth';
 
 export interface AuthenticatedRequest extends Request {
   userId?: string;
   authUserId?: string;
+  authUser?: AuthUserRecord;
 }
 
 /**
@@ -26,8 +28,14 @@ export async function requireAuth(
 
     req.userId = user.id;
     req.authUserId = authUserId;
+    req.authUser = user;
     next();
   } catch (err) {
+    if (isDbPoolSaturation(err)) {
+      console.error('[Auth] DB pool saturated during session verification:', err);
+      res.status(503).json({ error: 'Database busy — try again shortly', retry: true });
+      return;
+    }
     console.error('[Auth] Session verification failed:', err);
     res.status(401).json({ error: 'Unauthorized' });
   }

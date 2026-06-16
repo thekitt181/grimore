@@ -10,7 +10,20 @@ export async function getSessionFromHeaders(headers: IncomingHttpHeaders) {
 
 export async function getAuthUserIdFromHeaders(headers: IncomingHttpHeaders): Promise<string | null> {
   const session = await getSessionFromHeaders(headers);
-  return session?.user?.id ?? null;
+  if (session?.user?.id) return session.user.id;
+
+  // A stale Authorization bearer (e.g. old localStorage token) can make getSession
+  // return null even when the session cookie is still valid.
+  const authz = headers.authorization;
+  const cookie = headers.cookie;
+  if (authz?.startsWith('Bearer ') && cookie) {
+    const cookieSession = await auth.api.getSession({
+      headers: new Headers({ cookie }),
+    });
+    return cookieSession?.user?.id ?? null;
+  }
+
+  return null;
 }
 
 export async function getAuthUserIdFromRequest(

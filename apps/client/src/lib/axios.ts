@@ -1,4 +1,5 @@
 import axios, { type InternalAxiosRequestConfig } from 'axios';
+import { setBearerToken } from '@/lib/auth-client';
 import { getCompendiumAdminPassword } from '@/systems/compendium/compendiumAdminStore';
 import { getApiBaseUrl } from './appUrls';
 import {
@@ -25,26 +26,37 @@ export function isApiAuthError(err: unknown): boolean {
   return axios.isAxiosError(err) && err.response?.status === 401;
 }
 
-/** Confirm the server accepts the current Clerk token (not just that Clerk returned one). */
-export async function verifyApiSession(force = false): Promise<boolean> {
-  if (!force && wasApiSessionVerifiedRecently() && !isApiAuthBlocked()) return true;
-  if (!getAuthToken) return false;
-  const token = await getAuthToken({ skipCache: true });
-  if (!token) {
-    markApiAuthBlocked('missing-token');
-    return false;
+export function isApiDbBusyError(err: unknown): boolean {
+  return axios.isAxiosError(err) && err.response?.status === 503;
+}
+
+/** Confirm the server accepts the current session (cookie and/or bearer). */
+export async function verifyApiSessionState(force = false): Promise<'ok' | 'unauthorized' | 'busy'> {
+  if (!force && wasApiSessionVerifiedRecently() && !isApiAuthBlocked()) return 'ok';
+
+  let authHeader: string | undefined;
+  if (getAuthToken) {
+    const token = await getAuthToken({ skipCache: true });
+    if (token) authHeader = `Bearer ${token}`;
   }
+
   try {
     await api.get('/users/me', {
-      headers: { Authorization: `Bearer ${token}` },
-      __authRetried: true,
+      ...(authHeader ? { headers: { Authorization: authHeader } } : {}),
+      __authRetryStage: 99,
     } as RetriableConfig);
     clearApiAuthBlocked();
-    return true;
+    return 'ok';
   } catch (err) {
+    if (isApiDbBusyError(err)) return 'busy';
     if (isApiAuthError(err)) markApiAuthBlocked('unauthorized');
-    return false;
+    return 'unauthorized';
   }
+}
+
+export async function verifyApiSession(force = false): Promise<boolean> {
+  const state = await verifyApiSessionState(force);
+  return state === 'ok';
 }
 
 export async function ensureApiAuthSession(force = false): Promise<boolean> {
@@ -85,7 +97,7 @@ api.interceptors.request.use(async (config) => {
 });
 
 type RetriableConfig = InternalAxiosRequestConfig & {
-  __authRetried?: boolean;
+  __authRetryStage?: number;
   __wakeRetryCount?: number;
   __networkRetryCount?: number;
 };
@@ -100,7 +112,7 @@ function wakeRetryDelayMs(attempt: number): number {
 
 api.interceptors.response.use(
   (res) => {
-    if ((res.config as RetriableConfig).__authRetried) {
+    if ((res.config as RetriableConfig).__authRetryStage === 99) {
       clearApiAuthBlocked();
       dispatchAuthEvent('grimoire:auth-recovered');
     }
@@ -136,17 +148,26 @@ api.interceptors.response.use(
       }
     }
 
-    if (status === 401 && !config.__authRetried && getAuthToken) {
-      config.__authRetried = true;
-      const token = await getAuthToken({ skipCache: true });
-      if (token) {
-        config.headers['Authorization'] = `Bearer ${token}`;
+    if (status === 401) {
+      const stage = config.__authRetryStage ?? 0;
+
+      if (stage === 0 && config.headers['Authorization']) {
+        config.__authRetryStage = 1;
+        setBearerToken(null);
+        delete config.headers['Authorization'];
         return api.request(config);
       }
-      markApiAuthBlocked('missing-token');
-      dispatchAuthEvent('grimoire:auth-expired');
-    } else if (status === 401) {
-      if (config.__authRetried) markApiAuthBlocked('unauthorized');
+
+      if (stage <= 1 && getAuthToken) {
+        config.__authRetryStage = 2;
+        const token = await getAuthToken({ skipCache: true });
+        if (token) {
+          config.headers['Authorization'] = `Bearer ${token}`;
+          return api.request(config);
+        }
+      }
+
+      markApiAuthBlocked(stage >= 2 ? 'unauthorized' : 'missing-token');
       dispatchAuthEvent('grimoire:auth-expired');
     }
 

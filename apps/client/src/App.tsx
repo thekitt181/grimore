@@ -1,7 +1,8 @@
-import { useEffect } from 'react';
+import { useEffect, useLayoutEffect, useState } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { useGrimoireAuth } from '@/hooks/useGrimoireAuth';
-import { setAuthTokenGetter } from '@/lib/axios';
+import { getAuthBearerToken, signOutAndClear } from '@/lib/auth-client';
+import { setAuthTokenGetter, verifyApiSessionState } from '@/lib/axios';
 import { Dashboard } from '@/pages/Dashboard';
 import { CampaignDetail } from '@/pages/CampaignDetail';
 import { SessionPage } from '@/pages/SessionPage';
@@ -15,8 +16,46 @@ import { DdbImportJobBanner } from '@/systems/ddb/DdbImportJobBanner';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isSignedIn, isLoaded } = useGrimoireAuth();
+  const [apiReady, setApiReady] = useState(false);
+  const [sessionInvalid, setSessionInvalid] = useState(false);
 
-  if (!isLoaded) {
+  useEffect(() => {
+    if (!isLoaded || !isSignedIn) {
+      setApiReady(false);
+      setSessionInvalid(false);
+      return;
+    }
+
+    let cancelled = false;
+    void (async () => {
+      await getAuthBearerToken({ skipCache: true });
+      for (let attempt = 0; attempt < 5 && !cancelled; attempt++) {
+        const state = await verifyApiSessionState(true);
+        if (cancelled) return;
+        if (state === 'ok') {
+          setApiReady(true);
+          return;
+        }
+        if (state === 'unauthorized') {
+          await signOutAndClear();
+          setSessionInvalid(true);
+          setApiReady(false);
+          return;
+        }
+        await new Promise((r) => setTimeout(r, Math.min(2000 * (attempt + 1), 8000)));
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isLoaded, isSignedIn]);
+
+  if (sessionInvalid) {
+    return <Navigate to="/sign-in" replace />;
+  }
+
+  if (!isLoaded || (isSignedIn && !apiReady)) {
     return (
       <div
         className="min-h-screen flex items-center justify-center"
@@ -41,8 +80,8 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 export default function App() {
   const { getToken, isSignedIn, isLoaded } = useGrimoireAuth();
 
-  // Register bearer token getter for axios interceptor (runs once on mount)
-  useEffect(() => {
+  // Register before protected routes fire API calls (child effects run first).
+  useLayoutEffect(() => {
     setAuthTokenGetter(async (opts) => (await getToken(opts)) ?? null);
   }, [getToken]);
 

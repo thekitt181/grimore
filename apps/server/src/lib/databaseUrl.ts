@@ -36,7 +36,7 @@ export function resolveDatabaseUrl(raw?: string): string {
 
   if (!url.searchParams.has('connection_limit')) {
     const fromEnv = process.env['DATABASE_CONNECTION_LIMIT']?.trim();
-    const fallback = '5';
+    const fallback = '3';
     url.searchParams.set('connection_limit', fromEnv || fallback);
   }
 
