@@ -6,28 +6,41 @@ import { fetchSyncStatus, reconcileCompendiumMongo } from './compendiumApi';
 
 const GOLD = 'var(--color-accent-gold)';
 
-function mongoStatusLabel(status?: CompendiumSyncStatus): { text: string; tone: 'ok' | 'warn' | 'bad' | 'off' } {
+function compendiumBackendLabel(status?: CompendiumSyncStatus): string {
+  if (status?.storage === 'postgresql') return 'Postgres';
+  if (status?.mongoHealth?.configured) return 'Mongo';
+  return 'Local';
+}
+
+function compendiumStatusLabel(status?: CompendiumSyncStatus): { text: string; tone: 'ok' | 'warn' | 'bad' | 'off' } {
   const health = status?.mongoHealth;
   const storage = status?.storage;
+  const backend = compendiumBackendLabel(status);
+
   if (!health?.configured && storage !== 'postgresql') {
-    return { text: 'DB off (local)', tone: 'off' };
+    return { text: 'Compendium off (local files)', tone: 'off' };
   }
+
   switch (health?.state) {
     case 'connected':
       return {
-        text: health.latencyMs != null
-          ? `${storage === 'postgresql' ? 'Postgres' : 'Mongo'} OK · ${health.latencyMs}ms`
-          : storage === 'postgresql' ? 'Postgres OK' : 'Mongo OK',
+        text: health.latencyMs != null ? `${backend} OK · ${health.latencyMs}ms` : `${backend} OK`,
         tone: 'ok',
       };
     case 'degraded':
-      return { text: 'Mongo degraded', tone: 'warn' };
+      return { text: `${backend} degraded`, tone: 'warn' };
     case 'circuit-open':
-      return { text: 'Mongo paused (circuit)', tone: 'bad' };
+      return { text: `${backend} paused (circuit)`, tone: 'bad' };
     case 'unavailable':
-      return { text: 'Mongo unreachable', tone: 'bad' };
+      return {
+        text: storage === 'postgresql' ? 'Compendium DB busy' : `${backend} unreachable`,
+        tone: 'warn',
+      };
     default:
-      return { text: status?.storage === 'postgresql' ? 'Postgres syncing…' : 'Local fallback', tone: 'warn' };
+      return {
+        text: storage === 'postgresql' ? 'Postgres syncing…' : 'Local fallback',
+        tone: 'warn',
+      };
   }
 }
 
@@ -38,14 +51,13 @@ function toneColor(tone: 'ok' | 'warn' | 'bad' | 'off'): string {
   return 'var(--color-text-secondary)';
 }
 
-function needsMongoHeal(status?: CompendiumSyncStatus): boolean {
-  if (!status?.mongoHealth?.configured) return false;
-  const state = status.mongoHealth.state;
-  return status.mongoConnected === false
+function needsCompendiumHeal(status?: CompendiumSyncStatus): boolean {
+  const state = status?.mongoHealth?.state;
+  return status?.mongoConnected === false
     || state === 'unavailable'
     || state === 'circuit-open'
     || state === 'degraded'
-    || status.storage === 'local';
+    || status?.storage === 'local';
 }
 
 export function CompendiumMongoStatus() {
@@ -56,8 +68,9 @@ export function CompendiumMongoStatus() {
     queryFn: fetchSyncStatus,
     staleTime: 15_000,
   });
-  const label = mongoStatusLabel(syncStatus);
-  const showHeal = needsMongoHeal(syncStatus);
+  const label = compendiumStatusLabel(syncStatus);
+  const showHeal = needsCompendiumHeal(syncStatus);
+  const backend = compendiumBackendLabel(syncStatus);
 
   const healMut = useMutation({
     mutationFn: () =>
@@ -70,16 +83,16 @@ export function CompendiumMongoStatus() {
       qc.setQueryData(['compendium', 'sync-status'], next);
       void qc.invalidateQueries({ queryKey: ['compendium'] });
       if (next.mongoHealth?.state === 'connected') {
-        setHealMessage('Mongo restored — catalog rebuilding in background.');
+        setHealMessage(`${backend} restored — catalog rebuilding in background.`);
       } else {
         setHealMessage(
           next.mongoHealth?.lastError
-            ?? 'Mongo still unavailable — local compendium refreshed; check Atlas IP allowlist and network.',
+            ?? `${backend} still unavailable — local compendium refreshed.`,
         );
       }
     },
     onError: (err) => {
-      setHealMessage(extractApiError(err, 'Heal failed — Mongo still unavailable'));
+      setHealMessage(extractApiError(err, 'Heal failed — compendium DB still unavailable'));
       void qc.invalidateQueries({ queryKey: ['compendium', 'sync-status'] });
     },
   });
@@ -116,7 +129,7 @@ export function CompendiumMongoStatus() {
               setHealMessage(null);
               healMut.mutate();
             }}
-            title="Reset Mongo circuit breaker, reconnect, and sync compendium"
+            title="Reset compendium DB circuit breaker and refresh catalog"
           >
             {healMut.isPending ? 'Healing…' : 'Heal'}
           </button>
@@ -126,7 +139,7 @@ export function CompendiumMongoStatus() {
         <p
           className="font-ui text-[10px] leading-snug px-0.5"
           style={{
-            color: healMessage.startsWith('Mongo restored')
+            color: healMessage.includes('restored')
               ? '#4ade80'
               : 'var(--color-accent-red-hot)',
           }}

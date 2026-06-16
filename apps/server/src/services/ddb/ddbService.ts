@@ -1,4 +1,4 @@
-import { prisma } from '../../lib/prisma';
+import { readPrisma } from '../../lib/prisma';
 import type { Prisma } from '@prisma/client';
 import { decryptToken, encryptToken } from './encryption';
 import { normalizeCobaltToken, validateCobalt } from './cobaltAuth';
@@ -25,7 +25,7 @@ import { coerceGrimoireCharacter, DDB_HOMEBREW_SOURCE_ID, type DdbLinkStatus, ty
 import { DDB_NORMALIZER_VERSION } from './normalizerVersion';
 
 export async function getCobaltForUser(userId: string): Promise<string | null> {
-  const conn = await prisma.ddbConnection.findUnique({ where: { userId } });
+  const conn = await readPrisma.ddbConnection.findUnique({ where: { userId } });
   if (!conn) return null;
   return decryptToken(conn.cobaltEncrypted);
 }
@@ -40,7 +40,7 @@ export async function linkDdbAccount(userId: string, cobalt: string): Promise<Dd
   }
 
   const now = new Date();
-  await prisma.ddbConnection.upsert({
+  await readPrisma.ddbConnection.upsert({
     where: { userId },
     create: {
       userId,
@@ -62,12 +62,12 @@ export async function linkDdbAccount(userId: string, cobalt: string): Promise<Dd
 }
 
 export async function unlinkDdbAccount(userId: string): Promise<void> {
-  await prisma.ddbConnection.deleteMany({ where: { userId } });
-  await prisma.ddbCharacterCache.deleteMany({ where: { userId } });
+  await readPrisma.ddbConnection.deleteMany({ where: { userId } });
+  await readPrisma.ddbCharacterCache.deleteMany({ where: { userId } });
 }
 
 export async function getDdbStatus(userId: string): Promise<DdbLinkStatus> {
-  const conn = await prisma.ddbConnection.findUnique({ where: { userId } });
+  const conn = await readPrisma.ddbConnection.findUnique({ where: { userId } });
   if (!conn) return { linked: false };
 
   let cobalt: string;
@@ -85,7 +85,7 @@ export async function getDdbStatus(userId: string): Promise<DdbLinkStatus> {
     console.error('[DDB] validate failed:', err);
   }
   if (valid && !conn.lastValidatedAt) {
-    await prisma.ddbConnection.update({
+    await readPrisma.ddbConnection.update({
       where: { userId },
       data: { lastValidatedAt: new Date() },
     });
@@ -106,7 +106,7 @@ async function loadCachedCharacter(
   ddbCharacterId: number,
 ): Promise<GrimoireCharacter | null> {
   for (const cacheUserId of cacheUserIds) {
-    const cached = await prisma.ddbCharacterCache.findUnique({
+    const cached = await readPrisma.ddbCharacterCache.findUnique({
       where: { userId_ddbCharacterId: { userId: cacheUserId, ddbCharacterId } },
     });
     if (!cached) continue;
@@ -136,7 +136,7 @@ async function resolveDdbProviderUserId(
     throw new Error('D&D Beyond account not linked');
   }
 
-  const session = await prisma.gameSession.findUnique({
+  const session = await readPrisma.gameSession.findUnique({
     where: { id: sessionId },
     select: {
       campaignId: true,
@@ -145,7 +145,7 @@ async function resolveDdbProviderUserId(
   });
   if (!session) throw new Error('Session not found');
 
-  const member = await prisma.campaignMember.findFirst({
+  const member = await readPrisma.campaignMember.findFirst({
     where: { campaignId: session.campaignId, userId },
   });
   if (!member) throw new Error('Session access required');
@@ -177,7 +177,7 @@ export async function getOrSyncCharacter(
 
   const character = await extractCharacter(cobalt, ddbCharacterId);
   const snapshot = { ...character, ddbNormalizerVersion: DDB_NORMALIZER_VERSION };
-  await prisma.ddbCharacterCache.upsert({
+  await readPrisma.ddbCharacterCache.upsert({
     where: { userId_ddbCharacterId: { userId: providerId, ddbCharacterId } },
     create: {
       userId: providerId,
@@ -211,7 +211,7 @@ export async function patchCharacterHp(
 
   const pushedToDdb = await pushHpToDdb(cobalt, ddbCharacterId, hp, tempHp);
 
-  const cached = await prisma.ddbCharacterCache.findUnique({
+  const cached = await readPrisma.ddbCharacterCache.findUnique({
     where: { userId_ddbCharacterId: { userId, ddbCharacterId } },
   });
 
@@ -221,7 +221,7 @@ export async function patchCharacterHp(
       ddbCharacterId,
     });
     const next = coerceGrimoireCharacter({ ...snap, hp, tempHp, lastSyncedAt: new Date().toISOString() });
-    await prisma.ddbCharacterCache.update({
+    await readPrisma.ddbCharacterCache.update({
       where: { id: cached.id },
       data: {
         snapshot: {
@@ -260,7 +260,7 @@ export async function patchCharacterDeathSaves(
     pushedToDdb = pushedToDdb && hpPushed;
   }
 
-  const cached = await prisma.ddbCharacterCache.findUnique({
+  const cached = await readPrisma.ddbCharacterCache.findUnique({
     where: { userId_ddbCharacterId: { userId, ddbCharacterId } },
   });
 
@@ -280,7 +280,7 @@ export async function patchCharacterDeathSaves(
       ...(options?.tempHp != null ? { tempHp: options.tempHp } : {}),
       lastSyncedAt: new Date().toISOString(),
     });
-    await prisma.ddbCharacterCache.update({
+    await readPrisma.ddbCharacterCache.update({
       where: { id: cached.id },
       data: {
         snapshot: {

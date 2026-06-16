@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { DDB_HOMEBREW_SOURCE_ID } from '@grimoire/shared';
-import { prisma } from '../lib/prisma';
+import { readPrisma } from '../lib/readPrisma';
 import { isDbPoolSaturation } from '../lib/dbTimeout';
 import { requireAuth, type AuthenticatedRequest } from '../middleware/auth';
 import { requireSessionMember } from '../middleware/requireSessionMember';
@@ -115,6 +115,10 @@ router.get('/status', requireAuth, async (req: AuthenticatedRequest, res) => {
     const status = await getDdbStatus(req.userId!);
     res.json(status);
   } catch (err) {
+    if (isDbPoolSaturation(err)) {
+      res.status(503).json({ error: 'Database busy — try again shortly', retry: true });
+      return;
+    }
     console.error('[DDB] status error:', err);
     res.status(500).json({ error: 'Failed to check D&D Beyond status' });
   }
@@ -274,7 +278,7 @@ router.post('/campaigns/:campaignId/link', requireAuth, async (req: Authenticate
       return;
     }
 
-    const member = await prisma.campaignMember.findFirst({
+    const member = await readPrisma.campaignMember.findFirst({
       where: { campaignId, userId: req.userId!, role: 'GM' },
     });
     if (!member) {
@@ -282,7 +286,7 @@ router.post('/campaigns/:campaignId/link', requireAuth, async (req: Authenticate
       return;
     }
 
-    const link = await prisma.ddbCampaignLink.upsert({
+    const link = await readPrisma.ddbCampaignLink.upsert({
       where: { campaignId },
       create: { campaignId, ddbCampaignId: parsed.data.ddbCampaignId },
       update: { ddbCampaignId: parsed.data.ddbCampaignId, linkedAt: new Date() },
@@ -298,7 +302,7 @@ router.post('/campaigns/:campaignId/link', requireAuth, async (req: Authenticate
 router.get('/campaigns/:campaignId/ddb-link', requireAuth, async (req: AuthenticatedRequest, res) => {
   try {
     const campaignId = req.params['campaignId'] ?? '';
-    const link = await prisma.ddbCampaignLink.findUnique({ where: { campaignId } });
+    const link = await readPrisma.ddbCampaignLink.findUnique({ where: { campaignId } });
     res.json({ link: link ?? null });
   } catch (err) {
     console.error('[DDB] ddb-link error:', err);
@@ -396,12 +400,12 @@ router.patch('/settings', requireAuth, async (req: AuthenticatedRequest, res) =>
       res.status(400).json({ error: 'Invalid settings' });
       return;
     }
-    const conn = await prisma.ddbConnection.findUnique({ where: { userId: req.userId! } });
+    const conn = await readPrisma.ddbConnection.findUnique({ where: { userId: req.userId! } });
     if (!conn) {
       res.status(400).json({ error: 'Not linked' });
       return;
     }
-    const updated = await prisma.ddbConnection.update({
+    const updated = await readPrisma.ddbConnection.update({
       where: { userId: req.userId! },
       data: {
         ...(parsed.data.syncHpToDdb !== undefined ? { syncHpToDdb: parsed.data.syncHpToDdb } : {}),
