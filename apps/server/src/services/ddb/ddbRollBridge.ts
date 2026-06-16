@@ -1,7 +1,8 @@
 import WebSocket from 'ws';
 import type { Server } from 'socket.io';
 import type { DdbRollBridgePayload } from '@grimoire/shared';
-import { prisma } from '../../lib/prisma';
+import { readPrisma } from '../../lib/prisma';
+import { isDbPoolSaturation } from '../../lib/dbTimeout';
 import { isRedisOperational, safeRedis } from '../../lib/redis';
 import {
   cobaltCacheId,
@@ -296,10 +297,17 @@ async function pollGameLog(io: Server, bridge: ActiveBridge): Promise<void> {
   }
 }
 
+/** Cached game-log bearer (User.ID variant) — avoid re-auth on every 12s poll. */
+const gameLogAuthCache = new Map<string, { at: number; auth: { bearer: string; ddbUserId: number } }>();
+const GAME_LOG_AUTH_TTL_MS = 30 * 60 * 1000;
+
 /** Obtain bearer token with User.ID cookie (required for game-log REST/WS). */
 async function getGameLogAuth(cobalt: string): Promise<{ bearer: string; ddbUserId: number } | null> {
   const token = normalizeCobaltToken(cobalt);
   const cacheId = cobaltCacheId(token);
+
+  const hit = gameLogAuthCache.get(cacheId);
+  if (hit && Date.now() - hit.at < GAME_LOG_AUTH_TTL_MS) return hit.auth;
 
   let bearer = await getBearerToken(cacheId, token);
   if (!bearer) return null;
@@ -316,7 +324,9 @@ async function getGameLogAuth(cobalt: string): Promise<{ bearer: string; ddbUser
   if (!bearer) return null;
 
   ddbUserId = userIdFromBearer(bearer) ?? ddbUserId;
-  return { bearer, ddbUserId };
+  const auth = { bearer, ddbUserId };
+  gameLogAuthCache.set(cacheId, { at: Date.now(), auth });
+  return auth;
 }
 
 function scheduleReconnect(io: Server, bridge: ActiveBridge): void {
@@ -464,7 +474,7 @@ export async function startRollBridge(
   userId: string,
   ddbCampaignId?: number,
 ): Promise<void> {
-  const conn = await prisma.ddbConnection.findUnique({ where: { userId } });
+  const conn = await readPrisma.ddbConnection.findUnique({ where: { userId } });
   if (!conn) {
     console.warn('[DDB] roll bridge: user has no D&D Beyond connection');
     return;
@@ -534,13 +544,13 @@ export function stopRollBridge(sessionId: string, userId?: string): void {
 
 /** Resolve which Grimoire user should own the DDB roll bridge for a campaign. */
 export async function resolveRollBridgeUserId(campaignId: string): Promise<string | null> {
-  const campaign = await prisma.campaign.findUnique({
+  const campaign = await readPrisma.campaign.findUnique({
     where: { id: campaignId },
     select: { gmId: true },
   });
   if (!campaign) return null;
 
-  const gmConn = await prisma.ddbConnection.findUnique({ where: { userId: campaign.gmId } });
+  const gmConn = await readPrisma.ddbConnection.findUnique({ where: { userId: campaign.gmId } });
   if (gmConn?.rollBridgeEnabled) return campaign.gmId;
 
   return null;
@@ -559,7 +569,7 @@ async function loadSessionRollContext(sessionId: string): Promise<SessionRollCon
   const hit = sessionRollContextCache.get(sessionId);
   if (hit && Date.now() - hit.at < SESSION_CTX_TTL_MS) return hit;
 
-  const gameSession = await prisma.gameSession.findUnique({
+  const gameSession = await readPrisma.gameSession.findUnique({
     where: { id: sessionId },
     include: { campaign: { include: { ddbCampaignLink: true } } },
   });
@@ -568,7 +578,7 @@ async function loadSessionRollContext(sessionId: string): Promise<SessionRollCon
   const bridgeUserId = await resolveRollBridgeUserId(gameSession.campaignId);
   if (!bridgeUserId) return null;
 
-  const conn = await prisma.ddbConnection.findUnique({ where: { userId: bridgeUserId } });
+  const conn = await readPrisma.ddbConnection.findUnique({ where: { userId: bridgeUserId } });
   if (!conn?.rollBridgeEnabled) return null;
 
   const cobalt = await getCobaltForUser(bridgeUserId);
@@ -585,71 +595,89 @@ async function loadSessionRollContext(sessionId: string): Promise<SessionRollCon
 
 /** Poll DDB game log for new rolls (Redis-backed dedup). Used by bridge + HTTP API. */
 export async function fetchNewDdbRollsForSession(sessionId: string): Promise<DdbRollBridgePayload[]> {
-  const rollCtx = await loadSessionRollContext(sessionId);
-  if (!rollCtx) return [];
+  try {
+    const rollCtx = await loadSessionRollContext(sessionId);
+    if (!rollCtx) return [];
 
-  const auth = await getGameLogAuth(normalizeCobaltToken(rollCtx.cobalt));
-  if (!auth) return [];
+    const auth = await getGameLogAuth(normalizeCobaltToken(rollCtx.cobalt));
+    if (!auth) return [];
 
-  const ddbCampaignId = rollCtx.ddbCampaignId;
-  const url = `${REST_BASE}/getmessages?gameId=${ddbCampaignId}&userId=${auth.ddbUserId}`;
-  const res = await fetch(url, {
-    headers: {
-      Authorization: `Bearer ${auth.bearer}`,
-      Accept: 'application/json',
-      Origin: 'https://www.dndbeyond.com',
-    },
-  });
-  if (!res.ok) return [];
-
-  const json = (await res.json()) as { data?: unknown[]; messages?: unknown[] };
-  const msgs = json.data ?? json.messages ?? [];
-  if (!Array.isArray(msgs)) return [];
-
-  const seenKey = `ddb:roll-seen:${sessionId}`;
-  const initKey = `ddb:roll-seeded:${sessionId}`;
-
-  if (!isRedisOperational()) {
-    if (!localSeededSessions.has(sessionId)) {
-      for (const msg of msgs) {
-        const id = (msg as Record<string, unknown>).id;
-        if (typeof id === 'string') localClaimMessage(sessionId, id);
-      }
-      localSeededSessions.add(sessionId);
-      console.log(`[DDB] roll poll seeded session=${sessionId} (${msgs.length} messages, in-memory)`);
+    const ddbCampaignId = rollCtx.ddbCampaignId;
+    const url = `${REST_BASE}/getmessages?gameId=${ddbCampaignId}&userId=${auth.ddbUserId}`;
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        headers: {
+          Authorization: `Bearer ${auth.bearer}`,
+          Accept: 'application/json',
+          Origin: 'https://www.dndbeyond.com',
+        },
+      });
+    } catch (err) {
+      console.warn('[DDB] roll poll fetch failed:', err instanceof Error ? err.message : err);
       return [];
     }
-  } else {
-    const seeded = await safeRedis<string | null>(null, (client) => client.get(initKey));
+    if (!res.ok) return [];
 
-    if (!seeded) {
-      await safeRedis(undefined, async (client) => {
+    let json: { data?: unknown[]; messages?: unknown[] };
+    try {
+      json = (await res.json()) as { data?: unknown[]; messages?: unknown[] };
+    } catch (err) {
+      console.warn('[DDB] roll poll JSON parse failed:', err instanceof Error ? err.message : err);
+      return [];
+    }
+    const msgs = json.data ?? json.messages ?? [];
+    if (!Array.isArray(msgs)) return [];
+
+    const seenKey = `ddb:roll-seen:${sessionId}`;
+    const initKey = `ddb:roll-seeded:${sessionId}`;
+
+    if (!isRedisOperational()) {
+      if (!localSeededSessions.has(sessionId)) {
         for (const msg of msgs) {
           const id = (msg as Record<string, unknown>).id;
-          if (typeof id === 'string') await client.sadd(seenKey, id);
+          if (typeof id === 'string') localClaimMessage(sessionId, id);
         }
-        await client.setex(initKey, SEEN_TTL, '1');
-        await client.expire(seenKey, SEEN_TTL);
-      });
-      console.log(`[DDB] roll poll seeded session=${sessionId} (${msgs.length} messages)`);
-      return [];
+        localSeededSessions.add(sessionId);
+        console.log(`[DDB] roll poll seeded session=${sessionId} (${msgs.length} messages, in-memory)`);
+        return [];
+      }
+    } else {
+      const seeded = await safeRedis<string | null>(null, (client) => client.get(initKey));
+
+      if (!seeded) {
+        await safeRedis(undefined, async (client) => {
+          for (const msg of msgs) {
+            const id = (msg as Record<string, unknown>).id;
+            if (typeof id === 'string') await client.sadd(seenKey, id);
+          }
+          await client.setex(initKey, SEEN_TTL, '1');
+          await client.expire(seenKey, SEEN_TTL);
+        });
+        console.log(`[DDB] roll poll seeded session=${sessionId} (${msgs.length} messages)`);
+        return [];
+      }
     }
+
+    const out: DdbRollBridgePayload[] = [];
+    for (const msg of msgs) {
+      const id = (msg as Record<string, unknown>).id;
+      if (typeof id !== 'string') continue;
+
+      const parsed = parseRollMessage(msg);
+      if (!parsed) continue;
+      if (!(await claimDdbRollEmit(sessionId, parsed, id))) continue;
+
+      console.log(
+        `[DDB] roll poll: ${parsed.characterName} ${parsed.label} → ${parsed.total} (session=${sessionId})`,
+      );
+      out.push(toPayload(sessionId, parsed, id));
+    }
+
+    return out;
+  } catch (err) {
+    if (isDbPoolSaturation(err)) throw err;
+    console.warn('[DDB] roll poll error:', err instanceof Error ? err.message : err);
+    return [];
   }
-
-  const out: DdbRollBridgePayload[] = [];
-  for (const msg of msgs) {
-    const id = (msg as Record<string, unknown>).id;
-    if (typeof id !== 'string') continue;
-
-    const parsed = parseRollMessage(msg);
-    if (!parsed) continue;
-    if (!(await claimDdbRollEmit(sessionId, parsed, id))) continue;
-
-    console.log(
-      `[DDB] roll poll: ${parsed.characterName} ${parsed.label} → ${parsed.total} (session=${sessionId})`,
-    );
-    out.push(toPayload(sessionId, parsed, id));
-  }
-
-  return out;
 }

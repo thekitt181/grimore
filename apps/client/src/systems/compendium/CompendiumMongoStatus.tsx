@@ -7,8 +7,10 @@ import { fetchSyncStatus, reconcileCompendiumMongo } from './compendiumApi';
 const GOLD = 'var(--color-accent-gold)';
 
 function compendiumBackendLabel(status?: CompendiumSyncStatus): string {
+  if (status?.storage === 'mongodb') return 'Mongo';
   if (status?.storage === 'postgresql') return 'Postgres';
-  if (status?.mongoHealth?.configured) return 'Mongo';
+  // mongoHealth is a legacy field name — in production it reports Postgres compendium health.
+  if (status?.mongoHealth?.configured) return 'Postgres';
   return 'Local';
 }
 
@@ -17,7 +19,7 @@ function compendiumStatusLabel(status?: CompendiumSyncStatus): { text: string; t
   const storage = status?.storage;
   const backend = compendiumBackendLabel(status);
 
-  if (!health?.configured && storage !== 'postgresql') {
+  if (!health?.configured && storage !== 'postgresql' && storage !== 'mongodb') {
     return { text: 'Compendium off (local files)', tone: 'off' };
   }
 
@@ -38,7 +40,9 @@ function compendiumStatusLabel(status?: CompendiumSyncStatus): { text: string; t
       };
     default:
       return {
-        text: storage === 'postgresql' ? 'Postgres syncing…' : 'Local fallback',
+        text: storage === 'postgresql' || health?.configured
+          ? 'Postgres syncing…'
+          : 'Local fallback',
         tone: 'warn',
       };
   }

@@ -59,7 +59,7 @@ function compendiumErrorHint(error: unknown): string {
     if (error.response.status >= 500) {
       const msg = error.response.data?.error;
       if (typeof msg === 'string' && msg.trim()) {
-        if (msg.includes('Mongo operation timed out') || msg.includes('MongoDB temporarily unavailable')) {
+        if (msg.includes('Mongo operation timed out') || msg.includes('MongoDB temporarily unavailable') || msg.includes('Compendium DB')) {
           return 'Compendium database is slow — using cached data. It should recover shortly.';
         }
         return msg;

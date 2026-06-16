@@ -41,6 +41,7 @@ export async function requireSessionMember(
       res.status(503).json({ error: 'Database busy — try again shortly', retry: true });
       return;
     }
-    throw err;
+    console.error('[Auth] Session member check failed:', err);
+    res.status(500).json({ error: 'Session verification failed' });
   }
 }

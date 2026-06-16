@@ -447,8 +447,12 @@ router.get('/sessions/:sessionId/rolls/poll', requireAuth, requireSessionMember,
     const rolls = await fetchNewDdbRollsForSession(sessionId);
     res.json({ rolls });
   } catch (err) {
+    if (isDbPoolSaturation(err)) {
+      res.status(503).json({ error: 'Database busy — try again shortly', retry: true });
+      return;
+    }
     console.error('[DDB] roll poll failed:', err);
-    res.status(500).json({ error: 'Roll poll failed' });
+    res.json({ rolls: [] });
   }
 });
 
