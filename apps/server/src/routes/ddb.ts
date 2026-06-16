@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { DDB_HOMEBREW_SOURCE_ID } from '@grimoire/shared';
-import { readPrisma } from '../lib/readPrisma';
+import { readPrisma } from '../lib/prisma';
 import { isDbPoolSaturation } from '../lib/dbTimeout';
 import { requireAuth, type AuthenticatedRequest } from '../middleware/auth';
 import { requireSessionMember } from '../middleware/requireSessionMember';
