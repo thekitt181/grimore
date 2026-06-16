@@ -36,12 +36,12 @@ export function resolveDatabaseUrl(raw?: string): string {
 
   if (!url.searchParams.has('connection_limit')) {
     const fromEnv = process.env['DATABASE_CONNECTION_LIMIT']?.trim();
-    const fallback = process.env['NODE_ENV'] === 'production' ? '5' : '5';
+    const fallback = process.env['NODE_ENV'] === 'production' ? '3' : '5';
     url.searchParams.set('connection_limit', fromEnv || fallback);
   }
 
   if (!url.searchParams.has('pool_timeout')) {
-    url.searchParams.set('pool_timeout', '20');
+    url.searchParams.set('pool_timeout', process.env['NODE_ENV'] === 'production' ? '10' : '20');
   }
 
   return withSupabaseSsl(url.toString());

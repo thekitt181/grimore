@@ -8,6 +8,7 @@ import type {
 } from '@grimoire/shared';
 import { slugify } from '@grimoire/monster-dex';
 import { prisma } from '../lib/prisma';
+import { withDbTimeout } from '../lib/dbTimeout';
 import { entryNameKey, normalizeOwlbearRawDoc } from './compendiumMerge';
 import { compendiumEntryStorageId } from './compendiumEntryIdentity';
 import type { CompendiumKind } from './compendiumOwlbearPersist';
@@ -35,6 +36,7 @@ export const TYPED_IMPORT_COLLECTION: Record<CompendiumStorageKind, string> = {
 };
 
 const UPSERT_BATCH = 100;
+const STORAGE_PROBE_TIMEOUT_MS = Number(process.env['DB_PROBE_TIMEOUT_MS'] ?? 10_000);
 
 let storageUnavailable = false;
 let lastStorageError: string | null = null;
@@ -63,7 +65,7 @@ export function getCompendiumStorageHealthSnapshot() {
 async function withStorageProbe<T>(fn: () => Promise<T>): Promise<T> {
   const started = Date.now();
   try {
-    const result = await fn();
+    const result = await withDbTimeout(STORAGE_PROBE_TIMEOUT_MS, fn, 'compendium probe');
     storageUnavailable = false;
     lastStorageError = null;
     lastStorageCheckAt = new Date().toISOString();

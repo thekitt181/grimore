@@ -81,7 +81,16 @@ const corsOptions: cors.CorsOptions = {
 // CORS only for API — global CORS breaks Vite crossorigin /assets/ (500 + text/html CSS errors).
 app.use('/api', cors(corsOptions));
 app.use(cookieParser());
-app.all('/api/auth/*', toNodeHandler(auth));
+
+const authHandler = toNodeHandler(auth);
+app.all('/api/auth/*', (req, res) => {
+  void Promise.resolve(authHandler(req, res)).catch((err: unknown) => {
+    console.error('[Auth] Request failed:', req.method, req.originalUrl, err);
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'Authentication service error' });
+    }
+  });
+});
 app.post(
   '/api/support/webhook',
   express.raw({ type: 'application/json' }),
@@ -154,7 +163,6 @@ async function startCompendiumBackground(): Promise<void> {
     const { ensureBundledSourcesLocked, ensureImportedSourcesUnlocked } = await import('./services/compendiumBundledLock');
     await ensureBundledSourcesLocked('startup');
     await ensureImportedSourcesUnlocked('startup');
-    await warmCompendiumCatalog();
     startCompendiumMongoWatch();
     console.log('[Compendium] PostgreSQL storage — MongoDB compendium disabled');
   } catch (err) {
@@ -217,7 +225,8 @@ async function bootServices(): Promise<void> {
     }
 
     void connectRedisInBackground();
-    void startCompendiumBackground();
+    scheduleCompendiumBackground();
+    scheduleCompendiumCatalogWarm();
     scheduleResumeImportJobs();
   } catch (err) {
     console.error('[Server] Service boot failed — API stays unavailable until DB connects:', err);
@@ -226,13 +235,31 @@ async function bootServices(): Promise<void> {
 
 /** Defer DDB import resume so auth/API aren't starved by pool checkout at cold start. */
 function scheduleResumeImportJobs(): void {
-  const delayMs = Number(process.env['DDB_RESUME_JOBS_DELAY_MS'] ?? 90_000);
+  const delayMs = Number(process.env['DDB_RESUME_JOBS_DELAY_MS'] ?? 120_000);
   setTimeout(() => {
     void import('./services/ddb/ddbImportJobService')
       .then(({ resumeRunningImportJobs }) => resumeRunningImportJobs())
       .catch((err) => {
         console.warn('[DDB] Could not resume import jobs:', err);
       });
+  }, delayMs);
+}
+
+function scheduleCompendiumBackground(): void {
+  const delayMs = Number(process.env['COMPENDIUM_STARTUP_DELAY_MS'] ?? 180_000);
+  setTimeout(() => {
+    void startCompendiumBackground().catch((err) => {
+      console.error('[Compendium] Background init failed:', err);
+    });
+  }, delayMs);
+}
+
+function scheduleCompendiumCatalogWarm(): void {
+  const delayMs = Number(process.env['COMPENDIUM_WARM_DELAY_MS'] ?? 360_000);
+  setTimeout(() => {
+    void warmCompendiumCatalog().catch((err) => {
+      console.warn('[Compendium] Catalog warm failed:', err);
+    });
   }, delayMs);
 }
 
