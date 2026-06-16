@@ -48,9 +48,26 @@ export function resolveDatabaseUrl(raw?: string): string {
   return withSupabaseSsl(url.toString());
 }
 
-/** Dedicated Prisma pool for Better Auth (keeps sign-in off the compendium connection pool). */
+/** Dedicated Prisma pool for Better Auth — session pooler (5432), separate from app transaction pool (6543). */
 export function resolveAuthDatabaseUrl(): string {
-  const url = new URL(resolveDatabaseUrl());
+  const source = process.env['DATABASE_URL']?.trim();
+  if (!source) {
+    throw new Error('DATABASE_URL is not set');
+  }
+
+  let url: URL;
+  try {
+    url = new URL(source);
+  } catch {
+    throw new Error('DATABASE_URL is not a valid URL');
+  }
+
+  // Isolate auth from PgBouncer transaction pool used by compendium (port 6543).
+  if (url.hostname.includes('pooler.supabase.com')) {
+    url.port = '5432';
+    url.searchParams.delete('pgbouncer');
+  }
+
   url.searchParams.set(
     'connection_limit',
     process.env['AUTH_DATABASE_CONNECTION_LIMIT']?.trim() ?? '2',
@@ -59,6 +76,7 @@ export function resolveAuthDatabaseUrl(): string {
     'pool_timeout',
     process.env['AUTH_DATABASE_POOL_TIMEOUT']?.trim() ?? '20',
   );
+
   return withSupabaseSsl(url.toString());
 }
 

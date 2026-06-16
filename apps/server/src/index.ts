@@ -4,7 +4,7 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
-import { connectDatabases, disconnectDatabases } from './lib/prisma';
+import { connectDatabases, disconnectDatabases, authPrisma } from './lib/prisma';
 import { connectRedisOptional, disconnectAllRedis, isRedisOperational } from './lib/redis';
 import { attachRedisSocketAdapter, isSocketRedisAdapterEnabled } from './lib/socketRedisAdapter';
 import { getCompendiumStorageHealthSnapshot } from './services/compendiumPostgres';
@@ -25,6 +25,19 @@ import { scheduleCompendiumJobs } from './services/compendiumStartup';
 import { mountClientSpa } from './lib/serveClient';
 import { isFloorplanScanConfigured } from './services/floorplan/floorplanScanService';
 import { runMigrationsInBackground } from './lib/runMigrationsInBackground';
+
+import { withDbTimeout } from './lib/dbTimeout';
+
+async function checkAuthDatabase(): Promise<'ok' | 'error' | 'skipped'> {
+  if (!servicesReady) return 'skipped';
+  try {
+    await withDbTimeout(5_000, () => authPrisma.$queryRaw`SELECT 1`, 'auth health');
+    return 'ok';
+  } catch (err) {
+    console.warn('[Auth] Health DB check failed:', err);
+    return 'error';
+  }
+}
 
 const app = express();
 const httpServer = http.createServer(app);
@@ -95,7 +108,7 @@ app.post(
 );
 app.use(express.json({ limit: '50mb' }));
 
-app.get('/health', (_req, res) => {
+app.get('/health', async (_req, res) => {
   const compendiumHealth = getCompendiumStorageHealthSnapshot();
   res.json({
     status: servicesReady ? 'ok' : 'starting',
@@ -117,6 +130,7 @@ app.get('/health', (_req, res) => {
       googleCallback: `${getAuthBaseUrl()}/api/auth/callback/google`,
       dashboard: isBetterAuthDashboardEnabled(),
     },
+    authDb: await checkAuthDatabase(),
     timestamp: new Date().toISOString(),
   });
 });

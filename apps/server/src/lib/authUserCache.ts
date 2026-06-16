@@ -1,4 +1,4 @@
-import { prisma } from './prisma';
+import { authPrisma, prisma } from './prisma';
 
 export type AuthUserRecord = {
   id: string;
@@ -42,7 +42,7 @@ export async function resolveAuthUser(authUserId: string): Promise<AuthUserRecor
   });
 
   if (!user) {
-    const authUser = await prisma.authUser.findUnique({ where: { id: authUserId } });
+    const authUser = await authPrisma.authUser.findUnique({ where: { id: authUserId } });
     if (!authUser) {
       throw new Error(`Auth user not found: ${authUserId}`);
     }
