@@ -94,8 +94,8 @@ export function pickHandle(clientX: number, clientY: number): HandleDesc | null 
   const minDim = item ? Math.min(item.width, item.height) : 64;
   const isToken = item?.type === 'token';
   const tol = viewMode === '3d'
-    ? (isToken ? Math.max(10, Math.min(minDim * 0.09, 28)) : Math.max(14, Math.min(minDim * 0.14, 42)))
-    : (isToken ? Math.max(8 / scale, Math.min(minDim * 0.09, 18)) : Math.max(10 / scale, Math.min(minDim * 0.12, 24)));
+    ? (isToken ? Math.max(16, Math.min(minDim * 0.12, 34)) : Math.max(20, Math.min(minDim * 0.18, 50)))
+    : (isToken ? Math.max(14 / scale, Math.min(minDim * 0.12, 26)) : Math.max(18 / scale, Math.min(minDim * 0.16, 34)));
 
   const rect = getPickCanvasRect();
   const useScreen = viewMode === '3d' && rect && sceneCameraRef.liveCamera;

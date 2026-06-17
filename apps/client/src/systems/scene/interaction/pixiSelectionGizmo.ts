@@ -32,12 +32,12 @@ export function drawPixiSelectionGizmo(
 
   for (const h of layout.handles) {
     if (h.id === 'rotate') {
-      handlesG.circle(h.wx, h.wy, 9);
+      handlesG.circle(h.wx, h.wy, 12);
       handlesG.fill({ color: GOLD, alpha: 1 });
       handlesG.setStrokeStyle({ width: 1.5, color: 0xffffff, alpha: 0.9 });
       handlesG.stroke();
     } else {
-      handlesG.rect(h.wx - 5.5, h.wy - 5.5, 11, 11);
+      handlesG.rect(h.wx - 8, h.wy - 8, 16, 16);
       handlesG.fill({ color: GOLD, alpha: 1 });
     }
   }
