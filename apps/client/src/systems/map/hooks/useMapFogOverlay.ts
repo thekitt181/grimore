@@ -145,7 +145,7 @@ export function useMapFogOverlay(
     if (!layer) return;
     syncMapFogOverlays(layer, fogContainers.current, {
       ...fogStateRef.current,
-      liveById: {},
+      liveById: useLiveTransformStore.getState().byId,
     });
   };
 

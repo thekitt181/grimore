@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
-import { getActiveMap } from '@/systems/scene/store/itemStore';
+import { getActiveMap, useItemStore } from '@/systems/scene/store/itemStore';
+import { itemsWithLiveTransforms, useLiveTransformStore } from '@/systems/scene/store/liveTransformStore';
 import { useMapStore } from '@/systems/map/store/mapStore';
 import { useSessionStore } from '@/store/sessionStore';
 import { paintFogCanvas } from '@/systems/map/fogRender';
@@ -24,7 +25,10 @@ function useFogDrawState(map: MapItem) {
   const fogRevision = useMapStore((s) => s.fogRevision);
   const fogEnabled = useMapStore((s) => s.fogEnabled);
   const sessionFogActive = useMapStore((s) => s.sessionFogActive);
-  const myRole = useSessionStore((s) => s.myRole);
+  const items = useItemStore((s) => s.items);
+  const selectedIds = useItemStore((s) => s.selectedIds);
+  const liveTick = useLiveTransformStore((s) => s.tick);
+  const { myRole, myUserId } = useSessionStore();
 
   const isGM = myRole === 'GM';
   const showFogOverlay = fogEnabled || sessionFogActive;
@@ -37,6 +41,10 @@ function useFogDrawState(map: MapItem) {
     isGM,
     revealedCells,
     fogRevision,
+    items,
+    selectedIds,
+    myUserId,
+    liveTick,
   };
 }
 
@@ -71,13 +79,17 @@ export function Map3DFogOfWar({ map }: { map: MapItem }) {
     if (!ctx) return;
 
     ctx.setTransform(texScale, 0, 0, texScale, 0, 0);
+    const itemsForFog = itemsWithLiveTransforms(
+      s.items,
+      useLiveTransformStore.getState().byId,
+    );
     paintFogCanvas(ctx, map, {
       revealedCells: s.revealedCells,
       gridSize: map.gridSize,
       isGM: s.isGM,
-      items: {},
-      selectedIds: [],
-      myUserId: null,
+      items: itemsForFog,
+      selectedIds: s.selectedIds,
+      myUserId: s.myUserId,
       visible: true,
     });
 
@@ -101,7 +113,7 @@ export function Map3DFogOfWar({ map }: { map: MapItem }) {
 
   useEffect(() => {
     repaintFog();
-  }, [repaintFog, state.fogRevision, state.revealedCells, state.visible]);
+  }, [repaintFog, state.fogRevision, state.revealedCells, state.visible, state.liveTick, state.items, state.selectedIds]);
 
   useEffect(() => {
     if (!state.visible && materialRef.current) {
