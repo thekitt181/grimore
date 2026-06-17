@@ -13,26 +13,26 @@ interface LiveTransformState {
   byId: Record<string, LiveTransform>;
   /** Bumped on each change so fog can re-render without touching item store. */
   tick: number;
-  setLive: (id: string, patch: LiveTransform) => void;
-  setLiveMany: (entries: Array<{ id: string; patch: LiveTransform }>) => void;
+  setLive: (id: string, patch: LiveTransform, opts?: { bumpTick?: boolean }) => void;
+  setLiveMany: (entries: Array<{ id: string; patch: LiveTransform }>, opts?: { bumpTick?: boolean }) => void;
   clear: (ids: string[]) => void;
 }
 
 export const useLiveTransformStore = create<LiveTransformState>((set) => ({
   byId: {},
   tick: 0,
-  setLive: (id, patch) =>
-    set((s) => ({
-      byId: { ...s.byId, [id]: { ...s.byId[id], ...patch } },
-      tick: s.tick + 1,
-    })),
-  setLiveMany: (entries) =>
+  setLive: (id, patch, opts) =>
+    set((s) => {
+      const byId = { ...s.byId, [id]: { ...s.byId[id], ...patch } };
+      return opts?.bumpTick === false ? { byId } : { byId, tick: s.tick + 1 };
+    }),
+  setLiveMany: (entries, opts) =>
     set((s) => {
       const byId = { ...s.byId };
       for (const { id, patch } of entries) {
         byId[id] = { ...byId[id], ...patch };
       }
-      return { byId, tick: s.tick + 1 };
+      return opts?.bumpTick === false ? { byId } : { byId, tick: s.tick + 1 };
     }),
   clear: (ids) =>
     set((s) => {

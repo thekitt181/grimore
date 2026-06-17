@@ -174,8 +174,77 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
     }
 
     function moveDragDelta(m: MoveState, e: PointerEvent): { dx: number; dy: number } {
-      const { x: wx, y: wy } = clientToWorld(e.clientX, e.clientY);
-      return { dx: wx - m.startWorldX, dy: wy - m.startWorldY };
+      const scale = sceneRefs.world.current?.scale.x ?? 1;
+      const { viewMode, view3dOrbit } = useMapStore.getState();
+      const azimuth = viewMode === '3d' ? view3dOrbit.azimuth : 0;
+      return screenDeltaToWorldDelta(
+        e.clientX - m.startScreenX,
+        e.clientY - m.startScreenY,
+        scale,
+        azimuth,
+      );
+    }
+
+    function applyTokenMoveDrag(e: PointerEvent) {
+      if (!move) return;
+      const snap = useItemStore.getState().snapToGrid;
+      const tokenOnly = moveIncludesOnlyTokens(move.ids);
+      let { dx, dy } = moveDragDelta(move, e);
+
+      // Snap maps/drawings during drag; tokens snap on release for smooth motion.
+      if (snap && move.ids.length && !tokenOnly) {
+        const lead = move.ids[0]!;
+        const o = move.origins.get(lead)!;
+        const snapped = snapPoint(o.x + dx, o.y + dy);
+        dx = snapped.x - o.x;
+        dy = snapped.y - o.y;
+      }
+
+      const layer = sceneRefs.items.current;
+      const liveEntries: Array<{ id: string; patch: { x: number; y: number } }> = [];
+      for (const id of move.ids) {
+        const o = move.origins.get(id)!;
+        const it = useItemStore.getState().items[id];
+        if (!it) continue;
+        const nx = o.x + dx;
+        const ny = o.y + dy;
+        const live = useLiveTransformStore.getState().byId[id];
+        const drawW = live?.width ?? it.width;
+        const drawH = live?.height ?? it.height;
+        const c = getItemContainer(layer, id);
+        if (c) c.position.set(nx + drawW / 2, ny + drawH / 2);
+        liveEntries.push({ id, patch: { x: nx, y: ny } });
+      }
+      if (liveEntries.length) {
+        useLiveTransformStore.getState().setLiveMany(liveEntries, { bumpTick: false });
+      }
+
+      if (tokenOnly) {
+        const feet = worldDeltaToFeet(dx, dy);
+        useTokenDragMeasureStore.getState().setMeasure(feet, e.clientX, e.clientY);
+      }
+    }
+
+    let moveDragRaf: number | null = null;
+    let pendingMoveEvent: PointerEvent | null = null;
+
+    function scheduleTokenMoveDrag(e: PointerEvent) {
+      pendingMoveEvent = e;
+      if (moveDragRaf != null) return;
+      moveDragRaf = requestAnimationFrame(() => {
+        moveDragRaf = null;
+        const ev = pendingMoveEvent;
+        pendingMoveEvent = null;
+        if (ev && move) applyTokenMoveDrag(ev);
+      });
+    }
+
+    function cancelMoveDragRaf() {
+      if (moveDragRaf != null) {
+        cancelAnimationFrame(moveDragRaf);
+        moveDragRaf = null;
+      }
+      pendingMoveEvent = null;
     }
 
     function moveIncludesOnlyTokens(ids: string[]): boolean {
@@ -461,40 +530,9 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
       }
 
       if (move) {
-        const snap = useItemStore.getState().snapToGrid;
-        let { dx, dy } = moveDragDelta(move, e);
-
-        // Snap based on the primary selected item's origin
-        if (snap && move.ids.length) {
-          const lead = move.ids[0]!;
-          const o = move.origins.get(lead)!;
-          const snapped = snapPoint(o.x + dx, o.y + dy);
-          dx = snapped.x - o.x;
-          dy = snapped.y - o.y;
-        }
-
-        // Live update PixiJS containers + live transform (Three.js reads live each frame).
-        const layer = sceneRefs.items.current;
-        const liveEntries: Array<{ id: string; patch: { x: number; y: number } }> = [];
-        for (const id of move.ids) {
-          const o = move.origins.get(id)!;
-          const it = useItemStore.getState().items[id];
-          if (!it) continue;
-          const nx = o.x + dx;
-          const ny = o.y + dy;
-          const live = useLiveTransformStore.getState().byId[id];
-          const drawW = live?.width ?? it.width;
-          const drawH = live?.height ?? it.height;
-          const c = getItemContainer(layer, id);
-          if (c) c.position.set(nx + drawW / 2, ny + drawH / 2);
-          liveEntries.push({ id, patch: { x: nx, y: ny } });
-        }
-        if (liveEntries.length) useLiveTransformStore.getState().setLiveMany(liveEntries);
-
-        if (moveIncludesOnlyTokens(move.ids)) {
-          const feet = worldDeltaToFeet(dx, dy);
-          useTokenDragMeasureStore.getState().setMeasure(feet, e.clientX, e.clientY);
-        }
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        scheduleTokenMoveDrag(e);
         return;
       }
 
@@ -542,6 +580,9 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
       }
 
       if (move) {
+        cancelMoveDragRaf();
+        // Flush any pending frame so release uses the latest drag position.
+        if (pendingMoveEvent) applyTokenMoveDrag(pendingMoveEvent);
         const m = move;
         const snap = useItemStore.getState().snapToGrid;
         let { dx, dy } = moveDragDelta(m, e);
@@ -669,6 +710,7 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
     interactionEl.addEventListener('pointercancel', onUp, captureOpts);
 
     return () => {
+      cancelMoveDragRaf();
       setItemDragActive(false);
       useTokenDragMeasureStore.getState().clear();
       interactionEl.removeEventListener('pointerdown', onDown, captureOpts);

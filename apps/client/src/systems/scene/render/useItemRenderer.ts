@@ -52,8 +52,6 @@ export function useItemRenderer(
   const activeMapId = useItemStore((s) => s.activeMapId);
   const selectedWallIndices = useItemStore((s) => s.selectedWallIndices);
   const myRole  = useSessionStore((s) => s.myRole);
-  const liveById = useLiveTransformStore((s) => s.byId);
-  const liveTick = useLiveTransformStore((s) => s.tick);
   const activeTurnItemId = useInitiativeStore((s) =>
     s.isActive && s.combatants[s.currentIndex] ? s.combatants[s.currentIndex]!.tokenId : undefined
   );
@@ -109,6 +107,7 @@ export function useItemRenderer(
     };
     const activeMap = getActiveMap();
     const fogVisibleTokenIds = clientVisibleTokenIdSet(items, gm);
+    const liveById = useLiveTransformStore.getState().byId;
 
     const liveIds = new Set(Object.keys(items));
     const liveMapIds = new Set(
@@ -258,8 +257,6 @@ export function useItemRenderer(
     activeMapId,
     selectedWallIndices,
     myRole,
-    liveById,
-    liveTick,
     activeTurnItemId,
     viewMode,
     activeTool,

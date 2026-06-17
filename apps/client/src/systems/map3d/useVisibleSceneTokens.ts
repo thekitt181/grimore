@@ -20,19 +20,16 @@ export function useVisibleSceneTokens(opts?: { modelOnly?: boolean }): {
   const selectedIds = useItemStore((s) => s.selectedIds);
   const myUserId = useSessionStore((s) => s.myUserId);
   const fogRevision = useMapStore((s) => s.fogRevision);
-  const liveById = useLiveTransformStore((s) => s.byId);
-  const liveTick = useLiveTransformStore((s) => s.tick);
   const activeTurnItemId = useInitiativeStore((s) =>
     s.isActive && s.combatants[s.currentIndex] ? s.combatants[s.currentIndex]!.tokenId : undefined,
   );
 
   const tokens = useMemo(() => {
-    void liveTick;
-    const merged = itemsWithLiveTransforms(items, liveById);
+    const merged = itemsWithLiveTransforms(items, useLiveTransformStore.getState().byId);
     const visible = sceneTokensForClient(Object.values(merged), gm);
     if (!opts?.modelOnly) return visible;
     return visible.filter((t) => Boolean(t.modelUrl));
-  }, [items, gm, liveById, liveTick, fogRevision, selectedIds, myUserId, opts?.modelOnly]);
+  }, [items, gm, fogRevision, selectedIds, myUserId, opts?.modelOnly]);
 
   return {
     tokens,

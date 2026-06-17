@@ -265,7 +265,7 @@ export function useTransformControls(appReady: boolean) {
           const c = it.type !== 'token' ? getItemContainer(layer, it.id) : null;
           if (c) c.rotation = (deg * Math.PI) / 180;
           (drag as DragState & { _deg?: number })._deg = deg;
-          useLiveTransformStore.getState().setLive(it.id, { rotation: deg });
+          useLiveTransformStore.getState().setLive(it.id, { rotation: deg }, { bumpTick: false });
           return;
         }
 
@@ -328,7 +328,7 @@ export function useTransformControls(appReady: boolean) {
             c.scale.set(newW / it.width, newH / it.height);
           }
         }
-        useLiveTransformStore.getState().setLive(it.id, { x: nx, y: ny, width: newW, height: newH });
+        useLiveTransformStore.getState().setLive(it.id, { x: nx, y: ny, width: newW, height: newH }, { bumpTick: false });
         const feetLabel = formatResizeFeetLabel(it, newW, newH, drag.w0);
         if (feetLabel) showResizeSizeLabel(e.clientX, e.clientY, feetLabel);
         return;
@@ -357,7 +357,7 @@ export function useTransformControls(appReady: boolean) {
             c.scale.set(nw / it.width, nh / it.height);
           }
         }
-        useLiveTransformStore.getState().setLiveMany(liveEntries);
+        useLiveTransformStore.getState().setLiveMany(liveEntries, { bumpTick: false });
       }
     }
 
