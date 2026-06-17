@@ -299,16 +299,14 @@ function GMSidebarContent() {
     emitItemUpdate([{ id: map.id, patch }]);
   }
 
-  async function handleAutoSyncGrid() {
+  function handleAutoSyncGrid() {
     const map = getActiveMap();
-    if (!map?.backgroundUrl) return;
+    if (!map) return;
     setGridSyncing(true);
-    const result = await syncGridToMap(map);
+    const result = syncGridToMap(map);
     setGridSyncing(false);
     if (!result.ok) {
-      alert(result.reason === 'no-image'
-        ? 'Add a map image first.'
-        : 'Could not detect the printed grid. Use the Calibrate tool (drag one cell) instead.');
+      alert('Select a map first.');
     }
   }
 
@@ -420,13 +418,13 @@ function GMSidebarContent() {
           )}
           <button
             className="btn-primary w-full text-xs py-1.5"
-            disabled={!activeMap.backgroundUrl || gridSyncing}
-            onClick={() => void handleAutoSyncGrid()}
+            disabled={gridSyncing}
+            onClick={() => handleAutoSyncGrid()}
           >
-            {gridSyncing ? 'Detecting grid…' : '⊹ Sync grid to map image'}
+            {gridSyncing ? 'Fitting grid…' : '⊹ Fit 5ft grid to map'}
           </button>
           <p className="font-ui text-xs leading-snug" style={{ color: 'var(--color-text-secondary)' }}>
-            Optional: align to the printed grid on your map image. Default scales with map size (~{DEFAULT_MAP_GRID_SIZE}px at {DEFAULT_MAP_WIDTH}×{DEFAULT_MAP_HEIGHT}).
+            Lays an even grid of 5ft squares across the map. To match a printed grid instead, use the Calibrate tool (drag one cell).
           </p>
         </div>
       )}

@@ -116,25 +116,24 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 function MapControls({ map, update }: { map: MapItem; update: (p: Partial<MapItem>) => void }) {
   const [syncing, setSyncing] = useState(false);
 
-  async function handleAutoSync() {
-    if (!map.backgroundUrl) return;
+  function handleAutoSync() {
     setSyncing(true);
-    const result = await syncGridToMap(map);
+    const result = syncGridToMap(map);
     setSyncing(false);
     if (!result.ok) {
-      alert('Could not auto-detect the grid. Use Calibrate (toolbar) and drag one cell.');
+      alert('Select a map first.');
     }
   }
 
   return (
     <>
       <button
-        title="Auto-detect grid from map image"
+        title="Fit an even 5ft grid to the map"
         className="btn-primary text-xs px-2 py-0.5"
-        disabled={!map.backgroundUrl || syncing}
-        onClick={() => void handleAutoSync()}
+        disabled={syncing}
+        onClick={() => handleAutoSync()}
       >
-        {syncing ? '…' : '⊹ Auto'}
+        {syncing ? '…' : '⊹ Fit grid'}
       </button>
       <Field label="Grid">
         <input type="color" value={numHex(map.gridColor)} onChange={(e) => update({ gridColor: hexNum(e.target.value) })}

@@ -615,11 +615,9 @@ export function ItemContextMenu() {
           <MapWeatherMenuSection mapId={single.id} onDone={close} />
           <MapTimeMenuSection onDone={close} />
           <div className="gold-divider my-1" />
-          <Btn label="⊹ Auto-sync grid" onClick={() => {
-            void syncGridToMap(single as MapItem).then((r) => {
-              if (!r.ok) alert('Could not auto-detect grid. Try Calibrate (drag one cell).');
-              close();
-            });
+          <Btn label="⊹ Fit 5ft grid to map" onClick={() => {
+            syncGridToMap(single as MapItem);
+            close();
           }} />
           <Btn label="⊹ Calibrate grid (manual)" onClick={() => { useMapStore.getState().setTool('calibrate'); close(); }} />
         </>

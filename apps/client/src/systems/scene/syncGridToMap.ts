@@ -1,38 +1,58 @@
 import { useItemStore } from './store/itemStore';
 import { emitItemUpdate } from './sceneSync';
-import { detectGridFromImage } from './gridAutoDetect';
-import type { MapItem } from './types';
+import { gridSizeForMap } from './types';
+import type { Item, MapItem } from './types';
 
 export type GridSyncResult =
-  | { ok: true; gridSize: number; gridOffsetX: number; gridOffsetY: number; confidence: number }
-  | { ok: false; reason: 'no-image' | 'detect-failed' | 'not-found' };
+  | { ok: true; gridSize: number; gridOffsetX: number; gridOffsetY: number; cols: number; rows: number }
+  | { ok: false; reason: 'not-found' };
 
-/** Detect printed grid on a map image and apply gridSize + offset to the item. */
-export async function syncGridToMap(map: MapItem): Promise<GridSyncResult> {
-  if (!map.backgroundUrl) return { ok: false, reason: 'no-image' };
+/**
+ * Uniform square grid that fits the map: a whole number of equal 5ft cells
+ * across the width, aligned to the top-left corner. Cell size scales with the
+ * map so it looks consistent regardless of the image's resolution.
+ */
+export function fitGridToMap(width: number, height: number): { gridSize: number; cols: number; rows: number } {
+  const base = gridSizeForMap(width, height);
+  const cols = Math.max(1, Math.round(width / base));
+  const gridSize = Math.max(4, Math.round(width / cols));
+  const rows = Math.max(1, Math.round(height / gridSize));
+  return { gridSize, cols, rows };
+}
 
-  const detected = await detectGridFromImage(map.backgroundUrl, map.width, map.height);
-  if (!detected) return { ok: false, reason: 'detect-failed' };
+/** Lay a clean 5ft square grid over the map and rescale tokens to keep their cell footprint. */
+export function syncGridToMap(map: MapItem): GridSyncResult {
+  const { gridSize, cols, rows } = fitGridToMap(map.width, map.height);
 
-  const patch: Partial<MapItem> = {
-    gridSize: detected.gridSize,
-    gridOffsetX: detected.gridOffsetX,
-    gridOffsetY: detected.gridOffsetY,
-  };
-  useItemStore.getState().updateItem(map.id, patch);
-  emitItemUpdate([{ id: map.id, patch }]);
+  const patch: Partial<MapItem> = { gridSize, gridOffsetX: 0, gridOffsetY: 0 };
+  const store = useItemStore.getState();
+  store.updateItem(map.id, patch);
 
-  return {
-    ok: true,
-    gridSize: detected.gridSize,
-    gridOffsetX: detected.gridOffsetX,
-    gridOffsetY: detected.gridOffsetY,
-    confidence: detected.confidence,
-  };
+  // Resize tokens so each keeps occupying sizeCells × 5ft cells on the new grid
+  // (a medium token stays exactly one square), keeping them centered in place.
+  const tokenUpdates: Array<{ id: string; patch: Partial<Item> }> = [];
+  if (map.gridSize > 0 && Math.abs(gridSize - map.gridSize) > 0.5) {
+    for (const it of Object.values(store.items)) {
+      if (it.type !== 'token') continue;
+      const cells = it.sizeCells || it.width / map.gridSize || 1;
+      const newSize = cells * gridSize;
+      const cx = it.x + it.width / 2;
+      const cy = it.y + it.height / 2;
+      tokenUpdates.push({
+        id: it.id,
+        patch: { width: newSize, height: newSize, x: cx - newSize / 2, y: cy - newSize / 2 },
+      });
+    }
+  }
+  if (tokenUpdates.length > 0) store.updateItems(tokenUpdates);
+
+  emitItemUpdate([{ id: map.id, patch }, ...tokenUpdates]);
+
+  return { ok: true, gridSize, gridOffsetX: 0, gridOffsetY: 0, cols, rows };
 }
 
 /** Convenience: sync the active map by id. */
-export async function syncGridToMapById(mapId: string): Promise<GridSyncResult> {
+export function syncGridToMapById(mapId: string): GridSyncResult {
   const map = useItemStore.getState().items[mapId];
   if (!map || map.type !== 'map') return { ok: false, reason: 'not-found' };
   return syncGridToMap(map);
