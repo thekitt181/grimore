@@ -22,6 +22,7 @@ import type { Item, MapItem } from '../types';
 import { itemDisplayZIndex, wallDisplayZIndex } from '../zOrder';
 import { tokenRendersInThree } from '../token/tokenRenderType';
 import { sceneRefs } from '../sceneRefs';
+import { clientVisibleTokenIdSet } from '../sceneMapsForClient';
 
 function itemParentLayer(
   item: Item,
@@ -58,6 +59,8 @@ export function useItemRenderer(
   );
   const viewMode = useMapStore((s) => s.viewMode);
   const activeTool = useMapStore((s) => s.activeTool);
+  const fogRevision = useMapStore((s) => s.fogRevision);
+  const myUserId = useSessionStore((s) => s.myUserId);
 
   const containers = useRef<Map<string, Container>>(new Map());
   const wallContainers = useRef<Map<string, Container>>(new Map());
@@ -105,6 +108,7 @@ export function useItemRenderer(
       ...(activeTurnItemId ? { activeTurnItemId } : {}),
     };
     const activeMap = getActiveMap();
+    const fogVisibleTokenIds = clientVisibleTokenIdSet(items, gm);
 
     const liveIds = new Set(Object.keys(items));
     const liveMapIds = new Set(
@@ -188,8 +192,9 @@ export function useItemRenderer(
       c.rotation = (drawRot * Math.PI) / 180;
       c.zIndex = itemDisplayZIndex(item);
 
-      // Visibility — hidden items are GM-only ghosts; otherwise everyone sees the same scene.
-      const show = item.visible !== false || gm;
+      // Visibility — hidden items are GM-only ghosts; players only see tokens in fog vision.
+      const inFogVision = item.type !== 'token' || fogVisibleTokenIds == null || fogVisibleTokenIds.has(item.id);
+      const show = (item.visible !== false || gm) && inFogVision;
       const alpha = item.visible !== false || !gm ? 1 : 0.35;
 
       if (viewMode === '3d') {
@@ -259,6 +264,8 @@ export function useItemRenderer(
     viewMode,
     activeTool,
     threeHealthTick,
+    fogRevision,
+    myUserId,
     appReady,
     layerRef,
     tokenLayerRef,

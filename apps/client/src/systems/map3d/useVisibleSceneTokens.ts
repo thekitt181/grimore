@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { useItemStore } from '@/systems/scene/store/itemStore';
 import { useInitiativeStore } from '@/systems/map/store/initiativeStore';
+import { useMapStore } from '@/systems/map/store/mapStore';
 import {
   itemsWithLiveTransforms,
   useLiveTransformStore,
@@ -16,6 +17,9 @@ export function useVisibleSceneTokens(opts?: { modelOnly?: boolean }): {
 } {
   const items = useItemStore((s) => s.items);
   const gm = useSessionStore((s) => s.myRole === 'GM');
+  const selectedIds = useItemStore((s) => s.selectedIds);
+  const myUserId = useSessionStore((s) => s.myUserId);
+  const fogRevision = useMapStore((s) => s.fogRevision);
   const liveById = useLiveTransformStore((s) => s.byId);
   const liveTick = useLiveTransformStore((s) => s.tick);
   const activeTurnItemId = useInitiativeStore((s) =>
@@ -28,7 +32,7 @@ export function useVisibleSceneTokens(opts?: { modelOnly?: boolean }): {
     const visible = sceneTokensForClient(Object.values(merged), gm);
     if (!opts?.modelOnly) return visible;
     return visible.filter((t) => Boolean(t.modelUrl));
-  }, [items, gm, liveById, liveTick, opts?.modelOnly]);
+  }, [items, gm, liveById, liveTick, fogRevision, selectedIds, myUserId, opts?.modelOnly]);
 
   return {
     tokens,

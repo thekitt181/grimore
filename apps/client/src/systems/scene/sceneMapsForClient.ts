@@ -1,4 +1,9 @@
 import type { Item, MapItem, TokenItem } from './types';
+import { filterPlayerTokens } from './token/clientTokenVisibility';
+import { isFogOverlayVisible } from './fogActiveSync';
+import { getActiveMap, useItemStore } from './store/itemStore';
+import { useMapStore } from '@/systems/map/store/mapStore';
+import { useSessionStore } from '@/store/sessionStore';
 
 /** Visible to players on the shared table (false = GM-only ghost). */
 export function isSceneItemShared(item: Item): boolean {
@@ -17,15 +22,41 @@ export function sceneMapsForClient(items: readonly Item[], gm = false): MapItem[
   );
 }
 
-/** All tokens on the shared canvas — fog may dim the map but does not hide minis. */
+/** Tokens rendered for this client — players only see tokens in live vision when fog is on. */
 export function sceneTokensForClient(
   items: readonly Item[] | Record<string, Item>,
   gm = false,
 ): TokenItem[] {
   const list = Array.isArray(items) ? items : Object.values(items);
-  return list.filter(
+  const onTable = list.filter(
     (i): i is TokenItem => i.type === 'token' && isSceneItemOnTable(i, gm),
   );
+
+  if (gm || !isFogOverlayVisible()) {
+    return onTable;
+  }
+
+  const record: Record<string, Item> = Array.isArray(items)
+    ? Object.fromEntries(list.map((i) => [i.id, i]))
+    : { ...items };
+
+  const fogVisible = filterPlayerTokens(record, {
+    myUserId: useSessionStore.getState().myUserId,
+    selectedIds: useItemStore.getState().selectedIds,
+    revealedCells: useMapStore.getState().revealedCells,
+    activeMap: getActiveMap(),
+  });
+  const fogIds = new Set(fogVisible.map((t) => t.id));
+  return onTable.filter((t) => fogIds.has(t.id));
+}
+
+/** Token ids that should render for this client (`null` = GM, no fog filter). */
+export function clientVisibleTokenIdSet(
+  items: readonly Item[] | Record<string, Item>,
+  gm: boolean,
+): Set<string> | null {
+  if (gm) return null;
+  return new Set(sceneTokensForClient(items, false).map((t) => t.id));
 }
 
 /** @deprecated use sceneMapsForClient(items) — gm/activeMap args ignored. */

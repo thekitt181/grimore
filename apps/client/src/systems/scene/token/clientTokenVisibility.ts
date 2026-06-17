@@ -10,7 +10,7 @@ import { useSessionStore } from '@/store/sessionStore';
 import { isFogOverlayVisible } from '@/systems/scene/fogActiveSync';
 import type { Item, MapItem, TokenItem } from '../types';
 
-/** Tokens hidden by fog of war — interaction / line-of-sight only, not table rendering. */
+/** Tokens hidden by fog of war — interaction and rendering. */
 export function filterPlayerTokens(
   items: Record<string, Item>,
   opts: {
@@ -85,7 +85,7 @@ export function playerCanRotateToken(token: TokenItem, myUserId: string | null):
   return playerOwnsToken(token, myUserId) || isPlayerCharacterToken(token);
 }
 
-/** Tokens a player may click/drag under fog — rendering uses sceneTokensForClient instead. */
+/** Tokens a player may click/drag under fog — same set as rendering. */
 export function playerSelectableTokens(
   items: Record<string, Item>,
   opts: {
