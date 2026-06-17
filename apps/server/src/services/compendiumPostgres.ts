@@ -565,15 +565,15 @@ async function loadImageMaps(includeImageData: boolean): Promise<{
     return { images, imagesData, entryImages };
   }
 
-  const refs = await prisma.compendiumImageRef.findMany();
+  const refs = await readPrisma.compendiumImageRef.findMany();
   for (const ref of refs) images[ref.key] = ref.value;
 
   if (includeImageData) {
-    const blobs = await prisma.compendiumImageBlob.findMany();
+    const blobs = await readPrisma.compendiumImageBlob.findMany();
     for (const blob of blobs) imagesData[blob.key] = blob.data;
   }
 
-  const histories = await prisma.compendiumEntryImageHistory.findMany();
+  const histories = await readPrisma.compendiumEntryImageHistory.findMany();
   for (const history of histories) entryImages[history.entryName] = history.urls;
 
   return { images, imagesData, entryImages };
@@ -583,7 +583,7 @@ async function loadImageMaps(includeImageData: boolean): Promise<{
 async function readRawGlobalDocFromPostgresBulk(
   metaRow: { deleted: string[]; lockedSources: string[]; publishedEntryKeys: string[]; lastUpdated: Date | null } | null,
 ): Promise<Omit<OwlbearRawGlobalDoc, 'images' | 'imagesData' | 'entryImages'>> {
-  const rows = await withStorageProbe(() => prisma.compendiumEntry.findMany({
+  const rows = await withStorageProbe(() => readPrisma.compendiumEntry.findMany({
     orderBy: [{ kind: 'asc' }, { name: 'asc' }],
   }));
 
@@ -650,9 +650,9 @@ export async function readRawGlobalDocFromPostgres(
   try {
     const includeImageData = opts?.includeImageData !== false;
     const skipImageMaps = opts?.skipImageMaps === true;
-    const meta = await withStorageProbe(() => prisma.compendiumMeta.findUnique({ where: { id: 'global' } }));
+    const meta = await withStorageProbe(() => readPrisma.compendiumMeta.findUnique({ where: { id: 'global' } }));
     if (!meta) await ensureCompendiumMeta();
-    const metaRow = meta ?? await prisma.compendiumMeta.findUnique({ where: { id: 'global' } });
+    const metaRow = meta ?? await readPrisma.compendiumMeta.findUnique({ where: { id: 'global' } });
 
     if (skipImageMaps) {
       const bulk = await readRawGlobalDocFromPostgresBulk(metaRow);
@@ -724,9 +724,9 @@ export async function readPostgresEntryImageSlice(
 } | null> {
   try {
     const [ref, history, meta] = await withStorageProbe(() => Promise.all([
-      prisma.compendiumImageRef.findUnique({ where: { key: imageKey } }),
-      prisma.compendiumEntryImageHistory.findUnique({ where: { entryName } }),
-      prisma.compendiumMeta.findUnique({ where: { id: 'global' }, select: { lastUpdated: true } }),
+      readPrisma.compendiumImageRef.findUnique({ where: { key: imageKey } }),
+      readPrisma.compendiumEntryImageHistory.findUnique({ where: { entryName } }),
+      readPrisma.compendiumMeta.findUnique({ where: { id: 'global' }, select: { lastUpdated: true } }),
     ]));
     return {
       imageRef: ref?.value ?? null,
@@ -740,7 +740,7 @@ export async function readPostgresEntryImageSlice(
 
 export async function readPostgresImageRefKey(key: string): Promise<string | null> {
   try {
-    const ref = await withStorageProbe(() => prisma.compendiumImageRef.findUnique({ where: { key } }));
+    const ref = await withStorageProbe(() => readPrisma.compendiumImageRef.findUnique({ where: { key } }));
     return ref?.value ?? null;
   } catch {
     return null;
@@ -749,7 +749,7 @@ export async function readPostgresImageRefKey(key: string): Promise<string | nul
 
 export async function readPostgresImageDataKey(key: string): Promise<string | null> {
   try {
-    const blob = await withStorageProbe(() => prisma.compendiumImageBlob.findUnique({ where: { key } }));
+    const blob = await withStorageProbe(() => readPrisma.compendiumImageBlob.findUnique({ where: { key } }));
     return blob?.data ?? null;
   } catch {
     return null;
@@ -758,7 +758,7 @@ export async function readPostgresImageDataKey(key: string): Promise<string | nu
 
 export async function readPostgresEntryImageHistory(entryName: string): Promise<string[]> {
   try {
-    const history = await withStorageProbe(() => prisma.compendiumEntryImageHistory.findUnique({
+    const history = await withStorageProbe(() => readPrisma.compendiumEntryImageHistory.findUnique({
       where: { entryName },
     }));
     return history?.urls ?? [];
@@ -774,9 +774,9 @@ export async function readPostgresGlobalImageRefs(): Promise<{
 } | null> {
   try {
     const [refs, histories, meta] = await withStorageProbe(() => Promise.all([
-      prisma.compendiumImageRef.findMany(),
-      prisma.compendiumEntryImageHistory.findMany(),
-      prisma.compendiumMeta.findUnique({ where: { id: 'global' }, select: { lastUpdated: true } }),
+      readPrisma.compendiumImageRef.findMany(),
+      readPrisma.compendiumEntryImageHistory.findMany(),
+      readPrisma.compendiumMeta.findUnique({ where: { id: 'global' }, select: { lastUpdated: true } }),
     ]));
     return {
       images: Object.fromEntries(refs.map((ref) => [ref.key, ref.value])),
@@ -838,7 +838,7 @@ async function upsertGlobalEntryRow(
     inTypedImport?: boolean;
   },
 ): Promise<void> {
-  const existing = await prisma.compendiumEntry.findUnique({ where: { id: slugify(entry.name) } });
+  const existing = await readPrisma.compendiumEntry.findUnique({ where: { id: slugify(entry.name) } });
   const data = buildUpsertData(kind, entry, {
     isCustom: flags.isCustom,
     inTypedImport: flags.inTypedImport ?? existing?.inTypedImport ?? false,
@@ -990,7 +990,7 @@ export async function readCompendiumPolicyFields(): Promise<{
   lastUpdated: string;
 } | null> {
   try {
-    const meta = await withStorageProbe(() => prisma.compendiumMeta.findUnique({ where: { id: 'global' } }));
+    const meta = await withStorageProbe(() => readPrisma.compendiumMeta.findUnique({ where: { id: 'global' } }));
     if (!meta) return null;
     return {
       lockedSources: meta.lockedSources,

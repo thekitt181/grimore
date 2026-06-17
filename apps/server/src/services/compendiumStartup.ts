@@ -14,6 +14,21 @@ function isRenderDeploy(): boolean {
   return process.env['RENDER'] === 'true' || Boolean(process.env['RENDER_SERVICE_ID']);
 }
 
+function scheduleReconcileRawGlobalStorage(): void {
+  const delayMs = isRenderDeploy()
+    ? Number(process.env['COMPENDIUM_RECONCILE_DELAY_MS'] ?? 300_000)
+    : 0;
+  if (delayMs > 0) {
+    setTimeout(() => {
+      void reconcileRawGlobalStorage().catch((err) => {
+        console.warn('[Compendium] Deferred reconcile failed:', err);
+      });
+    }, delayMs);
+    return;
+  }
+  void reconcileRawGlobalStorage();
+}
+
 export function shouldAutoStartCompendium(): boolean {
   if (process.env['COMPENDIUM_STARTUP'] === '1') return true;
   if (process.env['SKIP_COMPENDIUM_STARTUP'] === '1') return false;
@@ -46,7 +61,7 @@ async function runCompendiumStartup(): Promise<void> {
     console.error('[Compendium] Startup failed:', err);
     throw err;
   }
-  void reconcileRawGlobalStorage();
+  scheduleReconcileRawGlobalStorage();
 }
 
 function renderStartupGuardMs(): number {
