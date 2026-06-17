@@ -17,6 +17,7 @@ import { isInteriorClickBounds } from '../hitTest';
 import { resolveItemBounds } from '@/systems/map3d/sceneItemBounds';
 import { isTokenMoveClick } from '../token/tokenMovePick';
 import { worldToGridColRow } from '../token/tokenGrid';
+import { scheduleFogRepaintDuringDrag } from '@/systems/map/fogRepaintBridge';
 import type { Item, TokenItem } from '../types';
 import type { TokenGizmoLayout, GizmoHandle } from '../token/tokenGizmoLayout';
 import { formatResizeFeetLabel, hideResizeSizeLabel, showResizeSizeLabel } from './resizeSizeLabel';
@@ -266,6 +267,8 @@ export function useTransformControls(appReady: boolean) {
           if (c) c.rotation = (deg * Math.PI) / 180;
           (drag as DragState & { _deg?: number })._deg = deg;
           useLiveTransformStore.getState().setLive(it.id, { rotation: deg }, { bumpTick: false });
+          // Track the vision cone live as the token turns.
+          if (it.type === 'token') scheduleFogRepaintDuringDrag();
           return;
         }
 
