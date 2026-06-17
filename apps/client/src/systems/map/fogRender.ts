@@ -30,6 +30,14 @@ export interface FogLayers {
 
 const layerCache = new WeakMap<Container, FogLayers>();
 
+/**
+ * Cap the fog backing canvas so big maps never exceed the GPU/browser texture
+ * limit (which clips the texture and leaves part of the map unfogged after a
+ * resize). The sprite is stretched back up to the map's real size, and fog is
+ * low-frequency enough that the downscale is invisible.
+ */
+const MAX_FOG_DIM = 2048;
+
 function parseCellKey(key: string): { x: number; y: number } | null {
   const [sx, sy] = key.split(',');
   const x = Number(sx);
@@ -62,13 +70,17 @@ export function ensureFogLayers(fc: Container): FogLayers {
   return layers;
 }
 
-function resizeFogCanvas(layers: FogLayers, width: number, height: number): void {
-  const w = Math.max(1, Math.round(width));
-  const h = Math.max(1, Math.round(height));
-  if (layers.fogCanvas.width === w && layers.fogCanvas.height === h) return;
-  layers.fogCanvas.width = w;
-  layers.fogCanvas.height = h;
-  layers.fogTexture.source.resize(w, h);
+/** Size the backing canvas (capped) and return the map→canvas scale factor. */
+function resizeFogCanvas(layers: FogLayers, width: number, height: number): number {
+  const scale = Math.min(1, MAX_FOG_DIM / Math.max(width, height, 1));
+  const w = Math.max(1, Math.round(width * scale));
+  const h = Math.max(1, Math.round(height * scale));
+  if (layers.fogCanvas.width !== w || layers.fogCanvas.height !== h) {
+    layers.fogCanvas.width = w;
+    layers.fogCanvas.height = h;
+    layers.fogTexture.source.resize(w, h);
+  }
+  return scale;
 }
 
 export function clearFogLayers(layers: FogLayers): void {
@@ -99,11 +111,12 @@ function resetFogCanvas(ctx: CanvasRenderingContext2D): void {
   ctx.restore();
 }
 
-/** Paint fog-of-war to a canvas (map-local coordinates). */
+/** Paint fog-of-war to a canvas (map-local coordinates, scaled to the canvas). */
 export function paintFogCanvas(
   ctx: CanvasRenderingContext2D,
   map: MapItem,
   opts: FogDrawOptions,
+  scale = 1,
 ): void {
   const { width, height, gridSize } = map;
   const canvasW = ctx.canvas.width;
@@ -114,6 +127,8 @@ export function paintFogCanvas(
   }
 
   resetFogCanvas(ctx);
+  // Draw in map-local pixels; the transform maps them onto the capped canvas.
+  ctx.setTransform(scale, 0, 0, scale, 0, 0);
 
   const visionTokens = getVisionTokens(
     opts.items,
@@ -155,6 +170,7 @@ export function paintFogCanvas(
   }
 
   ctx.globalCompositeOperation = 'source-over';
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
 }
 
 /** Draw fog-of-war (map-local coordinates). */
@@ -177,12 +193,12 @@ export function drawFogLayers(
     return;
   }
 
-  resizeFogCanvas(layers, width, height);
+  const scale = resizeFogCanvas(layers, width, height);
   const ctx = layers.fogCanvas.getContext('2d');
   if (!ctx) return;
 
   ctx.setTransform(1, 0, 0, 1, 0, 0);
-  paintFogCanvas(ctx, map, opts);
+  paintFogCanvas(ctx, map, opts, scale);
   layers.fogTexture.source.update();
   layers.fogSprite.width = width;
   layers.fogSprite.height = height;
