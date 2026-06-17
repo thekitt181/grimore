@@ -9,6 +9,7 @@ import {
 import { fileToDataUrl } from '@/lib/imagePersistence';
 import { skipMusicTrack } from './audioEngine';
 import { useSceneMediaStore } from './sceneMediaStore';
+import { detectEmbed } from './mediaEmbed';
 import { emitSessionMediaPatch, emitSessionTimeOfDay } from './useSceneMedia';
 
 type MenuId = 'media' | 'upload';
@@ -47,6 +48,7 @@ export function SessionMediaBar({ sessionId, isGM }: SessionMediaBarProps) {
   if (!isGM) return null;
 
   const cfg = scene?.mediaConfig ?? DEFAULT_SCENE_MEDIA_CONFIG;
+  const detectedProvider = uploadUrl.trim() ? detectEmbed(uploadUrl.trim())?.title ?? null : null;
 
   function toggle(menu: MenuId) {
     setOpenMenu((prev) => (prev === menu ? null : menu));
@@ -253,10 +255,19 @@ export function SessionMediaBar({ sessionId, isGM }: SessionMediaBarProps) {
                 )}
                 <input
                   className="input w-full text-xs py-1"
-                  placeholder="Paste URL…"
+                  placeholder="Paste a link or file URL…"
                   value={uploadUrl}
                   onChange={(e) => setUploadUrl(e.target.value)}
                 />
+                {detectedProvider ? (
+                  <p className="px-1 font-ui text-[10px]" style={{ color: 'var(--color-accent-gold)' }}>
+                    Detected {detectedProvider} link — plays via its embedded player.
+                  </p>
+                ) : (
+                  <p className="px-1 font-ui text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
+                    Works with YouTube, Spotify, SoundCloud, Vimeo, Twitch links or direct MP4/MP3 files.
+                  </p>
+                )}
                 <input
                   type="file"
                   accept={uploadKind === 'video' ? 'video/*' : 'audio/*'}

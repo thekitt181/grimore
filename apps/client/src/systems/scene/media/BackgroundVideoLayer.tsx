@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSceneMediaStore } from './sceneMediaStore';
 import { emitClearSessionVideo } from './useSceneMedia';
+import { detectEmbed } from './mediaEmbed';
 
 interface BackgroundVideoLayerProps {
   sessionId: string;
@@ -22,6 +23,8 @@ export function BackgroundVideoLayer({ sessionId, allowDismiss = false }: Backgr
   const showAsOverlay = !cinemaMode && (popup?.showAsOverlay ?? false);
   const showPopup = Boolean(url && !cinemaMode && !showAsOverlay);
 
+  const embed = useMemo(() => (url ? detectEmbed(url) : null), [url]);
+
   useEffect(() => {
     setCinemaTakeover(Boolean(url && cinemaMode));
     if (!url) setLoadError(false);
@@ -29,7 +32,7 @@ export function BackgroundVideoLayer({ sessionId, allowDismiss = false }: Backgr
 
   useEffect(() => {
     const el = videoRef.current;
-    if (!el || !url) return;
+    if (!el || !url || embed) return;
 
     setLoadError(false);
     el.load();
@@ -49,7 +52,7 @@ export function BackgroundVideoLayer({ sessionId, allowDismiss = false }: Backgr
           if (cinemaMode || showPopup) setNeedsUnmute(true);
         }
       });
-  }, [url, popup?.autoplay, popup?.muted, popup?.volume, cinemaMode, showAsOverlay, showPopup]);
+  }, [url, embed, popup?.autoplay, popup?.muted, popup?.volume, cinemaMode, showAsOverlay, showPopup]);
 
   const stopPlayback = useCallback(() => {
     if (allowDismiss) {
@@ -84,29 +87,52 @@ export function BackgroundVideoLayer({ sessionId, allowDismiss = false }: Backgr
 
   if (!url) return null;
 
+  const embedSrc = embed
+    ? embed.src({
+        autoplay: popup?.autoplay !== false,
+        loop: popup?.loop ?? (showAsOverlay || false),
+        muted: popup?.muted ?? showAsOverlay,
+        controls: !showAsOverlay,
+      })
+    : null;
+
+  const iframeCommon = {
+    src: embedSrc ?? undefined,
+    allow:
+      'autoplay; encrypted-media; fullscreen; picture-in-picture; clipboard-write',
+    allowFullScreen: true,
+    referrerPolicy: 'strict-origin-when-cross-origin' as const,
+    frameBorder: 0,
+    onError: () => setLoadError(true),
+  };
+
   if (cinemaMode) {
     return (
       <div
         className="fixed inset-0 z-[9999] flex items-center justify-center bg-black"
         style={{ pointerEvents: 'auto' }}
       >
-        <video
-          ref={videoRef}
-          src={url}
-          className="h-full w-full object-contain"
-          loop={popup?.loop ?? false}
-          muted={popup?.muted ?? false}
-          playsInline
-          autoPlay
-          onEnded={handleEnded}
-          onError={() => setLoadError(true)}
-        />
+        {embedSrc ? (
+          <iframe {...iframeCommon} title={embed?.title ?? 'Video'} className="h-full w-full" />
+        ) : (
+          <video
+            ref={videoRef}
+            src={url}
+            className="h-full w-full object-contain"
+            loop={popup?.loop ?? false}
+            muted={popup?.muted ?? false}
+            playsInline
+            autoPlay
+            onEnded={handleEnded}
+            onError={() => setLoadError(true)}
+          />
+        )}
         {loadError && (
           <p className="absolute bottom-20 left-1/2 -translate-x-1/2 font-ui text-sm text-red-300 px-4 text-center">
-            Video failed to load — try Upload with a direct MP4 link.
+            Video failed to load — try a direct MP4 link or a YouTube/Vimeo URL.
           </p>
         )}
-        {needsUnmute && (
+        {needsUnmute && !embedSrc && (
           <button
             type="button"
             className="absolute bottom-8 left-1/2 -translate-x-1/2 btn-primary text-sm px-4 py-2"
@@ -131,16 +157,25 @@ export function BackgroundVideoLayer({ sessionId, allowDismiss = false }: Backgr
   if (showAsOverlay) {
     return (
       <div className="pointer-events-none absolute inset-0 z-[12] overflow-hidden opacity-40">
-        <video
-          ref={videoRef}
-          src={url}
-          className="h-full w-full object-cover"
-          loop={popup?.loop ?? true}
-          muted={popup?.muted ?? true}
-          playsInline
-          autoPlay
-          onError={() => setLoadError(true)}
-        />
+        {embedSrc ? (
+          <iframe
+            {...iframeCommon}
+            title={embed?.title ?? 'Video'}
+            className="h-full w-full scale-150"
+            style={{ pointerEvents: 'none' }}
+          />
+        ) : (
+          <video
+            ref={videoRef}
+            src={url}
+            className="h-full w-full object-cover"
+            loop={popup?.loop ?? true}
+            muted={popup?.muted ?? true}
+            playsInline
+            autoPlay
+            onError={() => setLoadError(true)}
+          />
+        )}
       </div>
     );
   }
@@ -154,18 +189,26 @@ export function BackgroundVideoLayer({ sessionId, allowDismiss = false }: Backgr
         className="relative max-w-5xl w-full rounded-xl overflow-hidden shadow-2xl"
         style={{ border: '1px solid var(--color-border)' }}
       >
-        <video
-          ref={videoRef}
-          src={url}
-          className="w-full max-h-[80vh] object-contain bg-black"
-          loop={popup?.loop ?? false}
-          muted={popup?.muted ?? false}
-          playsInline
-          autoPlay
-          controls
-          onEnded={handleEnded}
-          onError={() => setLoadError(true)}
-        />
+        {embedSrc ? (
+          <iframe
+            {...iframeCommon}
+            title={embed?.title ?? 'Video'}
+            className="w-full aspect-video bg-black"
+          />
+        ) : (
+          <video
+            ref={videoRef}
+            src={url}
+            className="w-full max-h-[80vh] object-contain bg-black"
+            loop={popup?.loop ?? false}
+            muted={popup?.muted ?? false}
+            playsInline
+            autoPlay
+            controls
+            onEnded={handleEnded}
+            onError={() => setLoadError(true)}
+          />
+        )}
         {loadError && (
           <p className="absolute bottom-3 left-3 right-12 font-ui text-xs text-red-300">
             Video failed to load — URL may be blocked or invalid.

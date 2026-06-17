@@ -1,5 +1,6 @@
 import { Howl } from 'howler';
 import type { SceneAudioLayer, SceneMediaConfig, SceneMusicTrack } from '@grimoire/shared';
+import { isEmbedUrl } from './mediaEmbed';
 
 const FADE_MS = 1200;
 const CROSSFADE_MS = 2500;
@@ -113,9 +114,12 @@ function startMusic(tracks: SceneMusicTrack[], mode: SceneMediaConfig['musicMode
 /** Apply a full scene media config — fades out old layers and starts new ones. */
 export function applySceneMediaConfig(config: SceneMediaConfig): void {
   masterVolume = config.masterVolume;
-  startAmbientLayers(config.ambientLayers);
-  if (config.musicPlaylist.length > 0) {
-    startMusic(config.musicPlaylist, config.musicMode);
+  // Streaming links (YouTube/Spotify/SoundCloud/…) are played by the iframe
+  // embed layer, not Howler — keep them out of the audio decoder.
+  startAmbientLayers(config.ambientLayers.filter((l) => !isEmbedUrl(l.url)));
+  const directTracks = config.musicPlaylist.filter((t) => !isEmbedUrl(t.url));
+  if (directTracks.length > 0) {
+    startMusic(directTracks, config.musicMode);
   } else {
     stopMusic();
   }

@@ -63,6 +63,7 @@ import { EffectReminderBanner } from '@/systems/spells/ActiveEffectsPanel';
 import { useItemStore } from '@/systems/scene/store/itemStore';
 import { useSceneMedia } from '@/systems/scene/media/useSceneMedia';
 import { BackgroundVideoLayer } from '@/systems/scene/media/BackgroundVideoLayer';
+import { EmbedAudioLayer } from '@/systems/scene/media/EmbedAudioLayer';
 import { SceneTransitionOverlay } from '@/systems/scene/media/SceneAtmosphere';
 import { SessionMediaBar } from '@/systems/scene/media/SessionMediaBar';
 import { GameClockWidget } from '@/systems/scene/media/GameClockWidget';
@@ -552,6 +553,7 @@ export function SessionPage() {
         <MapSidebar />
       </div>
       <BackgroundVideoLayer sessionId={sessionInfo.id} allowDismiss={isGM} />
+      <EmbedAudioLayer />
       <CatalogRebuildBanner />
     </div>
   );
