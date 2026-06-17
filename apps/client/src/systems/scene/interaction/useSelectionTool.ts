@@ -629,6 +629,12 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
               if (snap) {
                 const bounds = tokenBoundsFromGrid(it, p.gridCol, p.gridRow);
                 emitTokenMove(p.id, bounds.gridCol, bounds.gridRow, bounds.x, bounds.y);
+                // Keep the footprint exactly sizeCells × gridSize so the token
+                // stays centered in its square(s) even if its stored size is stale.
+                if (Math.abs(it.width - bounds.width) > 0.5 || Math.abs(it.height - bounds.height) > 0.5) {
+                  useItemStore.getState().updateItem(p.id, { width: bounds.width, height: bounds.height });
+                  emitItemUpdate([{ id: p.id, patch: { width: bounds.width, height: bounds.height } }]);
+                }
               } else {
                 emitTokenMove(p.id, p.gridCol, p.gridRow, p.x, p.y);
               }
