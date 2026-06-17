@@ -2,7 +2,7 @@ import {
   getVisionTokens,
   isTokenVisibleToPlayer,
   playerHasVisionSource,
-  playerTokenLosCells,
+  playerVisibleCells,
 } from '@/systems/map/fogLos';
 import { useMapStore } from '@/systems/map/store/mapStore';
 import { getActiveMap, useItemStore } from '@/systems/scene/store/itemStore';
@@ -43,7 +43,8 @@ export function filterPlayerTokens(
     map,
   );
   const visionIds = new Set(visionTokens.map((t) => t.id));
-  const losSeen = playerTokenLosCells(
+  const seenCells = playerVisibleCells(
+    opts.revealedCells,
     map,
     items,
     opts.myUserId,
@@ -53,7 +54,7 @@ export function filterPlayerTokens(
 
   return tokens.filter((t) => {
     if (visionIds.has(t.id)) return true;
-    return isTokenVisibleToPlayer(t, map, losSeen);
+    return isTokenVisibleToPlayer(t, map, seenCells);
   });
 }
 

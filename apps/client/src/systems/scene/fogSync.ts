@@ -56,10 +56,11 @@ function pushFogToServer(sessionId: string, cells: Set<string>) {
   lastPushedCells = new Set(cells);
 }
 
-/** Save fog locally immediately; debounce socket push (delta when possible). */
+/** Save fog locally immediately; debounce socket push (delta when possible). GM only. */
 export function persistFogScene(options?: { pushServer?: boolean; sessionId?: string | null }) {
   const sessionId = options?.sessionId ?? getPersistSessionId();
   if (!sessionId) return;
+  if (useSessionStore.getState().myRole !== 'GM') return;
 
   const cells = useMapStore.getState().revealedCells;
   const fogData = JSON.stringify([...cells]);
@@ -76,10 +77,11 @@ export function persistFogScene(options?: { pushServer?: boolean; sessionId?: st
   }, 400);
 }
 
-/** Flush fog to local storage + server immediately (page unload / GM sync). */
+/** Flush fog to local storage + server immediately (page unload / GM sync). GM only. */
 export function flushFogScene(sessionId?: string | null) {
   const sid = sessionId ?? getPersistSessionId();
   if (!sid) return;
+  if (useSessionStore.getState().myRole !== 'GM') return;
 
   if (pendingFogServerSync) {
     clearTimeout(pendingFogServerSync);
@@ -97,23 +99,31 @@ export function flushFogScene(sessionId?: string | null) {
 }
 
 /**
- * Restore fog on session entry — per-user local storage is authoritative when it has data.
+ * Restore fog on session entry — GM local storage only (players use server fog:sync).
  */
 export function restoreFogFromLocal(sessionId: string): void {
+  if (useSessionStore.getState().myRole !== 'GM') return;
   const local = loadFogCells(sessionId);
   useMapStore.getState().setRevealedCells(local, { persist: false });
   lastPushedCells = new Set(local);
 }
 
-/** Merge server snapshot on join; preserve local reveals when server sends empty/stale data. */
+/** Merge server snapshot on join; GM may merge local reveals, players trust server only. */
 export function hydrateFogFromServer(fogData: string, sessionId?: string | null) {
   const sid = sessionId ?? getPersistSessionId();
   const server = parseFogCells(fogData);
-  const local = sid ? loadFogCells(sid) : new Set<string>();
-  const inMemory = useMapStore.getState().revealedCells;
   const isGM = useSessionStore.getState().myRole === 'GM';
 
-  if (isGM && server.size === 0 && (local.size > 0 || inMemory.size > 0)) {
+  if (!isGM) {
+    useMapStore.getState().setRevealedCells(new Set(server), { persist: false });
+    lastPushedCells = new Set(server);
+    return;
+  }
+
+  const local = sid ? loadFogCells(sid) : new Set<string>();
+  const inMemory = useMapStore.getState().revealedCells;
+
+  if (server.size === 0 && (local.size > 0 || inMemory.size > 0)) {
     return;
   }
 
@@ -131,7 +141,7 @@ export function hydrateFogFromServer(fogData: string, sessionId?: string | null)
   if (sid) persistFogLocal(sid, json);
   lastPushedCells = new Set(merged);
 
-  if (sid && merged.size > server.size && useSessionStore.getState().myRole === 'GM' && getSocket().connected) {
+  if (sid && merged.size > server.size && getSocket().connected) {
     getSocket().emit('fog:sync', { sessionId: sid, fogData: json });
   }
 }

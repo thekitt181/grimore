@@ -14,6 +14,8 @@ import {
   bindFogRepaintSubscriptions,
   registerFogRepaintListener,
 } from '../fogRepaintBridge';
+import { hasDragLivePositions } from '@/systems/scene/interaction/dragLivePositions';
+import { isItemDragActive } from '@/systems/scene/interaction/selectionDragState';
 import type { MapItem } from '@/systems/scene/types';
 
 function syncMapFogOverlays(
@@ -109,8 +111,6 @@ export function useMapFogOverlay(
   const fogEnabled = useMapStore((s) => s.fogEnabled);
   const sessionFogActive = useMapStore((s) => s.sessionFogActive);
   const items = useItemStore((s) => s.items);
-  const liveById = useLiveTransformStore((s) => s.byId);
-  const liveTick = useLiveTransformStore((s) => s.tick);
   const selectedIds = useItemStore((s) => s.selectedIds);
   const { myRole, myUserId } = useSessionStore();
 
@@ -120,7 +120,6 @@ export function useMapFogOverlay(
   const fogContainers = useRef<Map<string, Container>>(new Map());
   const fogStateRef = useRef({
     items,
-    liveById,
     revealedCells,
     isGM,
     selectedIds,
@@ -130,7 +129,6 @@ export function useMapFogOverlay(
 
   fogStateRef.current = {
     items,
-    liveById,
     revealedCells,
     isGM,
     selectedIds,
@@ -142,12 +140,12 @@ export function useMapFogOverlay(
 
   repaintRef.current = () => {
     if (!appReady) return;
+    if (isItemDragActive() || hasDragLivePositions()) return;
     const layer = layerRef.current;
     if (!layer) return;
-    const live = useLiveTransformStore.getState();
     syncMapFogOverlays(layer, fogContainers.current, {
       ...fogStateRef.current,
-      liveById: live.byId,
+      liveById: {},
     });
   };
 
@@ -169,8 +167,6 @@ export function useMapFogOverlay(
   }, [
     appReady,
     items,
-    liveById,
-    liveTick,
     revealedCells,
     fogRevision,
     fogEnabled,
@@ -182,22 +178,6 @@ export function useMapFogOverlay(
     myUserId,
     layerRef,
   ]);
-
-  useEffect(() => {
-    if (!appReady || !showFogOverlay) return;
-    const app = sceneRefs.app.current;
-    if (!app) return;
-
-    const onTick = () => {
-      if (!fogStateRef.current.showFogOverlay) return;
-      repaintRef.current();
-    };
-
-    app.ticker.add(onTick);
-    return () => {
-      app.ticker.remove(onTick);
-    };
-  }, [appReady, showFogOverlay, layerRef]);
 
   useEffect(() => {
     return () => {

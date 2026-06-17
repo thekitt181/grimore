@@ -24,10 +24,14 @@ const QUOTA_PROBE_INTERVAL_MS = Number(process.env['REDIS_QUOTA_PROBE_MS'] ?? 60
 
 let quotaProbeTimer: ReturnType<typeof setInterval> | null = null;
 
-/** Fix common Render/Upstash paste mistakes (missing rediss:// scheme). */
+/** Fix common Render/Upstash paste mistakes (missing rediss:// scheme, KEY=value lines). */
 export function normalizeRedisUrl(raw: string): string | null {
   let url = raw.trim();
   if (!url) return null;
+
+  // Pasted env line: "REDIS_URLS=rediss://…" or "REDIS_URL_1=rediss://…"
+  const kvMatch = url.match(/^REDIS_URL(?:_\d+|S)?=(.+)$/i);
+  if (kvMatch) url = kvMatch[1]!.trim();
 
   if (url.startsWith('//')) {
     url = `rediss:${url}`;

@@ -7,10 +7,6 @@ import {
 } from 'pixi.js';
 import type { Item, MapItem } from '@/systems/scene/types';
 import { cellKey } from './store/mapStore';
-import {
-  getVisionTokens,
-  losPolygons,
-} from './fogLos';
 
 export interface FogDrawOptions {
   revealedCells: Set<string>;
@@ -78,16 +74,7 @@ export function clearFogLayers(layers: FogLayers): void {
   layers.fogTexture.source.update();
 }
 
-function appendPolygonPath(ctx: CanvasRenderingContext2D, poly: { x: number; y: number }[]): void {
-  if (poly.length < 3) return;
-  ctx.moveTo(poly[0]!.x, poly[0]!.y);
-  for (let i = 1; i < poly.length; i++) {
-    ctx.lineTo(poly[i]!.x, poly[i]!.y);
-  }
-  ctx.closePath();
-}
-
-/** Wipe the canvas each frame so prior vision holes cannot linger in the GPU texture. */
+/** Wipe the canvas each frame so prior reveal holes cannot linger in the GPU texture. */
 function resetFogCanvas(ctx: CanvasRenderingContext2D): void {
   const { width, height } = ctx.canvas;
   ctx.save();
@@ -116,44 +103,21 @@ export function paintFogCanvas(
 
   resetFogCanvas(ctx);
 
-  const visionTokens = getVisionTokens(
-    opts.items,
-    opts.selectedIds,
-    opts.isGM,
-    opts.isGM ? null : opts.myUserId,
-    map,
-  );
-
-  const polys = visionTokens.length > 0
-    ? losPolygons(map, visionTokens, gridSize, { directional: true })
-    : [];
-
-  // Solid fog, then erase holes. destination-out avoids even-odd artifacts when
-  // vision cones overlap GM-revealed grid cells (double-punch used to refog them).
+  // Solid fog — only GM-painted reveal cells open the map (no auto token vision holes).
   ctx.fillStyle = '#000000';
   ctx.fillRect(0, 0, width, height);
 
   ctx.globalCompositeOperation = 'destination-out';
 
-  for (const poly of polys) {
-    ctx.beginPath();
-    appendPolygonPath(ctx, poly);
-    ctx.fill();
-  }
-
-  const punchRevealed =
-    (opts.isGM && opts.selectedIds.length === 0) || !opts.isGM;
-  if (punchRevealed) {
-    for (const key of opts.revealedCells) {
-      const cell = parseCellKey(key);
-      if (!cell) continue;
-      ctx.fillRect(
-        cell.x * gridSize,
-        cell.y * gridSize,
-        gridSize,
-        gridSize,
-      );
-    }
+  for (const key of opts.revealedCells) {
+    const cell = parseCellKey(key);
+    if (!cell) continue;
+    ctx.fillRect(
+      cell.x * gridSize,
+      cell.y * gridSize,
+      gridSize,
+      gridSize,
+    );
   }
 
   ctx.globalCompositeOperation = 'source-over';

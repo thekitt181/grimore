@@ -602,7 +602,7 @@ export function initSocket(httpServer: HttpServer): Server {
     // ── D&D Beyond roll bridge ───────────────────────────────────────────────
     socket.on('ddb:rollBridge:start', async ({ sessionId, ddbCampaignId }) => {
       try {
-        const gameSession = await prisma.gameSession.findUnique({
+        const gameSession = await readPrisma.gameSession.findUnique({
           where: { id: sessionId },
           select: { campaignId: true },
         });

@@ -1,12 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react';
-import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
-import { useItemStore, getActiveMap } from '@/systems/scene/store/itemStore';
+import { getActiveMap } from '@/systems/scene/store/itemStore';
 import { useMapStore } from '@/systems/map/store/mapStore';
-import {
-  itemsWithLiveTransforms,
-  useLiveTransformStore,
-} from '@/systems/scene/store/liveTransformStore';
 import { useSessionStore } from '@/store/sessionStore';
 import { paintFogCanvas } from '@/systems/map/fogRender';
 import { fogTextureDimensions } from '@/systems/map/fogTextureSize';
@@ -15,6 +10,8 @@ import {
   bindFogRepaintSubscriptions,
   registerFogRepaintListener,
 } from '@/systems/map/fogRepaintBridge';
+import { hasDragLivePositions } from '@/systems/scene/interaction/dragLivePositions';
+import { isItemDragActive } from '@/systems/scene/interaction/selectionDragState';
 import type { MapItem } from '@/systems/scene/types';
 import { SceneItemTransformGroup } from './TokenTransformGroup';
 
@@ -27,12 +24,7 @@ function useFogDrawState(map: MapItem) {
   const fogRevision = useMapStore((s) => s.fogRevision);
   const fogEnabled = useMapStore((s) => s.fogEnabled);
   const sessionFogActive = useMapStore((s) => s.sessionFogActive);
-  const items = useItemStore((s) => s.items);
-  const selectedIds = useItemStore((s) => s.selectedIds);
-  const liveById = useLiveTransformStore((s) => s.byId);
-  const liveTick = useLiveTransformStore((s) => s.tick);
   const myRole = useSessionStore((s) => s.myRole);
-  const myUserId = useSessionStore((s) => s.myUserId);
 
   const isGM = myRole === 'GM';
   const showFogOverlay = fogEnabled || sessionFogActive;
@@ -40,24 +32,15 @@ function useFogDrawState(map: MapItem) {
   const isActive = activeMap?.id === map.id;
   const visible = isActive && showFogOverlay && isFogOverlayVisible() && (map.visible || isGM);
 
-  const itemsForFog = useMemo(
-    () => itemsWithLiveTransforms(items, liveById),
-    [items, liveById, liveTick],
-  );
-
   return {
     visible,
     isGM,
     revealedCells,
     fogRevision,
-    itemsForFog,
-    selectedIds,
-    myUserId,
-    liveTick,
   };
 }
 
-/** Wall-aware fog-of-war on the 3D map ground (directional vision cones + GM reveal). */
+/** Fog-of-war on the 3D map ground (GM-painted reveal cells only). */
 export function Map3DFogOfWar({ map }: { map: MapItem }) {
   const state = useFogDrawState(map);
 
@@ -76,9 +59,8 @@ export function Map3DFogOfWar({ map }: { map: MapItem }) {
   const stateRef = useRef(state);
   stateRef.current = state;
 
-  const lastPaintSigRef = useRef('');
-
   const repaintFog = useCallback(() => {
+    if (isItemDragActive() || hasDragLivePositions()) return;
     const s = stateRef.current;
     if (!s.visible) {
       if (materialRef.current) materialRef.current.visible = false;
@@ -93,9 +75,9 @@ export function Map3DFogOfWar({ map }: { map: MapItem }) {
       revealedCells: s.revealedCells,
       gridSize: map.gridSize,
       isGM: s.isGM,
-      items: s.itemsForFog,
-      selectedIds: s.selectedIds,
-      myUserId: s.myUserId,
+      items: {},
+      selectedIds: [],
+      myUserId: null,
       visible: true,
     });
 
@@ -113,26 +95,13 @@ export function Map3DFogOfWar({ map }: { map: MapItem }) {
   useEffect(() => {
     bindFogRepaintSubscriptions();
     return registerFogRepaintListener(() => {
-      lastPaintSigRef.current = '';
       repaintFog();
     });
   }, [repaintFog]);
 
   useEffect(() => {
-    lastPaintSigRef.current = '';
     repaintFog();
-  }, [repaintFog, state.fogRevision, state.liveTick, state.visible]);
-
-  useFrame(() => {
-    const s = stateRef.current;
-    if (!s.visible) return;
-
-    const liveTick = useLiveTransformStore.getState().tick;
-    const sig = `${s.fogRevision}:${liveTick}:${s.revealedCells.size}`;
-    if (sig === lastPaintSigRef.current) return;
-    lastPaintSigRef.current = sig;
-    repaintFog();
-  });
+  }, [repaintFog, state.fogRevision, state.revealedCells, state.visible]);
 
   useEffect(() => {
     if (!state.visible && materialRef.current) {

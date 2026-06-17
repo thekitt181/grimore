@@ -23,6 +23,9 @@ import { itemDisplayZIndex, wallDisplayZIndex } from '../zOrder';
 import { tokenRendersInThree } from '../token/tokenRenderType';
 import { sceneRefs } from '../sceneRefs';
 import { clientVisibleTokenIdSet } from '../sceneMapsForClient';
+import { resolveItemBounds } from '@/systems/map3d/sceneItemBounds';
+import { hasDragLivePositions } from '../interaction/dragLivePositions';
+import { isItemDragActive } from '../interaction/selectionDragState';
 
 function itemParentLayer(
   item: Item,
@@ -106,7 +109,6 @@ export function useItemRenderer(
       ...(activeTurnItemId ? { activeTurnItemId } : {}),
     };
     const activeMap = getActiveMap();
-    const fogVisibleTokenIds = clientVisibleTokenIdSet(items, gm);
     const liveById = useLiveTransformStore.getState().byId;
 
     const liveIds = new Set(Object.keys(items));
@@ -178,22 +180,16 @@ export function useItemRenderer(
         }
       }
 
-      // Transform — merge live drag offsets for fog vision alignment.
-      const live = liveById[item.id];
-      const drawX = live?.x ?? item.x;
-      const drawY = live?.y ?? item.y;
-      const drawW = live?.width ?? item.width;
-      const drawH = live?.height ?? item.height;
-      const drawRot = live?.rotation ?? item.rotation;
+      // Transform — merge live drag offsets (drag ref + live store).
+      const b = resolveItemBounds(item, liveById[item.id]);
       c.pivot.set(item.width / 2, item.height / 2);
-      c.scale.set(drawW / item.width, drawH / item.height);
-      c.position.set(drawX + drawW / 2, drawY + drawH / 2);
-      c.rotation = (drawRot * Math.PI) / 180;
+      c.scale.set(b.width / item.width, b.height / item.height);
+      c.position.set(b.cx, b.cz);
+      c.rotation = (b.rotation * Math.PI) / 180;
       c.zIndex = itemDisplayZIndex(item);
 
-      // Visibility — hidden items are GM-only ghosts; players only see tokens in fog vision.
-      const inFogVision = item.type !== 'token' || fogVisibleTokenIds == null || fogVisibleTokenIds.has(item.id);
-      const show = (item.visible !== false || gm) && inFogVision;
+      // Visibility — hidden items are GM-only ghosts (fog filter applied in a separate effect).
+      const show = item.visible !== false || gm;
       const alpha = item.visible !== false || !gm ? 1 : 0.35;
 
       if (viewMode === '3d') {
@@ -261,11 +257,50 @@ export function useItemRenderer(
     viewMode,
     activeTool,
     threeHealthTick,
-    fogRevision,
     myUserId,
     appReady,
     layerRef,
     tokenLayerRef,
+  ]);
+
+  // Fog token visibility — decoupled from transforms so drag stays smooth.
+  useEffect(() => {
+    if (!appReady) return;
+    if (isItemDragActive() || hasDragLivePositions()) return;
+
+    const gm: boolean = myRole === 'GM';
+    const fogVisibleTokenIds = clientVisibleTokenIdSet(items, gm);
+    const mobileMapUnderlay = viewMode === '3d' && isMobileClient();
+    const pixiTokenFallback = viewMode === '3d' && isMobileClient() && !isThreeCanvasHealthy();
+
+    for (const item of Object.values(items) as Item[]) {
+      if (item.type !== 'token') continue;
+      const c = containers.current.get(item.id);
+      if (!c) continue;
+
+      const inFogVision = fogVisibleTokenIds == null || fogVisibleTokenIds.has(item.id);
+      const show = (item.visible !== false || gm) && inFogVision;
+      const alpha = item.visible !== false || !gm ? 1 : 0.35;
+
+      if (viewMode === '3d') {
+        const showPixiToken = pixiTokenFallback && !item.modelUrl;
+        c.visible = show && showPixiToken;
+        c.alpha = show && showPixiToken ? alpha : 0;
+      } else {
+        c.visible = show;
+        c.alpha = show ? alpha : 0;
+      }
+    }
+  }, [
+    fogRevision,
+    items,
+    myRole,
+    myUserId,
+    selectedIds,
+    activeMapId,
+    viewMode,
+    threeHealthTick,
+    appReady,
   ]);
 
   // Cleanup on unmount

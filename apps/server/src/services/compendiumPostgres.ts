@@ -1014,7 +1014,11 @@ export function typedImportOverrideCount(slices: {
 }
 
 export async function seedBundledCompendiumIfEmpty(): Promise<{ seeded: boolean; counts: { monsters: number; items: number; spells: number } }> {
-  const existing = await prisma.compendiumEntry.count();
+  const existing = await withDbTimeout(
+    8_000,
+    () => readPrisma.compendiumEntry.count(),
+    'compendium seed count',
+  );
   if (existing > 0) return { seeded: false, counts: { monsters: 0, items: 0, spells: 0 } };
 
   const { loadLocalMonsters, loadLocalItems, loadLocalSpells } = await import('./compendiumLocal');

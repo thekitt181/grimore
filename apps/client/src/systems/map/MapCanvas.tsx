@@ -339,9 +339,8 @@ export function MapCanvas() {
         const incoming = parseFogCells(payload.fogData);
         if (isGM && incoming.size === 0 && current.size > 0) return;
         if (!isGM) {
-          const merged = mergeFogIntoCells(current, payload);
-          useMapStore.getState().setRevealedCells(merged, { persist: false });
-          resetFogPushBaseline(merged);
+          useMapStore.getState().setRevealedCells(incoming, { persist: false });
+          resetFogPushBaseline(incoming);
           return;
         }
         applyFogData(payload.fogData);

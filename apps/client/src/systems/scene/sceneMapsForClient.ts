@@ -1,5 +1,6 @@
 import type { Item, MapItem, TokenItem } from './types';
 import { filterPlayerTokens } from './token/clientTokenVisibility';
+import { itemsWithDragLiveTransforms } from './interaction/dragLivePositions';
 import { isFogOverlayVisible } from './fogActiveSync';
 import { getActiveMap, useItemStore } from './store/itemStore';
 import { useMapStore } from '@/systems/map/store/mapStore';
@@ -40,7 +41,7 @@ export function sceneTokensForClient(
     ? Object.fromEntries(list.map((i) => [i.id, i]))
     : { ...items };
 
-  const fogVisible = filterPlayerTokens(record, {
+  const fogVisible = filterPlayerTokens(itemsWithDragLiveTransforms(record), {
     myUserId: useSessionStore.getState().myUserId,
     selectedIds: useItemStore.getState().selectedIds,
     revealedCells: useMapStore.getState().revealedCells,

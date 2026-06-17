@@ -4,6 +4,8 @@ import { useMapStore } from '@/systems/map/store/mapStore';
 import { isPlayerCharacterToken } from '@/systems/scene/token/clientTokenVisibility';
 import { pickInteractableTokenAt } from '@/systems/scene/token/pickInteractableToken';
 import { setItemDragActive } from './selectionDragState';
+import { setDragLivePositions, clearDragLivePositions } from './dragLivePositions';
+import { flushDeferredFogRepaint } from '@/systems/map/fogRepaintBridge';
 import { useTokenDragMeasureStore } from './tokenDragMeasureStore';
 import { useItemStore, getActiveMap } from '../store/itemStore';
 import { useSessionStore } from '@/store/sessionStore';
@@ -201,6 +203,7 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
       }
 
       const layer = sceneRefs.items.current;
+      const dragEntries: Array<{ id: string; x: number; y: number }> = [];
       const liveEntries: Array<{ id: string; patch: { x: number; y: number } }> = [];
       for (const id of move.ids) {
         const o = move.origins.get(id)!;
@@ -213,38 +216,21 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
         const drawH = live?.height ?? it.height;
         const c = getItemContainer(layer, id);
         if (c) c.position.set(nx + drawW / 2, ny + drawH / 2);
-        liveEntries.push({ id, patch: { x: nx, y: ny } });
+        if (it.type === 'token') {
+          dragEntries.push({ id, x: nx, y: ny });
+        } else {
+          liveEntries.push({ id, patch: { x: nx, y: ny } });
+        }
       }
+      if (dragEntries.length) setDragLivePositions(dragEntries);
       if (liveEntries.length) {
         useLiveTransformStore.getState().setLiveMany(liveEntries, { bumpTick: false });
       }
 
       if (tokenOnly) {
         const feet = worldDeltaToFeet(dx, dy);
-        useTokenDragMeasureStore.getState().setMeasure(feet, e.clientX, e.clientY);
+        scheduleMeasureUpdate(feet, e.clientX, e.clientY);
       }
-    }
-
-    let moveDragRaf: number | null = null;
-    let pendingMoveEvent: PointerEvent | null = null;
-
-    function scheduleTokenMoveDrag(e: PointerEvent) {
-      pendingMoveEvent = e;
-      if (moveDragRaf != null) return;
-      moveDragRaf = requestAnimationFrame(() => {
-        moveDragRaf = null;
-        const ev = pendingMoveEvent;
-        pendingMoveEvent = null;
-        if (ev && move) applyTokenMoveDrag(ev);
-      });
-    }
-
-    function cancelMoveDragRaf() {
-      if (moveDragRaf != null) {
-        cancelAnimationFrame(moveDragRaf);
-        moveDragRaf = null;
-      }
-      pendingMoveEvent = null;
     }
 
     function moveIncludesOnlyTokens(ids: string[]): boolean {
@@ -252,6 +238,7 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
     }
 
     function beginMove(ids: string[], e: PointerEvent) {
+      setItemDragActive(true);
       const { x: startWorldX, y: startWorldY } = clientToWorld(e.clientX, e.clientY);
       const liveById = useLiveTransformStore.getState().byId;
       const origins = new Map<string, { x: number; y: number }>();
@@ -274,8 +261,29 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
       } else {
         useTokenDragMeasureStore.getState().clear();
       }
-      setItemDragActive(true);
       interactionEl.setPointerCapture(e.pointerId);
+    }
+
+    let measureRaf: number | null = null;
+    let pendingMeasure: { feet: number; x: number; y: number } | null = null;
+
+    function scheduleMeasureUpdate(feet: number, screenX: number, screenY: number) {
+      pendingMeasure = { feet, x: screenX, y: screenY };
+      if (measureRaf != null) return;
+      measureRaf = requestAnimationFrame(() => {
+        measureRaf = null;
+        const m = pendingMeasure;
+        pendingMeasure = null;
+        if (m) useTokenDragMeasureStore.getState().setMeasure(m.feet, m.x, m.y);
+      });
+    }
+
+    function cancelMeasureRaf() {
+      if (measureRaf != null) {
+        cancelAnimationFrame(measureRaf);
+        measureRaf = null;
+      }
+      pendingMeasure = null;
     }
 
     function beginWallMove(map: MapItem, indices: number[], e: PointerEvent) {
@@ -485,7 +493,10 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
       if (move) {
         e.preventDefault();
         e.stopImmediatePropagation();
+        applyTokenMoveDrag(e);
+        return;
       }
+
       const { x: wx, y: wy } = clientToWorld(e.clientX, e.clientY);
 
       if (wallMove) {
@@ -526,13 +537,6 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
         );
         useItemStore.getState().updateItem(map.id, { walls: next });
         redrawWallHandles();
-        return;
-      }
-
-      if (move) {
-        e.preventDefault();
-        e.stopImmediatePropagation();
-        scheduleTokenMoveDrag(e);
         return;
       }
 
@@ -580,9 +584,7 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
       }
 
       if (move) {
-        cancelMoveDragRaf();
-        // Flush any pending frame so release uses the latest drag position.
-        if (pendingMoveEvent) applyTokenMoveDrag(pendingMoveEvent);
+        applyTokenMoveDrag(e);
         const m = move;
         const snap = useItemStore.getState().snapToGrid;
         let { dx, dy } = moveDragDelta(m, e);
@@ -631,9 +633,12 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
             emitItemUpdate(itemPatches);
           }
         }
+        clearDragLivePositions(m.ids);
         useLiveTransformStore.getState().clear(m.ids);
         move = null;
         setItemDragActive(false);
+        flushDeferredFogRepaint();
+        cancelMeasureRaf();
         useTokenDragMeasureStore.getState().clear();
       }
 
@@ -710,8 +715,10 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
     interactionEl.addEventListener('pointercancel', onUp, captureOpts);
 
     return () => {
-      cancelMoveDragRaf();
+      if (move) clearDragLivePositions(move.ids);
+      cancelMeasureRaf();
       setItemDragActive(false);
+      flushDeferredFogRepaint();
       useTokenDragMeasureStore.getState().clear();
       interactionEl.removeEventListener('pointerdown', onDown, captureOpts);
       interactionEl.removeEventListener('dblclick', onDblClick);

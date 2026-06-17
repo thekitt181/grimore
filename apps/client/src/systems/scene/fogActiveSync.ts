@@ -1,6 +1,7 @@
 import { getSocket } from '@/lib/socket';
 import { useMapStore } from '@/systems/map/store/mapStore';
 import { useSessionStore } from '@/store/sessionStore';
+import { flushFogScene } from './fogSync';
 
 let fogActiveHandler: ((payload: { active: boolean; sessionId?: string }) => void) | null = null;
 
@@ -19,9 +20,17 @@ export function emitFogActive(active: boolean): void {
 
 /** GM toggles fog visibility for the whole table. */
 export function setFogVisibleForSession(visible: boolean): void {
+  const wasOn = isFogOverlayVisible();
   const store = useMapStore.getState();
   store.setFogEnabled(visible);
   store.setSessionFogActive(visible);
+
+  // Fresh black fog for everyone — clears stray revealed cells from vision/local cache.
+  if (visible && !wasOn && useSessionStore.getState().myRole === 'GM') {
+    store.setRevealedCells(new Set(), { persist: false });
+    flushFogScene();
+  }
+
   if (useSessionStore.getState().myRole === 'GM') {
     emitFogActive(visible);
   }
@@ -29,7 +38,11 @@ export function setFogVisibleForSession(visible: boolean): void {
 
 export function applySessionFogActive(active: boolean): void {
   const role = useSessionStore.getState().myRole;
+  const wasOn = isFogOverlayVisible();
   useMapStore.getState().setSessionFogActive(active);
+  if (active && !wasOn) {
+    useMapStore.getState().setRevealedCells(new Set(), { persist: false });
+  }
   if (role !== 'GM') {
     useMapStore.getState().setFogEnabled(active);
   } else if (active) {

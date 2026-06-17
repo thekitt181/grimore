@@ -3,7 +3,7 @@ import type { OwlbearItem, OwlbearMonster, OwlbearSpell } from '@grimoire/shared
 import { requireAuth, type AuthenticatedRequest } from '../middleware/auth';
 import { requireCompendiumAdmin, isCompendiumAdmin, getCompendiumAdminPassword, matchesCompendiumAdminPassword } from '../middleware/requireCompendiumAdmin';
 import { isDbPoolSaturation } from '../lib/dbTimeout';
-import { ensureCompendiumStartup } from '../services/compendiumStartup';
+import { ensureCompendiumStartup, scheduleCompendiumStartupBackground } from '../services/compendiumStartup';
 import {
   deleteCompendiumEntry,
   findCatalogItem,
@@ -97,9 +97,7 @@ router.get('/asset/*', (req, res) => {
 });
 
 router.get('/sync-status', ...auth, async (_req, res) => {
-  void ensureCompendiumStartup().catch((err) => {
-    console.warn('[Compendium] Background startup from sync-status failed:', err);
-  });
+  scheduleCompendiumStartupBackground();
   try {
     res.json(await getSyncStatus());
   } catch (err) {

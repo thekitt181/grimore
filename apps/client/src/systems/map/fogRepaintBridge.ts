@@ -1,21 +1,43 @@
 import { useItemStore } from '@/systems/scene/store/itemStore';
 import { useLiveTransformStore } from '@/systems/scene/store/liveTransformStore';
 import { useMapStore } from '@/systems/map/store/mapStore';
+import { hasDragLivePositions } from '@/systems/scene/interaction/dragLivePositions';
+import { isItemDragActive } from '@/systems/scene/interaction/selectionDragState';
 
 type FogRepaintListener = () => void;
 
 const listeners = new Set<FogRepaintListener>();
 let subscriptionsBound = false;
 let pendingRepaint = false;
+let deferredFogWork = false;
+
+function isDragRepaintSuppressed(): boolean {
+  return isItemDragActive() || hasDragLivePositions();
+}
 
 function bumpFogRevision(): void {
   useMapStore.setState((s) => ({ fogRevision: s.fogRevision + 1 }));
 }
 
+function runFogRepaintListeners(): void {
+  if (listeners.size === 0) {
+    pendingRepaint = true;
+    return;
+  }
+  pendingRepaint = false;
+  for (const listener of listeners) {
+    listener();
+  }
+}
+
 /** Notify Pixi item layers + fog overlays that visibility changed. */
 export function requestSceneVisibilityUpdate(): void {
+  if (isDragRepaintSuppressed()) {
+    deferredFogWork = true;
+    return;
+  }
   bumpFogRevision();
-  requestFogRepaint();
+  runFogRepaintListeners();
 }
 
 /** Register an imperative fog repaint (Pixi / Three overlays). */
@@ -34,14 +56,19 @@ export function registerFogRepaintListener(listener: FogRepaintListener): () => 
 
 /** Force all fog overlays to repaint immediately (e.g. after socket sync). */
 export function requestFogRepaint(): void {
-  if (listeners.size === 0) {
-    pendingRepaint = true;
+  if (isDragRepaintSuppressed()) {
+    deferredFogWork = true;
     return;
   }
-  pendingRepaint = false;
-  for (const listener of listeners) {
-    listener();
-  }
+  runFogRepaintListeners();
+}
+
+/** Run deferred fog/visibility work after a drag ends. */
+export function flushDeferredFogRepaint(): void {
+  if (!deferredFogWork) return;
+  deferredFogWork = false;
+  bumpFogRevision();
+  runFogRepaintListeners();
 }
 
 /** Repaint when live drags or remote token moves change vision cones. */
