@@ -29,6 +29,8 @@ import type { TimeOfDay, WeatherOverlay } from '@grimoire/shared';
 import { useSceneMediaStore, selectEffectiveWeather } from './media/sceneMediaStore';
 import { emitSessionTimeOfDay, emitSessionWeather } from './media/useSceneMedia';
 import { extractApiError } from '@/lib/apiError';
+import { useTokenStore } from './store/tokenStore';
+import { playerCanRotateToken, playerOwnsToken } from './token/clientTokenVisibility';
 
 const CONDITIONS = [
   'Blinded', 'Charmed', 'Deafened', 'Frightened', 'Grappled', 'Incapacitated',
@@ -74,13 +76,17 @@ function resolveContextMenu(
   if (!hit) return null;
 
   if (!isGM) {
+    const myUserId = useSessionStore.getState().myUserId;
     if (hit.type === 'handout') {
       if (!useItemStore.getState().selectedIds.includes(hit.id)) {
         useItemStore.getState().select([hit.id], 'set');
       }
       return { x: clientX, y: clientY, kind: 'item' };
     }
-    if (hit.type === 'token' && isDdbPcToken(hit as TokenItem)) {
+    if (
+      hit.type === 'token'
+      && (isDdbPcToken(hit as TokenItem) || playerOwnsToken(hit as TokenItem, myUserId))
+    ) {
       if (!useItemStore.getState().selectedIds.includes(hit.id)) {
         useItemStore.getState().select([hit.id], 'set');
       }
@@ -129,12 +135,14 @@ export function ItemContextMenu() {
   const openPcActions = useDdbStore((s) => s.openPcActions);
   const openSheet = useDdbStore((s) => s.openSheet);
   const setImportModalOpen = useDdbStore((s) => s.setImportModalOpen);
+  const rotateToken = useTokenStore((s) => s.rotateToken);
   const ref = useRef<HTMLDivElement>(null);
 
   const selectedIds = useItemStore((s) => s.selectedIds);
   const selectedWallIndices = useItemStore((s) => s.selectedWallIndices);
   const items = useItemStore((s) => s.items);
   const myRole = useSessionStore((s) => s.myRole);
+  const myUserId = useSessionStore((s) => s.myUserId);
   const connectedUsers = useSessionStore((s) => s.connectedUsers);
   const isGM = myRole === 'GM';
 
@@ -360,6 +368,10 @@ export function ItemContextMenu() {
       single?.type === 'token' && isDdbPcToken(single as TokenItem)
         ? (single as TokenItem)
         : null;
+    const rotToken =
+      single?.type === 'token' && playerCanRotateToken(single as TokenItem, myUserId)
+        ? (single as TokenItem)
+        : null;
 
     return (
       <div
@@ -389,6 +401,12 @@ export function ItemContextMenu() {
               openSheet(pcToken);
               close();
             }} />
+          </>
+        )}
+        {rotToken && (
+          <>
+            <Btn label="⟲ Rotate left (45°)" onClick={() => rotateToken(rotToken.id, -45)} />
+            <Btn label="⟳ Rotate right (45°)" onClick={() => rotateToken(rotToken.id, 45)} />
           </>
         )}
         {single?.type === 'handout' && (

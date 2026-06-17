@@ -3,6 +3,7 @@ import type { TokenItem } from '@/systems/scene/types';
 import { isMobileClient } from '@/lib/socket';
 import { useDdbStore } from './ddbStore';
 import { isDdbPcToken } from './ddbTokenUtils';
+import { useTokenStore } from '@/systems/scene/store/tokenStore';
 
 /**
  * Touch-friendly shortcuts for D&D Beyond PC tokens (no right-click on mobile).
@@ -12,6 +13,7 @@ export function MobileDdbTokenBar() {
   const items = useItemStore((s) => s.items);
   const openSheet = useDdbStore((s) => s.openSheet);
   const openPcActions = useDdbStore((s) => s.openPcActions);
+  const rotateToken = useTokenStore((s) => s.rotateToken);
 
   if (!isMobileClient()) return null;
 
@@ -28,6 +30,14 @@ export function MobileDdbTokenBar() {
     >
       <button
         type="button"
+        className="btn-primary text-xs py-2 px-3 shadow-panel min-h-[44px]"
+        onClick={() => rotateToken(token.id, -45)}
+        aria-label="Rotate token left"
+      >
+        ⟲
+      </button>
+      <button
+        type="button"
         className="btn-primary text-xs py-2 px-4 shadow-panel min-h-[44px]"
         onClick={() => openSheet(token)}
       >
@@ -39,6 +49,14 @@ export function MobileDdbTokenBar() {
         onClick={() => openPcActions(token)}
       >
         ⚔ Actions
+      </button>
+      <button
+        type="button"
+        className="btn-primary text-xs py-2 px-3 shadow-panel min-h-[44px]"
+        onClick={() => rotateToken(token.id, 45)}
+        aria-label="Rotate token right"
+      >
+        ⟳
       </button>
     </div>
   );

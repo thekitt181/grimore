@@ -35,7 +35,7 @@ const ROT_DIST = 28;
 export function computeTokenGizmoLayout(
   items: Item[],
   liveById: Record<string, LiveTransform>,
-  opts?: { moveOnly?: boolean },
+  opts?: { moveOnly?: boolean; handleMode?: 'move' | 'rotate' | 'all' },
 ): TokenGizmoLayout {
   if (items.length === 0) {
     return { mode: 'none', cx: 0, cy: 0, width: 0, height: 0, rotation: 0, handles: [], boxCorners: [] };
@@ -71,6 +71,13 @@ export function computeTokenGizmoLayout(
     const rotDist = compact ? Math.max(ROT_DIST, minDim * 0.55) : ROT_DIST;
     const rotPt = toWorld(0, -hh - rotDist);
     handles.push({ id: 'rotate', wx: rotPt.x, wy: rotPt.y, sx: 0, sy: 0 });
+    const mode = opts?.handleMode ?? (opts?.moveOnly ? 'move' : 'all');
+    const finalHandles =
+      mode === 'move'
+        ? []
+        : mode === 'rotate'
+          ? handles.filter((h) => h.id === 'rotate')
+          : handles;
     return {
       mode: 'single',
       itemId: it.id,
@@ -79,7 +86,7 @@ export function computeTokenGizmoLayout(
       width: w,
       height: h,
       rotation,
-      handles: opts?.moveOnly ? [] : handles,
+      handles: finalHandles,
       boxCorners,
     };
   }
@@ -106,6 +113,7 @@ export function computeTokenGizmoLayout(
     { id: 'se', wx: maxX, wy: maxY, sx: 1, sy: 1 },
     { id: 'sw', wx: minX, wy: maxY, sx: -1, sy: 1 },
   ];
+  const mode = opts?.handleMode ?? (opts?.moveOnly ? 'move' : 'all');
   return {
     mode: 'group',
     cx,
@@ -113,7 +121,7 @@ export function computeTokenGizmoLayout(
     width: w,
     height: h,
     rotation: 0,
-    handles: opts?.moveOnly ? [] : handles,
+    handles: mode === 'move' || mode === 'rotate' ? [] : handles,
     boxCorners: [
       { x: minX, y: minY },
       { x: maxX, y: minY },

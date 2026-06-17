@@ -10,6 +10,7 @@ import { drawPixiSelectionGizmo, hidePixiSelectionGizmo } from './pixiSelectionG
 import { syncTransformHandleRegistry } from './useTransformControls';
 import type { Item } from '../types';
 import { itemSelectionGizmoRendersInThree } from '../token/tokenRenderType';
+import { playerCanRotateToken } from '../token/clientTokenVisibility';
 
 function manipulableSelected(items: Record<string, Item>, selectedIds: string[], gm: boolean): Item[] {
   return selectedIds
@@ -73,7 +74,13 @@ export function usePixiSelectionGizmo(appReady: boolean) {
         return;
       }
 
-      const layout = computeTokenGizmoLayout(selected, liveById, { moveOnly: !gm });
+      let handleMode: 'move' | 'rotate' | 'all' = gm ? 'all' : 'move';
+      if (!gm && selected.length === 1 && selected[0]?.type === 'token') {
+        const myUserId = useSessionStore.getState().myUserId;
+        if (playerCanRotateToken(selected[0] as any, myUserId)) handleMode = 'rotate';
+      }
+
+      const layout = computeTokenGizmoLayout(selected, liveById, { handleMode });
       syncTransformHandleRegistry(layout);
       drawPixiSelectionGizmo(box!, handlesG!, layout);
     };

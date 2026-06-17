@@ -20,6 +20,7 @@ import { worldToGridColRow } from '../token/tokenGrid';
 import type { Item, TokenItem } from '../types';
 import type { TokenGizmoLayout, GizmoHandle } from '../token/tokenGizmoLayout';
 import { formatResizeFeetLabel, hideResizeSizeLabel, showResizeSizeLabel } from './resizeSizeLabel';
+import { playerCanRotateToken } from '../token/clientTokenVisibility';
 
 // ─── Handle registry (shared with selection tool) ──────────────────────────────
 
@@ -54,7 +55,16 @@ export function syncTransformHandleRegistry(layout: TokenGizmoLayout): void {
 /** Picks a transform handle near the pointer (screen space in 3D, world space in 2D). */
 export function pickHandle(clientX: number, clientY: number): HandleDesc | null {
   if (registry.mode === 'none' || registry.handles.length === 0) return null;
-  if (useSessionStore.getState().myRole !== 'GM') return null;
+  const session = useSessionStore.getState();
+  const isGM = session.myRole === 'GM';
+  if (!isGM) {
+    // Players may only pick the rotate handle on eligible single-token selections.
+    if (registry.mode !== 'single' || !registry.itemId) return null;
+    const it = useItemStore.getState().items[registry.itemId];
+    if (!it || it.type !== 'token') return null;
+    if (!playerCanRotateToken(it as TokenItem, session.myUserId)) return null;
+    if (!registry.handles.some((h) => h.id === 'rotate')) return null;
+  }
 
   const viewMode = useMapStore.getState().viewMode;
   const items = useItemStore.getState().items;
@@ -92,6 +102,7 @@ export function pickHandle(clientX: number, clientY: number): HandleDesc | null 
   let best: HandleDesc | null = null;
   let bestD = tol * tol;
   for (const h of registry.handles) {
+    if (!isGM && h.id !== 'rotate') continue;
     let d: number;
     if (useScreen) {
       const projected = worldXZToClientScreen(h.wx, h.wy, rect);
@@ -150,12 +161,17 @@ export function useTransformControls(appReady: boolean) {
     hidePixiControls();
 
     const gm = myRole === 'GM';
-    if (!gm) {
-      return;
-    }
+    const session = useSessionStore.getState();
+    const selected = selectedIds.map((id) => items[id]).filter(Boolean) as Item[];
+    const playerRotateOk =
+      !gm
+      && activeTool === 'select'
+      && selected.length === 1
+      && selected[0]?.type === 'token'
+      && playerCanRotateToken(selected[0] as TokenItem, session.myUserId);
+    if (!gm && !playerRotateOk) return;
 
-    const sel = selectedIds.map((id) => items[id]).filter(Boolean) as Item[];
-    const manipulable = sel.filter((it) => {
+    const manipulable = selected.filter((it) => {
       if (it.locked) return false;
       return true;
     });
@@ -186,6 +202,9 @@ export function useTransformControls(appReady: boolean) {
       const h = pickHandle(e.clientX, e.clientY);
       if (!h) return; // not on a handle — selection tool handles it
       e.stopPropagation();
+      // Players only get the rotate handle on a single token.
+      if (!gm && h.id !== 'rotate') return;
+      if (!gm && registry.mode !== 'single') return;
 
       if (registry.mode === 'single' && registry.itemId) {
         const it = useItemStore.getState().items[registry.itemId];

@@ -11,6 +11,7 @@ import { syncTransformHandleRegistry } from '@/systems/scene/interaction/useTran
 import { objectBoundsInParentLocal, meshSubtreeBoundsInParentLocal } from './objectBoundsInParentLocal';
 import type { Item, MapItem } from '@/systems/scene/types';
 import type { GizmoHandleId, TokenGizmoLayout } from '@/systems/scene/token/tokenGizmoLayout';
+import { playerCanRotateToken } from '@/systems/scene/token/clientTokenVisibility';
 
 const GOLD = '#c9a84c';
 const HANDLE_Y = 0.12;
@@ -51,7 +52,7 @@ function setBoxPoints(line: THREE.LineLoop, points: THREE.Vector3[]): void {
 function localTokenHandlePositions(
   hw: number,
   hh: number,
-  moveOnly: boolean,
+  handleMode: 'move' | 'rotate' | 'all',
 ): Array<{ id: GizmoHandleId; x: number; z: number }> {
   const minDim = Math.min(hw * 2, hh * 2);
   const compact = minDim < 96;
@@ -63,10 +64,10 @@ function localTokenHandlePositions(
     { id: 'se', x: hw + handleOutset, z: hh + handleOutset },
     { id: 'sw', x: -hw - handleOutset, z: hh + handleOutset },
   ];
-  if (!moveOnly) {
-    handles.push({ id: 'rotate', x: 0, z: -hh - rotDist });
-  }
-  return handles;
+  const rotate = { id: 'rotate' as const, x: 0, z: -hh - rotDist };
+  if (handleMode === 'move') return [];
+  if (handleMode === 'rotate') return [rotate];
+  return [...handles, rotate];
 }
 
 function applyModelBoundsGizmo(
@@ -133,8 +134,13 @@ export function TokenSelectionGizmo({
     if (!item) return;
 
     const liveById = useLiveTransformStore.getState().byId;
-    const gm = useSessionStore.getState().myRole === 'GM';
-    const layout = computeTokenGizmoLayout([item], liveById, { moveOnly: !gm });
+    const session = useSessionStore.getState();
+    const gm = session.myRole === 'GM';
+    let handleMode: 'move' | 'rotate' | 'all' = gm ? 'all' : 'move';
+    if (!gm && item.type === 'token' && playerCanRotateToken(item as any, session.myUserId)) {
+      handleMode = 'rotate';
+    }
+    const layout = computeTokenGizmoLayout([item], liveById, { handleMode });
     syncTransformHandleRegistry(layout);
 
     let hw = meshBaseWidth / 2;
@@ -177,7 +183,7 @@ export function TokenSelectionGizmo({
       setBoxPoints(box, boxPts.current);
     }
 
-    const localHandles = localTokenHandlePositions(hw, hh, !gm);
+    const localHandles = localTokenHandlePositions(hw, hh, handleMode);
     let i = 0;
     for (const h of localHandles) {
       const mesh = meshRefs.current[i];

@@ -77,6 +77,14 @@ export function playerCanMoveToken(
   return token.visible !== false;
 }
 
+/** True when a player may rotate this token (GM may rotate everything). */
+export function playerCanRotateToken(token: TokenItem, myUserId: string | null): boolean {
+  if (token.locked) return false;
+  if (token.visible === false) return false;
+  // Prefer explicit ownership, but allow PC tokens without ownerId (common with DDB imports).
+  return playerOwnsToken(token, myUserId) || isPlayerCharacterToken(token);
+}
+
 /** Tokens a player may click/drag under fog — rendering uses sceneTokensForClient instead. */
 export function playerSelectableTokens(
   items: Record<string, Item>,
