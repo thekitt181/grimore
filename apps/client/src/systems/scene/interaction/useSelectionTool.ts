@@ -44,6 +44,9 @@ interface MoveState {
   origins: Map<string, { x: number; y: number }>;
 }
 
+/** Pointer travel (screen px) below which a press counts as a click, not a drag. */
+const CLICK_MOVE_THRESHOLD_PX = 4;
+
 interface MarqueeState {
   startWX: number;
   startWY: number;
@@ -590,8 +593,11 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
         applyTokenMoveDrag(e);
         const m = move;
         const snap = useItemStore.getState().snapToGrid;
+        // A click (negligible pointer travel) should only select — never snap/move.
+        const screenTravel = Math.hypot(e.clientX - m.startScreenX, e.clientY - m.startScreenY);
+        const isClick = screenTravel < CLICK_MOVE_THRESHOLD_PX;
         let { dx, dy } = moveDragDelta(m, e);
-        if (snap && m.ids.length) {
+        if (!isClick && snap && m.ids.length) {
           const lead = m.ids[0]!;
           const o = m.origins.get(lead)!;
           const snapped = snapPoint(o.x + dx, o.y + dy);
@@ -609,7 +615,7 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
           }
           return { id, kind: 'item' as const, patch: { x: nx, y: ny } as Partial<Item> };
         });
-        if (Math.abs(dx) > 0.01 || Math.abs(dy) > 0.01) {
+        if (!isClick && (Math.abs(dx) > 0.01 || Math.abs(dy) > 0.01)) {
           const myUserId = useSessionStore.getState().myUserId?.trim() ?? '';
           const claimOwner = !isGm() && myUserId;
           for (const p of patches) {
