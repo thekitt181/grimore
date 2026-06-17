@@ -96,12 +96,17 @@ export function pickHandle(clientX: number, clientY: number): HandleDesc | null 
   const tol = viewMode === '3d'
     ? (isToken ? Math.max(16, Math.min(minDim * 0.12, 34)) : Math.max(20, Math.min(minDim * 0.18, 50)))
     : (isToken ? Math.max(14 / scale, Math.min(minDim * 0.12, 26)) : Math.max(18 / scale, Math.min(minDim * 0.16, 34)));
+  // The rotate knob is a single point that's easy to miss, so give it a more
+  // generous grab radius than the resize corners.
+  const rotTol = viewMode === '3d'
+    ? Math.max(22, Math.min(minDim * 0.18, 44))
+    : Math.max(22 / scale, Math.min(minDim * 0.18, 38));
 
   const rect = getPickCanvasRect();
   const useScreen = viewMode === '3d' && rect && sceneCameraRef.liveCamera;
 
   let best: HandleDesc | null = null;
-  let bestD = tol * tol;
+  let bestD = Infinity;
   for (const h of registry.handles) {
     if (!isGM && h.id !== 'rotate') continue;
     let d: number;
@@ -114,7 +119,8 @@ export function pickHandle(clientX: number, clientY: number): HandleDesc | null 
       const dy = wy - h.wy;
       d = dx * dx + dy * dy;
     }
-    if (d <= bestD) { bestD = d; best = h; }
+    const t = h.id === 'rotate' ? rotTol : tol;
+    if (d <= t * t && d < bestD) { bestD = d; best = h; }
   }
   return best;
 }
