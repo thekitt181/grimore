@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect, type CSSProperties } from 'react';
+import { useMemo, useRef, useState, useEffect, type CSSProperties } from 'react';
 import axios from 'axios';
 import { useGrimoireAuth, useGrimoireSignOut } from '@/hooks/useGrimoireAuth';
 import { useInfiniteQuery, useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
@@ -582,6 +582,7 @@ export function CompendiumSidebarList({ onMinimize }: { onMinimize?: () => void 
             showHomebrew={isHomebrewEntry(monster.isCustom, monster.source)}
             showDraft={Boolean(monster.isDraft)}
             selected={monster.id === selectedMonsterId}
+            onPrefetch={() => prefetchCompendiumEntry(qc, 'monsters', monster.id, bookFetchOpts)}
             onClick={() => {
               prefetchCompendiumEntry(qc, 'monsters', monster.id, bookFetchOpts);
               selectMonster(monster.id);
@@ -596,6 +597,7 @@ export function CompendiumSidebarList({ onMinimize }: { onMinimize?: () => void 
             showHomebrew={isHomebrewEntry(item.isCustom, item.source)}
             showDraft={Boolean(item.isDraft)}
             selected={item.id === selectedItemId}
+            onPrefetch={() => prefetchCompendiumEntry(qc, 'items', item.id, bookFetchOpts)}
             onClick={() => {
               prefetchCompendiumEntry(qc, 'items', item.id, bookFetchOpts);
               selectItem(item.id);
@@ -626,6 +628,7 @@ export function CompendiumSidebarList({ onMinimize }: { onMinimize?: () => void 
             showHomebrew={isHomebrewEntry(spell.isCustom, spell.source)}
             showDraft={Boolean(spell.isDraft)}
             selected={spell.id === selectedSpellId}
+            onPrefetch={() => prefetchCompendiumEntry(qc, 'spells', spell.id, bookFetchOpts)}
             onClick={() => {
               prefetchCompendiumEntry(qc, 'spells', spell.id, bookFetchOpts);
               selectSpell(spell.id);
@@ -711,6 +714,7 @@ function EntryRow({
   showDraft = false,
   selected = false,
   onClick,
+  onPrefetch,
   onDelete,
 }: {
   name: string;
@@ -719,13 +723,37 @@ function EntryRow({
   showDraft?: boolean;
   selected?: boolean;
   onClick: () => void;
+  onPrefetch?: () => void;
   onDelete?: () => void;
 }) {
+  // Hover-intent prefetch: a short dwell warms the detail cache before the
+  // click, so the reference panel opens instantly instead of showing "Loading…".
+  const hoverTimer = useRef<number | null>(null);
+  const clearHover = () => {
+    if (hoverTimer.current !== null) {
+      window.clearTimeout(hoverTimer.current);
+      hoverTimer.current = null;
+    }
+  };
+  const armPrefetch = () => {
+    if (!onPrefetch || hoverTimer.current !== null) return;
+    hoverTimer.current = window.setTimeout(() => {
+      hoverTimer.current = null;
+      onPrefetch();
+    }, 140);
+  };
+  useEffect(() => clearHover, []);
+
   return (
-    <div className="flex items-stretch gap-0.5">
+    <div
+      className="flex items-stretch gap-0.5"
+      onMouseEnter={armPrefetch}
+      onMouseLeave={clearHover}
+    >
       <button
         type="button"
         onClick={onClick}
+        onFocus={() => onPrefetch?.()}
         className="flex-1 min-w-0 text-left px-1.5 py-1 rounded text-xs font-ui hover:opacity-90"
         style={{
           background: selected ? 'rgba(201,168,76,0.15)' : 'var(--color-bg-primary)',
