@@ -68,6 +68,9 @@ export function useItemRenderer(
   const signatures = useRef<Map<string, string>>(new Map());
   const overlaySignatures = useRef<Map<string, string>>(new Map());
   const wallSignatures = useRef<Map<string, string>>(new Map());
+  // Last computed fog-visible token id set (null = GM / no fog filter). Cached so
+  // the transform render effect can respect fog during drag without recomputing.
+  const fogVisibleIdsRef = useRef<Set<string> | null>(null);
   const [threeHealthTick, setThreeHealthTick] = useState(0);
 
   useEffect(() => {
@@ -188,8 +191,11 @@ export function useItemRenderer(
       c.rotation = (b.rotation * Math.PI) / 180;
       c.zIndex = itemDisplayZIndex(item);
 
-      // Visibility — hidden items are GM-only ghosts (fog filter applied in a separate effect).
-      const show = item.visible !== false || gm;
+      // Visibility — hidden items are GM-only ghosts. Respect the cached fog set
+      // so dragging (which runs this effect) can't reveal fog-hidden tokens.
+      const fogIds = fogVisibleIdsRef.current;
+      const inFogVision = item.type !== 'token' || fogIds == null || fogIds.has(item.id);
+      const show = (item.visible !== false || gm) && inFogVision;
       const alpha = item.visible !== false || !gm ? 1 : 0.35;
 
       if (viewMode === '3d') {
@@ -270,6 +276,7 @@ export function useItemRenderer(
 
     const gm: boolean = myRole === 'GM';
     const fogVisibleTokenIds = clientVisibleTokenIdSet(items, gm);
+    fogVisibleIdsRef.current = fogVisibleTokenIds;
     const mobileMapUnderlay = viewMode === '3d' && isMobileClient();
     const pixiTokenFallback = viewMode === '3d' && isMobileClient() && !isThreeCanvasHealthy();
 
