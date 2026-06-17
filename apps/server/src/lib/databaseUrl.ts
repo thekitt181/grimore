@@ -26,8 +26,11 @@ export function resolveDatabaseUrl(raw?: string): string {
     throw new Error('DATABASE_URL is not a valid URL');
   }
 
-  // Prisma + Supabase: session pooler (5432) caps at ~15 clients — use transaction pooler for the app.
-  if (url.hostname.includes('pooler.supabase.com') && url.port === '5432') {
+  // Prisma + Supabase: the session pooler (5432) caps at ~15 clients, so always route the
+  // app through the transaction pooler (6543), which multiplexes and isn't capped that low.
+  // Force it whenever the host is the Supabase pooler and the port isn't already 6543
+  // (covers URLs that omit the port and would otherwise default to session mode).
+  if (url.hostname.includes('pooler.supabase.com') && url.port !== '6543') {
     url.port = '6543';
     if (!url.searchParams.has('pgbouncer')) {
       url.searchParams.set('pgbouncer', 'true');
@@ -36,7 +39,7 @@ export function resolveDatabaseUrl(raw?: string): string {
 
   if (!url.searchParams.has('connection_limit')) {
     const fromEnv = process.env['DATABASE_CONNECTION_LIMIT']?.trim();
-    const fallback = '3';
+    const fallback = '5';
     url.searchParams.set('connection_limit', fromEnv || fallback);
   }
 
@@ -80,7 +83,13 @@ export function resolveAuthDatabaseUrl(): string {
   return withSupabaseSsl(url.toString());
 }
 
-/** Session pooler for user-facing app routes — isolated from compendium transaction pool (6543). */
+/**
+ * User-facing app routes (campaigns, dashboard, session-member checks). Uses the
+ * transaction pooler (6543) — the session pooler (5432) is hard-capped at ~15 clients
+ * and was the source of EMAXCONNSESSION errors. Kept as a separate Prisma client so a
+ * heavy compendium sync can't starve user reads. All queries here are simple/batch
+ * (no interactive transactions), so the transaction pooler is safe.
+ */
 export function resolveReadDatabaseUrl(): string {
   const source = process.env['DATABASE_URL']?.trim();
   if (!source) {
@@ -94,9 +103,11 @@ export function resolveReadDatabaseUrl(): string {
     throw new Error('DATABASE_URL is not a valid URL');
   }
 
-  if (url.hostname.includes('pooler.supabase.com')) {
-    url.port = '5432';
-    url.searchParams.delete('pgbouncer');
+  if (url.hostname.includes('pooler.supabase.com') && url.port !== '6543') {
+    url.port = '6543';
+    if (!url.searchParams.has('pgbouncer')) {
+      url.searchParams.set('pgbouncer', 'true');
+    }
   }
 
   url.searchParams.set(
