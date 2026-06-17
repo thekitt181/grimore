@@ -79,7 +79,9 @@ export function redrawGrid(
   const cols = Math.ceil((mapWidth  + gridSize) / gridSize) + 1;
   const rows = Math.ceil((mapHeight + gridSize) / gridSize) + 1;
 
-  g.setStrokeStyle({ width: 1, color: gridColor, alpha: gridOpacity });
+  // pixelLine keeps grid lines a crisp 1 device pixel at any zoom, avoiding the
+  // shimmer/moiré that scaled hairlines produce when zoomed out.
+  g.setStrokeStyle({ width: 1, color: gridColor, alpha: gridOpacity, pixelLine: true });
 
   if (gridType === 'square') {
     drawSquareGrid(g, cols, rows, gridSize, ox, oy);
