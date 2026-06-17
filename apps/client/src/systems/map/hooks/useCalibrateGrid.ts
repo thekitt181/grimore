@@ -4,7 +4,7 @@ import { useMapStore } from '../store/mapStore';
 import { mapLayerRefs } from '../MapCanvas';
 import { useItemStore, getActiveMap } from '@/systems/scene/store/itemStore';
 import { emitItemUpdate } from '@/systems/scene/sceneSync';
-import type { MapItem } from '@/systems/scene/types';
+import type { Item, MapItem } from '@/systems/scene/types';
 import { clientToWorld, getMapToolElement } from '../mapToolPointer';
 
 /**
@@ -92,7 +92,31 @@ export function useCalibrateGrid(appReady = false, interactionReady = false) {
 
       const patch: Partial<MapItem> = { gridSize: newGridSize, gridOffsetX: ox, gridOffsetY: oy };
       useItemStore.getState().updateItem(map.id, patch);
-      emitItemUpdate([{ id: map.id, patch }]);
+
+      // Rescale tokens so each one still occupies sizeCells × 5ft cells on the
+      // recalibrated grid (a medium token stays exactly one 5ft square).
+      const tokenUpdates: Array<{ id: string; patch: Partial<Item> }> = [];
+      if (map.gridSize > 0 && Math.abs(newGridSize - map.gridSize) > 0.5) {
+        for (const it of Object.values(useItemStore.getState().items)) {
+          if (it.type !== 'token') continue;
+          const cells = it.sizeCells || it.width / map.gridSize || 1;
+          const newSize = cells * newGridSize;
+          const cx = it.x + it.width / 2;
+          const cy = it.y + it.height / 2;
+          tokenUpdates.push({
+            id: it.id,
+            patch: {
+              width: newSize,
+              height: newSize,
+              x: cx - newSize / 2,
+              y: cy - newSize / 2,
+            },
+          });
+        }
+      }
+      if (tokenUpdates.length > 0) useItemStore.getState().updateItems(tokenUpdates);
+
+      emitItemUpdate([{ id: map.id, patch }, ...tokenUpdates]);
       useMapStore.getState().setTool('select');
     }
 
