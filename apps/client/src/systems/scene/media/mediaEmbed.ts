@@ -29,6 +29,8 @@ export interface EmbedInfo {
   title: string;
   /** Build the iframe `src` for the requested playback options. */
   src: (opts: EmbedOptions) => string;
+  /** YouTube ids, when applicable, so the IFrame API can build the player. */
+  youtube?: { videoId?: string | undefined; listId?: string | undefined };
 }
 
 const VIDEO_FILE_RE = /\.(mp4|webm|ogv|mov|m4v)(\?.*)?$/i;
@@ -77,6 +79,7 @@ function buildYoutube(u: URL): EmbedInfo | null {
     provider: 'youtube',
     mediaType: 'video',
     title: 'YouTube',
+    youtube: { videoId, listId },
     src: (o) => {
       const p = new URLSearchParams();
       p.set('autoplay', o.autoplay ? '1' : '0');
@@ -85,6 +88,9 @@ function buildYoutube(u: URL): EmbedInfo | null {
       p.set('rel', '0');
       p.set('modestbranding', '1');
       p.set('playsinline', '1');
+      // Required so the IFrame Player API can attach and control volume.
+      p.set('enablejsapi', '1');
+      if (typeof window !== 'undefined') p.set('origin', window.location.origin);
       if (o.loop) {
         p.set('loop', '1');
         if (videoId) p.set('playlist', videoId);

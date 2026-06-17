@@ -5,6 +5,7 @@ import { ddbPanelPosition, ddbPanelWidth } from '@/systems/ddb/ddbTokenUtils';
 import { isMobileClient } from '@/lib/socket';
 import { useSessionStore } from '@/store/sessionStore';
 import { useDiceStore } from './diceStore';
+import { DiceSkinControls } from './DiceSkinControls';
 import type { RollMode } from '@grimoire/dice-engine';
 
 const DICE = [4, 6, 8, 10, 12, 20, 100];
@@ -221,6 +222,8 @@ export function DiceRoller({ onClose }: { onClose: () => void }) {
           );
         })}
       </div>
+
+      <DiceSkinControls />
 
       {myRole === 'GM' && (
         <div className="flex items-center gap-2 px-3 py-1.5 shrink-0" style={{ borderBottom: `1px solid ${BD}` }}>

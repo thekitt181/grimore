@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { v4 as uuidv4 } from 'uuid';
 import type { LightingPreset, TimeOfDay } from '@grimoire/shared';
 import {
@@ -7,7 +8,6 @@ import {
   TIME_OF_DAY_PRESETS,
 } from '@grimoire/shared';
 import { fileToDataUrl } from '@/lib/imagePersistence';
-import { skipMusicTrack } from './audioEngine';
 import { useSceneMediaStore } from './sceneMediaStore';
 import { detectEmbed } from './mediaEmbed';
 import { emitSessionMediaPatch, emitSessionTimeOfDay } from './useSceneMedia';
@@ -24,7 +24,9 @@ export function SessionMediaBar({ sessionId, isGM }: SessionMediaBarProps) {
   const [uploadUrl, setUploadUrl] = useState('');
   const [uploadKind, setUploadKind] = useState<'video' | 'ambient' | 'music'>('video');
   const [videoOverlay, setVideoOverlay] = useState(false);
+  const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null);
   const barRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   const scene = useSceneMediaStore((s) => s.activeScene);
   const masterVolume = useSceneMediaStore((s) => s.masterVolume);
@@ -33,25 +35,46 @@ export function SessionMediaBar({ sessionId, isGM }: SessionMediaBarProps) {
   const setMasterVolume = useSceneMediaStore((s) => s.setMasterVolume);
   const setAmbientMuted = useSceneMediaStore((s) => s.setAmbientMuted);
   const setMusicMuted = useSceneMediaStore((s) => s.setMusicMuted);
+  const skipMusic = useSceneMediaStore((s) => s.skipMusic);
+  const musicSkipCount = useSceneMediaStore((s) => s.musicSkipCount);
 
   useEffect(() => {
     if (!openMenu) return;
     function onDown(e: MouseEvent) {
-      if (barRef.current && !barRef.current.contains(e.target as Node)) {
-        setOpenMenu(null);
-      }
+      const target = e.target as Node;
+      if (barRef.current?.contains(target)) return;
+      if (menuRef.current?.contains(target)) return;
+      setOpenMenu(null);
+    }
+    function reposition() {
+      setAnchorRect(barRef.current?.getBoundingClientRect() ?? null);
     }
     window.addEventListener('pointerdown', onDown);
-    return () => window.removeEventListener('pointerdown', onDown);
+    window.addEventListener('resize', reposition);
+    window.addEventListener('scroll', reposition, true);
+    return () => {
+      window.removeEventListener('pointerdown', onDown);
+      window.removeEventListener('resize', reposition);
+      window.removeEventListener('scroll', reposition, true);
+    };
   }, [openMenu]);
 
   if (!isGM) return null;
 
   const cfg = scene?.mediaConfig ?? DEFAULT_SCENE_MEDIA_CONFIG;
   const detectedProvider = uploadUrl.trim() ? detectEmbed(uploadUrl.trim())?.title ?? null : null;
+  const musicQueue = cfg.musicPlaylist;
+  const embedQueue = musicQueue.filter((t) => detectEmbed(t.url));
+  const playingTrackId = embedQueue.length
+    ? embedQueue[musicSkipCount % embedQueue.length]!.id
+    : musicQueue[0]?.id ?? null;
 
   function toggle(menu: MenuId) {
-    setOpenMenu((prev) => (prev === menu ? null : menu));
+    setOpenMenu((prev) => {
+      const next = prev === menu ? null : menu;
+      if (next) setAnchorRect(barRef.current?.getBoundingClientRect() ?? null);
+      return next;
+    });
   }
 
   function pushLighting(preset: LightingPreset) {
@@ -119,16 +142,31 @@ export function SessionMediaBar({ sessionId, isGM }: SessionMediaBarProps) {
       }];
       emitSessionMediaPatch(sessionId, { ambientAudioUrl: url, mediaConfig: { ...cfg, ambientLayers: layers } });
     } else {
+      const trackName = `${detectEmbed(url)?.title ?? 'Track'} ${cfg.musicPlaylist.length + 1}`;
+      const tracks = [...cfg.musicPlaylist, { id: uuidv4(), name: trackName, url, volume: 0.55 }];
       emitSessionMediaPatch(sessionId, {
         mediaConfig: {
           ...cfg,
-          musicMode: 'single',
-          musicPlaylist: [{ id: uuidv4(), name: 'Custom track', url, volume: 0.55 }],
+          // Multiple tracks form a queue Skip can advance through.
+          musicMode: tracks.length > 1 ? 'playlist' : 'single',
+          musicPlaylist: tracks,
         },
       });
     }
     setUploadUrl('');
-    setOpenMenu(null);
+    // Keep the panel open when queueing music so several tracks can be added.
+    if (uploadKind !== 'music') setOpenMenu(null);
+  }
+
+  function removeMusicTrack(id: string) {
+    const tracks = cfg.musicPlaylist.filter((t) => t.id !== id);
+    emitSessionMediaPatch(sessionId, {
+      mediaConfig: {
+        ...cfg,
+        musicMode: tracks.length > 1 ? 'playlist' : 'single',
+        musicPlaylist: tracks,
+      },
+    });
   }
 
   async function onUploadFile(file: File | undefined) {
@@ -176,10 +214,13 @@ export function SessionMediaBar({ sessionId, isGM }: SessionMediaBarProps) {
       <TabBtn id="media" label="Mix" />
       <TabBtn id="upload" label="Upload" />
 
-      {openMenu && (
+      {openMenu && createPortal(
         <div
-          className="absolute top-full right-0 mt-1 z-[100] rounded-lg shadow-panel py-2 overflow-hidden"
+          ref={menuRef}
+          className="fixed z-[200] rounded-lg shadow-panel py-2 overflow-hidden"
           style={{
+            top: anchorRect ? anchorRect.bottom + 6 : 56,
+            right: anchorRect ? Math.max(8, window.innerWidth - anchorRect.right) : 8,
             background: 'var(--color-bg-secondary)',
             border: '1px solid var(--color-border)',
             minWidth: 260,
@@ -212,10 +253,39 @@ export function SessionMediaBar({ sessionId, isGM }: SessionMediaBarProps) {
                   <button type="button" className="btn-ghost text-xs py-0.5 px-2" onClick={() => setMusicMuted(!musicMuted)}>
                     {musicMuted ? 'Music off' : 'Music on'}
                   </button>
-                  <button type="button" className="btn-ghost text-xs py-0.5 px-2" onClick={() => skipMusicTrack()}>
+                  <button type="button" className="btn-ghost text-xs py-0.5 px-2" onClick={() => skipMusic()}>
                     Skip track
                   </button>
                 </div>
+                <div className="gold-divider my-1" />
+                <p className="px-1 font-ui text-[10px] uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>
+                  Music queue ({musicQueue.length})
+                </p>
+                {musicQueue.length === 0 ? (
+                  <p className="px-1 font-ui text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
+                    Add tracks from the Upload tab — multiple tracks let Skip cycle the queue.
+                  </p>
+                ) : (
+                  musicQueue.map((t) => (
+                    <div key={t.id} className="flex items-center gap-1 px-1 py-0.5">
+                      <span
+                        className="flex-1 truncate font-ui text-xs"
+                        style={{ color: t.id === playingTrackId ? 'var(--color-accent-gold)' : 'var(--color-text-primary)' }}
+                        title={t.url}
+                      >
+                        {t.id === playingTrackId ? '▶ ' : ''}{t.name}
+                      </span>
+                      <button
+                        type="button"
+                        className="btn-ghost text-xs py-0 px-1.5"
+                        title="Remove from queue"
+                        onClick={() => removeMusicTrack(t.id)}
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))
+                )}
                 <div className="gold-divider my-1" />
                 <p className="px-1 font-ui text-[10px] uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>
                   Lighting
@@ -240,13 +310,19 @@ export function SessionMediaBar({ sessionId, isGM }: SessionMediaBarProps) {
                 <div className="gold-divider my-1" />
                 <select
                   className="input w-full text-xs py-1"
+                  style={{ color: 'var(--color-text-primary)', background: 'var(--color-bg-secondary)' }}
                   value={uploadKind}
                   onChange={(e) => setUploadKind(e.target.value as typeof uploadKind)}
                 >
-                  <option value="video">Video</option>
-                  <option value="ambient">Ambient audio</option>
-                  <option value="music">Music track</option>
+                  <option value="video" style={{ color: '#f5f0e6', background: '#1b1b22' }}>Video</option>
+                  <option value="ambient" style={{ color: '#f5f0e6', background: '#1b1b22' }}>Ambient audio (layered loop)</option>
+                  <option value="music" style={{ color: '#f5f0e6', background: '#1b1b22' }}>Music track (skippable queue)</option>
                 </select>
+                {uploadKind === 'ambient' && (
+                  <p className="px-1 font-ui text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
+                    Ambient loops all play together. For a Skip-able queue, choose “Music track”.
+                  </p>
+                )}
                 {uploadKind === 'video' && (
                   <label className="flex items-center gap-2 font-ui text-xs">
                     <input type="checkbox" checked={videoOverlay} onChange={(e) => setVideoOverlay(e.target.checked)} />
@@ -275,12 +351,18 @@ export function SessionMediaBar({ sessionId, isGM }: SessionMediaBarProps) {
                   onChange={(e) => void onUploadFile(e.target.files?.[0])}
                 />
                 <button type="button" className="btn-primary w-full text-xs py-1" onClick={applyUpload} disabled={!uploadUrl.trim()}>
-                  Push live
+                  {uploadKind === 'music' ? 'Add to queue' : 'Push live'}
                 </button>
+                {uploadKind === 'music' && (
+                  <p className="px-1 font-ui text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
+                    Queued: {musicQueue.length} track{musicQueue.length === 1 ? '' : 's'}. Add more, then use Skip in the Mix tab to cycle.
+                  </p>
+                )}
               </div>
             )}
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );

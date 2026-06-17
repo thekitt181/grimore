@@ -10,6 +10,7 @@ import type {
   WeatherSettings,
 } from '@grimoire/shared';
 import { DEFAULT_GAME_TIME, DEFAULT_SCENE_MEDIA_CONFIG, gameTimeToTimeOfDay, normalizeGameTime, TIME_OF_DAY_TO_GAME_TIME } from '@grimoire/shared';
+import { skipMusicTrack } from './audioEngine';
 
 export const DEFAULT_WEATHER_SETTINGS: WeatherSettings = {
   cover: 65,
@@ -50,6 +51,8 @@ interface SceneMediaState {
   masterVolume: number;
   ambientMuted: boolean;
   musicMuted: boolean;
+  /** Advances on Skip so the streaming embed dock can change tracks too. */
+  musicSkipCount: number;
   /** GM-only local preview before pushing to session. */
   previewMode: boolean;
   setActiveScene: (scene: SceneRecord | null, transition?: SceneTransition) => void;
@@ -63,6 +66,8 @@ interface SceneMediaState {
   setMasterVolume: (v: number) => void;
   setAmbientMuted: (v: boolean) => void;
   setMusicMuted: (v: boolean) => void;
+  /** Skip to the next music track (direct files via Howler + streaming embeds). */
+  skipMusic: () => void;
   setPreviewMode: (v: boolean) => void;
   patchMediaConfig: (patch: Partial<SceneMediaConfig>) => void;
 }
@@ -79,6 +84,7 @@ export const useSceneMediaStore = create<SceneMediaState>((set, get) => ({
   masterVolume: DEFAULT_SCENE_MEDIA_CONFIG.masterVolume,
   ambientMuted: false,
   musicMuted: false,
+  musicSkipCount: 0,
   previewMode: false,
   setActiveScene: (scene, transition = 'fade') =>
     set({ activeScene: scene, transition, transitioning: true }),
@@ -134,6 +140,10 @@ export const useSceneMediaStore = create<SceneMediaState>((set, get) => ({
   setMasterVolume: (masterVolume) => set({ masterVolume }),
   setAmbientMuted: (ambientMuted) => set({ ambientMuted }),
   setMusicMuted: (musicMuted) => set({ musicMuted }),
+  skipMusic: () => {
+    skipMusicTrack();
+    set((s) => ({ musicSkipCount: s.musicSkipCount + 1 }));
+  },
   setPreviewMode: (previewMode) => set({ previewMode }),
   patchMediaConfig: (patch) => {
     const scene = get().activeScene;

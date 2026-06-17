@@ -1,4 +1,3 @@
-import { skipMusicTrack } from '../media/audioEngine';
 import { useSceneMediaStore } from '../media/sceneMediaStore';
 
 export function SessionMediaControls() {
@@ -9,6 +8,7 @@ export function SessionMediaControls() {
   const setMasterVolume = useSceneMediaStore((s) => s.setMasterVolume);
   const setAmbientMuted = useSceneMediaStore((s) => s.setAmbientMuted);
   const setMusicMuted = useSceneMediaStore((s) => s.setMusicMuted);
+  const skipMusic = useSceneMediaStore((s) => s.skipMusic);
 
   if (!scene) return null;
 
@@ -35,7 +35,7 @@ export function SessionMediaControls() {
       <button type="button" className="btn-ghost text-xs py-0 px-2" onClick={() => setMusicMuted(!musicMuted)}>
         {musicMuted ? 'Music off' : 'Music on'}
       </button>
-      <button type="button" className="btn-ghost text-xs py-0 px-2" onClick={() => skipMusicTrack()}>
+      <button type="button" className="btn-ghost text-xs py-0 px-2" onClick={() => skipMusic()}>
         Skip track
       </button>
     </div>

@@ -1,4 +1,4 @@
-import { Howl } from 'howler';
+import { Howl, Howler } from 'howler';
 import type { SceneAudioLayer, SceneMediaConfig, SceneMusicTrack } from '@grimoire/shared';
 import { isEmbedUrl } from './mediaEmbed';
 
@@ -8,6 +8,8 @@ const CROSSFADE_MS = 2500;
 interface LayerHandle {
   id: string;
   howl: Howl;
+  /** The layer's own 0–1 volume before master/mute is applied. */
+  baseVolume: number;
 }
 
 let ambientLayers: LayerHandle[] = [];
@@ -20,10 +22,21 @@ let ambientMuted = false;
 let musicMuted = false;
 let musicPlaylistToken = 0;
 
+function clamp01(v: number): number {
+  return Math.max(0, Math.min(1, v));
+}
+
+// Per-howl volume only accounts for the track's own level and mute state.
+// The master volume is applied globally via `Howler.volume()` so it scales
+// every playing sound live (even mid-fade) and survives module reloads.
 function effectiveVolume(layerVolume: number, kind: 'ambient' | 'music'): number {
   const muted = kind === 'ambient' ? ambientMuted : musicMuted;
   if (muted) return 0;
-  return Math.max(0, Math.min(1, layerVolume * masterVolume));
+  return clamp01(layerVolume);
+}
+
+function applyMasterToHowler(): void {
+  Howler.volume(clamp01(masterVolume));
 }
 
 function fadeHowl(howl: Howl, to: number, ms = FADE_MS, onEnd?: () => void) {
@@ -97,7 +110,7 @@ function startAmbientLayers(layers: SceneAudioLayer[]) {
     });
     howl.play();
     fadeHowl(howl, effectiveVolume(layer.volume, 'ambient'), FADE_MS);
-    ambientLayers.push({ id: layer.id, howl });
+    ambientLayers.push({ id: layer.id, howl, baseVolume: layer.volume });
   }
 }
 
@@ -114,6 +127,7 @@ function startMusic(tracks: SceneMusicTrack[], mode: SceneMediaConfig['musicMode
 /** Apply a full scene media config — fades out old layers and starts new ones. */
 export function applySceneMediaConfig(config: SceneMediaConfig): void {
   masterVolume = config.masterVolume;
+  applyMasterToHowler();
   // Streaming links (YouTube/Spotify/SoundCloud/…) are played by the iframe
   // embed layer, not Howler — keep them out of the audio decoder.
   startAmbientLayers(config.ambientLayers.filter((l) => !isEmbedUrl(l.url)));
@@ -127,20 +141,13 @@ export function applySceneMediaConfig(config: SceneMediaConfig): void {
 
 export function setMediaMasterVolume(volume: number): void {
   masterVolume = volume;
-  for (const layer of ambientLayers) {
-    const src = layer.howl;
-    // preserve relative layer volume by reading current as proxy — re-apply on next scene apply
-    src.volume(effectiveVolume(src.volume() / Math.max(masterVolume, 0.001), 'ambient'));
-  }
-  if (musicHowl && musicTracks[musicIndex]) {
-    musicHowl.volume(effectiveVolume(musicTracks[musicIndex]!.volume, 'music'));
-  }
+  applyMasterToHowler();
 }
 
 export function setAmbientMuted(muted: boolean): void {
   ambientMuted = muted;
   for (const layer of ambientLayers) {
-    layer.howl.volume(muted ? 0 : effectiveVolume(layer.howl.volume(), 'ambient'));
+    layer.howl.volume(effectiveVolume(layer.baseVolume, 'ambient'));
   }
 }
 
