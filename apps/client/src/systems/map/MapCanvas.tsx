@@ -47,7 +47,7 @@ import { useDeleteKey } from './hooks/useDeleteKey';
 import { useMap3DPixiMode } from './hooks/useMap3DPixiMode';
 import { useMap3DOrbit } from './hooks/useMap3DOrbit';
 import { useMap2DMiniOrbit } from './hooks/useMap2DMiniOrbit';
-import type { Item, MapItem, TokenItem } from '@/systems/scene/types';
+import type { Item, MapItem, TokenItem, ImageItem } from '@/systems/scene/types';
 import { MapCategoryWheel, type ImageCategory } from './MapCategoryWheel';
 import { TokenTypeChoicePopup } from './TokenTypeChoicePopup';
 import { MapCameraControls } from './MapCameraControls';
@@ -619,7 +619,13 @@ export function MapCanvas() {
   }, []);
   function handleCategorySelect(category: ImageCategory) {
     if (!pendingDrop) return;
-    if (category === 'character' || category === 'item' || category === 'prop' || category === 'other') {
+    if (category === 'other') {
+      const drop = pendingDrop;
+      setPendingDrop(null);
+      void placeMapImage(drop.url, drop.worldX, drop.worldY, drop.modelFile);
+      return;
+    }
+    if (category === 'character' || category === 'item' || category === 'prop') {
       setPendingDrop({ ...pendingDrop, category });
       return;
     }
@@ -714,6 +720,50 @@ export function MapCanvas() {
 }
 
 // ─── Drop placement ───────────────────────────────────────────────────────────
+
+async function placeMapImage(
+  url: string,
+  worldX: number,
+  worldY: number,
+  modelFile?: File,
+) {
+  if (modelFile || isModelUrl(url)) {
+    window.alert('3D models cannot be placed as Image — use Prop or Character.');
+    return;
+  }
+
+  const grid = getActiveMap()?.gridSize ?? DEFAULT_MAP_GRID_SIZE;
+  const maxPx = grid * 4;
+
+  const dims = await new Promise<{ w: number; h: number }>((resolve) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => resolve({ w: img.naturalWidth || maxPx, h: img.naturalHeight || maxPx });
+    img.onerror = () => resolve({ w: maxPx, h: maxPx });
+    img.src = url;
+  });
+
+  const scale = maxPx / Math.max(dims.w, dims.h, 1);
+  const width = Math.max(32, dims.w * scale);
+  const height = Math.max(32, dims.h * scale);
+  const snapped = snapPoint(worldX, worldY);
+  const image: ImageItem = {
+    id: uuidv4(),
+    type: 'image',
+    name: 'Image',
+    imageUrl: url,
+    x: snapped.x - width / 2,
+    y: snapped.y - height / 2,
+    rotation: 0,
+    width,
+    height,
+    zIndex: 0,
+    locked: false,
+    visible: true,
+  };
+  useItemStore.getState().addItem(image);
+  emitItemAdd(image);
+}
 
 async function placeByCategory(
   category: ImageCategory,

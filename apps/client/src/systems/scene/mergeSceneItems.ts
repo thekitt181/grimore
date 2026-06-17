@@ -65,6 +65,9 @@ export function mergeSceneItems(
         const { imageUrl: _drop, ...rest } = item;
         merged.push(rest);
       }
+    } else if (item.type === 'image' && loc?.type === 'image') {
+      const imageUrl = pickBackgroundUrl(item.imageUrl, loc.imageUrl) ?? item.imageUrl;
+      merged.push({ ...item, imageUrl });
     } else {
       merged.push(item);
     }
@@ -116,6 +119,9 @@ export function sanitizePersistedItems(items: Item[]): Item[] {
     if (item.type === 'handout' && item.imageUrl && !isPersistableImageUrl(item.imageUrl)) {
       const { imageUrl: _dead, ...rest } = item;
       return rest;
+    }
+    if (item.type === 'image' && item.imageUrl && !isPersistableImageUrl(item.imageUrl)) {
+      return { ...item, imageUrl: '' };
     }
     return item;
   });

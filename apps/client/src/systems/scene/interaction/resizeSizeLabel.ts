@@ -60,7 +60,7 @@ export function formatResizeFeetLabel(
   const gridSize = useMapStore.getState().gridSize;
   const wFt = Math.round((width / gridSize) * FEET_PER_CELL);
   const hFt = Math.round((height / gridSize) * FEET_PER_CELL);
-  if (item.type === 'map' || item.type === 'handout' || wFt === hFt) {
+  if (item.type === 'map' || item.type === 'handout' || item.type === 'image' || wFt === hFt) {
     return `${wFt} ft`;
   }
   return `${wFt} × ${hFt} ft`;

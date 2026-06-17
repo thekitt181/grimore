@@ -15,6 +15,7 @@ import { Map3DScannedScene } from './Map3DScannedScene';
 import { Map3DWalls } from './Map3DWalls';
 import { Map3DTokens } from './Map3DTokens';
 import { Map3DDrawings } from './Map3DDrawings';
+import { Map3DImageLayer } from './Map3DImages';
 import { Map3DMapModel } from './Map3DMapModel';
 import { Map3DFogOfWar } from './Map3DFogOfWar';
 import { SyncedPixiOrthographicCamera } from './SyncedPixiCamera';
@@ -151,6 +152,7 @@ function Map3DSceneContent() {
 
       <TokenLayer />
       <Map3DDrawings drawings={drawings} labels={labels} />
+      <Map3DImageLayer />
     </>
   );
 }

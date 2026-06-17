@@ -18,6 +18,7 @@ function manipulableSelected(items: Record<string, Item>, selectedIds: string[],
     .filter((it): it is Item => {
       if (!it || it.locked) return false;
       if (it.type === 'token') return it.visible !== false;
+      if (it.type === 'image' || it.type === 'handout') return gm;
       return gm;
     });
 }

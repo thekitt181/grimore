@@ -128,7 +128,7 @@ function rot(x: number, y: number, deg: number): { x: number; y: number } {
 const MIN = 16;
 
 function aspectLocked(item: Item): boolean {
-  return item.type === 'map' || item.type === 'token' || item.type === 'handout';
+  return item.type === 'map' || item.type === 'token' || item.type === 'handout' || item.type === 'image';
 }
 
 // ─── Hook ────────────────────────────────────────────────────────────────────

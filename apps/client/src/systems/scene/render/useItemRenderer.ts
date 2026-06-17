@@ -200,6 +200,9 @@ export function useItemRenderer(
           const showPixiToken = pixiTokenFallback && !item.modelUrl;
           c.visible = show && showPixiToken;
           c.alpha = show && showPixiToken ? alpha : 0;
+        } else if (item.type === 'image') {
+          c.visible = false;
+          c.alpha = 0;
         } else {
           c.visible = false;
           c.alpha = 0;

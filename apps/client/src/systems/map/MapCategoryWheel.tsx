@@ -15,7 +15,7 @@ const SEGMENTS: Segment[] = [
   { id: 'character', label: 'Character', icon: '🧙', color: '#1a1a2a', hoverColor: '#2a2a4a' },
   { id: 'item',      label: 'Item',      icon: '⚔️', color: '#2a1a1a', hoverColor: '#4a2a2a' },
   { id: 'prop',      label: 'Prop',      icon: '🪑', color: '#1a221a', hoverColor: '#2a3a2a' },
-  { id: 'other',     label: 'Other',     icon: '❓', color: '#22221a', hoverColor: '#3a3a2a' },
+  { id: 'other',     label: 'Image',     icon: '🖼️', color: '#22221a', hoverColor: '#3a3a2a' },
 ];
 
 const OUTER_R = 110;

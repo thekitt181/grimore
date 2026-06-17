@@ -4,7 +4,7 @@
 // All items share the same transform (x/y/rotation/width/height), z-order,
 // lock/visibility and ownership. Type-specific data lives on each subtype.
 
-export type ItemType = 'map' | 'token' | 'handout' | 'drawing' | 'text';
+export type ItemType = 'map' | 'token' | 'image' | 'handout' | 'drawing' | 'text';
 
 export type GridType = 'square' | 'hex';
 
@@ -128,6 +128,13 @@ export interface TokenItem extends BaseItem {
 }
 
 /** Compendium item card placed on the map (GM reveals to players). */
+/** Decorative map image (drop wheel → Image) — not a combat token. */
+export interface ImageItem extends BaseItem {
+  type: 'image';
+  name: string;
+  imageUrl: string;
+}
+
 export interface HandoutItem extends BaseItem {
   type: 'handout';
   name: string;
@@ -157,7 +164,7 @@ export interface TextItem extends BaseItem {
   fontSize: number;
 }
 
-export type Item = MapItem | TokenItem | HandoutItem | DrawItem | TextItem;
+export type Item = MapItem | TokenItem | ImageItem | HandoutItem | DrawItem | TextItem;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -184,6 +191,7 @@ export function isHpHiddenFromPlayers(token: TokenItem): boolean {
   return Boolean(token.monsterId);
 }
 export function isToken(i: Item): i is TokenItem { return i.type === 'token'; }
+export function isImage(i: Item): i is ImageItem { return i.type === 'image'; }
 export function isHandout(i: Item): i is HandoutItem { return i.type === 'handout'; }
 export function isDrawing(i: Item): i is DrawItem { return i.type === 'drawing'; }
 export function isText(i: Item): i is TextItem { return i.type === 'text'; }

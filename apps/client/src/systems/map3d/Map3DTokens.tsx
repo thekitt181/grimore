@@ -112,7 +112,7 @@ function Token2DFlat({
         </mesh>
       )}
 
-      <TokenNameLabel name={token.name} localY={radius * 0.85 * stretchZ} />
+      <TokenNameLabel name={token.name} footprint={targetSize} />
       <TokenHpBar tokenId={token.id} footprint={targetSize} />
       <TokenConditionDots tokenId={token.id} radius={radius} />
 
@@ -184,7 +184,7 @@ function Token3DModel({
           tokenRender
           tokenRender2d={view2d}
         />
-        <TokenNameLabel name={token.name} localY={view2d ? targetSize * 1.35 : targetSize * 0.92} />
+        <TokenNameLabel name={token.name} footprint={targetSize} />
         <TokenHpBar tokenId={token.id} footprint={targetSize} />
         <TokenConditionDots tokenId={token.id} radius={baseRadius} y={view2d ? 0.35 : 0.25} />
 
@@ -282,7 +282,7 @@ function Token3DMesh({
         <meshStandardMaterial color="#c9a84c" roughness={0.4} metalness={0.6} />
       </mesh>
 
-      <TokenNameLabel name={token.name} localY={(yTop + radius * 0.75) * stretchZ} />
+      <TokenNameLabel name={token.name} footprint={targetSize} />
       <TokenHpBar tokenId={token.id} footprint={targetSize} />
       <TokenConditionDots tokenId={token.id} radius={radius} y={yTop + 0.3} />
 

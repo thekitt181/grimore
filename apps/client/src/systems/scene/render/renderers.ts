@@ -1,7 +1,7 @@
 import {
   Container, Graphics, Sprite, Text, TextStyle,
 } from 'pixi.js';
-import type { Item, MapItem, TokenItem, HandoutItem, DrawItem, TextItem, WallSegment } from '../types';
+import type { Item, MapItem, TokenItem, ImageItem, HandoutItem, DrawItem, TextItem, WallSegment } from '../types';
 import { tokenShowsHpBarToPlayer } from '../types';
 import { redrawGrid } from '@/systems/map/hooks/useMapGrid';
 import { loadTexture } from '@/lib/textureLoader';
@@ -46,6 +46,8 @@ export function itemVisualSignature(item: Item, ctx: RenderContext): string {
       return `${base}|${item.text}|${item.color}|${item.fontSize}`;
     case 'handout':
       return `${base}|${item.name}|${item.imageUrl}|${item.compendiumItemId}`;
+    case 'image':
+      return `${base}|${item.name}|${item.imageUrl}`;
   }
 }
 
@@ -58,6 +60,7 @@ export function renderItem(container: Container, item: Item, ctx: RenderContext)
     case 'drawing': renderDrawing(container, item); break;
     case 'text':    renderText(container, item); break;
     case 'handout': renderHandout(container, item); break;
+    case 'image':   renderImage(container, item); break;
   }
 }
 
@@ -171,6 +174,28 @@ export function renderMapWalls(c: Container, walls: WallSegment[], selectedIndic
 
 const HP_BAR_HEIGHT = 6;
 
+function tokenNameFontSize(radius: number): number {
+  return Math.max(10, Math.min(24, radius * 0.34));
+}
+
+function addTokenNameLabel(c: Container, name: string, cx: number, cy: number, radius: number): void {
+  const nameText = new Text({
+    text: name,
+    style: new TextStyle({
+      fontFamily: 'Inter',
+      fontSize: tokenNameFontSize(radius),
+      fill: 0xe8e0d0,
+      stroke: { color: 0x000000, width: 3 },
+      fontWeight: '600',
+    }),
+  });
+  nameText.label = 'name';
+  nameText.anchor.set(0.5, 1);
+  nameText.x = cx;
+  nameText.y = cy - radius - 3;
+  c.addChild(nameText);
+}
+
 function renderToken(c: Container, item: TokenItem, ctx: RenderContext) {
   c.removeChildren();
   renderTokenBase(c, item, ctx);
@@ -265,15 +290,7 @@ function renderTokenBase(c: Container, item: TokenItem, ctx: RenderContext) {
   }
 
   if (!hidePixiBody) {
-    const nameText = new Text({
-      text: item.name,
-      style: new TextStyle({ fontFamily: 'Inter', fontSize: 10, fill: 0xe8e0d0, stroke: { color: 0x000000, width: 3 } }),
-    });
-    nameText.label = 'name';
-    nameText.anchor.set(0.5, 0);
-    nameText.x = cx;
-    nameText.y = cy + radius + 2;
-    c.addChild(nameText);
+    addTokenNameLabel(c, item.name, cx, cy, radius);
   }
 }
 
@@ -366,6 +383,52 @@ function renderTokenOverlay(c: Container, item: TokenItem, ctx: RenderContext) {
   }
 
   c.addChild(overlay);
+}
+
+// ─── Map image (decorative drop) ─────────────────────────────────────────────
+
+function renderImage(c: Container, item: ImageItem) {
+  const minDim = Math.min(item.width, item.height);
+  const nameSize = Math.max(10, Math.min(22, minDim * 0.14));
+
+  const nameText = new Text({
+    text: item.name,
+    style: new TextStyle({
+      fontFamily: 'Inter',
+      fontSize: nameSize,
+      fill: 0xe8e0d0,
+      stroke: { color: 0x000000, width: 3 },
+      fontWeight: '600',
+    }),
+  });
+  nameText.label = 'name';
+  nameText.anchor.set(0.5, 1);
+  nameText.x = item.width / 2;
+  nameText.y = -4;
+  c.addChild(nameText);
+
+  if (item.imageUrl) {
+    void loadTexture(item.imageUrl).then((tex) => {
+      if (c.destroyed) return;
+      const sprite = new Sprite(tex);
+      sprite.label = 'image';
+      const sx = item.width / tex.width;
+      const sy = item.height / tex.height;
+      const scale = Math.min(sx, sy);
+      sprite.scale.set(scale);
+      sprite.x = (item.width - tex.width * scale) / 2;
+      sprite.y = (item.height - tex.height * scale) / 2;
+      c.addChildAt(sprite, 0);
+    }).catch(() => {});
+  } else {
+    const placeholder = new Graphics();
+    placeholder.label = 'placeholder';
+    placeholder.rect(0, 0, item.width, item.height);
+    placeholder.fill({ color: 0x14141e, alpha: 0.9 });
+    placeholder.setStrokeStyle({ width: 2, color: 0xc9a84c, alpha: 0.6 });
+    placeholder.stroke();
+    c.addChildAt(placeholder, 0);
+  }
 }
 
 // ─── Handout (item card) ────────────────────────────────────────────────────
