@@ -163,7 +163,6 @@ export function WeatherCanvas({ weather, settings = DEFAULT_WEATHER_SETTINGS }: 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const particlesRef = useRef<Particle[]>([]);
   const splashesRef = useRef<Splash[]>([]);
-  const flashRef = useRef(0);
   const gustRef = useRef(0);
   const rafRef = useRef<number>(0);
 
@@ -284,7 +283,6 @@ export function WeatherCanvas({ weather, settings = DEFAULT_WEATHER_SETTINGS }: 
       g.fillRect(0, 0, w, h * 0.35);
     }
 
-    let lastFlash = Date.now();
     let lastGust = Date.now();
 
     function drawParticle(p: Particle, w: number, h: number, now: number) {
@@ -456,23 +454,6 @@ export function WeatherCanvas({ weather, settings = DEFAULT_WEATHER_SETTINGS }: 
           s.alpha *= 0.88;
           s.radius *= 1.04;
           if (s.alpha < 0.03) splashes.splice(i, 1);
-        }
-      }
-
-      if (weather === 'storm' || weather === 'blizzard') {
-        if (now - lastFlash > 2600 + Math.random() * 4000) {
-          // Reset the cooldown for this window even if lightning doesn't fire,
-          // otherwise the dice are re-rolled every frame and it strobes.
-          lastFlash = now;
-          if (Math.random() < 0.35 + density * 0.3) {
-            flashRef.current = 1;
-          }
-        }
-        if (flashRef.current > 0) {
-          g.fillStyle = `rgba(220, 230, 255, ${flashRef.current * 0.4})`;
-          g.fillRect(0, 0, w, h);
-          flashRef.current *= 0.78;
-          if (flashRef.current < 0.02) flashRef.current = 0;
         }
       }
 
