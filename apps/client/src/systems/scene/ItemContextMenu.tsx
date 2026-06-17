@@ -112,6 +112,10 @@ interface FloatingPickerState {
 const MENU_WIDTH = 210;
 const MAP_MENU_WIDTH = 240;
 const VIEWPORT_PAD = 8;
+/** Right-click must stay within this radius (px) to count as a click, not a drag. */
+const RIGHT_CLICK_MOVE_PX = 5;
+/** After dismiss, ignore synthetic contextmenu events for this long (pointerup open is unaffected). */
+const DISMISS_CONTEXTMENU_SUPPRESS_MS = 400;
 
 function clampMenuPosition(
   anchorX: number,
@@ -137,6 +141,36 @@ export function ItemContextMenu() {
   const setImportModalOpen = useDdbStore((s) => s.setImportModalOpen);
   const rotateToken = useTokenStore((s) => s.rotateToken);
   const ref = useRef<HTMLDivElement>(null);
+  const menuOpenRef = useRef(false);
+  const suppressContextMenuUntilRef = useRef(0);
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const rightClickArmRef = useRef<{ x: number; y: number; shiftKey: boolean } | null>(null);
+  const openedFromPointerUpRef = useRef(false);
+
+  menuOpenRef.current = menu !== null;
+
+  function clearLongPressTimer() {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  }
+
+  function dismissMenu() {
+    clearLongPressTimer();
+    setMenu(null);
+    rightClickArmRef.current = null;
+    openedFromPointerUpRef.current = false;
+    suppressContextMenuUntilRef.current = Date.now() + DISMISS_CONTEXTMENU_SUPPRESS_MS;
+  }
+
+  function openMenu(next: MenuState) {
+    clearLongPressTimer();
+    suppressContextMenuUntilRef.current = 0;
+    rightClickArmRef.current = null;
+    openedFromPointerUpRef.current = false;
+    setMenu(next);
+  }
 
   const selectedIds = useItemStore((s) => s.selectedIds);
   const selectedWallIndices = useItemStore((s) => s.selectedWallIndices);
@@ -146,20 +180,75 @@ export function ItemContextMenu() {
   const connectedUsers = useSessionStore((s) => s.connectedUsers);
   const isGM = myRole === 'GM';
 
+  function tryOpenContextMenu(clientX: number, clientY: number, shiftKey: boolean): boolean {
+    const next = resolveContextMenu(clientX, clientY, isGM, shiftKey);
+    if (!next) return false;
+    openMenu(next);
+    return true;
+  }
+
   const selected = selectedIds.map((id) => items[id]).filter(Boolean) as Item[];
   const single = selected.length === 1 ? selected[0]! : null;
 
-  // Right-click on canvas → item menu, or map menu (GM) with summon as an option
+  // Desktop: open on right-button pointerup (not contextmenu) to avoid spurious
+  // contextmenu events after dismiss / preventDefault on left-clicks.
   useEffect(() => {
+    if (isMobileClient()) return;
+
+    function onPointerDown(e: PointerEvent) {
+      if (e.pointerType !== 'mouse') return;
+      if (e.button === 0) {
+        rightClickArmRef.current = null;
+        return;
+      }
+      if (e.button !== 2 || !isCanvasPointerEvent(e)) return;
+      rightClickArmRef.current = { x: e.clientX, y: e.clientY, shiftKey: e.shiftKey };
+      openedFromPointerUpRef.current = false;
+    }
+
+    function onPointerUp(e: PointerEvent) {
+      if (e.pointerType !== 'mouse' || e.button !== 2 || !isCanvasPointerEvent(e)) return;
+      const arm = rightClickArmRef.current;
+      rightClickArmRef.current = null;
+      if (!arm) return;
+      if (Math.hypot(e.clientX - arm.x, e.clientY - arm.y) > RIGHT_CLICK_MOVE_PX) return;
+      if (tryOpenContextMenu(e.clientX, e.clientY, arm.shiftKey)) {
+        openedFromPointerUpRef.current = true;
+      }
+    }
+
     function onContextMenu(e: MouseEvent) {
       if (!isCanvasContextEvent(e)) return;
-      const next = resolveContextMenu(e.clientX, e.clientY, isGM, e.shiftKey);
-      if (!next) return;
       e.preventDefault();
-      setMenu(next);
+      e.stopPropagation();
+
+      if (openedFromPointerUpRef.current) {
+        openedFromPointerUpRef.current = false;
+        return;
+      }
+      if (Date.now() < suppressContextMenuUntilRef.current) return;
+      // Browsers may fire contextmenu with button 0 after a left-click dismiss.
+      if (e.button !== 2) return;
+
+      const arm = rightClickArmRef.current;
+      rightClickArmRef.current = null;
+      if (arm) {
+        if (Math.hypot(e.clientX - arm.x, e.clientY - arm.y) > RIGHT_CLICK_MOVE_PX) return;
+        tryOpenContextMenu(e.clientX, e.clientY, arm.shiftKey);
+        return;
+      }
+
+      tryOpenContextMenu(e.clientX, e.clientY, e.shiftKey);
     }
-    window.addEventListener('contextmenu', onContextMenu);
-    return () => window.removeEventListener('contextmenu', onContextMenu);
+
+    window.addEventListener('pointerdown', onPointerDown, true);
+    window.addEventListener('pointerup', onPointerUp);
+    window.addEventListener('contextmenu', onContextMenu, true);
+    return () => {
+      window.removeEventListener('pointerdown', onPointerDown, true);
+      window.removeEventListener('pointerup', onPointerUp);
+      window.removeEventListener('contextmenu', onContextMenu, true);
+    };
   }, [isGM]);
 
   // Long-press on mobile (no right-click)
@@ -168,37 +257,37 @@ export function ItemContextMenu() {
 
     const LONG_PRESS_MS = 520;
     const MOVE_CANCEL_PX = 14;
-    let timer: ReturnType<typeof setTimeout> | null = null;
     let originX = 0;
     let originY = 0;
     let activePointerId: number | null = null;
 
     function clearTimer() {
-      if (timer) {
-        clearTimeout(timer);
-        timer = null;
+      if (longPressTimerRef.current) {
+        clearTimeout(longPressTimerRef.current);
+        longPressTimerRef.current = null;
       }
       activePointerId = null;
     }
 
     function onPointerDown(e: PointerEvent) {
       if (!isCanvasPointerEvent(e) || e.pointerType === 'mouse') return;
+      if (menuOpenRef.current) return;
       clearTimer();
       originX = e.clientX;
       originY = e.clientY;
       activePointerId = e.pointerId;
 
-      timer = setTimeout(() => {
-        timer = null;
+      longPressTimerRef.current = setTimeout(() => {
+        longPressTimerRef.current = null;
         const next = resolveContextMenu(originX, originY, isGM);
         if (!next) return;
         navigator.vibrate?.(12);
-        setMenu(next);
+        openMenu(next);
       }, LONG_PRESS_MS);
     }
 
     function onPointerMove(e: PointerEvent) {
-      if (timer == null || e.pointerId !== activePointerId) return;
+      if (longPressTimerRef.current == null || e.pointerId !== activePointerId) return;
       if (Math.hypot(e.clientX - originX, e.clientY - originY) > MOVE_CANCEL_PX) {
         clearTimer();
       }
@@ -221,14 +310,20 @@ export function ItemContextMenu() {
     };
   }, [isGM]);
 
-  // Close on outside click
+  // Close on outside click (capture — before map drag/selection handlers)
   useEffect(() => {
     if (!menu) return;
-    function onDown(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setMenu(null);
+
+    function onPointerDownCapture(e: PointerEvent) {
+      if (e.button !== 0) return;
+      const el = ref.current;
+      const target = e.target as Node | null;
+      if (el && target && el.contains(target)) return;
+      dismissMenu();
     }
-    window.addEventListener('pointerdown', onDown);
-    return () => window.removeEventListener('pointerdown', onDown);
+
+    window.addEventListener('pointerdown', onPointerDownCapture, true);
+    return () => window.removeEventListener('pointerdown', onPointerDownCapture, true);
   }, [menu]);
 
   // Measure actual menu height and keep it fully on-screen.
@@ -287,7 +382,7 @@ export function ItemContextMenu() {
 
   if (!menu) return null;
 
-  function close() { setMenu(null); }
+  function close() { dismissMenu(); }
 
   const menuWidth = menu.kind === 'map' ? MAP_MENU_WIDTH : MENU_WIDTH;
 
@@ -319,6 +414,7 @@ export function ItemContextMenu() {
           background: 'var(--color-bg-secondary)',
           border: '1px solid var(--color-border)',
         }}
+        onPointerDown={(e) => e.stopPropagation()}
         onContextMenu={(e) => e.preventDefault()}
       >
         <>
@@ -386,6 +482,8 @@ export function ItemContextMenu() {
           background: 'var(--color-bg-secondary)',
           border: '1px solid var(--color-border)',
         }}
+        onPointerDown={(e) => e.stopPropagation()}
+        onContextMenu={(e) => e.preventDefault()}
       >
         <div className="px-3 py-1 font-display text-xs tracking-wider uppercase" style={{ color: 'var(--color-accent-gold)' }}>
           {pcToken ? pcToken.name : single?.type ?? 'item'}
@@ -476,16 +574,18 @@ export function ItemContextMenu() {
     <div
       ref={ref}
       className="fixed z-50 rounded-lg shadow-panel py-1 overflow-y-auto"
-      style={{
-        left: position?.left ?? menu.x,
-        top: position?.top ?? menu.y,
-        width: MENU_WIDTH,
-        maxHeight: `calc(100vh - ${VIEWPORT_PAD * 2}px)`,
-        visibility: position ? 'visible' : 'hidden',
-        background: 'var(--color-bg-secondary)',
-        border: '1px solid var(--color-border)',
-      }}
-    >
+        style={{
+          left: position?.left ?? menu.x,
+          top: position?.top ?? menu.y,
+          width: MENU_WIDTH,
+          maxHeight: `calc(100vh - ${VIEWPORT_PAD * 2}px)`,
+          visibility: position ? 'visible' : 'hidden',
+          background: 'var(--color-bg-secondary)',
+          border: '1px solid var(--color-border)',
+        }}
+        onPointerDown={(e) => e.stopPropagation()}
+        onContextMenu={(e) => e.preventDefault()}
+      >
       <div className="px-3 py-1 font-display text-xs tracking-wider uppercase" style={{ color: 'var(--color-accent-gold)' }}>
         {selectedWallIndices.length > 0 && selected.length === 0
           ? `${selectedWallIndices.length} walls`
