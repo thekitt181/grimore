@@ -14,31 +14,28 @@ function isRenderDeploy(): boolean {
   return process.env['RENDER'] === 'true' || Boolean(process.env['RENDER_SERVICE_ID']);
 }
 
-function scheduleReconcileRawGlobalStorage(): void {
-  const delayMs = isRenderDeploy()
-    ? Number(process.env['COMPENDIUM_RECONCILE_DELAY_MS'] ?? 300_000)
-    : 0;
-  if (delayMs > 0) {
-    setTimeout(() => {
-      void reconcileRawGlobalStorage().catch((err) => {
-        console.warn('[Compendium] Deferred reconcile failed:', err);
-      });
-    }, delayMs);
-    return;
-  }
-  void reconcileRawGlobalStorage();
-}
+let renderMaintenanceScheduled = false;
 
-export function shouldAutoStartCompendium(): boolean {
-  if (process.env['COMPENDIUM_STARTUP'] === '1') return true;
-  if (process.env['SKIP_COMPENDIUM_STARTUP'] === '1') return false;
-  return !isRenderDeploy();
+function scheduleRenderCompendiumMaintenance(): void {
+  if (!isRenderDeploy() || renderMaintenanceScheduled) return;
+  renderMaintenanceScheduled = true;
+  const delayMs = Number(process.env['COMPENDIUM_MAINTENANCE_DELAY_MS'] ?? 300_000);
+  console.log(`[Compendium] Heavy storage maintenance deferred ${Math.round(delayMs / 1000)}s on Render`);
+  setTimeout(() => {
+    void (async () => {
+      try {
+        const { scheduleFallbackMongoSync } = await import('./compendiumFallbackMongoSync');
+        scheduleFallbackMongoSync('render-deferred');
+        const { ensureBundledSourcesLocked, ensureImportedSourcesUnlocked } = await import('./compendiumBundledLock');
+        await ensureBundledSourcesLocked('render-deferred');
+        await ensureImportedSourcesUnlocked('render-deferred');
+        await reconcileRawGlobalStorage();
+      } catch (err) {
+        console.warn('[Compendium] Deferred Render maintenance failed:', err);
+      }
+    })();
+  }, delayMs);
 }
-
-let startupPromise: Promise<void> | null = null;
-let startupDone = false;
-let startupFailedUntil = 0;
-let guardWaitPromise: Promise<void> | null = null;
 
 async function runCompendiumStartup(): Promise<void> {
   try {
@@ -52,17 +49,36 @@ async function runCompendiumStartup(): Promise<void> {
       );
     }
     await syncCompendiumStorageOnStartup();
-    const { ensureBundledSourcesLocked, ensureImportedSourcesUnlocked } = await import('./compendiumBundledLock');
-    await ensureBundledSourcesLocked('startup');
-    await ensureImportedSourcesUnlocked('startup');
+    if (!isRenderDeploy()) {
+      const { ensureBundledSourcesLocked, ensureImportedSourcesUnlocked } = await import('./compendiumBundledLock');
+      await ensureBundledSourcesLocked('startup');
+      await ensureImportedSourcesUnlocked('startup');
+      scheduleReconcileRawGlobalStorage();
+    } else {
+      scheduleRenderCompendiumMaintenance();
+    }
     startCompendiumMongoWatch();
     console.log('[Compendium] PostgreSQL storage ready');
   } catch (err) {
     console.error('[Compendium] Startup failed:', err);
     throw err;
   }
-  scheduleReconcileRawGlobalStorage();
 }
+
+function scheduleReconcileRawGlobalStorage(): void {
+  void reconcileRawGlobalStorage();
+}
+
+export function shouldAutoStartCompendium(): boolean {
+  if (process.env['COMPENDIUM_STARTUP'] === '1') return true;
+  if (process.env['SKIP_COMPENDIUM_STARTUP'] === '1') return false;
+  return !isRenderDeploy();
+}
+
+let startupPromise: Promise<void> | null = null;
+let startupDone = false;
+let startupFailedUntil = 0;
+let guardWaitPromise: Promise<void> | null = null;
 
 function renderStartupGuardMs(): number {
   if (!isRenderDeploy()) return 0;

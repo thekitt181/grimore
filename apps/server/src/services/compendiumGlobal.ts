@@ -475,8 +475,11 @@ export async function syncCompendiumStorageOnStartup(): Promise<void> {
     invalidateExtensionGlobalCache();
     clearGlobalFallbackCache();
 
-    const { scheduleFallbackMongoSync } = await import('./compendiumFallbackMongoSync');
-    scheduleFallbackMongoSync('startup');
+    const isRender = process.env['RENDER'] === 'true' || Boolean(process.env['RENDER_SERVICE_ID']);
+    if (!isRender) {
+      const { scheduleFallbackMongoSync } = await import('./compendiumFallbackMongoSync');
+      scheduleFallbackMongoSync('startup');
+    }
 
     const version = await readMongoGlobalVersion();
     if (version) {

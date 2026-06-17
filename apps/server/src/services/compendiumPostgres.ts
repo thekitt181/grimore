@@ -38,6 +38,7 @@ export const TYPED_IMPORT_COLLECTION: Record<CompendiumStorageKind, string> = {
 
 const UPSERT_BATCH = 100;
 const STORAGE_PROBE_TIMEOUT_MS = Number(process.env['DB_PROBE_TIMEOUT_MS'] ?? 10_000);
+const COMPENDIUM_PERSIST_TIMEOUT_MS = Number(process.env['COMPENDIUM_PERSIST_TIMEOUT_MS'] ?? 180_000);
 const UPSERT_ENTRY_TIMEOUT_MS = Number(process.env['COMPENDIUM_UPSERT_TIMEOUT_MS'] ?? 30_000);
 
 let storageUnavailable = false;
@@ -868,7 +869,7 @@ export async function persistRawGlobalDocToPostgres(
   lastUpdated = new Date(),
 ): Promise<boolean> {
   try {
-    await withStorageProbe(async () => {
+    await withDbTimeout(COMPENDIUM_PERSIST_TIMEOUT_MS, async () => {
       const normalized = normalizeOwlbearRawDoc({
         ...raw,
         lastUpdated: lastUpdated.toISOString(),
@@ -913,7 +914,7 @@ export async function persistRawGlobalDocToPostgres(
       if (normalized.images) await syncImageRefs(normalized.images);
       if (normalized.imagesData) await syncImageBlobs(normalized.imagesData);
       if (normalized.entryImages) await syncEntryImageHistories(normalized.entryImages);
-    });
+    }, 'compendium persist');
     return true;
   } catch (err) {
     console.warn(
