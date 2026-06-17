@@ -610,7 +610,7 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
           const ny = o.y + dy;
           const it = useItemStore.getState().items[id];
           if (it?.type === 'token') {
-            const { gridCol, gridRow } = worldToGridColRow(nx + it.width / 2, ny + it.height / 2);
+            const { gridCol, gridRow } = worldToGridColRow(nx + it.width / 2, ny + it.height / 2, it.sizeCells);
             return { id, kind: 'token' as const, gridCol, gridRow, x: nx, y: ny };
           }
           return { id, kind: 'item' as const, patch: { x: nx, y: ny } as Partial<Item> };

@@ -146,12 +146,14 @@ export function applyTokenSocketPatch(
       const gridSize = map?.gridSize ?? DEFAULT_MAP_GRID_SIZE;
       const gridCol = Number(token.gridCol ?? 0);
       const gridRow = Number(token.gridRow ?? 0);
+      const ox = (map?.x ?? 0) + (map?.gridOffsetX ?? 0);
+      const oy = (map?.y ?? 0) + (map?.gridOffsetY ?? 0);
       store.upsertItem({
         id,
         type: 'token',
         name: String(token.name ?? 'Token'),
-        x: gridCol * gridSize,
-        y: gridRow * gridSize,
+        x: ox + gridCol * gridSize,
+        y: oy + gridRow * gridSize,
         width: gridSize,
         height: gridSize,
         rotation: Number(token.rotation ?? 0),

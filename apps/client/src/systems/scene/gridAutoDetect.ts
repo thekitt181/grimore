@@ -11,8 +11,9 @@ export interface GridDetection {
 }
 
 const MAX_SAMPLE = 900;
-const MIN_CELL = 12;
+const MIN_CELL = 20;
 const MAX_CELL_RATIO = 0.45; // max cell = 45% of map width
+const MAX_CELLS_ACROSS = 60;  // floor cell size so detection can't return a tiny dense grid
 
 /** Load image into a canvas (CORS-safe). Returns null if pixels are unreadable. */
 async function loadSampleCanvas(
@@ -188,7 +189,11 @@ export async function detectGridFromImage(
   const rowS = smooth(rows, 2);
 
   const invScale = 1 / scale;
-  const minLag = Math.max(3, Math.round(MIN_CELL * scale));
+  // Floor the cell size: a real battlemap is rarely more than ~60 cells across,
+  // so this stops the detector locking onto fine texture/harmonics and returning
+  // a tiny grid full of small squares.
+  const minCellMapPx = Math.max(MIN_CELL, Math.max(mapWidth, mapHeight) / MAX_CELLS_ACROSS);
+  const minLag = Math.max(3, Math.round(minCellMapPx * scale));
   const maxLagX = Math.round(w * MAX_CELL_RATIO);
   const maxLagY = Math.round(h * MAX_CELL_RATIO);
 
@@ -199,7 +204,10 @@ export async function detectGridFromImage(
   if (confidence < 0.08) return null;
 
   const gridSize = Math.round(((cx.period + cy.period) / 2) * invScale);
-  const clampedSize = Math.max(MIN_CELL, Math.min(Math.round(mapWidth * MAX_CELL_RATIO), gridSize));
+  const clampedSize = Math.max(
+    minCellMapPx,
+    Math.min(Math.round(mapWidth * MAX_CELL_RATIO), gridSize),
+  );
 
   const offXSample = firstPeak(colS, cx.peaks, cx.period);
   const offYSample = firstPeak(rowS, cy.peaks, cy.period);

@@ -396,7 +396,8 @@ export function useTransformControls(appReady: boolean) {
             }
             const finalW = tokenPatch.width ?? newW;
             const finalH = tokenPatch.height ?? newH;
-            const grid = worldToGridColRow(nx + finalW / 2, ny + finalH / 2);
+            const sizeCellsForGrid = (tokenPatch.sizeCells ?? token.sizeCells) || 1;
+            const grid = worldToGridColRow(nx + finalW / 2, ny + finalH / 2, sizeCellsForGrid);
             tokenPatch.gridCol = grid.gridCol;
             tokenPatch.gridRow = grid.gridRow;
           }

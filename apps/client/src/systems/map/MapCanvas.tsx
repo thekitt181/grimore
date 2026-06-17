@@ -813,8 +813,7 @@ async function placeByCategory(
     imageUrl = url;
     modelUrl = undefined;
   }
-  const snapped = snapPoint(worldX, worldY);
-  const { gridCol, gridRow } = worldToGridColRow(snapped.x, snapped.y);
+  const { gridCol, gridRow } = worldToGridColRow(worldX, worldY, 1);
   const bounds = tokenBoundsFromGrid({ sizeCells: 1 }, gridCol, gridRow);
   const token: TokenItem = {
     id: tokenId,
