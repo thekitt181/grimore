@@ -11,8 +11,7 @@ import {
   bindFogRepaintSubscriptions,
   registerFogRepaintListener,
 } from '@/systems/map/fogRepaintBridge';
-import { hasDragLivePositions } from '@/systems/scene/interaction/dragLivePositions';
-import { isItemDragActive } from '@/systems/scene/interaction/selectionDragState';
+import { itemsWithDragLiveTransforms } from '@/systems/scene/interaction/dragLivePositions';
 import type { MapItem } from '@/systems/scene/types';
 import { SceneItemTransformGroup } from './TokenTransformGroup';
 
@@ -68,7 +67,6 @@ export function Map3DFogOfWar({ map }: { map: MapItem }) {
   stateRef.current = state;
 
   const repaintFog = useCallback(() => {
-    if (isItemDragActive() || hasDragLivePositions()) return;
     const s = stateRef.current;
     if (!s.visible) {
       if (materialRef.current) materialRef.current.visible = false;
@@ -79,9 +77,8 @@ export function Map3DFogOfWar({ map }: { map: MapItem }) {
     if (!ctx) return;
 
     ctx.setTransform(texScale, 0, 0, texScale, 0, 0);
-    const itemsForFog = itemsWithLiveTransforms(
-      s.items,
-      useLiveTransformStore.getState().byId,
+    const itemsForFog = itemsWithDragLiveTransforms(
+      itemsWithLiveTransforms(s.items, useLiveTransformStore.getState().byId),
     );
     paintFogCanvas(ctx, map, {
       revealedCells: s.revealedCells,

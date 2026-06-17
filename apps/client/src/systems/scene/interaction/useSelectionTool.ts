@@ -5,7 +5,7 @@ import { isPlayerCharacterToken } from '@/systems/scene/token/clientTokenVisibil
 import { pickInteractableTokenAt } from '@/systems/scene/token/pickInteractableToken';
 import { setItemDragActive } from './selectionDragState';
 import { setDragLivePositions, clearDragLivePositions } from './dragLivePositions';
-import { flushDeferredFogRepaint } from '@/systems/map/fogRepaintBridge';
+import { flushDeferredFogRepaint, scheduleFogRepaintDuringDrag } from '@/systems/map/fogRepaintBridge';
 import { useTokenDragMeasureStore } from './tokenDragMeasureStore';
 import { useItemStore, getActiveMap } from '../store/itemStore';
 import { useSessionStore } from '@/store/sessionStore';
@@ -222,7 +222,10 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
           liveEntries.push({ id, patch: { x: nx, y: ny } });
         }
       }
-      if (dragEntries.length) setDragLivePositions(dragEntries);
+      if (dragEntries.length) {
+        setDragLivePositions(dragEntries);
+        scheduleFogRepaintDuringDrag();
+      }
       if (liveEntries.length) {
         useLiveTransformStore.getState().setLiveMany(liveEntries, { bumpTick: false });
       }

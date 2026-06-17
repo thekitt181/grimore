@@ -14,8 +14,7 @@ import {
   bindFogRepaintSubscriptions,
   registerFogRepaintListener,
 } from '../fogRepaintBridge';
-import { hasDragLivePositions } from '@/systems/scene/interaction/dragLivePositions';
-import { isItemDragActive } from '@/systems/scene/interaction/selectionDragState';
+import { itemsWithDragLiveTransforms } from '@/systems/scene/interaction/dragLivePositions';
 import type { MapItem } from '@/systems/scene/types';
 
 function syncMapFogOverlays(
@@ -32,7 +31,9 @@ function syncMapFogOverlays(
   },
 ): void {
   const activeMap = getActiveMap();
-  const itemsForFog = itemsWithLiveTransforms(opts.items, opts.liveById);
+  const itemsForFog = itemsWithDragLiveTransforms(
+    itemsWithLiveTransforms(opts.items, opts.liveById),
+  );
   const liveMapIds = new Set(
     Object.values(opts.items)
       .filter((i): i is MapItem => i.type === 'map')
@@ -140,7 +141,6 @@ export function useMapFogOverlay(
 
   repaintRef.current = () => {
     if (!appReady) return;
-    if (isItemDragActive() || hasDragLivePositions()) return;
     const layer = layerRef.current;
     if (!layer) return;
     syncMapFogOverlays(layer, fogContainers.current, {

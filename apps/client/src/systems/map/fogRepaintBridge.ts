@@ -63,6 +63,22 @@ export function requestFogRepaint(): void {
   runFogRepaintListeners();
 }
 
+let dragFogRepaintRaf = 0;
+
+/** Repaint fog during token drag — uses dragLivePositions, no store/React churn. */
+export function requestFogRepaintDuringDrag(): void {
+  runFogRepaintListeners();
+}
+
+/** Coalesce drag fog repaints to one per animation frame. */
+export function scheduleFogRepaintDuringDrag(): void {
+  if (dragFogRepaintRaf) return;
+  dragFogRepaintRaf = requestAnimationFrame(() => {
+    dragFogRepaintRaf = 0;
+    requestFogRepaintDuringDrag();
+  });
+}
+
 /** Run deferred fog/visibility work after a drag ends. */
 export function flushDeferredFogRepaint(): void {
   if (!deferredFogWork) return;
