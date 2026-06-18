@@ -18,6 +18,22 @@ import { loadImportSkipIndex } from '../compendiumImportIndex';
 const runningJobs = new Set<string>();
 const STALE_IMPORT_JOB_MS = 3 * 60 * 1000;
 
+/** On server boot, cancel RUNNING jobs left over from a crashed deploy so they don't resume. */
+export async function releaseStaleImportJobsOnStartup(): Promise<void> {
+  const cutoff = new Date(Date.now() - STALE_IMPORT_JOB_MS);
+  const result = await readPrisma.ddbLibraryImportJob.updateMany({
+    where: { status: 'RUNNING', updatedAt: { lt: cutoff } },
+    data: {
+      status: 'FAILED',
+      errorMessage: 'Import interrupted by server restart — start a new import when ready',
+      completedAt: new Date(),
+    },
+  });
+  if (result.count > 0) {
+    console.log(`[DDB] Released ${result.count} stale RUNNING import job(s) after restart`);
+  }
+}
+
 function mergeImportResults(...parts: DdbLibraryImportResult[]): DdbLibraryImportResult {
   const imported = parts.flatMap((p) => p.imported);
   const errors = parts.flatMap((p) => p.errors);

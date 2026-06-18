@@ -1,4 +1,8 @@
 /** Runtime Postgres URL with safe pool settings (Supabase-friendly). */
+function isRenderDeploy(): boolean {
+  return process.env['RENDER'] === 'true' || Boolean(process.env['RENDER_SERVICE_ID']);
+}
+
 function withSupabaseSsl(connectionUrl: string): string {
   try {
     const url = new URL(connectionUrl);
@@ -39,13 +43,19 @@ export function resolveDatabaseUrl(raw?: string): string {
 
   if (!url.searchParams.has('connection_limit')) {
     const fromEnv = process.env['DATABASE_CONNECTION_LIMIT']?.trim();
-    const fallback = '4';
+    // Render runs one Node worker — Prisma recommends connection_limit=1 with Supabase pooler.
+    const fallback = isRenderDeploy() ? '1' : '4';
     url.searchParams.set('connection_limit', fromEnv || fallback);
+  }
+
+  if (!url.searchParams.has('connect_timeout')) {
+    const fromEnv = process.env['DATABASE_CONNECT_TIMEOUT']?.trim();
+    url.searchParams.set('connect_timeout', fromEnv || '10');
   }
 
   if (!url.searchParams.has('pool_timeout')) {
     const fromEnv = process.env['DATABASE_POOL_TIMEOUT']?.trim();
-    url.searchParams.set('pool_timeout', fromEnv || '20');
+    url.searchParams.set('pool_timeout', fromEnv || (isRenderDeploy() ? '10' : '20'));
   }
 
   return withSupabaseSsl(url.toString());

@@ -56,7 +56,8 @@ export async function disconnectDatabases(): Promise<void> {
 process.once('beforeExit', () => {
   void disconnectDatabases();
 });
-if (process.env['NODE_ENV'] !== 'production') {
-  process.once('SIGINT', () => { void disconnectDatabases(); });
-  process.once('SIGTERM', () => { void disconnectDatabases(); });
+for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+  process.once(signal, () => {
+    void disconnectDatabases();
+  });
 }

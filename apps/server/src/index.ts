@@ -181,6 +181,14 @@ async function bootServices(): Promise<void> {
   try {
     await connectDatabases();
 
+    // Drop zombie RUNNING import jobs so they don't resume and hold the pool after deploy.
+    try {
+      const { releaseStaleImportJobsOnStartup } = await import('./services/ddb/ddbImportJobService');
+      await releaseStaleImportJobsOnStartup();
+    } catch (err) {
+      console.warn('[DDB] Stale import job cleanup skipped:', err);
+    }
+
     // API routes need Postgres only — don't block on Redis, compendium, or DDB jobs.
     servicesReady = true;
     console.log('[Server] API ready');
@@ -201,6 +209,10 @@ async function bootServices(): Promise<void> {
 /** Defer DDB import resume so auth/API aren't starved by pool checkout at cold start. */
 function scheduleResumeImportJobs(): void {
   const isRender = process.env['RENDER'] === 'true' || Boolean(process.env['RENDER_SERVICE_ID']);
+  if (isRender && process.env['DDB_RESUME_IMPORT_JOBS'] !== '1') {
+    console.log('[DDB] Auto-resume of import jobs disabled on Render (set DDB_RESUME_IMPORT_JOBS=1 to enable)');
+    return;
+  }
   const defaultDelay = isRender ? 600_000 : 120_000;
   const delayMs = Number(process.env['DDB_RESUME_JOBS_DELAY_MS'] ?? defaultDelay);
   setTimeout(() => {
