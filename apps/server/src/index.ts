@@ -181,14 +181,6 @@ async function bootServices(): Promise<void> {
   try {
     await connectDatabases();
 
-    // Drop zombie RUNNING import jobs so they don't resume and hold the pool after deploy.
-    try {
-      const { releaseStaleImportJobsOnStartup } = await import('./services/ddb/ddbImportJobService');
-      await releaseStaleImportJobsOnStartup();
-    } catch (err) {
-      console.warn('[DDB] Stale import job cleanup skipped:', err);
-    }
-
     // API routes need Postgres only — don't block on Redis, compendium, or DDB jobs.
     servicesReady = true;
     console.log('[Server] API ready');
@@ -201,6 +193,15 @@ async function bootServices(): Promise<void> {
     void connectRedisInBackground();
     scheduleCompendiumJobs();
     scheduleResumeImportJobs();
+
+    // Non-blocking — Supavisor can take up to 60s to fail when Postgres is saturated.
+    void import('./services/ddb/ddbImportJobService')
+      .then(({ releaseStaleImportJobsOnStartup }) =>
+        withDbTimeout(8_000, releaseStaleImportJobsOnStartup, 'ddb.stale-import-cleanup'),
+      )
+      .catch((err) => {
+        console.warn('[DDB] Stale import job cleanup skipped:', err);
+      });
   } catch (err) {
     console.error('[Server] Service boot failed — API stays unavailable until DB connects:', err);
   }

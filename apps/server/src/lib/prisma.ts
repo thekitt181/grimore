@@ -4,7 +4,6 @@ import { resolveDatabaseUrl } from './databaseUrl';
 const globalForPrisma = globalThis as unknown as {
   prisma?: PrismaClient;
 };
-
 function createClient(): PrismaClient {
   return new PrismaClient({
     datasources: { db: { url: resolveDatabaseUrl() } },
@@ -39,6 +38,16 @@ export async function connectDatabases(maxAttempts = 6): Promise<void> {
         }),
       ]);
       console.log('[DB] PostgreSQL connected (shared pool)');
+      try {
+        const u = new URL(resolveDatabaseUrl());
+        console.log(
+          `[DB] Pool settings: port=${u.port || '5432'} pgbouncer=${u.searchParams.get('pgbouncer') ?? 'false'} `
+          + `connection_limit=${u.searchParams.get('connection_limit') ?? 'default'} `
+          + `pool_timeout=${u.searchParams.get('pool_timeout') ?? 'default'}s`,
+        );
+      } catch {
+        /* ignore */
+      }
       return;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
