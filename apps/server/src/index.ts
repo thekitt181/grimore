@@ -30,6 +30,8 @@ import { withDbTimeout } from './lib/dbTimeout';
 
 async function checkAuthDatabase(): Promise<'ok' | 'error' | 'skipped'> {
   if (!servicesReady) return 'skipped';
+  // Render health probes must not compete with auth/API for scarce pool slots.
+  if (process.env['RENDER'] === 'true' || process.env['RENDER_SERVICE_ID']) return 'skipped';
   try {
     await withDbTimeout(5_000, () => authPrisma.$queryRaw`SELECT 1`, 'auth health');
     return 'ok';

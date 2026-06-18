@@ -14,9 +14,8 @@ export function isDbTransientError(err: unknown): boolean {
   return /\[DB\].*timed out after \d+ms/i.test(err.message);
 }
 
-/** Fail fast when the Postgres pool is saturated (avoids 60s Supabase checkout waits).
- *  Note: does not cancel the underlying Prisma query — orphaned queries can still hold
- *  pool slots until they finish; avoid starting heavy work through this wrapper. */
+/** Fail fast when the Postgres pool is saturated. On timeout, resets the Prisma pool so
+ *  orphaned queries (which Prisma cannot cancel) do not block every subsequent request. */
 export async function withDbTimeout<T>(
   ms: number,
   fn: () => Promise<T>,
@@ -24,10 +23,10 @@ export async function withDbTimeout<T>(
 ): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(
-      () => reject(new Error(`[DB] ${label} timed out after ${ms}ms`)),
-      ms,
-    );
+    timer = setTimeout(() => {
+      void import('./prisma').then(({ resetPrismaPool }) => resetPrismaPool(`timeout:${label}`));
+      reject(new Error(`[DB] ${label} timed out after ${ms}ms`));
+    }, ms);
   });
   try {
     return await Promise.race([fn(), timeout]);

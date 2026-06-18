@@ -1,14 +1,59 @@
 import { PrismaClient } from '@prisma/client';
 import { resolveDatabaseUrl } from './databaseUrl';
+import { isDbPoolSaturation } from './dbTimeout';
 
 const globalForPrisma = globalThis as unknown as {
   prisma?: PrismaClient;
 };
+
+let resetInFlight: Promise<void> | null = null;
+let lastResetAt = 0;
+const RESET_COOLDOWN_MS = 3_000;
+
+/** Drop stuck connections when the pool is saturated (withDbTimeout orphans, P2024, etc.). */
+export async function resetPrismaPool(reason = 'unknown'): Promise<void> {
+  const now = Date.now();
+  if (resetInFlight) return resetInFlight;
+  if (now - lastResetAt < RESET_COOLDOWN_MS) return;
+  lastResetAt = now;
+
+  resetInFlight = (async () => {
+    console.warn(`[DB] Resetting Prisma pool (${reason})`);
+    await prisma.$disconnect().catch(() => undefined);
+    await prisma.$connect().catch((err) => {
+      console.warn('[DB] Pool reconnect failed:', err);
+    });
+  })().finally(() => {
+    resetInFlight = null;
+  });
+
+  return resetInFlight;
+}
+
 function createClient(): PrismaClient {
-  return new PrismaClient({
+  const base = new PrismaClient({
     datasources: { db: { url: resolveDatabaseUrl() } },
     log: process.env['NODE_ENV'] === 'development' ? ['error', 'warn'] : ['error'],
   });
+
+  const extended = base.$extends({
+    query: {
+      $allModels: {
+        async $allOperations({ args, query }) {
+          try {
+            return await query(args);
+          } catch (err) {
+            if (isDbPoolSaturation(err)) {
+              await resetPrismaPool('query saturation');
+            }
+            throw err;
+          }
+        },
+      },
+    },
+  });
+
+  return extended as unknown as PrismaClient;
 }
 
 /**

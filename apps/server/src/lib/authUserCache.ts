@@ -1,5 +1,4 @@
 import { authPrisma } from './prisma';
-import { withDbTimeout } from './dbTimeout';
 
 export type AuthUserRecord = {
   id: string;
@@ -10,7 +9,6 @@ export type AuthUserRecord = {
 
 const cache = new Map<string, { user: AuthUserRecord; expiresAt: number }>();
 const TTL_MS = 5 * 60_000;
-const LOOKUP_TIMEOUT_MS = 8_000;
 
 function readCached(authUserId: string): AuthUserRecord | null {
   const hit = cache.get(authUserId);
@@ -33,43 +31,29 @@ function defaultUsername(name: string, email: string): string {
   return email.split('@')[0]?.slice(0, 32) || 'adventurer';
 }
 
-/** Resolve app User from Better Auth user id — uses the auth pool, not the compendium transaction pool. */
+/** Resolve app User from Better Auth user id. */
 export async function resolveAuthUser(authUserId: string): Promise<AuthUserRecord> {
   const cached = readCached(authUserId);
   if (cached) return cached;
 
-  let user = await withDbTimeout(
-    LOOKUP_TIMEOUT_MS,
-    () =>
-      authPrisma.user.findUnique({
-        where: { authUserId },
-        select: { id: true, authUserId: true, username: true, avatarUrl: true },
-      }),
-    'resolveAuthUser.find',
-  );
+  let user = await authPrisma.user.findUnique({
+    where: { authUserId },
+    select: { id: true, authUserId: true, username: true, avatarUrl: true },
+  });
 
   if (!user) {
-    const authUser = await withDbTimeout(
-      LOOKUP_TIMEOUT_MS,
-      () => authPrisma.authUser.findUnique({ where: { id: authUserId } }),
-      'resolveAuthUser.authUser',
-    );
+    const authUser = await authPrisma.authUser.findUnique({ where: { id: authUserId } });
     if (!authUser) {
       throw new Error(`Auth user not found: ${authUserId}`);
     }
-    user = await withDbTimeout(
-      LOOKUP_TIMEOUT_MS,
-      () =>
-        authPrisma.user.create({
-          data: {
-            authUserId,
-            username: defaultUsername(authUser.name, authUser.email),
-            avatarUrl: authUser.image,
-          },
-          select: { id: true, authUserId: true, username: true, avatarUrl: true },
-        }),
-      'resolveAuthUser.create',
-    );
+    user = await authPrisma.user.create({
+      data: {
+        authUserId,
+        username: defaultUsername(authUser.name, authUser.email),
+        avatarUrl: authUser.image,
+      },
+      select: { id: true, authUserId: true, username: true, avatarUrl: true },
+    });
   }
 
   return writeCached(authUserId, user);
