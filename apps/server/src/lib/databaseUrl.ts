@@ -43,8 +43,8 @@ export function resolveDatabaseUrl(raw?: string): string {
 
   if (!url.searchParams.has('connection_limit')) {
     const fromEnv = process.env['DATABASE_CONNECTION_LIMIT']?.trim();
-    // Render runs one Node worker — Prisma recommends connection_limit=1 with Supabase pooler.
-    const fallback = isRenderDeploy() ? '1' : '4';
+    // Render: 2 slots so a slow background query cannot block auth/API (limit=1 caused P2024).
+    const fallback = isRenderDeploy() ? '2' : '4';
     url.searchParams.set('connection_limit', fromEnv || fallback);
   }
 

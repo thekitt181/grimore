@@ -194,14 +194,18 @@ async function bootServices(): Promise<void> {
     scheduleCompendiumJobs();
     scheduleResumeImportJobs();
 
-    // Non-blocking — Supavisor can take up to 60s to fail when Postgres is saturated.
-    void import('./services/ddb/ddbImportJobService')
-      .then(({ releaseStaleImportJobsOnStartup }) =>
-        withDbTimeout(8_000, releaseStaleImportJobsOnStartup, 'ddb.stale-import-cleanup'),
-      )
-      .catch((err) => {
-        console.warn('[DDB] Stale import job cleanup skipped:', err);
-      });
+    // Stale import cleanup can hold a DB connection for 60s+ when Supabase is saturated;
+    // withDbTimeout does not cancel the underlying Prisma query. Skip on Render.
+    const isRender = process.env['RENDER'] === 'true' || Boolean(process.env['RENDER_SERVICE_ID']);
+    if (!isRender) {
+      void import('./services/ddb/ddbImportJobService')
+        .then(({ releaseStaleImportJobsOnStartup }) =>
+          withDbTimeout(8_000, releaseStaleImportJobsOnStartup, 'ddb.stale-import-cleanup'),
+        )
+        .catch((err) => {
+          console.warn('[DDB] Stale import job cleanup skipped:', err);
+        });
+    }
   } catch (err) {
     console.error('[Server] Service boot failed — API stays unavailable until DB connects:', err);
   }
