@@ -10,6 +10,15 @@ let resetInFlight: Promise<void> | null = null;
 let lastResetAt = 0;
 const RESET_COOLDOWN_MS = 3_000;
 
+/** Serialize Prisma queries so concurrent requests cannot exhaust connection_limit. */
+let dbTail: Promise<unknown> = Promise.resolve();
+
+function runSerialized<T>(fn: () => Promise<T>): Promise<T> {
+  const job = dbTail.then(fn, fn);
+  dbTail = job.catch(() => undefined);
+  return job;
+}
+
 /** Drop stuck connections when the pool is saturated (withDbTimeout orphans, P2024, etc.). */
 export async function resetPrismaPool(reason = 'unknown'): Promise<void> {
   const now = Date.now();
@@ -40,14 +49,17 @@ function createClient(): PrismaClient {
     query: {
       $allModels: {
         async $allOperations({ args, query }) {
-          try {
-            return await query(args);
-          } catch (err) {
-            if (isDbPoolSaturation(err)) {
-              await resetPrismaPool('query saturation');
+          return runSerialized(async () => {
+            try {
+              return await query(args);
+            } catch (err) {
+              if (isDbPoolSaturation(err)) {
+                await resetPrismaPool('query saturation');
+                return await query(args);
+              }
+              throw err;
             }
-            throw err;
-          }
+          });
         },
       },
     },

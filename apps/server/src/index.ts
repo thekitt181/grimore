@@ -4,7 +4,7 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
-import { connectDatabases, disconnectDatabases, authPrisma } from './lib/prisma';
+import { connectDatabases, disconnectDatabases, authPrisma, resetPrismaPool } from './lib/prisma';
 import { connectRedisOptional, disconnectAllRedis, isRedisOperational } from './lib/redis';
 import { attachRedisSocketAdapter, isSocketRedisAdapterEnabled } from './lib/socketRedisAdapter';
 import { getCompendiumStorageHealthSnapshot } from './services/compendiumPostgres';
@@ -26,7 +26,7 @@ import { mountClientSpa } from './lib/serveClient';
 import { isFloorplanScanConfigured } from './services/floorplan/floorplanScanService';
 import { runMigrationsInBackground } from './lib/runMigrationsInBackground';
 
-import { withDbTimeout } from './lib/dbTimeout';
+import { isDbPoolSaturation, isDbTransientError, withDbTimeout } from './lib/dbTimeout';
 
 async function checkAuthDatabase(): Promise<'ok' | 'error' | 'skipped'> {
   if (!servicesReady) return 'skipped';
@@ -96,8 +96,19 @@ app.use(cookieParser());
 
 const authHandler = toNodeHandler(auth);
 app.all('/api/auth/*', (req, res) => {
-  void Promise.resolve(authHandler(req, res)).catch((err: unknown) => {
+  if (!servicesReady) {
+    res.status(503).json({ error: 'Server is starting — retry shortly', retry: true });
+    return;
+  }
+  void Promise.resolve(authHandler(req, res)).catch(async (err: unknown) => {
     console.error('[Auth] Request failed:', req.method, req.originalUrl, err);
+    if (isDbPoolSaturation(err) || isDbTransientError(err)) {
+      await resetPrismaPool('auth handler');
+      if (!res.headersSent) {
+        res.status(503).json({ error: 'Database busy — try again shortly', retry: true });
+      }
+      return;
+    }
     if (!res.headersSent) {
       res.status(500).json({ error: 'Authentication service error' });
     }
