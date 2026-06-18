@@ -18,31 +18,43 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isSignedIn, isLoaded } = useGrimoireAuth();
   const [apiReady, setApiReady] = useState(false);
   const [sessionInvalid, setSessionInvalid] = useState(false);
+  const [serverWaking, setServerWaking] = useState(false);
 
   useEffect(() => {
     if (!isLoaded || !isSignedIn) {
       setApiReady(false);
       setSessionInvalid(false);
+      setServerWaking(false);
       return;
     }
 
     let cancelled = false;
     void (async () => {
       await getAuthBearerToken({ skipCache: true });
-      for (let attempt = 0; attempt < 5 && !cancelled; attempt++) {
+      for (let attempt = 0; attempt < 8 && !cancelled; attempt++) {
         const state = await verifyApiSessionState(true);
         if (cancelled) return;
         if (state === 'ok') {
           setApiReady(true);
+          setServerWaking(false);
           return;
         }
         if (state === 'unauthorized') {
           await signOutAndClear();
           setSessionInvalid(true);
           setApiReady(false);
+          setServerWaking(false);
           return;
         }
-        await new Promise((r) => setTimeout(r, Math.min(2000 * (attempt + 1), 8000)));
+        if (attempt >= 3) {
+          setApiReady(true);
+          setServerWaking(true);
+        }
+        await new Promise((r) => setTimeout(r, Math.min(1500 * (attempt + 1), 6000)));
+      }
+      if (!cancelled) {
+        setApiReady(true);
+        setServerWaking(true);
       }
     })();
 
@@ -51,6 +63,33 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
     };
   }, [isLoaded, isSignedIn]);
 
+  useEffect(() => {
+    if (!isLoaded || !isSignedIn || !serverWaking) return;
+    let cancelled = false;
+    const tick = async () => {
+      if (cancelled) return;
+      const state = await verifyApiSessionState(true);
+      if (cancelled) return;
+      if (state === 'ok') {
+        setServerWaking(false);
+        return;
+      }
+      if (state === 'unauthorized') {
+        await signOutAndClear();
+        setSessionInvalid(true);
+        setApiReady(false);
+        setServerWaking(false);
+        return;
+      }
+      window.setTimeout(() => { void tick(); }, 4000);
+    };
+    const timer = window.setTimeout(() => { void tick(); }, 4000);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [isLoaded, isSignedIn, serverWaking]);
+
   if (sessionInvalid) {
     return <Navigate to="/sign-in" replace />;
   }
@@ -58,12 +97,15 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   if (!isLoaded || (isSignedIn && !apiReady)) {
     return (
       <div
-        className="min-h-screen flex items-center justify-center"
+        className="min-h-screen flex flex-col items-center justify-center gap-3"
         style={{ background: '#0a0a0f' }}
       >
         <div className="font-display text-lg animate-torch" style={{ color: '#c9a84c' }}>
           Loading...
         </div>
+        <p className="font-ui text-xs max-w-xs text-center" style={{ color: 'rgba(201,168,76,0.55)' }}>
+          Waking the server — this can take a moment after deploy or when the database is busy.
+        </p>
       </div>
     );
   }
@@ -71,6 +113,14 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   if (!isSignedIn) return <Navigate to="/sign-in" replace />;
   return (
     <>
+      {serverWaking && (
+        <div
+          className="font-ui text-xs text-center py-1.5 px-3 shrink-0"
+          style={{ background: 'rgba(201,168,76,0.12)', color: '#c9a84c', borderBottom: '1px solid rgba(201,168,76,0.25)' }}
+        >
+          Server is still connecting — compendium and API may be slow for a few seconds.
+        </div>
+      )}
       <DdbImportJobBanner />
       {children}
     </>

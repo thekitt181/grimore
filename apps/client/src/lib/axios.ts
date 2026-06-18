@@ -49,8 +49,17 @@ export async function verifyApiSessionState(force = false): Promise<'ok' | 'unau
     return 'ok';
   } catch (err) {
     if (isApiDbBusyError(err)) return 'busy';
-    if (isApiAuthError(err)) markApiAuthBlocked('unauthorized');
-    return 'unauthorized';
+    if (axios.isAxiosError(err)) {
+      const status = err.response?.status;
+      if (status === 401) {
+        markApiAuthBlocked('unauthorized');
+        return 'unauthorized';
+      }
+      if (status === 500 || status === 502 || status === 504 || !err.response) {
+        return 'busy';
+      }
+    }
+    return 'busy';
   }
 }
 

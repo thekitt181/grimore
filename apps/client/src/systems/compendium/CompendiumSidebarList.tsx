@@ -129,11 +129,27 @@ export function CompendiumSidebarList({ onMinimize }: { onMinimize?: () => void 
       return;
     }
     let cancelled = false;
-    void ensureApiAuthSession().then((ok) => {
-      if (!cancelled) setApiSessionOk(ok);
-    });
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    const check = () => {
+      void ensureApiAuthSession().then((ok) => {
+        if (cancelled) return;
+        setApiSessionOk(ok);
+        if (!ok) {
+          timer = setTimeout(check, 3000);
+        }
+      });
+    };
+
+    check();
+
+    const onRecovered = () => { check(); };
+    window.addEventListener('grimoire:auth-recovered', onRecovered);
+
     return () => {
       cancelled = true;
+      if (timer) clearTimeout(timer);
+      window.removeEventListener('grimoire:auth-recovered', onRecovered);
     };
   }, [isSignedIn]);
 

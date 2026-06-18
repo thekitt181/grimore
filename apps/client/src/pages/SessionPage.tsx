@@ -10,6 +10,7 @@ import { MapCanvas } from '@/systems/map/MapCanvas';
 import { MapToolbar } from '@/systems/map/MapToolbar';
 import { MapViewModeToggle } from '@/systems/map/MapViewModeToggle';
 import { MapSidebar } from '@/systems/map/MapSidebar';
+import { useMapSidebarStore } from '@/systems/map/mapSidebarStore';
 import { ItemInspector } from '@/systems/scene/ItemInspector';
 import { ItemContextMenu } from '@/systems/scene/ItemContextMenu';
 import { DrawingTextInput } from '@/systems/map/DrawingTextInput';
@@ -508,7 +509,12 @@ export function SessionPage() {
                 )}
                 {isGM && (
                   <button
-                    onClick={() => setPanelOpen(!panelOpen)}
+                    onClick={() => {
+                      const sidebar = useMapSidebarStore.getState();
+                      sidebar.setSidebarCollapsed(false);
+                      sidebar.setCompendiumCollapsed(false);
+                      setPanelOpen(!panelOpen);
+                    }}
                     className="w-10 h-10 rounded-lg flex items-center justify-center text-lg shadow-panel transition-all"
                     style={{
                       background: panelOpen ? 'rgba(201,168,76,0.2)' : 'var(--color-bg-secondary)',
