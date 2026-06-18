@@ -415,21 +415,40 @@ export async function readOverrideEntryByNameFromPostgres(
   return rows.find((entry) => entryNameKey(entry.name) === key) ?? null;
 }
 
+function entryMatchesId(
+  entry: OwlbearMonster | OwlbearItem | OwlbearSpell,
+  id: string,
+): boolean {
+  const withId = entry as { _id?: string };
+  const storageId = withId._id?.trim() || compendiumEntryStorageId(entry.name, entry.source);
+  return storageId === id
+    || slugify(entry.name) === id
+    || entryNameKey(entry.name) === entryNameKey(id);
+}
+
 export async function readOverrideEntryByIdFromPostgres(
   kind: CompendiumStorageKind,
   id: string,
+  opts?: { source?: string },
 ): Promise<OwlbearMonster | OwlbearItem | OwlbearSpell | null> {
   if (isCompendiumStorageUnavailable()) return null;
+  const source = opts?.source?.trim();
   try {
     const row = await withStorageProbe(() => readPrisma.compendiumEntry.findUnique({ where: { id } }));
     if (row && PRISMA_TO_KIND[row.kind] === kind) {
-      return rowToEntry(kind, row);
+      const entry = rowToEntry(kind, row);
+      if (!source || entryMatchesSource(entry.source, source)) {
+        return entry;
+      }
     }
   } catch {
     /* fall through */
   }
   const rows = await readOverrideEntriesFromPostgres(kind);
-  return rows.find((entry) => slugify(entry.name) === id || entryNameKey(entry.name) === entryNameKey(id)) ?? null;
+  const scoped = source
+    ? rows.filter((entry) => entryMatchesSource(entry.source, source))
+    : rows;
+  return scoped.find((entry) => entryMatchesId(entry, id)) ?? null;
 }
 
 export async function isTypedImportCompendiumEntry(

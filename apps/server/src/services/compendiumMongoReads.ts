@@ -136,9 +136,10 @@ export async function readOverrideEntryByNameFromMongo(
 export async function readOverrideEntryByIdFromMongo(
   kind: CompendiumKind,
   id: string,
+  opts?: { source?: string },
 ): Promise<OwlbearMonster | OwlbearItem | OwlbearSpell | null> {
   if (isCompendiumStorageUnavailable()) return null;
-  return readOverrideEntryByIdFromPostgres(kind, id);
+  return readOverrideEntryByIdFromPostgres(kind, id, opts);
 }
 
 export async function readOverrideCountsFromMongo(): Promise<{

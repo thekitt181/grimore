@@ -641,8 +641,14 @@ export function ItemContextMenu() {
             close();
           }} />
           <Btn label="📖 View stat block" onClick={() => {
-            useCompendiumUiStore.getState().setTab('monsters');
-            useCompendiumUiStore.getState().selectMonster((single as TokenItem).monsterId!);
+            const t = single as TokenItem;
+            const store = useCompendiumUiStore.getState();
+            store.setTab('monsters');
+            if (t.monsterSource?.trim()) {
+              store.setBrowseMode('sources');
+              store.setSelectedSource(t.monsterSource.trim());
+            }
+            store.selectMonster(t.monsterId!);
             close();
           }} />
         </>

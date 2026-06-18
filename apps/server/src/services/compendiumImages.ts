@@ -28,6 +28,7 @@ function owlbearPublicRoots(): string[] {
   }
   roots.push(path.resolve(process.cwd(), '../../../owlbear_dnd_extension/public'));
   roots.push(path.resolve(process.cwd(), '../../../owlbear_dnd_extension/dist'));
+  roots.push(path.resolve(__dirname, '../../data/compendium'));
   return [...new Set(roots)];
 }
 

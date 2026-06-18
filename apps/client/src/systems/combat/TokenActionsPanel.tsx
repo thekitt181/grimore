@@ -24,9 +24,13 @@ import { TokenActionCard } from './TokenActionCard';
 export function TokenActionsPanel({ token, onClose }: { token: TokenItem; onClose: () => void }) {
   const targetPick = useCombatStore((s) => s.targetPick);
 
+  const monsterFetchOpts = token.monsterSource?.trim()
+    ? { source: token.monsterSource.trim() }
+    : undefined;
+
   const { data: monster, isLoading, isError } = useQuery({
-    queryKey: ['compendium', 'monster', token.monsterId],
-    queryFn: () => getMonster(token.monsterId!),
+    queryKey: ['compendium', 'monster', token.monsterId, monsterFetchOpts?.source ?? ''],
+    queryFn: () => getMonster(token.monsterId!, monsterFetchOpts),
     enabled: Boolean(token.monsterId),
     staleTime: 60_000,
   });

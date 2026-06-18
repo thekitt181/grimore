@@ -1529,7 +1529,9 @@ export async function getMonsterById(id: string, opts?: CompendiumGetByIdOpts): 
   const policy = await getCatalogPolicy();
   let hit = (await getCachedMonsters()).find((m) => m.id === id);
   if (!hit) {
-    const raw = await readOverrideEntryByIdFromMongo('monster', id);
+    const raw = await readOverrideEntryByIdFromMongo('monster', id, {
+      ...(opts?.source?.trim() ? { source: opts.source.trim() } : {}),
+    });
     if (raw) hit = compendiumMonsterFromOverride(raw as OwlbearMonster, policy) ?? undefined;
   }
   if (!hit) {
@@ -1614,7 +1616,9 @@ export async function getItemById(id: string, opts?: CompendiumGetByIdOpts): Pro
   const policy = await getCatalogPolicy();
   let hit = (await getCachedItems()).find((i) => i.id === id);
   if (!hit) {
-    const raw = await readOverrideEntryByIdFromMongo('item', id);
+    const raw = await readOverrideEntryByIdFromMongo('item', id, {
+      ...(opts?.source?.trim() ? { source: opts.source.trim() } : {}),
+    });
     if (raw) hit = compendiumItemFromOverride(raw as OwlbearItem, policy) ?? undefined;
   }
   if (!hit) {
@@ -1703,7 +1707,9 @@ export async function getSpellById(id: string, opts?: CompendiumGetByIdOpts): Pr
   const policy = await getCatalogPolicy();
   let hit = (await getCachedSpells()).find((s) => s.id === id);
   if (!hit) {
-    const raw = await readOverrideEntryByIdFromMongo('spell', id);
+    const raw = await readOverrideEntryByIdFromMongo('spell', id, {
+      ...(opts?.source?.trim() ? { source: opts.source.trim() } : {}),
+    });
     if (raw) hit = compendiumSpellFromOverride(raw as OwlbearSpell, policy) ?? undefined;
   }
   if (!hit) {
