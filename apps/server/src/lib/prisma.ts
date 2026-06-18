@@ -1,36 +1,31 @@
 import { PrismaClient } from '@prisma/client';
-import { resolveAuthDatabaseUrl, resolveDatabaseUrl, resolveReadDatabaseUrl } from './databaseUrl';
+import { resolveDatabaseUrl } from './databaseUrl';
 
 const globalForPrisma = globalThis as unknown as {
   prisma?: PrismaClient;
-  authPrisma?: PrismaClient;
-  readPrisma?: PrismaClient;
 };
 
-function createClient(url: string): PrismaClient {
+function createClient(): PrismaClient {
   return new PrismaClient({
-    datasources: { db: { url } },
+    datasources: { db: { url: resolveDatabaseUrl() } },
     log: process.env['NODE_ENV'] === 'development' ? ['error', 'warn'] : ['error'],
   });
 }
 
-/** App data — compendium, sessions, DDB, etc. */
-export const prisma =
-  globalForPrisma.prisma ?? createClient(resolveDatabaseUrl());
+/**
+ * Single shared Prisma pool for the whole server (auth, campaigns, compendium, DDB).
+ * Multiple PrismaClient instances each reserve their own connection_limit slots against
+ * Supabase's pooler and caused EMAXCONNSESSION / ECHECKOUTTIMEOUT under load.
+ */
+export const prisma = globalForPrisma.prisma ?? createClient();
 
-/** Isolated pool for Better Auth so sign-in is not starved by compendium jobs. */
-export const authPrisma =
-  globalForPrisma.authPrisma ?? createClient(resolveAuthDatabaseUrl());
+/** @deprecated Alias — use `prisma`. Kept so imports do not need a wide refactor. */
+export const authPrisma = prisma;
 
-/** User-facing routes (campaigns, dashboard) — session pooler, not transaction pool. */
-export const readPrisma =
-  globalForPrisma.readPrisma ?? createClient(resolveReadDatabaseUrl());
+/** @deprecated Alias — use `prisma`. Kept so imports do not need a wide refactor. */
+export const readPrisma = prisma;
 
-if (process.env['NODE_ENV'] !== 'production') {
-  globalForPrisma.prisma = prisma;
-  globalForPrisma.authPrisma = authPrisma;
-  globalForPrisma.readPrisma = readPrisma;
-}
+globalForPrisma.prisma = prisma;
 
 export async function connectDatabases(maxAttempts = 6): Promise<void> {
   const timeoutMs = 20_000;
@@ -38,12 +33,12 @@ export async function connectDatabases(maxAttempts = 6): Promise<void> {
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
       await Promise.race([
-        Promise.all([prisma.$connect(), authPrisma.$connect(), readPrisma.$connect()]),
+        prisma.$connect(),
         new Promise<never>((_, reject) => {
           setTimeout(() => reject(new Error(`PostgreSQL connect timeout after ${timeoutMs}ms`)), timeoutMs);
         }),
       ]);
-      console.log('[DB] PostgreSQL connected (app + auth + read pools)');
+      console.log('[DB] PostgreSQL connected (shared pool)');
       return;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -55,11 +50,7 @@ export async function connectDatabases(maxAttempts = 6): Promise<void> {
 }
 
 export async function disconnectDatabases(): Promise<void> {
-  await Promise.all([
-    prisma.$disconnect().catch(() => undefined),
-    authPrisma.$disconnect().catch(() => undefined),
-    readPrisma.$disconnect().catch(() => undefined),
-  ]);
+  await prisma.$disconnect().catch(() => undefined);
 }
 
 process.once('beforeExit', () => {

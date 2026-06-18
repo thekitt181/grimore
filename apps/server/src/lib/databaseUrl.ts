@@ -39,7 +39,7 @@ export function resolveDatabaseUrl(raw?: string): string {
 
   if (!url.searchParams.has('connection_limit')) {
     const fromEnv = process.env['DATABASE_CONNECTION_LIMIT']?.trim();
-    const fallback = '5';
+    const fallback = '4';
     url.searchParams.set('connection_limit', fromEnv || fallback);
   }
 
@@ -51,75 +51,14 @@ export function resolveDatabaseUrl(raw?: string): string {
   return withSupabaseSsl(url.toString());
 }
 
-/** Dedicated Prisma pool for Better Auth — session pooler (5432), separate from app transaction pool (6543). */
+/** Dedicated Prisma pool for Better Auth — uses the same transaction pooler URL as the app. */
 export function resolveAuthDatabaseUrl(): string {
-  const source = process.env['DATABASE_URL']?.trim();
-  if (!source) {
-    throw new Error('DATABASE_URL is not set');
-  }
-
-  let url: URL;
-  try {
-    url = new URL(source);
-  } catch {
-    throw new Error('DATABASE_URL is not a valid URL');
-  }
-
-  // Isolate auth from PgBouncer transaction pool used by compendium (port 6543).
-  if (url.hostname.includes('pooler.supabase.com')) {
-    url.port = '5432';
-    url.searchParams.delete('pgbouncer');
-  }
-
-  url.searchParams.set(
-    'connection_limit',
-    process.env['AUTH_DATABASE_CONNECTION_LIMIT']?.trim() ?? '2',
-  );
-  url.searchParams.set(
-    'pool_timeout',
-    process.env['AUTH_DATABASE_POOL_TIMEOUT']?.trim() ?? '20',
-  );
-
-  return withSupabaseSsl(url.toString());
+  return resolveDatabaseUrl();
 }
 
-/**
- * User-facing app routes (campaigns, dashboard, session-member checks). Uses the
- * transaction pooler (6543) — the session pooler (5432) is hard-capped at ~15 clients
- * and was the source of EMAXCONNSESSION errors. Kept as a separate Prisma client so a
- * heavy compendium sync can't starve user reads. All queries here are simple/batch
- * (no interactive transactions), so the transaction pooler is safe.
- */
+/** @deprecated Same URL as resolveDatabaseUrl — kept for callers/tests. */
 export function resolveReadDatabaseUrl(): string {
-  const source = process.env['DATABASE_URL']?.trim();
-  if (!source) {
-    throw new Error('DATABASE_URL is not set');
-  }
-
-  let url: URL;
-  try {
-    url = new URL(source);
-  } catch {
-    throw new Error('DATABASE_URL is not a valid URL');
-  }
-
-  if (url.hostname.includes('pooler.supabase.com') && url.port !== '6543') {
-    url.port = '6543';
-    if (!url.searchParams.has('pgbouncer')) {
-      url.searchParams.set('pgbouncer', 'true');
-    }
-  }
-
-  url.searchParams.set(
-    'connection_limit',
-    process.env['READ_DATABASE_CONNECTION_LIMIT']?.trim() ?? '4',
-  );
-  url.searchParams.set(
-    'pool_timeout',
-    process.env['READ_DATABASE_POOL_TIMEOUT']?.trim() ?? '20',
-  );
-
-  return withSupabaseSsl(url.toString());
+  return resolveDatabaseUrl();
 }
 
 /** Prisma migrate needs direct Postgres — not the PgBouncer transaction pooler. */

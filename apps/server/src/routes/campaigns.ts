@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { nanoid } from 'nanoid';
 import { readPrisma } from '../lib/prisma';
-import { isDbPoolSaturation, withDbTimeout } from '../lib/dbTimeout';
+import { isDbPoolSaturation, isDbTransientError, withDbTimeout } from '../lib/dbTimeout';
 import { requireAuth, type AuthenticatedRequest } from '../middleware/auth';
 import { INVITE_CODE_LENGTH } from '@grimoire/shared';
 import { getPrimaryClientUrl } from '../lib/clientOrigins';
@@ -43,7 +43,7 @@ function respondCampaignDbError(
   logLabel: string,
   message: string,
 ): void {
-  if (isDbPoolSaturation(err)) {
+  if (isDbPoolSaturation(err) || isDbTransientError(err)) {
     res.status(503).json({ error: 'Database busy — try again shortly', retry: true });
     return;
   }
