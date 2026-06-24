@@ -141,6 +141,7 @@ function constitutionHitPointBonus(raw: any): number {
 }
 
 function computeMaxHitPoints(raw: any): number {
+  console.log('[computeMaxHitPoints] Raw top-level keys:', Object.keys(raw));
   console.log('[computeMaxHitPoints] Starting with raw:', raw);
   
   // Prioritize any sheet-provided max HP field first
@@ -286,6 +287,7 @@ export function extractVitals(raw: any): { hp: number; maxHp: number; tempHp: nu
 }
 
 export function extractAc(raw: any): number {
+  console.log('[extractAc] Raw top-level keys:', Object.keys(raw));
   console.log('[extractAc] Starting with raw:', raw);
   
   // Prioritize any sheet-provided AC field first
