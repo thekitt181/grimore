@@ -204,6 +204,9 @@ export async function getOrSyncCharacter(
   console.log('raw.adjustedHitPoints:', (raw as any).adjustedHitPoints);
   console.log('raw.baseHitPoints:', (raw as any).baseHitPoints);
   console.log('raw.bonusHitPoints:', (raw as any).bonusHitPoints);
+  console.log('raw.modifiers:', JSON.stringify((raw as any).modifiers, null, 2));
+  console.log('raw.classes:', JSON.stringify((raw as any).classes, null, 2));
+  console.log('raw.inventory:', JSON.stringify((raw as any).inventory, null, 2));
   console.log('=== END DEBUG ===\n');
 
   const character = await extractCharacter(cobalt, ddbCharacterId);
