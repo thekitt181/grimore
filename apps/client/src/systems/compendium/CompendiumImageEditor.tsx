@@ -2,7 +2,7 @@ import { useRef, useState, useEffect } from 'react';
 import axios from 'axios';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { CompendiumImageKind } from '@grimoire/shared';
-import { fileToDataUrl } from '@/lib/imagePersistence';
+import { fileToCompressedDataUrl } from '@/lib/imagePersistence';
 import { getEntryImages, saveEntryImages } from './compendiumApi';
 import { withCompendiumImageCacheBust, sameCompendiumImageUrl } from './compendiumImageUrl';
 import { syncCompendiumImageToHandouts } from './syncHandoutImages';
@@ -86,7 +86,7 @@ export function CompendiumImageEditor({
   async function onFilePick(file: File) {
     setSaveError(null);
     try {
-      const dataUrl = await fileToDataUrl(file);
+      const dataUrl = await fileToCompressedDataUrl(file);
       saveMut.mutate(dataUrl);
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : 'Failed to read file');

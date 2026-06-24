@@ -14,6 +14,36 @@ export function fileToDataUrl(file: File): Promise<string> {
   });
 }
 
+/** Read a file as a resized, compressed data URL suitable for compendium images. */
+export function fileToCompressedDataUrl(file: File, maxDim = 1024, quality = 0.9): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('Could not read file'));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error('Could not load image'));
+      img.onload = () => {
+        const scale = Math.min(1, maxDim / Math.max(img.width, img.height, 1));
+        const w = Math.max(1, Math.round(img.width * scale));
+        const h = Math.max(1, Math.round(img.height * scale));
+        const canvas = document.createElement('canvas');
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          reject(new Error('Canvas unavailable'));
+          return;
+        }
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL('image/jpeg', quality));
+      };
+      img.src = reader.result as string;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
 /** Load image dimensions from any URL (http, data, blob). */
 export function loadImageSize(url: string): Promise<{ w: number; h: number }> {
   return new Promise((resolve, reject) => {
