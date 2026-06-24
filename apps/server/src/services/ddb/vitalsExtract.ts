@@ -5,38 +5,6 @@ import { extractAbilities } from './abilitiesExtract';
 /** @deprecated Use DDB_NORMALIZER_VERSION from normalizerVersion.ts */
 export { DDB_NORMALIZER_VERSION as HP_NORMALIZER_VERSION } from './normalizerVersion';
 
-/**
- * Recursively finds a numeric value in an object by key name (case-insensitive)
- */
-function findNestedNumber(obj: any, ...keys: string[]): number | undefined {
-  if (!obj || typeof obj !== 'object') return undefined;
-
-  console.log('[findNestedNumber] Checking object with keys:', Object.keys(obj).sort());
-  
-  // Check current level
-  for (const key of keys) {
-    const lowerKey = key.toLowerCase();
-    for (const [objKey, value] of Object.entries(obj)) {
-      if (objKey.toLowerCase() === lowerKey && typeof value === 'number' && Number.isFinite(value)) {
-        console.log('[findNestedNumber] FOUND value!', objKey, '=', value);
-        return value;
-      }
-    }
-  }
-
-  // Recurse into nested objects
-  for (const [objKey, value] of Object.entries(obj)) {
-    if (value && typeof value === 'object') {
-      console.log('[findNestedNumber] Recursing into:', objKey);
-      const found = findNestedNumber(value, ...keys);
-      if (found !== undefined) return found;
-    }
-  }
-
-  console.log('[findNestedNumber] No value found');
-  return undefined;
-}
-
 function characterLevel(raw: any): number {
   const classLevels = (raw.classes ?? []).reduce(
     (sum: number, c: any) => sum + (pickNumber(c.level) ?? 0),
@@ -87,7 +55,7 @@ function modifierHitPointValue(m: any, level: number): number {
   if (!Number.isFinite(val) || val === 0) return 0;
 
   const type = String(m.type ?? '').toLowerCase();
-  if (type !== 'bonus' && type !== 'maximum' && type !== 'set') return 0;
+  if (type !== 'bonus' && type !== 'maximum' && type !== 'set') return 0;       
 
   if (isPerLevelHitPointModifier(m)) return val * level;
   return val;
@@ -145,61 +113,17 @@ function constitutionHitPointBonus(raw: any): number {
   return Math.max(0, conMod * characterLevel(raw));
 }
 
-/**
- * Recursively searches an object for specific numbers and logs their paths
- */
-function findNumbersInObject(obj: any, targetNumbers: number[], path: string = ''): void {
-  if (!obj) return;
-
-  for (const [key, value] of Object.entries(obj)) {
-    const currentPath = path ? `${path}.${key}` : key;
-
-    if (typeof value === 'number' && targetNumbers.includes(value)) {
-      console.log(`[findNumbers] Found ${value} at: ${currentPath}`);
-    }
-
-    if (typeof value === 'object') {
-      findNumbersInObject(value, targetNumbers, currentPath);
-    }
-
-    if (Array.isArray(value)) {
-      value.forEach((item, index) => {
-        findNumbersInObject(item, targetNumbers, `${currentPath}[${index}]`);
-      });
-    }
-  }
-}
-
 function computeMaxHitPoints(raw: any): number {
-  console.log('[computeMaxHitPoints] Raw top-level keys:', Object.keys(raw).sort());
-  console.log('[computeMaxHitPoints] Searching entire character for 77...');
-  findNumbersInObject(raw, [77]);
-  
-  console.log('[computeMaxHitPoints] raw.stats:', raw.stats);
-  console.log('[computeMaxHitPoints] raw.hitPointInfo:', raw.hitPointInfo);
-  console.log('[computeMaxHitPoints] raw.hitPointsInfo:', raw.hitPointsInfo);
-  console.log('[computeMaxHitPoints] raw.overview:', raw.overview);
-  console.log('[computeMaxHitPoints] raw.characterValues:', raw.characterValues);
-  
-  // Also log any top-level number that's 77!
-  for (const [key, val] of Object.entries(raw)) {
-    if (typeof val === 'number' && val === 77) {
-      console.log('[computeMaxHitPoints] FOUND 77 at top-level:', key);
-    }
-  }
-  
-  console.log('[computeMaxHitPoints] Starting with raw:', raw);
-  
-  // Prioritize any sheet-provided max HP field first
-  const sheetMax = findNestedNumber(
-    raw,
-    'maxHitPoints',
-    'maxHp',
-    'maximumHitPoints',
-    'max'
+  // Prioritize sheet-provided max HP first!
+  const sheetMax = pickNumber(
+    raw.maximumHitPoints,
+    raw.maxHitPoints,
+    raw.maxHp,
+    raw.hitPointInfo?.maximum,
+    raw.hitPointInfo?.max,
+    raw.hitPointsInfo?.maximum,
   );
-  console.log('[computeMaxHitPoints] sheetMax:', sheetMax);
-  if (sheetMax !== undefined && sheetMax > 0) return sheetMax;
+  if (sheetMax != null && sheetMax > 0) return sheetMax;
 
   const base =
     pickNumber(
@@ -209,7 +133,6 @@ function computeMaxHitPoints(raw: any): number {
       raw.hitPointsInfo?.base,
       raw.hitPointInfo?.baseHitPoints,
     ) ?? 0;
-  console.log('[computeMaxHitPoints] base:', base);
 
   const bonusField = pickNumber(
     raw.bonusHitPoints,
@@ -218,39 +141,28 @@ function computeMaxHitPoints(raw: any): number {
     raw.hitPointsInfo?.bonus,
     raw.hitPointInfo?.bonusHitPoints,
   );
-  console.log('[computeMaxHitPoints] bonusField:', bonusField);
 
   // DDB stores rolled/class HP in baseHitPoints; CON×level usually lives in bonusHitPoints
-  // but that field is often null — compute from ability scores when missing.
+  // but that field is often null — compute from ability scores when missing. 
   const conBonus = constitutionHitPointBonus(raw);
-  console.log('[computeMaxHitPoints] conBonus:', conBonus);
-  
   const fromModifiers = sumHitPointBonusesFromModifiers(raw);
   const fromFeats = sumFeatHitPointBonus(raw);
-  console.log('[computeMaxHitPoints] fromModifiers:', fromModifiers, 'fromFeats:', fromFeats);
-  
   const extraBonus = Math.max(fromModifiers, fromFeats);
   const bonus = (bonusField ?? conBonus) + extraBonus;
-  console.log('[computeMaxHitPoints] bonus:', bonus);
 
   let maxHp = base + bonus;
-  console.log('[computeMaxHitPoints] maxHp after base+bonus:', maxHp);
 
   const override = pickNumber(raw.overrideHitPoints, raw.hitPointInfo?.override);
-  console.log('[computeMaxHitPoints] override:', override);
-  if (override !== undefined && override > 0) maxHp = override;
+  if (override != null && override > 0) maxHp = override;
 
   const adjusted = pickNumber(
     raw.adjustedHitPoints,
     raw.hitPointInfo?.adjusted,
     raw.hitPointsInfo?.adjusted,
   );
-  console.log('[computeMaxHitPoints] adjusted:', adjusted);
-  if (adjusted !== undefined && adjusted > maxHp) maxHp = adjusted;
+  if (adjusted != null && adjusted > maxHp) maxHp = adjusted;
 
-  const result = Math.max(maxHp, 1);
-  console.log('[computeMaxHitPoints] Final result:', result);
-  return result;
+  return Math.max(maxHp, 1);
 }
 
 function computeCurrentHitPoints(raw: any, maxHp: number): number {
@@ -283,43 +195,34 @@ function computeCurrentHitPoints(raw: any, maxHp: number): number {
 }
 
 function extractAcFromEquipment(raw: any, dexMod: number): number {
-  console.log('[extractAcFromEquipment] Starting with inventory:', JSON.stringify(raw.inventory, null, 2));
   let bodyAc = 0;
   let shieldBonus = 0;
 
   for (const item of raw.inventory ?? []) {
-    console.log('[extractAcFromEquipment] Checking item:', { id: item.id, equipped: item.equipped });
     if (!item.equipped) continue;
     const def = item.definition ?? {};
-    console.log('[extractAcFromEquipment] Item definition:', def);
-    const filterType = String(def.filterType ?? def.type ?? '').toLowerCase();
-    console.log('[extractAcFromEquipment] filterType:', filterType);
+    const filterType = String(def.filterType ?? def.type ?? '').toLowerCase();  
     if (!filterType.includes('armor')) continue;
 
     const ac = Number(def.armorClass ?? 0);
-    console.log('[extractAcFromEquipment] Item ac:', ac);
     if (!ac) continue;
 
-    const baseName = String(def.baseArmorName ?? def.name ?? '').toLowerCase();
+    const baseName = String(def.baseArmorName ?? def.name ?? '').toLowerCase(); 
     const armorTypeId = Number(def.armorTypeId ?? 0);
 
     if (baseName.includes('shield') || armorTypeId === 4) {
       shieldBonus = Math.max(shieldBonus, ac);
-      console.log('[extractAcFromEquipment] Found shield, shieldBonus:', shieldBonus);
       continue;
     }
 
     let dexAdd = dexMod;
     if (armorTypeId === 3) dexAdd = 0;
-    else if (armorTypeId === 2) dexAdd = Math.min(Math.max(dexMod, 0), 2);
+    else if (armorTypeId === 2) dexAdd = Math.min(Math.max(dexMod, 0), 2);      
 
     bodyAc = Math.max(bodyAc, ac + Math.max(0, dexAdd));
-    console.log('[extractAcFromEquipment] Found body armor, bodyAc:', bodyAc);
   }
 
-  const result = bodyAc > 0 ? bodyAc + shieldBonus : 0;
-  console.log('[extractAcFromEquipment] Final result:', result);
-  return result;
+  return bodyAc > 0 ? bodyAc + shieldBonus : 0;
 }
 
 export function extractVitals(raw: any): { hp: number; maxHp: number; tempHp: number } {
@@ -342,43 +245,23 @@ export function extractVitals(raw: any): { hp: number; maxHp: number; tempHp: nu
 }
 
 export function extractAc(raw: any): number {
-  console.log('[extractAc] Raw top-level keys:', Object.keys(raw).sort());
-  console.log('[extractAc] Searching entire character for 16...');
-  findNumbersInObject(raw, [16]);
-  console.log('[extractAc] modifiers:', JSON.stringify(raw.modifiers, null, 2));
-  console.log('[extractAc] customDefenseAdjustments:', JSON.stringify(raw.customDefenseAdjustments, null, 2));
-  
-  console.log('[extractAc] raw.stats:', raw.stats);
-  console.log('[extractAc] raw.overview:', raw.overview);
-  console.log('[extractAc] raw.characterValues:', raw.characterValues);
-  
-  // Also log any top-level number that's 16!
-  for (const [key, val] of Object.entries(raw)) {
-    if (typeof val === 'number' && val === 16) {
-      console.log('[extractAc] FOUND 16 at top-level:', key);
-    }
-  }
-  
-  console.log('[extractAc] Starting with raw:', raw);
-  
-  // Prioritize any sheet-provided AC field first
-  const sheetAc = findNestedNumber(
-    raw,
-    'armorClass',
-    'ac'
+  // Prioritize sheet-provided AC first!
+  const sheetAc = pickNumber(
+    raw.armorClass,
+    raw.ac,
+    raw.hitPointInfo?.armorClass,
+    raw.hitPointsInfo?.armorClass,
   );
-  console.log('[extractAc] sheetAc:', sheetAc);
-  if (sheetAc !== undefined && sheetAc > 0) return sheetAc;
+  if (sheetAc != null && sheetAc > 0) return sheetAc;
 
   const abilities = extractAbilities(raw);
   const dexMod = abilities.find((a) => a.name === 'DEX')?.mod ?? 0;
-  console.log('[extractAc] dexMod:', dexMod);
 
   let setAc = 0;
   let bonusAc = 0;
 
   for (const m of collectModifiers(raw)) {
-    const sub = String(m.subType ?? m.friendlySubtypeName ?? '').toLowerCase();
+    const sub = String(m.subType ?? m.friendlySubtypeName ?? '').toLowerCase(); 
     const friendly = String(m.friendlyTypeName ?? m.friendlySubtypeName ?? '').toLowerCase();
     const type = String(m.type ?? '').toLowerCase();
     const val = Number(m.value ?? m.fixedValue ?? 0);
@@ -392,31 +275,14 @@ export function extractAc(raw: any): number {
       || sub.includes('armor class')
       || friendly.includes('armor class');
 
-    if (type === 'set' && isAc) {
-      console.log('[extractAc] Found set modifier:', { m, val });
-      setAc = Math.max(setAc, val);
-    }
-    if (type === 'bonus' && isAc) {
-      console.log('[extractAc] Found bonus modifier:', { m, val });
-      bonusAc += val;
-    }
+    if (type === 'set' && isAc) setAc = Math.max(setAc, val);
+    if (type === 'bonus' && isAc) bonusAc += val;
   }
-  console.log('[extractAc] setAc:', setAc, 'bonusAc:', bonusAc);
 
   const equippedAc = extractAcFromEquipment(raw, dexMod);
   const unarmored = 10 + dexMod + bonusAc;
-  console.log('[extractAc] equippedAc:', equippedAc, 'unarmored:', unarmored);
 
-  if (setAc > 0) {
-    const result = Math.max(setAc + bonusAc, equippedAc, unarmored);
-    console.log('[extractAc] Final result (setAc path):', result);
-    return result;
-  }
-  if (equippedAc > 0) {
-    const result = Math.max(equippedAc + bonusAc, unarmored);
-    console.log('[extractAc] Final result (equipped path):', result);
-    return result;
-  }
-  console.log('[extractAc] Final result (unarmored):', unarmored);
+  if (setAc > 0) return Math.max(setAc + bonusAc, equippedAc, unarmored);       
+  if (equippedAc > 0) return Math.max(equippedAc + bonusAc, unarmored);
   return Math.max(unarmored, 10);
 }
