@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import axios from 'axios';
 import { fetchAdminConfigured, verifyCompendiumAdminPassword } from './compendiumApi';
 import { useCompendiumAdminStore } from './compendiumAdminStore';
 
@@ -31,6 +32,17 @@ export function CompendiumAdminUnlock() {
       }
     },
   });
+
+  function getErrorMessage(): string {
+    if (!verifyMut.isError) return '';
+    const err = verifyMut.error;
+    if (axios.isAxiosError(err)) {
+      const msg = err.response?.data?.error;
+      if (msg) return msg;
+      if (err.response?.status === 403) return 'Wrong password';
+    }
+    return 'Something went wrong';
+  }
 
   if (!configuredQ.data?.configured) return null;
 
@@ -88,7 +100,7 @@ export function CompendiumAdminUnlock() {
       )}
       {verifyMut.isError && (
         <p className="font-ui text-[10px] mt-0.5" style={{ color: 'var(--color-accent-red-hot)' }}>
-          Wrong password
+          {getErrorMessage()}
         </p>
       )}
     </div>

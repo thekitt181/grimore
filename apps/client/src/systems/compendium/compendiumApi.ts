@@ -39,12 +39,8 @@ export async function fetchAdminConfigured(): Promise<{ configured: boolean }> {
 }
 
 export async function verifyCompendiumAdminPassword(password: string): Promise<boolean> {
-  try {
-    const { data } = await api.post<{ ok: boolean }>('/compendium/admin/verify', { password });
-    return Boolean(data.ok);
-  } catch {
-    return false;
-  }
+  const { data } = await api.post<{ ok: boolean }>('/compendium/admin/verify', { password });
+  return Boolean(data.ok);
 }
 
 export async function fetchVisibilityPolicy(): Promise<CompendiumVisibilityPolicy> {
