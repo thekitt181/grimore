@@ -183,6 +183,24 @@ export async function getOrSyncCharacter(
   const cobalt = await getCobaltForUser(providerId);
   if (!cobalt) throw new Error('D&D Beyond account not linked');
 
+  const raw = await fetchRawCharacter(cobalt, ddbCharacterId);
+  
+  // TEMP DEBUG LOG
+  console.log('\n=== DDB RAW CHARACTER DEBUG ===');
+  console.log('Top-level keys:', Object.keys(raw).sort());
+  console.log('Looking for AC fields:');
+  console.log('raw.armorClass:', (raw as any).armorClass);
+  console.log('raw.ac:', (raw as any).ac);
+  console.log('raw.stats:', (raw as any).stats);
+  console.log('Looking for HP fields:');
+  console.log('raw.maxHitPoints:', (raw as any).maxHitPoints);
+  console.log('raw.maxHp:', (raw as any).maxHp);
+  console.log('raw.hitPointInfo:', (raw as any).hitPointInfo);
+  console.log('raw.hitPointsInfo:', (raw as any).hitPointsInfo);
+  console.log('raw.currentHitPoints:', (raw as any).currentHitPoints);
+  console.log('raw.removedHitPoints:', (raw as any).removedHitPoints);
+  console.log('=== END DEBUG ===\n');
+
   const character = await extractCharacter(cobalt, ddbCharacterId);
   const snapshot = { ...character, ddbNormalizerVersion: DDB_NORMALIZER_VERSION };
   await readPrisma.ddbCharacterCache.upsert({
