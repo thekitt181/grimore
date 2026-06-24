@@ -368,7 +368,7 @@ function mergeSpells(
 function filterMonsters(list: CompendiumMonster[], q: string, crMin?: number, crMax?: number): CompendiumMonster[] {
   const lower = q.trim().toLowerCase();
   return list.filter((m) => {
-    if (lower && !m.name.toLowerCase().includes(lower) && !m.description.toLowerCase().includes(lower)) {
+    if (lower && !m.name.toLowerCase().includes(lower)) {
       return false;
     }
     const cr = parseCr(m.cr);
@@ -1586,7 +1586,7 @@ export async function searchItems(opts: {
     );
     let filtered = fromCache.filter((i) => {
       if (!lower) return true;
-      return i.name.toLowerCase().includes(lower) || i.description.toLowerCase().includes(lower);
+      return i.name.toLowerCase().includes(lower);
     });
     if (opts.isCustom === true) {
       filtered = filtered.filter((i) => isHomebrewEntry(i.isCustom, i.source));
@@ -1601,7 +1601,7 @@ export async function searchItems(opts: {
   const merged = filterVisible('item', await getCachedItems(), policy, opts.includeDrafts ?? false);
   let filtered = merged.filter((i) => {
     if (!lower) return true;
-    return i.name.toLowerCase().includes(lower) || i.description.toLowerCase().includes(lower);
+    return i.name.toLowerCase().includes(lower);
   });
   if (opts.isCustom === true) {
     filtered = filtered.filter((i) => isHomebrewEntry(i.isCustom, i.source));
