@@ -10,25 +10,30 @@ export { DDB_NORMALIZER_VERSION as HP_NORMALIZER_VERSION } from './normalizerVer
  */
 function findNestedNumber(obj: any, ...keys: string[]): number | undefined {
   if (!obj || typeof obj !== 'object') return undefined;
+
+  console.log('[findNestedNumber] Checking object with keys:', Object.keys(obj).sort());
   
   // Check current level
   for (const key of keys) {
     const lowerKey = key.toLowerCase();
     for (const [objKey, value] of Object.entries(obj)) {
       if (objKey.toLowerCase() === lowerKey && typeof value === 'number' && Number.isFinite(value)) {
+        console.log('[findNestedNumber] FOUND value!', objKey, '=', value);
         return value;
       }
     }
   }
-  
+
   // Recurse into nested objects
-  for (const value of Object.values(obj)) {
+  for (const [objKey, value] of Object.entries(obj)) {
     if (value && typeof value === 'object') {
+      console.log('[findNestedNumber] Recursing into:', objKey);
       const found = findNestedNumber(value, ...keys);
       if (found !== undefined) return found;
     }
   }
-  
+
+  console.log('[findNestedNumber] No value found');
   return undefined;
 }
 
@@ -140,8 +145,49 @@ function constitutionHitPointBonus(raw: any): number {
   return Math.max(0, conMod * characterLevel(raw));
 }
 
+/**
+ * Recursively searches an object for specific numbers and logs their paths
+ */
+function findNumbersInObject(obj: any, targetNumbers: number[], path: string = ''): void {
+  if (!obj) return;
+
+  for (const [key, value] of Object.entries(obj)) {
+    const currentPath = path ? `${path}.${key}` : key;
+
+    if (typeof value === 'number' && targetNumbers.includes(value)) {
+      console.log(`[findNumbers] Found ${value} at: ${currentPath}`);
+    }
+
+    if (typeof value === 'object') {
+      findNumbersInObject(value, targetNumbers, currentPath);
+    }
+
+    if (Array.isArray(value)) {
+      value.forEach((item, index) => {
+        findNumbersInObject(item, targetNumbers, `${currentPath}[${index}]`);
+      });
+    }
+  }
+}
+
 function computeMaxHitPoints(raw: any): number {
-  console.log('[computeMaxHitPoints] Raw top-level keys:', Object.keys(raw));
+  console.log('[computeMaxHitPoints] Raw top-level keys:', Object.keys(raw).sort());
+  console.log('[computeMaxHitPoints] Searching entire character for 77...');
+  findNumbersInObject(raw, [77]);
+  
+  console.log('[computeMaxHitPoints] raw.stats:', raw.stats);
+  console.log('[computeMaxHitPoints] raw.hitPointInfo:', raw.hitPointInfo);
+  console.log('[computeMaxHitPoints] raw.hitPointsInfo:', raw.hitPointsInfo);
+  console.log('[computeMaxHitPoints] raw.overview:', raw.overview);
+  console.log('[computeMaxHitPoints] raw.characterValues:', raw.characterValues);
+  
+  // Also log any top-level number that's 77!
+  for (const [key, val] of Object.entries(raw)) {
+    if (typeof val === 'number' && val === 77) {
+      console.log('[computeMaxHitPoints] FOUND 77 at top-level:', key);
+    }
+  }
+  
   console.log('[computeMaxHitPoints] Starting with raw:', raw);
   
   // Prioritize any sheet-provided max HP field first
@@ -287,7 +333,21 @@ export function extractVitals(raw: any): { hp: number; maxHp: number; tempHp: nu
 }
 
 export function extractAc(raw: any): number {
-  console.log('[extractAc] Raw top-level keys:', Object.keys(raw));
+  console.log('[extractAc] Raw top-level keys:', Object.keys(raw).sort());
+  console.log('[extractAc] Searching entire character for 16...');
+  findNumbersInObject(raw, [16]);
+  
+  console.log('[extractAc] raw.stats:', raw.stats);
+  console.log('[extractAc] raw.overview:', raw.overview);
+  console.log('[extractAc] raw.characterValues:', raw.characterValues);
+  
+  // Also log any top-level number that's 16!
+  for (const [key, val] of Object.entries(raw)) {
+    if (typeof val === 'number' && val === 16) {
+      console.log('[extractAc] FOUND 16 at top-level:', key);
+    }
+  }
+  
   console.log('[extractAc] Starting with raw:', raw);
   
   // Prioritize any sheet-provided AC field first
