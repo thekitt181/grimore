@@ -122,8 +122,17 @@ function computeMaxHitPoints(raw: any): number {
     raw.hitPointInfo?.maximum,
     raw.hitPointInfo?.max,
     raw.hitPointsInfo?.maximum,
+    raw.hitPointsInfo?.max,
     raw.stats?.hitPoints?.maximum,
     raw.stats?.hitPoints?.max,
+    raw.stats?.maximumHitPoints,
+    raw.stats?.maxHitPoints,
+    raw.stats?.maxHp,
+    raw.characterStats?.maximumHitPoints,
+    raw.characterStats?.maxHitPoints,
+    raw.characterStats?.maxHp,
+    raw.hpStats?.max,
+    raw.hpStats?.maximum,
   );
   if (sheetMax != null && sheetMax > 0) return sheetMax;
 
@@ -253,6 +262,12 @@ export function extractAc(raw: any): number {
     raw.ac,
     raw.stats?.armorClass,
     raw.stats?.ac,
+    raw.characterStats?.armorClass,
+    raw.characterStats?.ac,
+    raw.acStats?.value,
+    raw.armorClassStats?.value,
+    raw.modifiers?.ac,
+    raw.modifiers?.armorClass,
   );
   if (sheetAc != null && sheetAc > 0) return sheetAc;
 
