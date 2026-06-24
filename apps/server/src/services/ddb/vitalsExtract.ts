@@ -114,6 +114,19 @@ function constitutionHitPointBonus(raw: any): number {
 }
 
 function computeMaxHitPoints(raw: any): number {
+  // Prioritize any sheet-provided max HP field first
+  const sheetMax = pickNumber(
+    raw.maximumHitPoints,
+    raw.maxHitPoints,
+    raw.maxHp,
+    raw.hitPointInfo?.maximum,
+    raw.hitPointInfo?.max,
+    raw.hitPointsInfo?.maximum,
+    raw.stats?.hitPoints?.maximum,
+    raw.stats?.hitPoints?.max,
+  );
+  if (sheetMax != null && sheetMax > 0) return sheetMax;
+
   const base =
     pickNumber(
       raw.baseHitPoints,
@@ -150,17 +163,6 @@ function computeMaxHitPoints(raw: any): number {
     raw.hitPointsInfo?.adjusted,
   );
   if (adjusted != null && adjusted > maxHp) maxHp = adjusted;
-
-  // Some API responses expose the sheet max directly (includes all bonuses).
-  const sheetMax = pickNumber(
-    raw.maximumHitPoints,
-    raw.maxHitPoints,
-    raw.maxHp,
-    raw.hitPointInfo?.maximum,
-    raw.hitPointInfo?.max,
-    raw.hitPointsInfo?.maximum,
-  );
-  if (sheetMax != null && sheetMax > maxHp) maxHp = sheetMax;
 
   return Math.max(maxHp, 1);
 }
@@ -245,6 +247,15 @@ export function extractVitals(raw: any): { hp: number; maxHp: number; tempHp: nu
 }
 
 export function extractAc(raw: any): number {
+  // Prioritize any sheet-provided AC field first
+  const sheetAc = pickNumber(
+    raw.armorClass,
+    raw.ac,
+    raw.stats?.armorClass,
+    raw.stats?.ac,
+  );
+  if (sheetAc != null && sheetAc > 0) return sheetAc;
+
   const abilities = extractAbilities(raw);
   const dexMod = abilities.find((a) => a.name === 'DEX')?.mod ?? 0;
 
