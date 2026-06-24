@@ -10,6 +10,7 @@ export interface Combatant {
   conditions: string[];
   tokenId?: string;
   isPlayer: boolean;
+  hideHpFromPlayers?: boolean;
 }
 
 interface InitiativeState {

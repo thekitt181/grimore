@@ -7,6 +7,7 @@ import { isMobileClient } from '@/lib/socket';
 import { useInitiativeStore, type Combatant } from '../map/store/initiativeStore';
 import { useItemStore } from '@/systems/scene/store/itemStore';
 import type { TokenItem } from '@/systems/scene/types';
+import { isHpHiddenFromPlayers } from '@/systems/scene/types';
 import { useSessionStore } from '@/store/sessionStore';
 import {
   applyCombatantHpToToken,
@@ -72,6 +73,7 @@ export function InitiativeTracker({ onClose }: { onClose: () => void }) {
       tempHp:     readTempHp(linked?.tempHp),
       conditions: linked ? [...linked.conditions] : [],
       isPlayer:   newIsPlayer,
+      hideHpFromPlayers: linked ? isHpHiddenFromPlayers(linked) : false,
       ...(linkTokenId ? { tokenId: linkTokenId } : {}),
     };
     addCombatant(c);
@@ -234,26 +236,46 @@ export function InitiativeTracker({ onClose }: { onClose: () => void }) {
                       {c.name}
                     </span>
                     {c.isPlayer && <span className="badge-role-player shrink-0" style={{ fontSize: 8 }}>PC</span>}
+                    {isGM && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          updateCombatant(c.id, { hideHpFromPlayers: !c.hideHpFromPlayers });
+                          syncToServer();
+                        }}
+                        className="shrink-0 text-[9px] px-1 rounded"
+                        style={{ 
+                          color: c.hideHpFromPlayers ? '#ef4444' : '#4ade80',
+                          border: `1px solid ${c.hideHpFromPlayers ? '#ef4444' : '#4ade80'}`,
+                          background: c.hideHpFromPlayers ? 'rgba(239,68,68,0.1)' : 'rgba(74,222,128,0.1)'
+                        }}
+                        title={c.hideHpFromPlayers ? "Show HP to players" : "Hide HP from players"}
+                      >
+                        {c.hideHpFromPlayers ? "HP Hidden" : "HP Visible"}
+                      </button>
+                    )}
                   </div>
                   {/* HP bar */}
-                  <div className="flex items-center gap-1 mt-0.5">
-                    <div className="relative flex-1 h-1 rounded-full overflow-hidden" style={{ background: '#1c1c28' }}>
-                      <div className="absolute inset-y-0 left-0 rounded-full transition-all" style={{ width: `${hpPct * 100}%`, background: hpColor }} />
-                      {tempHp > 0 && (
-                        <div
-                          className="absolute inset-y-0 rounded-full transition-all"
-                          style={{
-                            left: `${hpPct * 100}%`,
-                            width: `${Math.min(tempPct * 100, 100 - hpPct * 100)}%`,
-                            background: '#60a5fa',
-                          }}
-                        />
-                      )}
+                  {(isGM || !c.hideHpFromPlayers) && (
+                    <div className="flex items-center gap-1 mt-0.5">
+                      <div className="relative flex-1 h-1 rounded-full overflow-hidden" style={{ background: '#1c1c28' }}>
+                        <div className="absolute inset-y-0 left-0 rounded-full transition-all" style={{ width: `${hpPct * 100}%`, background: hpColor }} />
+                        {tempHp > 0 && (
+                          <div
+                            className="absolute inset-y-0 rounded-full transition-all"
+                            style={{
+                              left: `${hpPct * 100}%`,
+                              width: `${Math.min(tempPct * 100, 100 - hpPct * 100)}%`,
+                              background: '#60a5fa',
+                            }}
+                          />
+                        )}
+                      </div>
+                      <span className="font-ui text-xs shrink-0" style={{ color: 'var(--color-text-secondary)', fontSize: 9 }}>
+                        {c.hp}/{c.maxHp}{tempHp > 0 ? ` +${tempHp}` : ''}
+                      </span>
                     </div>
-                    <span className="font-ui text-xs shrink-0" style={{ color: 'var(--color-text-secondary)', fontSize: 9 }}>
-                      {c.hp}/{c.maxHp}{tempHp > 0 ? ` +${tempHp}` : ''}
-                    </span>
-                  </div>
+                  )}
                   {isGM && (
                     <div className="flex items-center gap-1 mt-0.5">
                       <span className="font-ui shrink-0" style={{ color: '#60a5fa', fontSize: 8 }}>Temp</span>

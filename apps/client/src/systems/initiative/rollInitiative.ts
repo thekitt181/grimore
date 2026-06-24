@@ -2,6 +2,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { rollDice } from '@grimoire/dice-engine';
 import { useItemStore } from '@/systems/scene/store/itemStore';
 import type { TokenItem } from '@/systems/scene/types';
+import { isHpHiddenFromPlayers } from '@/systems/scene/types';
 import { useInitiativeStore } from '@/systems/map/store/initiativeStore';
 import { syncInitiativeToServer } from './initiativeTokenSync';
 import { readTempHp } from './hpUtils';
@@ -39,6 +40,7 @@ export function rollInitiativeFromTokens(): void {
         tempHp: readTempHp(token.tempHp),
         name: token.name,
         conditions: [...token.conditions],
+        hideHpFromPlayers: isHpHiddenFromPlayers(token),
       });
     } else {
       store.addCombatant({
@@ -51,6 +53,7 @@ export function rollInitiativeFromTokens(): void {
         conditions: [...token.conditions],
         tokenId: token.id,
         isPlayer: false,
+        hideHpFromPlayers: isHpHiddenFromPlayers(token),
       });
     }
   }

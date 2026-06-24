@@ -222,6 +222,7 @@ export interface InitiativeSyncPayload {
     conditions: string[];
     tokenId?: string;
     isPlayer: boolean;
+    hideHpFromPlayers?: boolean;
   }>;
   currentIndex: number;
   round: number;
