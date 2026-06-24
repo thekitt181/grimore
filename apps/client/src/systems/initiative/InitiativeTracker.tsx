@@ -6,6 +6,7 @@ import { ddbPanelPosition, ddbPanelWidth } from '@/systems/ddb/ddbTokenUtils';
 import { isMobileClient } from '@/lib/socket';
 import { useInitiativeStore, type Combatant } from '../map/store/initiativeStore';
 import { useItemStore } from '@/systems/scene/store/itemStore';
+import { emitItemUpdate } from '@/systems/scene/sceneSync';
 import type { TokenItem } from '@/systems/scene/types';
 import { isHpHiddenFromPlayers } from '@/systems/scene/types';
 import { useSessionStore } from '@/store/sessionStore';
