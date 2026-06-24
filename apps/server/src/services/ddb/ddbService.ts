@@ -192,6 +192,7 @@ export async function getOrSyncCharacter(
   console.log('raw.armorClass:', (raw as any).armorClass);
   console.log('raw.ac:', (raw as any).ac);
   console.log('raw.stats:', (raw as any).stats);
+  console.log('raw.overview:', (raw as any).overview);
   console.log('Looking for HP fields:');
   console.log('raw.maxHitPoints:', (raw as any).maxHitPoints);
   console.log('raw.maxHp:', (raw as any).maxHp);
@@ -199,6 +200,10 @@ export async function getOrSyncCharacter(
   console.log('raw.hitPointsInfo:', (raw as any).hitPointsInfo);
   console.log('raw.currentHitPoints:', (raw as any).currentHitPoints);
   console.log('raw.removedHitPoints:', (raw as any).removedHitPoints);
+  console.log('raw.overrideHitPoints:', (raw as any).overrideHitPoints);
+  console.log('raw.adjustedHitPoints:', (raw as any).adjustedHitPoints);
+  console.log('raw.baseHitPoints:', (raw as any).baseHitPoints);
+  console.log('raw.bonusHitPoints:', (raw as any).bonusHitPoints);
   console.log('=== END DEBUG ===\n');
 
   const character = await extractCharacter(cobalt, ddbCharacterId);
