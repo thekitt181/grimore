@@ -167,7 +167,15 @@ export async function getOrSyncCharacter(
   const providerId = await resolveDdbProviderUserId(userId, sessionId);
   const cacheUserIds = providerId === userId ? [userId] : [providerId, userId];
 
-  if (!force) {
+  if (force) {
+    // Delete all existing cache entries for this character to ensure fresh sync
+    await readPrisma.ddbCharacterCache.deleteMany({
+      where: {
+        userId: { in: cacheUserIds },
+        ddbCharacterId,
+      },
+    });
+  } else {
     const cached = await loadCachedCharacter(cacheUserIds, ddbCharacterId);
     if (cached) return cached;
   }

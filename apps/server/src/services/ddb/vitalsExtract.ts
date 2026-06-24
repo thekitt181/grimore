@@ -5,6 +5,33 @@ import { extractAbilities } from './abilitiesExtract';
 /** @deprecated Use DDB_NORMALIZER_VERSION from normalizerVersion.ts */
 export { DDB_NORMALIZER_VERSION as HP_NORMALIZER_VERSION } from './normalizerVersion';
 
+/**
+ * Recursively finds a numeric value in an object by key name (case-insensitive)
+ */
+function findNestedNumber(obj: any, ...keys: string[]): number | undefined {
+  if (!obj || typeof obj !== 'object') return undefined;
+  
+  // Check current level
+  for (const key of keys) {
+    const lowerKey = key.toLowerCase();
+    for (const [objKey, value] of Object.entries(obj)) {
+      if (objKey.toLowerCase() === lowerKey && typeof value === 'number' && Number.isFinite(value)) {
+        return value;
+      }
+    }
+  }
+  
+  // Recurse into nested objects
+  for (const value of Object.values(obj)) {
+    if (value && typeof value === 'object') {
+      const found = findNestedNumber(value, ...keys);
+      if (found !== undefined) return found;
+    }
+  }
+  
+  return undefined;
+}
+
 function characterLevel(raw: any): number {
   const classLevels = (raw.classes ?? []).reduce(
     (sum: number, c: any) => sum + (pickNumber(c.level) ?? 0),
@@ -115,26 +142,14 @@ function constitutionHitPointBonus(raw: any): number {
 
 function computeMaxHitPoints(raw: any): number {
   // Prioritize any sheet-provided max HP field first
-  const sheetMax = pickNumber(
-    raw.maximumHitPoints,
-    raw.maxHitPoints,
-    raw.maxHp,
-    raw.hitPointInfo?.maximum,
-    raw.hitPointInfo?.max,
-    raw.hitPointsInfo?.maximum,
-    raw.hitPointsInfo?.max,
-    raw.stats?.hitPoints?.maximum,
-    raw.stats?.hitPoints?.max,
-    raw.stats?.maximumHitPoints,
-    raw.stats?.maxHitPoints,
-    raw.stats?.maxHp,
-    raw.characterStats?.maximumHitPoints,
-    raw.characterStats?.maxHitPoints,
-    raw.characterStats?.maxHp,
-    raw.hpStats?.max,
-    raw.hpStats?.maximum,
+  const sheetMax = findNestedNumber(
+    raw,
+    'maxHitPoints',
+    'maxHp',
+    'maximumHitPoints',
+    'max'
   );
-  if (sheetMax != null && sheetMax > 0) return sheetMax;
+  if (sheetMax !== undefined && sheetMax > 0) return sheetMax;
 
   const base =
     pickNumber(
@@ -164,14 +179,14 @@ function computeMaxHitPoints(raw: any): number {
   let maxHp = base + bonus;
 
   const override = pickNumber(raw.overrideHitPoints, raw.hitPointInfo?.override);
-  if (override != null && override > 0) maxHp = override;
+  if (override !== undefined && override > 0) maxHp = override;
 
   const adjusted = pickNumber(
     raw.adjustedHitPoints,
     raw.hitPointInfo?.adjusted,
     raw.hitPointsInfo?.adjusted,
   );
-  if (adjusted != null && adjusted > maxHp) maxHp = adjusted;
+  if (adjusted !== undefined && adjusted > maxHp) maxHp = adjusted;
 
   return Math.max(maxHp, 1);
 }
@@ -257,19 +272,12 @@ export function extractVitals(raw: any): { hp: number; maxHp: number; tempHp: nu
 
 export function extractAc(raw: any): number {
   // Prioritize any sheet-provided AC field first
-  const sheetAc = pickNumber(
-    raw.armorClass,
-    raw.ac,
-    raw.stats?.armorClass,
-    raw.stats?.ac,
-    raw.characterStats?.armorClass,
-    raw.characterStats?.ac,
-    raw.acStats?.value,
-    raw.armorClassStats?.value,
-    raw.modifiers?.ac,
-    raw.modifiers?.armorClass,
+  const sheetAc = findNestedNumber(
+    raw,
+    'armorClass',
+    'ac'
   );
-  if (sheetAc != null && sheetAc > 0) return sheetAc;
+  if (sheetAc !== undefined && sheetAc > 0) return sheetAc;
 
   const abilities = extractAbilities(raw);
   const dexMod = abilities.find((a) => a.name === 'DEX')?.mod ?? 0;
