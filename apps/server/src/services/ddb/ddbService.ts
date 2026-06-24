@@ -2,7 +2,7 @@ import { readPrisma } from '../../lib/prisma';
 import type { Prisma } from '@prisma/client';
 import { decryptToken, encryptToken } from './encryption';
 import { normalizeCobaltToken, validateCobalt } from './cobaltAuth';
-import { extractCharacter } from './characterExtract';
+import { extractCharacter, fetchRawCharacter } from './characterExtract';
 import { fetchDdbCampaigns, fetchDdbCharacterList } from './campaigns';
 import { pushHpToDdb, pushDeathSavesToDdb, type DdbDeathSavesPayload } from './characterUpdate';
 import { fetchDdbEncounters, resolveDdbEncounter, parseDdbEncounterId } from './encounters';
