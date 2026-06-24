@@ -114,6 +114,15 @@ function constitutionHitPointBonus(raw: any): number {
 }
 
 function computeMaxHitPoints(raw: any): number {
+  // Log EVERYTHING HP-related!
+  console.log('[computeMaxHitPoints] All HP-related raw character fields:');
+  for (const key of Object.keys(raw)) {
+    if (key.toLowerCase().includes('hp') || key.toLowerCase().includes('hit')) {
+      console.log(`  - ${key}:`, raw[key]);
+    }
+  }
+  console.log('[computeMaxHitPoints] Character values:', JSON.stringify(raw.characterValues, null, 2));
+
   // Prioritize sheet-provided max HP first!
   const sheetMax = pickNumber(
     raw.maximumHitPoints,
@@ -123,6 +132,7 @@ function computeMaxHitPoints(raw: any): number {
     raw.hitPointInfo?.max,
     raw.hitPointsInfo?.maximum,
   );
+  console.log('[computeMaxHitPoints] sheetMax:', sheetMax);
   if (sheetMax != null && sheetMax > 0) return sheetMax;
 
   const base =
@@ -245,6 +255,16 @@ export function extractVitals(raw: any): { hp: number; maxHp: number; tempHp: nu
 }
 
 export function extractAc(raw: any): number {
+  // Log EVERYTHING AC-related!
+  console.log('[extractAc] All AC-related raw character fields:');
+  for (const key of Object.keys(raw)) {
+    if (key.toLowerCase().includes('armor') || key.toLowerCase().includes('ac')) {
+      console.log(`  - ${key}:`, raw[key]);
+    }
+  }
+  console.log('[extractAc] Character values:', JSON.stringify(raw.characterValues, null, 2));
+  console.log('[extractAc] Modifiers:', JSON.stringify(raw.modifiers, null, 2));
+
   // Prioritize sheet-provided AC first!
   const sheetAc = pickNumber(
     raw.armorClass,
@@ -252,6 +272,7 @@ export function extractAc(raw: any): number {
     raw.hitPointInfo?.armorClass,
     raw.hitPointsInfo?.armorClass,
   );
+  console.log('[extractAc] sheetAc:', sheetAc);
   if (sheetAc != null && sheetAc > 0) return sheetAc;
 
   const abilities = extractAbilities(raw);
