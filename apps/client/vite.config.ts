@@ -33,13 +33,12 @@ export default defineConfig({
         manualChunks: {
           vendor: ['react', 'react-dom', 'react-router-dom'],
           compendium: ['@grimoire/monster-dex'],
-          scene: ['reactflow', 'lucide-react'],
         },
       },
     },
     chunkSizeWarningLimit: 1000,
   },
   optimizeDeps: {
-    include: ['react', 'react-dom', 'react-router-dom', 'reactflow', 'lucide-react', '@grimoire/monster-dex'],
+    include: ['react', 'react-dom', 'react-router-dom', '@grimoire/monster-dex'],
   },
 });
