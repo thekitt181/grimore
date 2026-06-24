@@ -45,6 +45,7 @@ export function CharacterSheetPanel({ token, onClose }: { token: TokenItem; onCl
   const syncMutation = useMutation({
     mutationFn: () => syncDdbCharacter(ddbId!),
     onSuccess: (ch) => {
+      console.log('[CharacterSheetPanel] Sync success! Character:', ch);
       void qc.setQueryData(['ddb', 'character', ddbId], ch);
       pullDdbHpToToken(liveToken.id, ch);
     },
