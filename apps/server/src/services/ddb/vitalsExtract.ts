@@ -336,6 +336,8 @@ export function extractAc(raw: any): number {
   console.log('[extractAc] Raw top-level keys:', Object.keys(raw).sort());
   console.log('[extractAc] Searching entire character for 16...');
   findNumbersInObject(raw, [16]);
+  console.log('[extractAc] modifiers:', JSON.stringify(raw.modifiers, null, 2));
+  console.log('[extractAc] customDefenseAdjustments:', JSON.stringify(raw.customDefenseAdjustments, null, 2));
   
   console.log('[extractAc] raw.stats:', raw.stats);
   console.log('[extractAc] raw.overview:', raw.overview);
