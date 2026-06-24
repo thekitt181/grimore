@@ -213,6 +213,9 @@ export function MonsterStatBlock({
       });
     },
     onSuccess: (saved) => onSaveSuccess(qc, 'monsters', monster.id, saved, setEditing),
+    onError: (err) => {
+      console.error('[Compendium] Save monster error:', err);
+    },
   });
 
   return (
@@ -257,7 +260,9 @@ export function MonsterStatBlock({
             </p>
           )}
           <div className="flex gap-1">
-            <button className="btn-primary text-xs px-2 py-0.5" disabled={saveMut.isPending || !name.trim()} onClick={() => saveMut.mutate()}>Save</button>
+            <button className="btn-primary text-xs px-2 py-0.5" disabled={saveMut.isPending || !name.trim()} onClick={() => saveMut.mutate()}>
+              {saveMut.isPending ? 'Saving…' : 'Save'}
+            </button>
             <button className="btn-ghost text-xs px-2 py-0.5" onClick={() => setEditing(false)}>Cancel</button>
           </div>
         </div>
@@ -466,7 +471,9 @@ export function SpellStatBlock({ spell, editable = false }: { spell: CompendiumS
             </p>
           )}
           <div className="flex gap-1">
-            <button className="btn-primary text-xs px-2 py-0.5" disabled={saveMut.isPending || !name.trim()} onClick={() => saveMut.mutate()}>Save</button>
+            <button className="btn-primary text-xs px-2 py-0.5" disabled={saveMut.isPending || !name.trim()} onClick={() => saveMut.mutate()}>
+              {saveMut.isPending ? 'Saving…' : 'Save'}
+            </button>
             <button className="btn-ghost text-xs px-2 py-0.5" onClick={() => setEditing(false)}>Cancel</button>
           </div>
         </div>
