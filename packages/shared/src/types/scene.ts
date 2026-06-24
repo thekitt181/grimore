@@ -127,6 +127,9 @@ export interface SceneRecord {
   createdAt: string;
   updatedAt: string;
   map?: GameMapRecord | null;
+  items: unknown[];
+  activeMapId: string | null;
+  fogData: unknown;
 }
 
 export interface SceneBundle {
@@ -144,6 +147,9 @@ export interface CreateScenePayload {
   timeOfDay?: TimeOfDay | null;
   gameTime?: GameTime | null;
   mediaConfig?: Partial<SceneMediaConfig>;
+  items?: unknown[];
+  activeMapId?: string | null;
+  fogData?: unknown;
 }
 
 export interface UpdateScenePayload extends Partial<CreateScenePayload> {

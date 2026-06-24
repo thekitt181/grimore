@@ -21,6 +21,8 @@ import {
   fetchCampaignScenes,
   updateScene,
 } from './sceneApi';
+import { useItemStore } from '../store/itemStore';
+import { useMapStore } from '@/systems/map/store/mapStore';
 
 interface SceneManagerProps {
   campaignId: string;
@@ -67,6 +69,22 @@ export function SceneManager({ campaignId, isGM, liveSessionId, onSceneActivated
     onSuccess: (data) => {
       onSceneActivated?.(data.scene, data.transition);
       setMessage(`Activated "${data.scene.name}"`);
+    },
+  });
+  
+  const saveCurrentToSceneMut = useMutation({
+    mutationFn: async (sceneId: string) => {
+      const { items, activeMapId } = useItemStore.getState();
+      const { revealedCells } = useMapStore.getState();
+      return updateScene(sceneId, {
+        items: Object.values(items),
+        activeMapId,
+        fogData: [...revealedCells],
+      });
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['scenes', campaignId] });
+      setMessage('Scene saved');
     },
   });
 
@@ -270,6 +288,14 @@ export function SceneManager({ campaignId, isGM, liveSessionId, onSceneActivated
                       Go · {t.label}
                     </button>
                   ))}
+                  <button
+                    type="button"
+                    className="btn-ghost text-xs"
+                    disabled={saveCurrentToSceneMut.isPending}
+                    onClick={() => saveCurrentToSceneMut.mutate(scene.id)}
+                  >
+                    Save current
+                  </button>
                 </>
               )}
               <button

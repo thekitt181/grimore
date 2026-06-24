@@ -89,6 +89,9 @@ const createSceneSchema = z.object({
   timeOfDay: timeOfDaySchema,
   gameTime: gameTimeSchema,
   mediaConfig: mediaConfigSchema,
+  items: z.array(z.any()).optional(),
+  activeMapId: z.string().nullable().optional(),
+  fogData: z.any().optional(),
 });
 
 const createMapSchema = z.object({
@@ -251,6 +254,9 @@ router.post('/campaign/:campaignId', requireAuth, async (req: AuthenticatedReque
         gameTimeHour: data.gameTime?.hour ?? 12,
         gameTimeMinute: data.gameTime?.minute ?? 0,
         mediaConfig: mediaConfigInput(data.mediaConfig),
+        items: (data.items ?? []) as Prisma.InputJsonValue,
+        activeMapId: data.activeMapId ?? null,
+        fogData: data.fogData ?? null,
         sortOrder: (maxOrder._max.sortOrder ?? -1) + 1,
       },
       include: sceneIncludeMap(),
@@ -302,6 +308,9 @@ router.patch('/:id', requireAuth, async (req: AuthenticatedRequest, res) => {
         } : {}),
         ...(data.sortOrder !== undefined ? { sortOrder: data.sortOrder } : {}),
         ...(data.mediaConfig !== undefined ? { mediaConfig: mediaConfigInput(data.mediaConfig) } : {}),
+        ...(data.items !== undefined ? { items: data.items as Prisma.InputJsonValue } : {}),
+        ...(data.activeMapId !== undefined ? { activeMapId: data.activeMapId } : {}),
+        ...(data.fogData !== undefined ? { fogData: data.fogData as Prisma.InputJsonValue } : {}),
       },
       include: sceneIncludeMap(),
     });

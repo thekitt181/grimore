@@ -276,6 +276,9 @@ model Scene {
   gameTimeMinute  Int     @default(0)
   mediaConfig     Json     @default("{}")
   sortOrder       Int     @default(0)
+  items           Json     @default("[]")
+  activeMapId     String?
+  fogData         Json?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 

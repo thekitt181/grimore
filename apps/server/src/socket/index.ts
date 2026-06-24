@@ -88,6 +88,28 @@ function stripCastVfxTriggers(payload: SpellEffectSyncPayload): SpellEffectSyncP
 }
 
 async function hydrateSessionFromCache(socket: Socket, sessionId: string): Promise<void> {
+  // First check if there's an active scene for the session
+  const gameSession = await readPrisma.gameSession.findUnique({
+    where: { id: sessionId },
+    include: { campaign: true },
+  });
+  
+  let sceneItems: unknown[] | undefined;
+  let sceneFogData: unknown;
+  let sceneActiveMapId: string | null | undefined;
+
+  if (gameSession?.activeSceneId) {
+    const activeScene = await readPrisma.scene.findUnique({
+      where: { id: gameSession.activeSceneId },
+    });
+    if (activeScene) {
+      sceneItems = Array.isArray(activeScene.items) ? activeScene.items : [];
+      sceneFogData = activeScene.fogData;
+      sceneActiveMapId = activeScene.activeMapId;
+    }
+  }
+
+  // Then get cache as fallback
   const [cachedFog, cachedItemsRaw, cachedFocusRaw, cachedEffectsRaw] = await Promise.all([
     getSessionFog(sessionId),
     getSessionItems(sessionId),
@@ -95,7 +117,9 @@ async function hydrateSessionFromCache(socket: Socket, sessionId: string): Promi
     getSessionSpellEffects(sessionId),
   ]);
 
-  socket.emit('fog:sync', { sessionId, fogData: cachedFog ?? '[]' });
+  // Use scene data if available, else cache
+  const fogData = sceneFogData ?? cachedFog ?? '[]';
+  socket.emit('fog:sync', { sessionId, fogData });
 
   let mapFocus: MapFocusPayload | undefined;
   if (cachedFocusRaw) {
@@ -114,21 +138,18 @@ async function hydrateSessionFromCache(socket: Socket, sessionId: string): Promi
     if (mapFocus) socket.emit('map:focus', mapFocus);
   };
 
-  const activeMapId = mapFocus?.mapId ?? null;
-
-  if (cachedItemsRaw) {
-    try {
-      const items = JSON.parse(cachedItemsRaw) as unknown;
-      if (Array.isArray(items)) {
-        socket.emit('items:sync', { sessionId, items, activeMapId });
-        emitMapFocus();
-        return;
-      }
-    } catch {
-      /* fall through */
+  const activeMapId = sceneActiveMapId ?? mapFocus?.mapId ?? null;
+  const items = sceneItems ?? (() => {
+    if (cachedItemsRaw) {
+      try {
+        const parsed = JSON.parse(cachedItemsRaw) as unknown;
+        if (Array.isArray(parsed)) return parsed;
+      } catch { /* */ }
     }
-  }
-  socket.emit('items:sync', { sessionId, items: [], activeMapId });
+    return [];
+  })();
+
+  socket.emit('items:sync', { sessionId, items, activeMapId });
   emitMapFocus();
 
   if (cachedEffectsRaw) {
@@ -344,26 +365,122 @@ export function initSocket(httpServer: HttpServer): Server {
     });
 
     // ── Generic scene items (unified editor) — relay only; clients persist locally ──
-    socket.on('item:add', (payload: ItemAddPayload) => {
+    socket.on('item:add', async (payload: ItemAddPayload) => {
       if (!isJoinedSession(socket, payload.sessionId)) return;
       void cacheItemAdd(payload);
       socket.to(payload.sessionId).emit('item:add', payload);
+
+      // Save to active scene if it exists
+      try {
+        const session = await readPrisma.gameSession.findUnique({
+          where: { id: payload.sessionId }
+        });
+        if (session?.activeSceneId) {
+          const scene = await readPrisma.scene.findUnique({
+            where: { id: session.activeSceneId }
+          });
+          if (scene) {
+            let items: any[] = Array.isArray(scene.items) ? [...scene.items] : [];
+            // Check if item exists and replace, else add
+            const idx = items.findIndex((i: any) => (i as any).id === (payload.item as any).id);
+            if (idx >= 0) {
+              items[idx] = payload.item as any;
+            } else {
+              items.push(payload.item as any);
+            }
+            await prisma.scene.update({
+              where: { id: session.activeSceneId },
+              data: { items: items as Prisma.InputJsonValue }
+            });
+          }
+        }
+      } catch (err) {
+        console.error('[Socket] Failed to save item add to scene:', err);
+      }
     });
-    socket.on('item:update', (payload: ItemUpdatePayload) => {
+    socket.on('item:update', async (payload: ItemUpdatePayload) => {
       if (!isJoinedSession(socket, payload.sessionId)) return;
       void cacheItemUpdate(payload);
       socket.to(payload.sessionId).emit('item:update', payload);
+
+      // Save to active scene if it exists
+      try {
+        const session = await readPrisma.gameSession.findUnique({
+          where: { id: payload.sessionId }
+        });
+        if (session?.activeSceneId) {
+          const scene = await readPrisma.scene.findUnique({
+            where: { id: session.activeSceneId }
+          });
+          if (scene) {
+            let items = Array.isArray(scene.items) ? [...scene.items] : [];
+            for (const { id, patch } of payload.patches) {
+              const idx = items.findIndex((i: any) => (i as any).id === id);
+              if (idx >= 0) {
+                items[idx] = { ...(items[idx] as any), ...(patch as any) };
+              }
+            }
+            await prisma.scene.update({
+              where: { id: session.activeSceneId },
+              data: { items: items as Prisma.InputJsonValue }
+            });
+          }
+        }
+      } catch (err) {
+        console.error('[Socket] Failed to save item updates to scene:', err);
+      }
     });
-    socket.on('item:remove', (payload: ItemRemovePayload) => {
+    socket.on('item:remove', async (payload: ItemRemovePayload) => {
       if (!isJoinedSession(socket, payload.sessionId)) return;
       void cacheItemRemove(payload);
       socket.to(payload.sessionId).emit('item:remove', payload);
+
+      // Save to active scene if it exists
+      try {
+        const session = await readPrisma.gameSession.findUnique({
+          where: { id: payload.sessionId }
+        });
+        if (session?.activeSceneId) {
+          const scene = await readPrisma.scene.findUnique({
+            where: { id: session.activeSceneId }
+          });
+          if (scene) {
+            let items = Array.isArray(scene.items) ? [...scene.items] : [];
+            const removeSet = new Set(payload.ids);
+            items = items.filter((i: any) => !removeSet.has(i.id));
+            await prisma.scene.update({
+              where: { id: session.activeSceneId },
+              data: { items: items as Prisma.InputJsonValue }
+            });
+          }
+        }
+      } catch (err) {
+        console.error('[Socket] Failed to save item remove to scene:', err);
+      }
     });
-    socket.on('items:sync', (payload: ItemsSyncPayload) => {
+    socket.on('items:sync', async (payload: ItemsSyncPayload) => {
       if (!isJoinedSession(socket, payload.sessionId)) return;
       if (!isSessionGM(socket)) return;
       cacheSessionItems(payload.sessionId, payload.items);
       socket.to(payload.sessionId).emit('items:sync', payload);
+      
+      // Save to active scene if it exists
+      try {
+        const session = await readPrisma.gameSession.findUnique({
+        where: { id: payload.sessionId }
+      });
+      if (session?.activeSceneId) {
+        await prisma.scene.update({
+          where: { id: session.activeSceneId },
+          data: { 
+            items: payload.items as Prisma.InputJsonValue,
+            activeMapId: payload.activeMapId
+          }
+        });
+      }
+      } catch (err) {
+        console.error('[Socket] Failed to save items to scene:', err);
+      }
     });
 
     socket.on('model:request', (payload: ModelAssetRequestPayload) => {
@@ -413,18 +530,53 @@ export function initSocket(httpServer: HttpServer): Server {
       socket.to(payload.sessionId).emit('map:tokenMove', payload);
     });
 
-    socket.on('map:fogUpdate', (payload: FogUpdatePayload) => {
+    socket.on('map:fogUpdate', async (payload: FogUpdatePayload) => {
       if (!isJoinedSession(socket, payload.sessionId)) return;
       if (!isSessionGM(socket)) return;
       cacheSessionFog(payload.sessionId, payload);
       socket.to(payload.sessionId).emit('map:fogUpdate', payload);
+
+      // Save to active scene if it exists
+      try {
+        const session = await readPrisma.gameSession.findUnique({
+          where: { id: payload.sessionId }
+        });
+        if (session?.activeSceneId) {
+          // For fogUpdate, we need to get current fog and apply the changes
+          // Since we don't have the full logic here, let's just rely on fog:sync for full updates
+          // But if we have fogData in payload, use that
+          if (payload.fogData) {
+            await prisma.scene.update({
+              where: { id: session.activeSceneId },
+              data: { fogData: payload.fogData as Prisma.InputJsonValue }
+            });
+          }
+        }
+      } catch (err) {
+        console.error('[Socket] Failed to save fog update to scene:', err);
+      }
     });
 
-    socket.on('fog:sync', (payload: FogSyncPayload) => {
+    socket.on('fog:sync', async (payload: FogSyncPayload) => {
       if (!isJoinedSession(socket, payload.sessionId)) return;
       if (!isSessionGM(socket)) return;
       cacheSessionFog(payload.sessionId, { fogData: payload.fogData });
       socket.to(payload.sessionId).emit('fog:sync', payload);
+
+      // Save to active scene if it exists
+      try {
+        const session = await readPrisma.gameSession.findUnique({
+          where: { id: payload.sessionId }
+        });
+        if (session?.activeSceneId) {
+          await prisma.scene.update({
+            where: { id: session.activeSceneId },
+            data: { fogData: payload.fogData as Prisma.InputJsonValue }
+          });
+        }
+      } catch (err) {
+        console.error('[Socket] Failed to save fog sync to scene:', err);
+      }
     });
 
     socket.on('fog:active', (payload: FogActivePayload) => {

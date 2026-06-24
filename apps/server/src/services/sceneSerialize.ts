@@ -65,6 +65,9 @@ export function serializeScene(scene: {
   gameTimeMinute?: number;
   mediaConfig: unknown;
   sortOrder: number;
+  items: unknown;
+  activeMapId: string | null;
+  fogData: unknown;
   createdAt: Date;
   updatedAt: Date;
   map?: Parameters<typeof serializeGameMap>[0] | null;
@@ -85,6 +88,9 @@ export function serializeScene(scene: {
     },
     mediaConfig: parseMediaConfig(scene.mediaConfig),
     sortOrder: scene.sortOrder,
+    items: Array.isArray(scene.items) ? scene.items : [],
+    activeMapId: scene.activeMapId ?? null,
+    fogData: scene.fogData ?? null,
     createdAt: scene.createdAt.toISOString(),
     updatedAt: scene.updatedAt.toISOString(),
     ...(scene.map ? { map: serializeGameMap(scene.map) } : {}),

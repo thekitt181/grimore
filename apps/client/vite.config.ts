@@ -19,4 +19,27 @@ export default defineConfig({
     strictPort: true,
     proxy: apiProxyConfig(),
   },
+  build: {
+    target: 'esnext',
+    minify: 'terser',
+    terserOptions: {
+      compress: {
+        drop_console: process.env.NODE_ENV === 'production',
+        drop_debugger: process.env.NODE_ENV === 'production',
+      },
+    },
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          vendor: ['react', 'react-dom', 'react-router-dom'],
+          compendium: ['@grimoire/monster-dex'],
+          scene: ['reactflow', 'lucide-react'],
+        },
+      },
+    },
+    chunkSizeWarningLimit: 1000,
+  },
+  optimizeDeps: {
+    include: ['react', 'react-dom', 'react-router-dom', 'reactflow', 'lucide-react', '@grimoire/monster-dex'],
+  },
 });

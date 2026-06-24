@@ -339,6 +339,8 @@ router.patch('/monsters/:id', ...admin, async (req: AuthenticatedRequest, res) =
     }
     const renamed = Boolean(existing?.name && name !== existing.name);
     const saved = await saveMonster({
+      ...existing,
+      ...body,
       name,
       type: body.type ?? existing?.type ?? 'Medium humanoid, neutral',
       source: body.source ?? existing?.source ?? 'Custom',
@@ -447,6 +449,8 @@ router.patch('/items/:id', ...admin, async (req, res) => {
     if (!name) { res.status(400).json({ error: 'Name required' }); return; }
     const renamed = Boolean(existing?.name && name !== existing.name);
     const saved = await saveItem({
+      ...existing,
+      ...body,
       name,
       type: body.type ?? existing?.type ?? '',
       source: body.source ?? existing?.source ?? 'Custom',
@@ -521,6 +525,8 @@ router.patch('/spells/:id', ...admin, async (req, res) => {
     if (!name) { res.status(400).json({ error: 'Name required' }); return; }
     const renamed = Boolean(existing?.name && name !== existing.name);
     const saved = await saveSpell({
+      ...existing,
+      ...body,
       name,
       level: Number(body.level ?? existing?.level ?? 0),
       ...(body.damage ?? existing?.damage ? { damage: body.damage ?? existing?.damage } : {}),
@@ -535,7 +541,8 @@ router.patch('/spells/:id', ...admin, async (req, res) => {
     });
     res.json(saved);
   } catch (err) {
-    res.status(500).json({ error: 'Failed to save spell' });
+    console.error('[Compendium] save spell:', err);
+    res.status(500).json({ error: err instanceof Error ? err.message : 'Failed to save spell' });
   }
 });
 

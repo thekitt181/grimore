@@ -18,6 +18,10 @@ import {
 } from './audioEngine';
 import { useSceneMediaStore, normalizeWeatherOverlay } from './sceneMediaStore';
 import { hydrateSceneMap } from '../manager/hydrateSceneMap';
+import { useItemStore } from '../store/itemStore';
+import { useMapStore } from '@/systems/map/store/mapStore';
+import { applyFogData } from '../fogSync';
+import { emitItemsSync } from '../sceneSync';
 
 export const SESSION_WEATHER_SCENE_ID = 'session-live-weather';
 export const SESSION_TIME_SCENE_ID = 'session-live-time';
@@ -57,6 +61,9 @@ function createSessionLiveScene(
     sortOrder: 0,
     createdAt: now,
     updatedAt: now,
+    items: [],
+    activeMapId: null,
+    fogData: null,
     ...rest,
     mediaConfig: {
       ...DEFAULT_SCENE_MEDIA_CONFIG,
@@ -159,6 +166,19 @@ export function applySceneBundle(scene: SceneRecord, transition: SceneChangePayl
   const media = buildMediaConfig(scene);
   useSceneMediaStore.getState().setMasterVolume(media.masterVolume);
   applySceneMediaConfig(media);
+  
+  // Load items and active map from scene
+  if (scene.items) {
+    useItemStore.getState().setItems(scene.items as any[], scene.activeMapId);
+  }
+  
+  // Load fog from scene
+  if (scene.fogData) {
+    const fogJson = typeof scene.fogData === 'string' 
+      ? scene.fogData 
+      : JSON.stringify(scene.fogData);
+    applyFogData(fogJson, { persist: true });
+  }
 }
 
 /** Listen for scene changes + drive Howler layers. */
@@ -253,6 +273,17 @@ export function emitSceneChange(
     transition,
     scene,
   });
+  
+  // If GM, also sync items and fog to all clients
+  if (useSessionStore.getState().myRole === 'GM') {
+    emitItemsSync(scene.items as any[]);
+    if (scene.fogData) {
+      const fogJson = typeof scene.fogData === 'string' 
+        ? scene.fogData 
+        : JSON.stringify(scene.fogData);
+      getSocket().emit('fog:sync', { sessionId, fogData: fogJson });
+    }
+  }
 }
 
 /** Push map weather live to all clients (right-click map menu). Visual only — no auto audio. */
