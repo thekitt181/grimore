@@ -141,6 +141,8 @@ function constitutionHitPointBonus(raw: any): number {
 }
 
 function computeMaxHitPoints(raw: any): number {
+  console.log('[computeMaxHitPoints] Starting with raw:', raw);
+  
   // Prioritize any sheet-provided max HP field first
   const sheetMax = findNestedNumber(
     raw,
@@ -149,6 +151,7 @@ function computeMaxHitPoints(raw: any): number {
     'maximumHitPoints',
     'max'
   );
+  console.log('[computeMaxHitPoints] sheetMax:', sheetMax);
   if (sheetMax !== undefined && sheetMax > 0) return sheetMax;
 
   const base =
@@ -159,6 +162,7 @@ function computeMaxHitPoints(raw: any): number {
       raw.hitPointsInfo?.base,
       raw.hitPointInfo?.baseHitPoints,
     ) ?? 0;
+  console.log('[computeMaxHitPoints] base:', base);
 
   const bonusField = pickNumber(
     raw.bonusHitPoints,
@@ -167,18 +171,26 @@ function computeMaxHitPoints(raw: any): number {
     raw.hitPointsInfo?.bonus,
     raw.hitPointInfo?.bonusHitPoints,
   );
+  console.log('[computeMaxHitPoints] bonusField:', bonusField);
 
   // DDB stores rolled/class HP in baseHitPoints; CON×level usually lives in bonusHitPoints
   // but that field is often null — compute from ability scores when missing.
   const conBonus = constitutionHitPointBonus(raw);
+  console.log('[computeMaxHitPoints] conBonus:', conBonus);
+  
   const fromModifiers = sumHitPointBonusesFromModifiers(raw);
   const fromFeats = sumFeatHitPointBonus(raw);
+  console.log('[computeMaxHitPoints] fromModifiers:', fromModifiers, 'fromFeats:', fromFeats);
+  
   const extraBonus = Math.max(fromModifiers, fromFeats);
   const bonus = (bonusField ?? conBonus) + extraBonus;
+  console.log('[computeMaxHitPoints] bonus:', bonus);
 
   let maxHp = base + bonus;
+  console.log('[computeMaxHitPoints] maxHp after base+bonus:', maxHp);
 
   const override = pickNumber(raw.overrideHitPoints, raw.hitPointInfo?.override);
+  console.log('[computeMaxHitPoints] override:', override);
   if (override !== undefined && override > 0) maxHp = override;
 
   const adjusted = pickNumber(
@@ -186,9 +198,12 @@ function computeMaxHitPoints(raw: any): number {
     raw.hitPointInfo?.adjusted,
     raw.hitPointsInfo?.adjusted,
   );
+  console.log('[computeMaxHitPoints] adjusted:', adjusted);
   if (adjusted !== undefined && adjusted > maxHp) maxHp = adjusted;
 
-  return Math.max(maxHp, 1);
+  const result = Math.max(maxHp, 1);
+  console.log('[computeMaxHitPoints] Final result:', result);
+  return result;
 }
 
 function computeCurrentHitPoints(raw: any, maxHp: number): number {
@@ -271,16 +286,20 @@ export function extractVitals(raw: any): { hp: number; maxHp: number; tempHp: nu
 }
 
 export function extractAc(raw: any): number {
+  console.log('[extractAc] Starting with raw:', raw);
+  
   // Prioritize any sheet-provided AC field first
   const sheetAc = findNestedNumber(
     raw,
     'armorClass',
     'ac'
   );
+  console.log('[extractAc] sheetAc:', sheetAc);
   if (sheetAc !== undefined && sheetAc > 0) return sheetAc;
 
   const abilities = extractAbilities(raw);
   const dexMod = abilities.find((a) => a.name === 'DEX')?.mod ?? 0;
+  console.log('[extractAc] dexMod:', dexMod);
 
   let setAc = 0;
   let bonusAc = 0;
@@ -300,14 +319,31 @@ export function extractAc(raw: any): number {
       || sub.includes('armor class')
       || friendly.includes('armor class');
 
-    if (type === 'set' && isAc) setAc = Math.max(setAc, val);
-    if (type === 'bonus' && isAc) bonusAc += val;
+    if (type === 'set' && isAc) {
+      console.log('[extractAc] Found set modifier:', { m, val });
+      setAc = Math.max(setAc, val);
+    }
+    if (type === 'bonus' && isAc) {
+      console.log('[extractAc] Found bonus modifier:', { m, val });
+      bonusAc += val;
+    }
   }
+  console.log('[extractAc] setAc:', setAc, 'bonusAc:', bonusAc);
 
   const equippedAc = extractAcFromEquipment(raw, dexMod);
   const unarmored = 10 + dexMod + bonusAc;
+  console.log('[extractAc] equippedAc:', equippedAc, 'unarmored:', unarmored);
 
-  if (setAc > 0) return Math.max(setAc + bonusAc, equippedAc, unarmored);
-  if (equippedAc > 0) return Math.max(equippedAc + bonusAc, unarmored);
+  if (setAc > 0) {
+    const result = Math.max(setAc + bonusAc, equippedAc, unarmored);
+    console.log('[extractAc] Final result (setAc path):', result);
+    return result;
+  }
+  if (equippedAc > 0) {
+    const result = Math.max(equippedAc + bonusAc, unarmored);
+    console.log('[extractAc] Final result (equipped path):', result);
+    return result;
+  }
+  console.log('[extractAc] Final result (unarmored):', unarmored);
   return Math.max(unarmored, 10);
 }
