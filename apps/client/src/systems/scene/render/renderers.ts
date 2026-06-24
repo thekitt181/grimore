@@ -29,7 +29,7 @@ export function tokenBaseVisualSignature(item: TokenItem): string {
 /** HP, conditions, and turn ring — cheap to patch without rebuilding the whole token. */
 export function tokenOverlayVisualSignature(item: TokenItem, ctx: RenderContext): string {
   const selected = ctx.selectedIds?.includes(item.id) ?? false;
-  return `${item.hp}|${item.maxHp}|${item.tempHp ?? 0}|${item.conditions.join(',')}|${ctx.activeTurnItemId === item.id}|${selected}|${ctx.gm}`;
+  return `${item.hp}|${item.maxHp}|${item.tempHp ?? 0}|${item.conditions.join(',')}|${ctx.activeTurnItemId === item.id}|${selected}|${ctx.gm}|${item.hideHpFromPlayers ?? ''}`;
 }
 
 /** A signature of the visual-relevant fields so we can skip needless rebuilds. */
