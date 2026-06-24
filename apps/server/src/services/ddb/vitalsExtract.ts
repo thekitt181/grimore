@@ -283,16 +283,21 @@ function computeCurrentHitPoints(raw: any, maxHp: number): number {
 }
 
 function extractAcFromEquipment(raw: any, dexMod: number): number {
+  console.log('[extractAcFromEquipment] Starting with inventory:', JSON.stringify(raw.inventory, null, 2));
   let bodyAc = 0;
   let shieldBonus = 0;
 
   for (const item of raw.inventory ?? []) {
+    console.log('[extractAcFromEquipment] Checking item:', { id: item.id, equipped: item.equipped });
     if (!item.equipped) continue;
     const def = item.definition ?? {};
+    console.log('[extractAcFromEquipment] Item definition:', def);
     const filterType = String(def.filterType ?? def.type ?? '').toLowerCase();
+    console.log('[extractAcFromEquipment] filterType:', filterType);
     if (!filterType.includes('armor')) continue;
 
     const ac = Number(def.armorClass ?? 0);
+    console.log('[extractAcFromEquipment] Item ac:', ac);
     if (!ac) continue;
 
     const baseName = String(def.baseArmorName ?? def.name ?? '').toLowerCase();
@@ -300,6 +305,7 @@ function extractAcFromEquipment(raw: any, dexMod: number): number {
 
     if (baseName.includes('shield') || armorTypeId === 4) {
       shieldBonus = Math.max(shieldBonus, ac);
+      console.log('[extractAcFromEquipment] Found shield, shieldBonus:', shieldBonus);
       continue;
     }
 
@@ -308,9 +314,12 @@ function extractAcFromEquipment(raw: any, dexMod: number): number {
     else if (armorTypeId === 2) dexAdd = Math.min(Math.max(dexMod, 0), 2);
 
     bodyAc = Math.max(bodyAc, ac + Math.max(0, dexAdd));
+    console.log('[extractAcFromEquipment] Found body armor, bodyAc:', bodyAc);
   }
 
-  return bodyAc > 0 ? bodyAc + shieldBonus : 0;
+  const result = bodyAc > 0 ? bodyAc + shieldBonus : 0;
+  console.log('[extractAcFromEquipment] Final result:', result);
+  return result;
 }
 
 export function extractVitals(raw: any): { hp: number; maxHp: number; tempHp: number } {
