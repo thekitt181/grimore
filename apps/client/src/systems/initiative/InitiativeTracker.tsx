@@ -240,7 +240,16 @@ export function InitiativeTracker({ onClose }: { onClose: () => void }) {
                       <button
                         type="button"
                         onClick={() => {
-                          updateCombatant(c.id, { hideHpFromPlayers: !c.hideHpFromPlayers });
+                          const newHideHp = !c.hideHpFromPlayers;
+                          updateCombatant(c.id, { hideHpFromPlayers: newHideHp });
+                          if (c.tokenId) {
+                            // Sync the change to the linked token
+                            const token = useItemStore.getState().items[c.tokenId];
+                            if (token && token.type === 'token') {
+                              useItemStore.getState().updateItem(token.id, { hideHpFromPlayers: newHideHp });
+                              emitItemUpdate([{ id: token.id, patch: { hideHpFromPlayers: newHideHp } }]);
+                            }
+                          }
                           syncToServer();
                         }}
                         className="shrink-0 text-[9px] px-1 rounded"
