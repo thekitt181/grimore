@@ -40,7 +40,8 @@ function isModifierActive(raw: any, mod: any): boolean {
     if (defId !== componentId) continue;
     return isItemActive(item);
   }
-  return false;
+  // componentId refers to a class feature, racial trait, etc. — not an inventory row.
+  return true;
 }
 
 function collectActiveModifiers(raw: any): any[] {
@@ -88,8 +89,42 @@ function modifierHitPointValue(m: any, level: number): number {
   return val;
 }
 
+function appendDefinitionModifiers(list: any[], source: any): void {
+  const def = source?.definition ?? source;
+  if (!def) return;
+  for (const key of ['modifiers', 'grantedModifiers']) {
+    const mods = def[key];
+    if (Array.isArray(mods)) list.push(...mods);
+  }
+}
+
+function collectFeatureModifiers(raw: any): any[] {
+  const list: any[] = [];
+
+  for (const cls of raw.classes ?? []) {
+    appendDefinitionModifiers(list, cls);
+    for (const feature of cls.classFeatures ?? cls.definition?.classFeatures ?? []) {
+      appendDefinitionModifiers(list, feature);
+    }
+  }
+
+  for (const trait of raw.race?.racialTraits ?? raw.race?.definition?.racialTraits ?? []) {
+    appendDefinitionModifiers(list, trait);
+  }
+
+  appendDefinitionModifiers(list, raw.background);
+  appendDefinitionModifiers(list, raw.background?.definition);
+
+  for (const bucket of Object.values(raw.options ?? {})) {
+    if (!Array.isArray(bucket)) continue;
+    for (const opt of bucket) appendDefinitionModifiers(list, opt);
+  }
+
+  return list;
+}
+
 function collectHitPointModifiers(raw: any): any[] {
-  const list = [...collectActiveModifiers(raw)];
+  const list = [...collectActiveModifiers(raw), ...collectFeatureModifiers(raw)];
 
   for (const item of raw.inventory ?? []) {
     if (!isItemActive(item)) continue;
@@ -170,7 +205,14 @@ function computeMaxHitPoints(raw: any): number {
   const conBonus = constitutionHitPointBonus(raw);
   const fromModifiers = sumHitPointBonusesFromModifiers(raw);
   const fromFeats = sumFeatHitPointBonus(raw);
-  const extraBonus = Math.max(fromModifiers, fromFeats);
+  const hasToughModifier = collectHitPointModifiers(raw).some((m) => {
+    if (!isHitPointModifier(m)) return false;
+    const friendly = String(m.friendlySubtypeName ?? '').toLowerCase();
+    const isPerLevel = isPerLevelHitPointModifier(m)
+      && modifierHitPointValue(m, characterLevel(raw)) >= characterLevel(raw) * 2;
+    return friendly.includes('tough') || isPerLevel;
+  });
+  const extraBonus = fromModifiers + (hasToughModifier ? 0 : fromFeats);
   const bonus = (bonusField ?? conBonus) + extraBonus;
 
   let maxHp = base > 0
@@ -224,7 +266,7 @@ function computeCurrentHitPoints(raw: any, maxHp: number): number {
 }
 
 function collectAcModifiers(raw: any): any[] {
-  const list = [...collectActiveModifiers(raw)];
+  const list = [...collectActiveModifiers(raw), ...collectFeatureModifiers(raw)];
 
   for (const item of raw.inventory ?? []) {
     if (!isItemActive(item)) continue;

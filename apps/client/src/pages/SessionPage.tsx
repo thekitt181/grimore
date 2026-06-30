@@ -36,6 +36,7 @@ import { DdbLinkPanel } from '@/systems/ddb/DdbLinkPanel';
 import { MobileDdbTokenBar } from '@/systems/ddb/MobileDdbTokenBar';
 import { useDdbStore } from '@/systems/ddb/ddbStore';
 import { useDdbHpSync } from '@/systems/ddb/useDdbHpSync';
+import { useDdbPartyVitalsSync } from '@/systems/ddb/useDdbPartyVitalsSync';
 import { useDdbSocket } from '@/systems/ddb/useDdbSocket';
 import { useCombatStore } from '@/systems/combat/combatStore';
 import { useDiceSocket } from '@/systems/dice/useDiceSocket';
@@ -118,6 +119,7 @@ export function SessionPage() {
   useCompendiumAuthRecovery(socketReady);
   useDiceSocket();
   useDdbHpSync();
+  useDdbPartyVitalsSync(socketReady);
   useDdbSocket();
 
   const importModalOpen = useDdbStore((s) => s.importModalOpen);

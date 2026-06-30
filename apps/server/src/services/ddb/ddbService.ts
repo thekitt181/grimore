@@ -213,14 +213,18 @@ export async function patchCharacterHp(
   ddbCharacterId: number,
   hp: number,
   tempHp: number,
+  sessionId?: string,
 ): Promise<{ pushedToDdb: boolean; character: GrimoireCharacter }> {
-  const cobalt = await getCobaltForUser(userId);
+  const providerId = await resolveDdbProviderUserId(userId, sessionId);
+  const cobalt = await getCobaltForUser(providerId);
   if (!cobalt) throw new Error('D&D Beyond account not linked');
 
-  const pushedToDdb = await pushHpToDdb(cobalt, ddbCharacterId, hp, tempHp);
+  const pushedToDdb = userId === providerId
+    ? await pushHpToDdb(cobalt, ddbCharacterId, hp, tempHp)
+    : false;
 
   const cached = await readPrisma.ddbCharacterCache.findUnique({
-    where: { userId_ddbCharacterId: { userId, ddbCharacterId } },
+    where: { userId_ddbCharacterId: { userId: providerId, ddbCharacterId } },
   });
 
   if (cached) {
@@ -241,7 +245,7 @@ export async function patchCharacterHp(
     return { pushedToDdb, character: next };
   }
 
-  const character = await getOrSyncCharacter(userId, ddbCharacterId, true);
+  const character = await getOrSyncCharacter(userId, ddbCharacterId, true, sessionId);
   character.hp = hp;
   character.tempHp = tempHp;
   return { pushedToDdb, character };
@@ -252,13 +256,17 @@ export async function patchCharacterDeathSaves(
   ddbCharacterId: number,
   deathSaves: DdbDeathSavesPayload,
   options?: { hp?: number; tempHp?: number },
+  sessionId?: string,
 ): Promise<{ pushedToDdb: boolean; character: GrimoireCharacter }> {
-  const cobalt = await getCobaltForUser(userId);
+  const providerId = await resolveDdbProviderUserId(userId, sessionId);
+  const cobalt = await getCobaltForUser(providerId);
   if (!cobalt) throw new Error('D&D Beyond account not linked');
 
-  let pushedToDdb = await pushDeathSavesToDdb(cobalt, ddbCharacterId, deathSaves);
+  let pushedToDdb = userId === providerId
+    ? await pushDeathSavesToDdb(cobalt, ddbCharacterId, deathSaves)
+    : false;
 
-  if (options?.hp != null) {
+  if (options?.hp != null && userId === providerId) {
     const hpPushed = await pushHpToDdb(
       cobalt,
       ddbCharacterId,
@@ -269,7 +277,7 @@ export async function patchCharacterDeathSaves(
   }
 
   const cached = await readPrisma.ddbCharacterCache.findUnique({
-    where: { userId_ddbCharacterId: { userId, ddbCharacterId } },
+    where: { userId_ddbCharacterId: { userId: providerId, ddbCharacterId } },
   });
 
   if (cached) {
@@ -300,7 +308,7 @@ export async function patchCharacterDeathSaves(
     return { pushedToDdb, character: next };
   }
 
-  const character = await getOrSyncCharacter(userId, ddbCharacterId, true);
+  const character = await getOrSyncCharacter(userId, ddbCharacterId, true, sessionId);
   character.deathSaves = {
     successes: deathSaves.successes,
     failures: deathSaves.failures,

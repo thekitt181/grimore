@@ -240,7 +240,33 @@ function DieSkinRow({ kind }: { kind: DieKind }) {
 
 export function DiceSkinControls() {
   const [open, setOpen] = useState(false);
+  const [presetName, setPresetName] = useState('');
+  const [saveMsg, setSaveMsg] = useState('');
   const resetAll = useDiceSkinStore((s) => s.resetAll);
+  const saveDiceSkinsNow = useDiceSkinStore((s) => s.saveDiceSkinsNow);
+  const saveCurrentAsPreset = useDiceSkinStore((s) => s.saveCurrentAsPreset);
+  const loadPreset = useDiceSkinStore((s) => s.loadPreset);
+  const deletePreset = useDiceSkinStore((s) => s.deletePreset);
+  const savedPresets = useDiceSkinStore((s) => s.savedPresets);
+
+  function flash(msg: string) {
+    setSaveMsg(msg);
+    window.setTimeout(() => setSaveMsg(''), 2200);
+  }
+
+  function handleSaveNow() {
+    flash(saveDiceSkinsNow() ? 'Dice skins saved on this device.' : 'Could not save — storage may be full.');
+  }
+
+  function handleSavePreset() {
+    const preset = saveCurrentAsPreset(presetName);
+    if (!preset) {
+      flash('Enter a name for your dice set.');
+      return;
+    }
+    setPresetName('');
+    flash(`Saved preset "${preset.name}".`);
+  }
 
   return (
     <div className="px-2 py-1.5 shrink-0" style={{ borderBottom: `1px solid ${BD}` }}>
@@ -255,12 +281,78 @@ export function DiceSkinControls() {
       </button>
       {open && (
         <div className="mt-1.5 space-y-1">
+          <div
+            className="rounded px-1.5 py-1.5 space-y-1.5"
+            style={{ background: 'var(--color-bg-tertiary)', border: `1px solid ${BD}` }}
+          >
+            <div className="font-display text-[11px]" style={{ color: GOLD }}>Save dice set</div>
+            <div className="flex flex-wrap gap-1.5 items-center">
+              <button
+                type="button"
+                onClick={handleSaveNow}
+                className="text-[10px] font-ui px-2 py-1 rounded shrink-0"
+                style={{ border: `1px solid ${GOLD}`, color: GOLD }}
+              >
+                Save skins
+              </button>
+              <input
+                type="text"
+                value={presetName}
+                onChange={(e) => setPresetName(e.target.value)}
+                placeholder="Preset name"
+                className="input-dark text-[10px] py-0.5 flex-1 min-w-[5rem]"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleSavePreset();
+                }}
+              />
+              <button
+                type="button"
+                onClick={handleSavePreset}
+                className="text-[10px] font-ui px-2 py-1 rounded shrink-0"
+                style={{ border: `1px solid ${BD}`, color: 'var(--color-text-secondary)' }}
+              >
+                Save preset
+              </button>
+            </div>
+            {savedPresets.length > 0 && (
+              <div className="space-y-0.5 max-h-24 overflow-y-auto">
+                {savedPresets.map((preset) => (
+                  <div key={preset.id} className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        loadPreset(preset.id);
+                        flash(`Loaded "${preset.name}".`);
+                      }}
+                      className="flex-1 text-left text-[10px] font-ui px-1.5 py-0.5 rounded truncate"
+                      style={{ border: `1px solid ${BD}`, color: 'var(--color-text-primary)' }}
+                      title={new Date(preset.savedAt).toLocaleString()}
+                    >
+                      {preset.name}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => deletePreset(preset.id)}
+                      className="text-[10px] px-1 py-0.5 shrink-0"
+                      style={{ color: 'var(--color-accent-red-hot)' }}
+                      title="Delete preset"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            {saveMsg && (
+              <p className="font-ui text-[9px]" style={{ color: GOLD }}>{saveMsg}</p>
+            )}
+          </div>
           <AllDiceRow />
           {DIE_KINDS.map((kind) => (
             <DieSkinRow key={kind} kind={kind} />
           ))}
           <p className="font-ui text-[9px] leading-tight" style={{ color: 'var(--color-text-secondary)' }}>
-            d100 uses the d10 skin. Skins are saved on this device.
+            d100 uses the d10 skin. Skins auto-save; use Save skins or a named preset to keep a set on this device.
           </p>
           <button
             type="button"

@@ -157,6 +157,8 @@ interface SceneState extends ActiveGrid {
   saveMiniOrbitForToken: (tokenId: string, azimuth: number) => void;
   getMiniOrbitForToken: (tokenId: string) => number;
   resetView2dMiniOrbit: () => void;
+  /** Reset 2D/3D mini camera orbit for one GLB token back to default. */
+  resetTokenViewAngle: (tokenId: string) => void;
   setAutoExtrudeWalls: (enabled: boolean) => void;
   setWallHeightCells: (cells: number) => void;
   setScanImageWalls: (enabled: boolean) => void;
@@ -303,6 +305,16 @@ export const useMapStore = create<SceneState>((set, get) => ({
   getMiniOrbitForToken: (tokenId) => get().miniOrbitByTokenId[tokenId] ?? 0,
   resetView2dMiniOrbit: () =>
     set({ view2dMiniOrbit: { ...DEFAULT_VIEW2D_MINI_ORBIT }, miniOrbitByTokenId: {} }),
+  resetTokenViewAngle: (tokenId) =>
+    set((s) => ({
+      view2dMiniOrbit: { ...DEFAULT_VIEW2D_MINI_ORBIT },
+      view3dOrbit: { ...DEFAULT_VIEW3D_ORBIT },
+      miniOrbitByTokenId: { ...s.miniOrbitByTokenId, [tokenId]: 0 },
+      miniOrbit3dByTokenId: {
+        ...s.miniOrbit3dByTokenId,
+        [tokenId]: { ...DEFAULT_VIEW3D_ORBIT },
+      },
+    })),
   setAutoExtrudeWalls: (autoExtrudeWalls) => set({ autoExtrudeWalls }),
   setWallHeightCells: (wallHeightCells) =>
     set({ wallHeightCells: Math.max(0.5, Math.min(8, wallHeightCells)) }),

@@ -338,6 +338,7 @@ export function useTransformControls(appReady: boolean) {
           }
         }
         useLiveTransformStore.getState().setLive(it.id, { x: nx, y: ny, width: newW, height: newH }, { bumpTick: false });
+        if (it.type === 'token') scheduleFogRepaintDuringDrag();
         const feetLabel = formatResizeFeetLabel(it, newW, newH, drag.w0);
         if (feetLabel) showResizeSizeLabel(e.clientX, e.clientY, feetLabel);
         return;

@@ -22,7 +22,16 @@ export const DEFAULT_DIE_COLORS: Record<DieKind, string> = {
 
 const STORAGE_KEY = 'grimoire.diceSkins.v1';
 const FIT_KEY = 'grimoire.diceSkins.fit';
+const PRESETS_KEY = 'grimoire.diceSkinPresets.v1';
 const DEFAULT_FIT = 0.7;
+
+export interface DiceSkinPreset {
+  id: string;
+  name: string;
+  skins: Record<DieKind, DieSkin>;
+  imageFit: number;
+  savedAt: string;
+}
 
 function loadFit(): number {
   if (typeof localStorage === 'undefined') return DEFAULT_FIT;
@@ -77,10 +86,41 @@ function persistSkins(skins: Record<DieKind, DieSkin>): void {
   }
 }
 
+function loadPresets(): DiceSkinPreset[] {
+  if (typeof localStorage === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem(PRESETS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as DiceSkinPreset[];
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((p) => p && typeof p.id === 'string' && typeof p.name === 'string');
+  } catch {
+    return [];
+  }
+}
+
+function persistPresets(presets: DiceSkinPreset[]): void {
+  if (typeof localStorage === 'undefined') return;
+  try {
+    localStorage.setItem(PRESETS_KEY, JSON.stringify(presets));
+  } catch {
+    /* ignore */
+  }
+}
+
+function cloneSkins(skins: Record<DieKind, DieSkin>): Record<DieKind, DieSkin> {
+  const out = { ...skins };
+  for (const kind of DIE_KINDS) {
+    out[kind] = { ...skins[kind] };
+  }
+  return out;
+}
+
 interface DiceSkinState {
   skins: Record<DieKind, DieSkin>;
   /** How tightly imported images are zoomed/cropped onto faces (0.3–1). */
   imageFit: number;
+  savedPresets: DiceSkinPreset[];
   setImageFit: (fit: number) => void;
   setColor: (kind: DieKind, color: string) => void;
   setImage: (kind: DieKind, image: string | null) => void;
@@ -90,6 +130,11 @@ interface DiceSkinState {
   setColorAll: (color: string) => void;
   resetKind: (kind: DieKind) => void;
   resetAll: () => void;
+  /** Force-write current skins + fit to localStorage. */
+  saveDiceSkinsNow: () => boolean;
+  saveCurrentAsPreset: (name: string) => DiceSkinPreset | null;
+  loadPreset: (id: string) => void;
+  deletePreset: (id: string) => void;
   /** Resolve the skin for any die size (d100 → d10, odd sizes → nearest shape). */
   skinFor: (sides: number) => DieSkin;
 }
@@ -97,6 +142,7 @@ interface DiceSkinState {
 export const useDiceSkinStore = create<DiceSkinState>((set, get) => ({
   skins: loadSkins(),
   imageFit: loadFit(),
+  savedPresets: loadPresets(),
   setImageFit: (fit) =>
     set(() => {
       const clamped = Math.max(0.3, Math.min(1, fit));
@@ -141,6 +187,47 @@ export const useDiceSkinStore = create<DiceSkinState>((set, get) => ({
       persistSkins(skins);
       return { skins };
     }),
+  saveDiceSkinsNow: () => {
+    const { skins, imageFit } = get();
+    try {
+      persistSkins(skins);
+      persistFit(imageFit);
+      return true;
+    } catch {
+      return false;
+    }
+  },
+  saveCurrentAsPreset: (name) => {
+    const trimmed = name.trim();
+    if (!trimmed) return null;
+    const { skins, imageFit } = get();
+    const preset: DiceSkinPreset = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      name: trimmed,
+      skins: cloneSkins(skins),
+      imageFit,
+      savedAt: new Date().toISOString(),
+    };
+    const savedPresets = [...get().savedPresets, preset];
+    persistPresets(savedPresets);
+    persistSkins(skins);
+    persistFit(imageFit);
+    set({ savedPresets });
+    return preset;
+  },
+  loadPreset: (id) => {
+    const preset = get().savedPresets.find((p) => p.id === id);
+    if (!preset) return;
+    const skins = cloneSkins(preset.skins);
+    persistSkins(skins);
+    persistFit(preset.imageFit);
+    set({ skins, imageFit: preset.imageFit });
+  },
+  deletePreset: (id) => {
+    const savedPresets = get().savedPresets.filter((p) => p.id !== id);
+    persistPresets(savedPresets);
+    set({ savedPresets });
+  },
   skinFor: (sides) => get().skins[normalizeDieSides(sides)],
 }));
 

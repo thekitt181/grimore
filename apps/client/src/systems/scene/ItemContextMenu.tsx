@@ -505,6 +505,15 @@ export function ItemContextMenu() {
           <>
             <Btn label="⟲ Rotate left (45°)" onClick={() => rotateToken(rotToken.id, -45)} />
             <Btn label="⟳ Rotate right (45°)" onClick={() => rotateToken(rotToken.id, 45)} />
+            {rotToken.modelUrl && (
+              <Btn
+                label="↺ Reset view angle"
+                onClick={() => {
+                  useMapStore.getState().resetTokenViewAngle(rotToken.id);
+                  close();
+                }}
+              />
+            )}
           </>
         )}
         {single?.type === 'handout' && (
@@ -624,6 +633,16 @@ export function ItemContextMenu() {
       )}
 
       {single?.type === 'token' && isGM && <TokenExtras token={single as TokenItem} />}
+
+      {single?.type === 'token' && (single as TokenItem).modelUrl && (
+        <Btn
+          label="↺ Reset token view angle"
+          onClick={() => {
+            useMapStore.getState().resetTokenViewAngle(single!.id);
+            close();
+          }}
+        />
+      )}
 
       {single?.type === 'token' && isGM && (
         <TokenOwnerAssign

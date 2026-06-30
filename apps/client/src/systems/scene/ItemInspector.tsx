@@ -11,6 +11,7 @@ import { VisionFtInput } from '@/systems/map/VisionFtInput';
 import { applyTokenHpToCombatants } from '@/systems/initiative/initiativeTokenSync';
 import { applyDamage, applyHeal, readTempHp } from '@/systems/initiative/hpUtils';
 import { deleteCurrentSelection } from './deleteSelection';
+import { playerCanRotateToken } from './token/clientTokenVisibility';
 
 function numHex(n: number): string { return '#' + n.toString(16).padStart(6, '0'); }
 function hexNum(s: string): number { return parseInt(s.replace('#', ''), 16); }
@@ -156,7 +157,13 @@ function TokenControls({
   isGM: boolean;
   update: (p: Partial<TokenItem>) => void;
 }) {
+  const myUserId = useSessionStore((s) => s.myUserId);
+  const viewMode = useMapStore((s) => s.viewMode);
+  const resetTokenViewAngle = useMapStore((s) => s.resetTokenViewAngle);
   const isMonster = Boolean(token.monsterId);
+  const hasModel = Boolean(token.modelUrl);
+  const canRotate = playerCanRotateToken(token, myUserId);
+  const showViewReset = hasModel && (isGM || canRotate);
 
   if (!isGM && isMonster) {
     return (
@@ -218,6 +225,18 @@ function TokenControls({
             onClick={() => update({ hideHpFromPlayers: !isHpHiddenFromPlayers(token) })}
           >
             {isHpHiddenFromPlayers(token) ? 'Hidden from players' : 'Visible to players'}
+          </button>
+        </Field>
+      )}
+      {showViewReset && (
+        <Field label="View">
+          <button
+            type="button"
+            className="btn-ghost text-xs px-2 py-0.5 whitespace-nowrap"
+            title={viewMode === '3d' ? 'Reset 3D camera angle' : 'Reset mini view angle (right-drag orbit)'}
+            onClick={() => resetTokenViewAngle(token.id)}
+          >
+            Reset view angle
           </button>
         </Field>
       )}

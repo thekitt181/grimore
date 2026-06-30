@@ -53,14 +53,12 @@ export function pullDdbHpToToken(
   tokenId: string,
   character: { hp: number; maxHp: number; tempHp: number; ac?: number },
 ): void {
-  console.log('[pullDdbHpToToken] Updating token', tokenId, 'with character:', character);
   const patch: Partial<TokenItem> = {
     hp: character.hp,
     maxHp: character.maxHp,
     tempHp: character.tempHp,
     ...(character.ac != null && character.ac > 0 ? { ac: character.ac } : {}),
   };
-  console.log('[pullDdbHpToToken] Applying patch:', patch);
   suppressHpPushDepth += 1;
   try {
     useItemStore.getState().updateItem(tokenId, patch);

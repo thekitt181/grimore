@@ -236,8 +236,9 @@ router.patch('/characters/:id/hp', requireAuth, async (req: AuthenticatedRequest
       res.status(400).json({ error: 'Invalid HP payload' });
       return;
     }
+    const sessionId = req.header('x-session-id') ?? undefined;
     const { hp, tempHp } = parsed.data;
-    const result = await patchCharacterHp(req.userId!, id, hp, tempHp);
+    const result = await patchCharacterHp(req.userId!, id, hp, tempHp, sessionId);
     res.json(result);
   } catch (err) {
     res.status(400).json({ error: err instanceof Error ? err.message : 'HP update failed' });
@@ -256,12 +257,14 @@ router.patch('/characters/:id/death-saves', requireAuth, async (req: Authenticat
       res.status(400).json({ error: 'Invalid death save payload' });
       return;
     }
+    const sessionId = req.header('x-session-id') ?? undefined;
     const { successes, failures, stabilized, hp, tempHp } = parsed.data;
     const result = await patchCharacterDeathSaves(
       req.userId!,
       id,
       { successes, failures, stabilized },
       hp != null || tempHp != null ? { hp, tempHp } : undefined,
+      sessionId,
     );
     res.json(result);
   } catch (err) {
