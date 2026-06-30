@@ -123,8 +123,17 @@ function collectFeatureModifiers(raw: any): any[] {
   return list;
 }
 
+function collectConditionModifiers(raw: any): any[] {
+  const condition = raw.modifiers?.condition;
+  return Array.isArray(condition) ? condition : [];
+}
+
 function collectHitPointModifiers(raw: any): any[] {
-  const list = [...collectActiveModifiers(raw), ...collectFeatureModifiers(raw)];
+  const list = [
+    ...collectActiveModifiers(raw),
+    ...collectFeatureModifiers(raw),
+    ...collectConditionModifiers(raw),
+  ];
 
   for (const item of raw.inventory ?? []) {
     if (!isItemActive(item)) continue;
@@ -178,13 +187,35 @@ function pickSheetMaxHp(raw: any): number | undefined {
   return pickNumber(
     raw.maximumHitPoints,
     raw.maxHitPoints,
+    raw.maxHp,
     raw.hitPointInfo?.maximum,
     raw.hitPointInfo?.max,
     raw.hitPointsInfo?.maximum,
   );
 }
 
+function applyHpOverrides(raw: any, maxHp: number): number {
+  let result = maxHp;
+
+  const override = pickNumber(raw.overrideHitPoints, raw.hitPointInfo?.override);
+  if (override != null && override > 0) result = override;
+
+  const adjusted = pickNumber(
+    raw.adjustedHitPoints,
+    raw.hitPointInfo?.adjusted,
+    raw.hitPointsInfo?.adjusted,
+  );
+  if (adjusted != null && adjusted > result) result = adjusted;
+
+  return Math.max(result, 1);
+}
+
 function computeMaxHitPoints(raw: any): number {
+  const sheetMax = pickSheetMaxHp(raw);
+  if (sheetMax != null && sheetMax > 0) {
+    return applyHpOverrides(raw, sheetMax);
+  }
+
   const base =
     pickNumber(
       raw.baseHitPoints,
@@ -213,27 +244,11 @@ function computeMaxHitPoints(raw: any): number {
     return friendly.includes('tough') || isPerLevel;
   });
   const extraBonus = fromModifiers + (hasToughModifier ? 0 : fromFeats);
-  const bonus = (bonusField ?? conBonus) + extraBonus;
+  // When DDB sends bonusHitPoints it already includes CON×level and feat bonuses.
+  const bonus = bonusField != null ? bonusField : conBonus + extraBonus;
 
-  let maxHp = base > 0
-    ? Math.floor(base + bonus)
-    : base + bonus;
-
-  const override = pickNumber(raw.overrideHitPoints, raw.hitPointInfo?.override);
-  if (override != null && override > 0) maxHp = override;
-
-  const adjusted = pickNumber(
-    raw.adjustedHitPoints,
-    raw.hitPointInfo?.adjusted,
-    raw.hitPointsInfo?.adjusted,
-  );
-  if (adjusted != null && adjusted > maxHp) maxHp = adjusted;
-
-  // DDB often omits a top-level max — use sheet max only when it exceeds our computed total.
-  const sheetMax = pickSheetMaxHp(raw);
-  if (sheetMax != null && sheetMax > maxHp) maxHp = sheetMax;
-
-  return Math.max(maxHp, 1);
+  const maxHp = base > 0 ? Math.floor(base + bonus) : base + bonus;
+  return applyHpOverrides(raw, maxHp);
 }
 
 function computeCurrentHitPoints(raw: any, maxHp: number): number {
@@ -266,7 +281,11 @@ function computeCurrentHitPoints(raw: any, maxHp: number): number {
 }
 
 function collectAcModifiers(raw: any): any[] {
-  const list = [...collectActiveModifiers(raw), ...collectFeatureModifiers(raw)];
+  const list = [
+    ...collectActiveModifiers(raw),
+    ...collectFeatureModifiers(raw),
+    ...collectConditionModifiers(raw),
+  ];
 
   for (const item of raw.inventory ?? []) {
     if (!isItemActive(item)) continue;
@@ -292,7 +311,7 @@ function abilityModFromStatId(raw: any, statId: unknown): number {
 }
 
 function modifierValue(mod: any): number {
-  return pickNumber(mod.value, mod.fixedValue) ?? 0;
+  return pickNumber(mod.value, mod.fixedValue, mod.die?.fixedValue, mod.dice?.fixedValue) ?? 0;
 }
 
 function isAcRelatedModifier(mod: any): boolean {
@@ -446,17 +465,21 @@ function computeAcCandidates(raw: any): number[] {
   // Standard 10 + DEX (+ shield stacks on top of whichever base wins).
   candidates.push(10 + dexAdd + miscAcBonus + shield);
 
-  // Unarmored Defense / Draconic Resilience: 10 + set bonus + DEX + ability (e.g. CON/WIS) + flat unarmored bonuses.
-  candidates.push(
-    10 + unarmoredSetBonus + dexAdd + unarmoredAbilityBonus + unarmoredFlatBonus + miscAcBonus + shield,
-  );
+  // Unarmored Defense / Draconic Resilience: base (usually 10) + DEX + ability (e.g. CON/WIS).
+  if (unarmoredSetBonus > 0 || unarmoredAbilityBonus > 0 || unarmoredFlatBonus > 0) {
+    const unarmoredBase = unarmoredSetBonus > 0 ? unarmoredSetBonus : 10;
+    candidates.push(
+      unarmoredBase + dexAdd + unarmoredAbilityBonus + unarmoredFlatBonus + miscAcBonus + shield,
+    );
+  }
 
   if (minimumBaseArmor > 0) {
     candidates.push(minimumBaseArmor + miscAcBonus + shield);
   }
 
+  // Mage Armor and similar: set base (e.g. 13) + DEX.
   if (setFlatAc > 0) {
-    candidates.push(setFlatAc + miscAcBonus + shield);
+    candidates.push(setFlatAc + dexAdd + miscAcBonus + shield);
   }
 
   if (armoredBody > 0) {
@@ -489,16 +512,17 @@ export function extractVitals(raw: any): { hp: number; maxHp: number; tempHp: nu
 }
 
 export function extractAc(raw: any): number {
-  const candidates = computeAcCandidates(raw);
-  let computed = Math.max(...candidates, 10);
-
   const sheetAc = pickNumber(
     raw.armorClass,
     raw.ac,
     raw.hitPointInfo?.armorClass,
     raw.hitPointsInfo?.armorClass,
   );
-  if (sheetAc != null && sheetAc > computed) computed = sheetAc;
+  const computed = Math.max(...computeAcCandidates(raw), 10);
 
-  return Math.max(computed, 10);
+  if (sheetAc != null && sheetAc > 0) {
+    return Math.max(sheetAc, computed);
+  }
+
+  return computed;
 }
