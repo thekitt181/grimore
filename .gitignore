@@ -8,6 +8,7 @@ apps/server/client-dist
 !.env.production
 .env.local
 apps/server/data/global.json
+apps/server/data/session-media/
 *.log
 .DS_Store
 .turbo

@@ -1,6 +1,7 @@
 import type { Server as HttpServer } from 'http';
 import type { Socket } from 'socket.io';
 import { Server } from 'socket.io';
+import { sanitizeSceneMediaUrls } from '../services/sessionMediaStorage';
 import { getAuthUserIdFromRequest } from '../lib/sessionAuth';
 import { resolveAuthUser } from '../lib/authUserCache';
 import { prisma, readPrisma } from '../lib/prisma';
@@ -729,7 +730,10 @@ export function initSocket(httpServer: HttpServer): Server {
     // ── Scene ────────────────────────────────────────────────────────────────
     socket.on('scene:change', (payload: SceneChangePayload) => {
       if (!isJoinedSession(socket, payload.sessionId)) return;
-      io.to(payload.sessionId).emit('scene:change', payload);
+      const safe = payload.scene
+        ? { ...payload, scene: sanitizeSceneMediaUrls(payload.scene) }
+        : payload;
+      io.to(payload.sessionId).emit('scene:change', safe);
     });
 
     // ── Handout ──────────────────────────────────────────────────────────────

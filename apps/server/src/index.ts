@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import fs from 'fs';
 import http from 'http';
 import express from 'express';
 import cors from 'cors';
@@ -12,6 +13,7 @@ import { initSocket } from './socket';
 import campaignRoutes from './routes/campaigns';
 import userRoutes from './routes/users';
 import sessionRoutes from './routes/sessions';
+import sessionMediaRoutes from './routes/sessionMedia';
 import compendiumRoutes from './routes/compendium';
 import ddbRoutes from './routes/ddb';
 import mapsRoutes from './routes/maps';
@@ -23,6 +25,7 @@ import { toNodeHandler } from 'better-auth/node';
 import { auth, getAuthBaseUrl, isBetterAuthDashboardEnabled, isGoogleOAuthEnabled } from './lib/auth';
 import { scheduleCompendiumJobs } from './services/compendiumStartup';
 import { mountClientSpa } from './lib/serveClient';
+import { getSessionMediaRoot } from './services/sessionMediaStorage';
 import { isFloorplanScanConfigured } from './services/floorplan/floorplanScanService';
 import { runMigrationsInBackground } from './lib/runMigrationsInBackground';
 
@@ -148,6 +151,17 @@ app.get('/health', async (_req, res) => {
   });
 });
 
+const sessionMediaRoot = getSessionMediaRoot();
+fs.mkdirSync(sessionMediaRoot, { recursive: true });
+app.use('/api/session-media', express.static(sessionMediaRoot, {
+  maxAge: '7d',
+  setHeaders(res, filePath) {
+    if (/\.(mp4|webm|mov|m4v|ogv)$/i.test(filePath)) {
+      res.setHeader('Accept-Ranges', 'bytes');
+    }
+  },
+}));
+
 app.use('/api', (req, res, next) => {
   if (!servicesReady) {
     res.status(503).json({ error: 'Server is starting — retry shortly' });
@@ -160,6 +174,7 @@ app.use('/api', (req, res, next) => {
 app.use('/api/campaigns', campaignRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/sessions', sessionRoutes);
+app.use('/api/sessions', sessionMediaRoutes);
 app.use('/api/compendium', compendiumRoutes);
 app.use('/api/ddb', ddbRoutes);
 app.use('/api/maps', mapsRoutes);

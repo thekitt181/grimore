@@ -7,9 +7,16 @@ import {
   LIGHTING_PRESETS,
   TIME_OF_DAY_PRESETS,
 } from '@grimoire/shared';
-import { fileToDataUrl } from '@/lib/imagePersistence';
-import { useSceneMediaStore } from './sceneMediaStore';
 import { detectEmbed } from './mediaEmbed';
+import { useSceneMediaStore } from './sceneMediaStore';
+import {
+  formatMediaSizeMb,
+  localMediaFileTooLarge,
+  mediaUploadErrorMessage,
+  SESSION_MEDIA_AUDIO_MAX_MB,
+  SESSION_MEDIA_VIDEO_MAX_MB,
+  uploadSessionMediaFile,
+} from './sessionMediaApi';
 import { emitSessionMediaPatch, emitSessionTimeOfDay } from './useSceneMedia';
 
 type MenuId = 'media' | 'upload';
@@ -24,6 +31,9 @@ export function SessionMediaBar({ sessionId, isGM }: SessionMediaBarProps) {
   const [uploadUrl, setUploadUrl] = useState('');
   const [uploadKind, setUploadKind] = useState<'video' | 'ambient' | 'music'>('video');
   const [videoOverlay, setVideoOverlay] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null);
   const barRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -171,11 +181,24 @@ export function SessionMediaBar({ sessionId, isGM }: SessionMediaBarProps) {
 
   async function onUploadFile(file: File | undefined) {
     if (!file) return;
+    setUploadError(null);
+
+    if (localMediaFileTooLarge(file, uploadKind)) {
+      const maxMb = uploadKind === 'video' ? SESSION_MEDIA_VIDEO_MAX_MB : SESSION_MEDIA_AUDIO_MAX_MB;
+      setUploadError(`File is ${formatMediaSizeMb(file.size)} — max ${maxMb} MB for ${uploadKind === 'video' ? 'video' : 'audio'}.`);
+      return;
+    }
+
+    setUploading(true);
+    setUploadProgress(0);
     try {
-      const url = await fileToDataUrl(file);
+      const { url } = await uploadSessionMediaFile(sessionId, file, setUploadProgress);
       setUploadUrl(url);
-    } catch {
-      alert('Could not read that file.');
+    } catch (err) {
+      setUploadError(mediaUploadErrorMessage(err));
+    } finally {
+      setUploading(false);
+      setUploadProgress(0);
     }
   }
 
@@ -348,9 +371,23 @@ export function SessionMediaBar({ sessionId, isGM }: SessionMediaBarProps) {
                   type="file"
                   accept={uploadKind === 'video' ? 'video/*' : 'audio/*'}
                   className="w-full text-[10px]"
+                  disabled={uploading}
                   onChange={(e) => void onUploadFile(e.target.files?.[0])}
                 />
-                <button type="button" className="btn-primary w-full text-xs py-1" onClick={applyUpload} disabled={!uploadUrl.trim()}>
+                {uploading && (
+                  <p className="px-1 font-ui text-[10px]" style={{ color: 'var(--color-accent-gold)' }}>
+                    Uploading… {uploadProgress}%
+                  </p>
+                )}
+                {uploadError && (
+                  <p className="px-1 font-ui text-[10px] leading-snug" style={{ color: 'var(--color-accent-red-hot)' }}>
+                    {uploadError}
+                  </p>
+                )}
+                <p className="px-1 font-ui text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
+                  Local files upload to the server (max {SESSION_MEDIA_VIDEO_MAX_MB} MB video / {SESSION_MEDIA_AUDIO_MAX_MB} MB audio) — not embedded in the session socket.
+                </p>
+                <button type="button" className="btn-primary w-full text-xs py-1" onClick={applyUpload} disabled={!uploadUrl.trim() || uploading}>
                   {uploadKind === 'music' ? 'Add to queue' : 'Push live'}
                 </button>
                 {uploadKind === 'music' && (

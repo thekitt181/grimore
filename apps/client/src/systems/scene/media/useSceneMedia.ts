@@ -366,24 +366,70 @@ export type SessionMediaPatch = Partial<
   Pick<SceneRecord, 'ambientAudioUrl' | 'backgroundVideoUrl' | 'lightingPreset' | 'mediaConfig'>
 >;
 
+const MAX_INLINE_MEDIA_URL_CHARS = 512_000;
+
+function stripOversizedInlineMediaUrl(url: string | null | undefined): string | null | undefined {
+  if (url?.startsWith('data:') && url.length > MAX_INLINE_MEDIA_URL_CHARS) {
+    console.warn('[Media] Refusing to sync oversized inline file — upload via Media → Upload instead.');
+    return null;
+  }
+  return url;
+}
+
+function sanitizeMediaPatch(patch: SessionMediaPatch): SessionMediaPatch {
+  const out: SessionMediaPatch = { ...patch };
+  if ('ambientAudioUrl' in out) {
+    out.ambientAudioUrl = stripOversizedInlineMediaUrl(out.ambientAudioUrl) ?? null;
+  }
+  if ('backgroundVideoUrl' in out) {
+    out.backgroundVideoUrl = stripOversizedInlineMediaUrl(out.backgroundVideoUrl) ?? null;
+  }
+  if (out.mediaConfig) {
+    const cfg = { ...out.mediaConfig };
+    if (cfg.videoPopup?.url) {
+      const url = stripOversizedInlineMediaUrl(cfg.videoPopup.url);
+      cfg.videoPopup = url ? { ...cfg.videoPopup, url } : null;
+    }
+    if (cfg.ambientLayers) {
+      cfg.ambientLayers = cfg.ambientLayers
+        .map((layer) => {
+          const url = stripOversizedInlineMediaUrl(layer.url);
+          return url ? { ...layer, url } : null;
+        })
+        .filter((layer): layer is NonNullable<typeof layer> => Boolean(layer));
+    }
+    if (cfg.musicPlaylist) {
+      cfg.musicPlaylist = cfg.musicPlaylist
+        .map((track) => {
+          const url = stripOversizedInlineMediaUrl(track.url);
+          return url ? { ...track, url } : null;
+        })
+        .filter((track): track is NonNullable<typeof track> => Boolean(track));
+    }
+    out.mediaConfig = cfg;
+  }
+  return out;
+}
+
 /** Push audio/video/lighting changes live without switching maps. */
 export function emitSessionMediaPatch(sessionId: string, patch: SessionMediaPatch) {
+  const safePatch = sanitizeMediaPatch(patch);
   const store = useSceneMediaStore.getState();
   const active = store.activeScene;
   const campaignId = useSessionStore.getState().campaignId ?? 'local';
 
-  const mergedMediaConfig = patch.mediaConfig
-    ? { ...(active?.mediaConfig ?? DEFAULT_SCENE_MEDIA_CONFIG), ...patch.mediaConfig }
+  const mergedMediaConfig = safePatch.mediaConfig
+    ? { ...(active?.mediaConfig ?? DEFAULT_SCENE_MEDIA_CONFIG), ...safePatch.mediaConfig }
     : active?.mediaConfig;
 
   const scene: SceneRecord = active
     ? {
         ...active,
-        ...patch,
+        ...safePatch,
         ...(mergedMediaConfig ? { mediaConfig: mergedMediaConfig } : {}),
       }
     : createSessionMediaScene(campaignId, {
-        ...patch,
+        ...safePatch,
         ...(mergedMediaConfig ? { mediaConfig: mergedMediaConfig } : {}),
       });
 
