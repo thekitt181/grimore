@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
+import { normalizeAbilityName } from '@grimoire/shared';
 import { collectModifiers, pickNumber } from './attackExtract';
 import { extractAbilities } from './abilitiesExtract';
 
@@ -222,30 +223,89 @@ function computeCurrentHitPoints(raw: any, maxHp: number): number {
   return Math.max(0, pickNumber(raw.hitPoints, raw.hp) ?? 0);
 }
 
-function inventoryHasBodyArmor(raw: any): boolean {
-  return (raw.inventory ?? []).some((item: any) => {
-    if (!isItemActive(item)) return false;
+function collectAcModifiers(raw: any): any[] {
+  const list = [...collectActiveModifiers(raw)];
+
+  for (const item of raw.inventory ?? []) {
+    if (!isItemActive(item)) continue;
+    const granted = item.definition?.grantedModifiers ?? item.grantedModifiers ?? [];
+    if (Array.isArray(granted)) list.push(...granted);
+  }
+
+  for (const feat of raw.feats ?? []) {
+    const def = feat.definition ?? {};
+    for (const key of ['modifiers', 'grantedModifiers']) {
+      const mods = def[key];
+      if (Array.isArray(mods)) list.push(...mods);
+    }
+  }
+
+  return list;
+}
+
+function abilityModFromStatId(raw: any, statId: unknown): number {
+  if (statId == null || statId === '') return 0;
+  const name = normalizeAbilityName(statId);
+  return extractAbilities(raw).find((a) => a.name === name)?.mod ?? 0;
+}
+
+function modifierValue(mod: any): number {
+  return pickNumber(mod.value, mod.fixedValue) ?? 0;
+}
+
+function isAcRelatedModifier(mod: any): boolean {
+  const sub = normalizeSubType(mod);
+  const friendly = String(mod.friendlySubtypeName ?? mod.friendlyTypeName ?? '').toLowerCase();
+  const type = String(mod.type ?? '').toLowerCase();
+  if (type === 'armor-class') return true;
+  return (
+    sub.includes('armor-class')
+    || sub.includes('armor class')
+    || sub === 'unarmored-ac'
+    || sub === 'ac'
+    || sub.includes('ac-max-dex')
+    || sub.includes('minimum-base-armor')
+    || friendly.includes('armor class')
+  );
+}
+
+function effectiveDexMod(raw: any, mods: any[], baseDexMod: number): number {
+  const ignoreDex = mods.some(
+    (mod) => String(mod.type ?? '').toLowerCase() === 'ignore'
+      && normalizeSubType(mod) === 'unarmored-dex-ac-bonus',
+  );
+  if (ignoreDex) return 0;
+
+  let dexMod = Math.max(0, baseDexMod);
+  for (const mod of mods) {
+    if (String(mod.type ?? '').toLowerCase() !== 'set') continue;
+    if (normalizeSubType(mod) !== 'ac-max-dex-modifier') continue;
+    const cap = modifierValue(mod);
+    if (Number.isFinite(cap)) dexMod = Math.min(dexMod, cap);
+  }
+  return dexMod;
+}
+
+function extractShieldBonus(raw: any): number {
+  let shieldBonus = 0;
+  for (const item of raw.inventory ?? []) {
+    if (!isItemActive(item)) continue;
     const def = item.definition ?? {};
     const filterType = String(def.filterType ?? def.type ?? '').toLowerCase();
-    if (!filterType.includes('armor')) return false;
-    const armorTypeId = Number(def.armorTypeId ?? 0);
+    if (!filterType.includes('armor')) continue;
+    const ac = Number(def.armorClass ?? 0);
+    if (!ac) continue;
     const baseName = String(def.baseArmorName ?? def.name ?? '').toLowerCase();
-    return !baseName.includes('shield') && armorTypeId !== 4;
-  });
+    const armorTypeId = Number(def.armorTypeId ?? 0);
+    if (baseName.includes('shield') || armorTypeId === 4) {
+      shieldBonus = Math.max(shieldBonus, ac);
+    }
+  }
+  return shieldBonus;
 }
 
-function sumModifierBonus(mods: any[], subType: string): number {
-  return mods.reduce((sum, mod) => {
-    if (String(mod.type ?? '').toLowerCase() !== 'bonus') return sum;
-    if (normalizeSubType(mod) !== subType) return sum;
-    const val = pickNumber(mod.value, mod.fixedValue) ?? 0;
-    return Number.isFinite(val) ? sum + val : sum;
-  }, 0);
-}
-
-function extractAcFromEquipment(raw: any, dexMod: number): number {
+function extractBodyArmorAc(raw: any, dexMod: number): number {
   let bodyAc = 0;
-  let shieldBonus = 0;
 
   for (const item of raw.inventory ?? []) {
     if (!isItemActive(item)) continue;
@@ -258,11 +318,7 @@ function extractAcFromEquipment(raw: any, dexMod: number): number {
 
     const baseName = String(def.baseArmorName ?? def.name ?? '').toLowerCase();
     const armorTypeId = Number(def.armorTypeId ?? 0);
-
-    if (baseName.includes('shield') || armorTypeId === 4) {
-      shieldBonus = Math.max(shieldBonus, ac);
-      continue;
-    }
+    if (baseName.includes('shield') || armorTypeId === 4) continue;
 
     let dexAdd = dexMod;
     if (armorTypeId === 3) dexAdd = 0;
@@ -271,46 +327,104 @@ function extractAcFromEquipment(raw: any, dexMod: number): number {
     bodyAc = Math.max(bodyAc, ac + Math.max(0, dexAdd));
   }
 
-  if (bodyAc === 0) return 0;
-
-  const armoredBonus = sumModifierBonus(collectActiveModifiers(raw), 'armored-armor-class');
-  return bodyAc + shieldBonus + armoredBonus;
+  return bodyAc;
 }
 
-function computeUnarmoredAc(raw: any, dexMod: number, mods: any[]): number {
-  const ignoreDex = mods.some(
-    (mod) => String(mod.type ?? '').toLowerCase() === 'ignore'
-      && normalizeSubType(mod) === 'unarmored-dex-ac-bonus',
-  );
+function sumBonusBySubtypes(mods: any[], subtypes: string[]): number {
+  const wanted = new Set(subtypes.map((s) => s.toLowerCase()));
+  return mods.reduce((sum, mod) => {
+    if (String(mod.type ?? '').toLowerCase() !== 'bonus') return sum;
+    const sub = normalizeSubType(mod);
+    if (!wanted.has(sub) && !subtypes.some((s) => sub.includes(s))) return sum;
+    const val = modifierValue(mod);
+    return Number.isFinite(val) ? sum + val : sum;
+  }, 0);
+}
 
-  let maxDex = dexMod;
+/** DDB evaluates several AC formulas and uses the highest. */
+function computeAcCandidates(raw: any): number[] {
+  const abilities = extractAbilities(raw);
+  const dexMod = abilities.find((a) => a.name === 'DEX')?.mod ?? 0;
+  const mods = collectAcModifiers(raw);
+  const dexAdd = effectiveDexMod(raw, mods, dexMod);
+  const candidates: number[] = [];
+
+  let miscAcBonus = 0;
+  let unarmoredFlatBonus = 0;
+  let unarmoredSetBonus = 0;
+  let unarmoredAbilityBonus = 0;
+  let setFlatAc = 0;
+  let minimumBaseArmor = 0;
+
   for (const mod of mods) {
-    if (String(mod.type ?? '').toLowerCase() !== 'set') continue;
-    if (normalizeSubType(mod) !== 'ac-max-dex-modifier') continue;
-    const cap = pickNumber(mod.value, mod.fixedValue);
-    if (cap != null) maxDex = Math.min(maxDex, cap);
+    if (!isAcRelatedModifier(mod)) continue;
+    const sub = normalizeSubType(mod);
+    const type = String(mod.type ?? '').toLowerCase();
+    const val = modifierValue(mod);
+    if (!Number.isFinite(val)) continue;
+
+    if (type === 'bonus') {
+      if (sub === 'armor-class' || sub === 'ac') {
+        miscAcBonus += val;
+      } else if (sub === 'unarmored-armor-class' || sub === 'unarmored-ac') {
+        unarmoredFlatBonus += val;
+        if (mod.statId != null) {
+          unarmoredAbilityBonus += abilityModFromStatId(raw, mod.statId);
+        }
+      } else if (sub.includes('armor-class') || sub.includes('armor class')) {
+        miscAcBonus += val;
+      }
+      continue;
+    }
+
+    if (type !== 'set') continue;
+
+    if (sub === 'unarmored-armor-class') {
+      unarmoredSetBonus = Math.max(unarmoredSetBonus, val);
+      if (mod.statId != null) {
+        unarmoredAbilityBonus += abilityModFromStatId(raw, mod.statId);
+      }
+      continue;
+    }
+
+    if (sub === 'minimum-base-armor') {
+      minimumBaseArmor = Math.max(minimumBaseArmor, val);
+      continue;
+    }
+
+    if (sub === 'armor-class' || sub === 'ac') {
+      setFlatAc = Math.max(setFlatAc, val);
+    }
   }
 
-  const setUnarmored = mods.find(
-    (mod) => String(mod.type ?? '').toLowerCase() === 'set'
-      && normalizeSubType(mod) === 'unarmored-armor-class',
+  const shield = extractShieldBonus(raw);
+  const armoredBody = extractBodyArmorAc(raw, dexAdd);
+  const armoredBonus = sumBonusBySubtypes(mods, ['armored-armor-class']);
+
+  // Standard 10 + DEX (+ shield stacks on top of whichever base wins).
+  candidates.push(10 + dexAdd + miscAcBonus + shield);
+
+  // Unarmored Defense / Draconic Resilience: 10 + set bonus + DEX + ability (e.g. CON/WIS) + flat unarmored bonuses.
+  candidates.push(
+    10 + unarmoredSetBonus + dexAdd + unarmoredAbilityBonus + unarmoredFlatBonus + miscAcBonus + shield,
   );
-  const unarmoredBonus = sumModifierBonus(mods, 'unarmored-armor-class');
 
-  const minimumBase = mods.find(
-    (mod) => String(mod.type ?? '').toLowerCase() === 'set'
-      && normalizeSubType(mod) === 'minimum-base-armor',
-  );
-  const base = minimumBase
-    ? (pickNumber(minimumBase.value, minimumBase.fixedValue) ?? 10)
-    : 10;
+  if (minimumBaseArmor > 0) {
+    candidates.push(minimumBaseArmor + miscAcBonus + shield);
+  }
 
-  const unarmoredBase = setUnarmored
-    ? (pickNumber(setUnarmored.value, setUnarmored.fixedValue) ?? base)
-    : base;
+  if (setFlatAc > 0) {
+    candidates.push(setFlatAc + miscAcBonus + shield);
+  }
 
-  const dexAdd = ignoreDex ? 0 : Math.max(0, maxDex);
-  return unarmoredBase + dexAdd + unarmoredBonus;
+  if (armoredBody > 0) {
+    candidates.push(armoredBody + armoredBonus + miscAcBonus + shield);
+  } else if (shield > 0) {
+    // Shield without body armor still stacks on unarmored base.
+    candidates.push(10 + dexAdd + shield + miscAcBonus + unarmoredFlatBonus);
+  }
+
+  return candidates;
 }
 
 export function extractVitals(raw: any): { hp: number; maxHp: number; tempHp: number } {
@@ -333,30 +447,9 @@ export function extractVitals(raw: any): { hp: number; maxHp: number; tempHp: nu
 }
 
 export function extractAc(raw: any): number {
-  const abilities = extractAbilities(raw);
-  const dexMod = abilities.find((a) => a.name === 'DEX')?.mod ?? 0;
-  const mods = collectActiveModifiers(raw);
-  const armored = inventoryHasBodyArmor(raw);
+  const candidates = computeAcCandidates(raw);
+  let computed = Math.max(...candidates, 10);
 
-  let bonusAc = 0;
-  for (const m of mods) {
-    const sub = normalizeSubType(m);
-    const type = String(m.type ?? '').toLowerCase();
-    const val = pickNumber(m.value, m.fixedValue) ?? 0;
-    if (!Number.isFinite(val) || val === 0) continue;
-    if (type === 'bonus' && sub === 'armor-class') bonusAc += val;
-  }
-
-  const equippedAc = extractAcFromEquipment(raw, dexMod);
-  const unarmored = computeUnarmoredAc(raw, dexMod, mods) + bonusAc;
-
-  let computed = armored
-    ? Math.max(equippedAc + bonusAc, unarmored)
-    : Math.max(unarmored, 10 + dexMod + bonusAc);
-
-  if (equippedAc > 0) computed = Math.max(computed, equippedAc + bonusAc);
-
-  // Prefer computed AC; only trust a sheet value when it is higher (missed bonuses).
   const sheetAc = pickNumber(
     raw.armorClass,
     raw.ac,
