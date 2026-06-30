@@ -26,6 +26,10 @@ function isItemActive(item: any): boolean {
   const canEquip = def.canEquip ?? false;
   const canAttune = def.canAttune ?? item.canAttune ?? false;
   const attuned = item.isAttuned ?? false;
+  const isConsumable = def.isConsumable ?? item.isConsumable ?? false;
+  const filterType = String(def.filterType ?? def.type ?? '').toLowerCase();
+
+  if (isConsumable || filterType.includes('potion')) return false;
   if (canEquip && !equipped) return false;
   if (canAttune && !attuned) return false;
   return true;
@@ -46,6 +50,14 @@ function isModifierActive(raw: any, mod: any): boolean {
 
 function collectActiveModifiers(raw: any): any[] {
   return collectModifiers(raw).filter((mod) => isModifierActive(raw, mod));
+}
+
+function isHealingHitPointModifier(m: any): boolean {
+  const sub = normalizeSubType(m);
+  if (sub.includes('temporary-hit-point')) return true;
+  const dice = m.dice ?? m.die;
+  if (dice?.diceCount != null || dice?.diceValue != null) return true;
+  return false;
 }
 
 function isHitPointModifier(m: any): boolean {
@@ -128,6 +140,21 @@ function collectConditionModifiers(raw: any): any[] {
   return Array.isArray(condition) ? condition : [];
 }
 
+function modifierKey(m: any): string {
+  if (m.id != null && m.id !== '') return String(m.id);
+  return `${m.componentId}:${m.componentTypeId}:${m.type}:${m.subType}`;
+}
+
+function appendUniqueModifiers(list: any[], mods: any[]): void {
+  const seen = new Set(list.map(modifierKey));
+  for (const mod of mods) {
+    const key = modifierKey(mod);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    list.push(mod);
+  }
+}
+
 function collectHitPointModifiers(raw: any): any[] {
   const list = [
     ...collectActiveModifiers(raw),
@@ -138,14 +165,14 @@ function collectHitPointModifiers(raw: any): any[] {
   for (const item of raw.inventory ?? []) {
     if (!isItemActive(item)) continue;
     const granted = item.definition?.grantedModifiers ?? item.grantedModifiers ?? [];
-    if (Array.isArray(granted)) list.push(...granted);
+    if (Array.isArray(granted)) appendUniqueModifiers(list, granted);
   }
 
   for (const feat of raw.feats ?? []) {
     const def = feat.definition ?? {};
     for (const key of ['modifiers', 'grantedModifiers']) {
       const mods = def[key];
-      if (Array.isArray(mods)) list.push(...mods);
+      if (Array.isArray(mods)) appendUniqueModifiers(list, mods);
     }
   }
 
@@ -158,6 +185,7 @@ function sumHitPointBonusesFromModifiers(raw: any): number {
 
   for (const m of collectHitPointModifiers(raw)) {
     if (!isHitPointModifier(m)) continue;
+    if (isHealingHitPointModifier(m)) continue;
     if (String(m.type ?? '').toLowerCase() === 'set') continue;
     sum += modifierHitPointValue(m, level);
   }
@@ -290,14 +318,14 @@ function collectAcModifiers(raw: any): any[] {
   for (const item of raw.inventory ?? []) {
     if (!isItemActive(item)) continue;
     const granted = item.definition?.grantedModifiers ?? item.grantedModifiers ?? [];
-    if (Array.isArray(granted)) list.push(...granted);
+    if (Array.isArray(granted)) appendUniqueModifiers(list, granted);
   }
 
   for (const feat of raw.feats ?? []) {
     const def = feat.definition ?? {};
     for (const key of ['modifiers', 'grantedModifiers']) {
       const mods = def[key];
-      if (Array.isArray(mods)) list.push(...mods);
+      if (Array.isArray(mods)) appendUniqueModifiers(list, mods);
     }
   }
 
@@ -402,6 +430,14 @@ function sumBonusBySubtypes(mods: any[], subtypes: string[]): number {
   }, 0);
 }
 
+function bonusAcValue(raw: any, mod: any): number {
+  const val = modifierValue(mod);
+  if (mod.statId != null && (mod.value == null || val === 0)) {
+    return abilityModFromStatId(raw, mod.statId);
+  }
+  return Number.isFinite(val) ? val : 0;
+}
+
 /** DDB evaluates several AC formulas and uses the highest. */
 function computeAcCandidates(raw: any): number[] {
   const abilities = extractAbilities(raw);
@@ -421,22 +457,26 @@ function computeAcCandidates(raw: any): number[] {
     if (!isAcRelatedModifier(mod)) continue;
     const sub = normalizeSubType(mod);
     const type = String(mod.type ?? '').toLowerCase();
-    const val = modifierValue(mod);
-    if (!Number.isFinite(val)) continue;
 
     if (type === 'bonus') {
+      const bonusVal = bonusAcValue(raw, mod);
+      if (bonusVal === 0) continue;
+
       if (sub === 'armor-class' || sub === 'ac') {
-        miscAcBonus += val;
+        miscAcBonus += bonusVal;
       } else if (sub === 'unarmored-armor-class' || sub === 'unarmored-ac') {
-        unarmoredFlatBonus += val;
+        unarmoredFlatBonus += bonusVal;
         if (mod.statId != null) {
           unarmoredAbilityBonus += abilityModFromStatId(raw, mod.statId);
         }
       } else if (sub.includes('armor-class') || sub.includes('armor class')) {
-        miscAcBonus += val;
+        miscAcBonus += bonusVal;
       }
       continue;
     }
+
+    const val = modifierValue(mod);
+    if (!Number.isFinite(val)) continue;
 
     if (type !== 'set') continue;
 
