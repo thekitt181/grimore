@@ -140,6 +140,7 @@ export function ItemContextMenu() {
   const openSheet = useDdbStore((s) => s.openSheet);
   const setImportModalOpen = useDdbStore((s) => s.setImportModalOpen);
   const rotateToken = useTokenStore((s) => s.rotateToken);
+  const resetTokenRotation = useTokenStore((s) => s.resetTokenRotation);
   const ref = useRef<HTMLDivElement>(null);
   const menuOpenRef = useRef(false);
   const suppressContextMenuUntilRef = useRef(0);
@@ -505,15 +506,13 @@ export function ItemContextMenu() {
           <>
             <Btn label="⟲ Rotate left (45°)" onClick={() => rotateToken(rotToken.id, -45)} />
             <Btn label="⟳ Rotate right (45°)" onClick={() => rotateToken(rotToken.id, 45)} />
-            {rotToken.modelUrl && (
-              <Btn
-                label="↺ Reset view angle"
-                onClick={() => {
-                  useMapStore.getState().resetTokenViewAngle(rotToken.id);
-                  close();
-                }}
-              />
-            )}
+            <Btn
+              label="↺ Reset rotation"
+              onClick={() => {
+                resetTokenRotation(rotToken.id);
+                close();
+              }}
+            />
           </>
         )}
         {single?.type === 'handout' && (
@@ -632,17 +631,16 @@ export function ItemContextMenu() {
         </>
       )}
 
-      {single?.type === 'token' && isGM && <TokenExtras token={single as TokenItem} />}
-
-      {single?.type === 'token' && (single as TokenItem).modelUrl && (
-        <Btn
-          label="↺ Reset token view angle"
-          onClick={() => {
-            useMapStore.getState().resetTokenViewAngle(single!.id);
-            close();
-          }}
-        />
+      {single?.type === 'token' && isGM && !single.locked && single.visible !== false && (
+        <>
+          <div className="gold-divider my-1" />
+          <Btn label="⟲ Rotate left (45°)" onClick={() => { rotateToken(single.id, -45); close(); }} />
+          <Btn label="⟳ Rotate right (45°)" onClick={() => { rotateToken(single.id, 45); close(); }} />
+          <Btn label="↺ Reset rotation" onClick={() => { resetTokenRotation(single.id); close(); }} />
+        </>
       )}
+
+      {single?.type === 'token' && isGM && <TokenExtras token={single as TokenItem} />}
 
       {single?.type === 'token' && isGM && (
         <TokenOwnerAssign

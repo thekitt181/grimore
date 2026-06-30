@@ -1,5 +1,4 @@
 import { useItemStore } from '@/systems/scene/store/itemStore';
-import { useMapStore } from '@/systems/map/store/mapStore';
 import { useSessionStore } from '@/store/sessionStore';
 import type { TokenItem } from '@/systems/scene/types';
 import { isMobileClient } from '@/lib/socket';
@@ -19,7 +18,7 @@ export function MobileDdbTokenBar() {
   const openSheet = useDdbStore((s) => s.openSheet);
   const openPcActions = useDdbStore((s) => s.openPcActions);
   const rotateToken = useTokenStore((s) => s.rotateToken);
-  const resetTokenViewAngle = useMapStore((s) => s.resetTokenViewAngle);
+  const resetTokenRotation = useTokenStore((s) => s.resetTokenRotation);
 
   if (!isMobileClient()) return null;
 
@@ -28,18 +27,18 @@ export function MobileDdbTokenBar() {
 
   const token = single as TokenItem;
   const isPc = isDdbPcToken(token);
+  const isGM = myRole === 'GM';
   const canRotate = playerCanRotateToken(token, myUserId);
-  const hasModel = Boolean(token.modelUrl);
-  const showViewReset = hasModel && (myRole === 'GM' || canRotate);
+  const canAdjustRotation = (isGM || canRotate) && !token.locked && token.visible !== false;
 
-  if (!isPc && !canRotate && !showViewReset) return null;
+  if (!isPc && !canAdjustRotation) return null;
 
   return (
     <div
       className="absolute left-1/2 -translate-x-1/2 z-40 flex gap-2 px-2 pointer-events-auto flex-wrap justify-center max-w-[min(100vw-1rem,28rem)]"
       style={{ bottom: 'max(5.5rem, calc(env(safe-area-inset-bottom, 0px) + 4.5rem))' }}
     >
-      {canRotate && (
+      {canAdjustRotation && (
         <button
           type="button"
           className="btn-primary text-xs py-2 px-3 shadow-panel min-h-[44px]"
@@ -49,15 +48,15 @@ export function MobileDdbTokenBar() {
           ⟲
         </button>
       )}
-      {showViewReset && (
+      {canAdjustRotation && (
         <button
           type="button"
           className="btn-primary text-xs py-2 px-3 shadow-panel min-h-[44px]"
-          onClick={() => resetTokenViewAngle(token.id)}
-          aria-label="Reset token view angle"
-          title="Reset mini view angle"
+          onClick={() => resetTokenRotation(token.id)}
+          aria-label="Reset token rotation"
+          title={token.modelUrl ? 'Reset facing and mini view angle' : 'Reset facing to 0°'}
         >
-          ↺ View
+          ↺ Reset
         </button>
       )}
       {isPc && (
@@ -78,7 +77,7 @@ export function MobileDdbTokenBar() {
           </button>
         </>
       )}
-      {canRotate && (
+      {canAdjustRotation && (
         <button
           type="button"
           className="btn-primary text-xs py-2 px-3 shadow-panel min-h-[44px]"
