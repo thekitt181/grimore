@@ -21,11 +21,11 @@ export function visionArcRad(token: TokenItem): number {
 }
 
 export function visionFeet(token: TokenItem): number {
-  return (token.visionRadius ?? DEFAULT_VISION_CELLS) * 5;
+  return (token.visionRadius ?? 0) * 5;
 }
 
 export function visionRadiusFromFeet(feet: number): number {
-  return Math.max(1, feet) / 5;
+  return Math.max(0, feet) / 5;
 }
 
 /** Facing angle in map-local radians — matches rotate-handle math (0° = north/up). */
@@ -74,7 +74,7 @@ export function visionBounds(
   gridSize: number,
 ): { minX: number; minY: number; maxX: number; maxY: number } {
   const { x: cx, y: cy } = tokenMapOrigin(token, map);
-  const cells = token.visionRadius ?? DEFAULT_VISION_CELLS;
+  const cells = token.visionRadius ?? 0;
   const radiusPx = Math.max(1, cells) * gridSize;
   return {
     minX: Math.max(0, cx - radiusPx),
@@ -186,7 +186,7 @@ export function losPolygons(
 
   return tokens.map((token) => {
     const origin = tokenMapOrigin(token, map);
-    const radius = (token.visionRadius ?? DEFAULT_VISION_CELLS) * gridSize;
+    const radius = (token.visionRadius ?? 0) * gridSize;
     const arc = visionArcRad(token);
     if (directional && arc < Math.PI * 2 - 0.01) {
       return smoothVisionCone(origin, radius, tokenFacingRad(token, map), arc, mapW, mapH);
@@ -253,7 +253,7 @@ function computeLosVisibleCellKeys(
 
   for (const token of tokens) {
     const origin = tokenMapOrigin(token, map);
-    const radiusPx = (token.visionRadius ?? DEFAULT_VISION_CELLS) * gridSize;
+    const radiusPx = (token.visionRadius ?? 0) * gridSize;
     const facing = tokenFacingRad(token, map);
     const halfArc = visionArcRad(token) / 2;
 
@@ -289,7 +289,7 @@ const LOS_CACHE_MAX = 64;
 function tokensSignature(map: MapItem, tokens: TokenItem[]): string {
   return tokens.map((t) => {
     const o = tokenMapOrigin(t, map);
-    return `${t.id}:${o.x.toFixed(1)}:${o.y.toFixed(1)}:${t.rotation.toFixed(1)}:${t.visionRadius ?? DEFAULT_VISION_CELLS}:${t.visionArc ?? DEFAULT_VISION_ARC_DEG}`;
+    return `${t.id}:${o.x.toFixed(1)}:${o.y.toFixed(1)}:${t.rotation.toFixed(1)}:${t.visionRadius ?? 0}:${t.visionArc ?? DEFAULT_VISION_ARC_DEG}`;
   }).join(';');
 }
 

@@ -1181,7 +1181,7 @@ function TokenExtras({ token }: { token: TokenItem }) {
 
       <div className="px-3 py-1 font-ui text-xs" style={{ color: 'var(--color-text-secondary)' }}>Vision (ft)</div>
       <div className="px-3 pb-1 flex items-center gap-1">
-        <button className="btn-ghost px-1.5 py-0.5 text-xs" onClick={() => update({ visionRadius: visionRadiusFromFeet(Math.max(1, visionFeet(token) - 5)) })}>−</button>
+        <button className="btn-ghost px-1.5 py-0.5 text-xs" onClick={() => update({ visionRadius: visionRadiusFromFeet(Math.max(0, visionFeet(token) - 5)) })}>−</button>
         <span className="font-ui text-xs flex-1 text-center" style={{ color: 'var(--color-text-primary)' }}>
           {visionFeet(token)}ft
         </span>

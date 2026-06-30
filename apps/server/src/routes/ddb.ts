@@ -217,6 +217,7 @@ router.post('/characters/:id/import-token', requireAuth, async (req: Authenticat
         ownerId: req.userId,
         syncHpToDdb: true,
         hideHpFromPlayers: false,
+        visionRadius: character.darkvisionFt / 5,
       },
     });
   } catch (err) {

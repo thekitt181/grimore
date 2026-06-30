@@ -94,6 +94,8 @@ export interface GrimoireCharacter {
   damageImmunities: string[];
   damageVulnerabilities: string[];
   conditionImmunities: string[];
+  /** Darkvision range in feet; 0 when absent. */
+  darkvisionFt: number;
   spellSaveDc?: number;
   spellAttackMod?: number;
   proficiencyBonus: number;
@@ -399,6 +401,7 @@ export function coerceGrimoireCharacter(raw: Partial<GrimoireCharacter> & { ddbC
     damageImmunities: Array.isArray(raw.damageImmunities) ? raw.damageImmunities : [],
     damageVulnerabilities: Array.isArray(raw.damageVulnerabilities) ? raw.damageVulnerabilities : [],
     conditionImmunities: Array.isArray(raw.conditionImmunities) ? raw.conditionImmunities : [],
+    darkvisionFt: raw.darkvisionFt ?? 0,
     proficiencyBonus: raw.proficiencyBonus ?? 2,
     ...(raw.race ? { race: raw.race } : {}),
     ...(raw.avatarUrl ? { avatarUrl: raw.avatarUrl } : {}),

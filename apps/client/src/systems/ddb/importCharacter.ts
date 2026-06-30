@@ -77,6 +77,7 @@ export async function importCharacterToMap(
     conditions: [],
     hideHpFromPlayers: false,
     initiativeMod: tokenDefaults.initiativeMod ?? 0,
+    visionRadius: tokenDefaults.visionRadius ?? 0,
     ddbCharacterId: tokenDefaults.ddbCharacterId ?? ddbCharacterId,
     isPc: true,
     syncHpToDdb: tokenDefaults.syncHpToDdb ?? true,

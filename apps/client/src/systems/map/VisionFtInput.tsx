@@ -24,7 +24,7 @@ export function VisionFtInput({
       return;
     }
     const n = parseInt(draft, 10);
-    if (!Number.isNaN(n) && n >= 1) {
+    if (!Number.isNaN(n) && n >= 0) {
       onChangeFt(n);
       setDraft(String(n));
     } else {
@@ -55,11 +55,11 @@ export function VisionFtDraftInput({
 }) {
   function normalize() {
     if (draft === '') {
-      onDraftChange('1');
+      onDraftChange('0');
       return;
     }
     const n = parseInt(draft, 10);
-    if (!Number.isNaN(n) && n >= 1) onDraftChange(String(n));
+    if (!Number.isNaN(n) && n >= 0) onDraftChange(String(n));
   }
 
   return (
@@ -77,5 +77,5 @@ export function VisionFtDraftInput({
 
 export function parseVisionFt(draft: string, fallback: number): number {
   const n = parseInt(draft, 10);
-  return !Number.isNaN(n) && n >= 1 ? n : fallback;
+  return !Number.isNaN(n) && n >= 0 ? n : fallback;
 }

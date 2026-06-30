@@ -51,13 +51,14 @@ export function useDdbHpSync(): void {
 
 export function pullDdbHpToToken(
   tokenId: string,
-  character: { hp: number; maxHp: number; tempHp: number; ac?: number },
+  character: { hp: number; maxHp: number; tempHp: number; ac?: number; darkvisionFt?: number },
 ): void {
   const patch: Partial<TokenItem> = {
     hp: character.hp,
     maxHp: character.maxHp,
     tempHp: character.tempHp,
     ...(character.ac != null && character.ac > 0 ? { ac: character.ac } : {}),
+    ...(character.darkvisionFt != null ? { visionRadius: character.darkvisionFt / 5 } : {}),
   };
   suppressHpPushDepth += 1;
   try {

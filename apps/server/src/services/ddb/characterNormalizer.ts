@@ -6,6 +6,7 @@ import {
   extractSkills,
 } from './abilitiesExtract';
 import { extractAc, extractVitals } from './vitalsExtract';
+import { extractDarkvisionFt } from './sensesExtract';
 import { extractDeathSaves, extractDefenses, extractFeats } from './traitsExtract';
 import {
   normalizeAbilityName,
@@ -138,6 +139,7 @@ export function normalizeCharacter(raw: any, ddbCharacterId: number): GrimoireCh
   const defenses = extractDefenses(raw);
   const feats = extractFeats(raw);
   const deathSaves = extractDeathSaves(raw);
+  const darkvisionFt = extractDarkvisionFt(raw);
 
   return {
     ddbCharacterId,
@@ -168,6 +170,7 @@ export function normalizeCharacter(raw: any, ddbCharacterId: number): GrimoireCh
     damageImmunities: defenses.damageImmunities,
     damageVulnerabilities: defenses.damageVulnerabilities,
     conditionImmunities: defenses.conditionImmunities,
+    darkvisionFt,
     spellSaveDc: raw.spellSaveDc ?? raw.baseSpellcastingAbilitySaveDc,
     spellAttackMod: raw.spellAttackModifier ?? raw.baseSpellcastingAbilityAttackMod,
     proficiencyBonus,
