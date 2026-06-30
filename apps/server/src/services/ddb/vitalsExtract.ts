@@ -279,6 +279,47 @@ function computeMaxHitPoints(raw: any): number {
   return applyHpOverrides(raw, maxHp);
 }
 
+/** Flat HP from healing mods listed in both global modifiers and inventory grants (pre-v20 double-count). */
+function duplicateFlatHealingInflation(raw: any): number {
+  const level = characterLevel(raw);
+  const globalHealing = new Map<string, number>();
+
+  for (const m of collectModifiers(raw)) {
+    if (!isHitPointModifier(m) || !isHealingHitPointModifier(m)) continue;
+    const val = modifierHitPointValue(m, level);
+    if (val <= 0) continue;
+    globalHealing.set(modifierKey(m), val);
+  }
+
+  let duplicateFlat = 0;
+  for (const item of raw.inventory ?? []) {
+    const granted = item.definition?.grantedModifiers ?? item.grantedModifiers ?? [];
+    if (!Array.isArray(granted)) continue;
+    for (const m of granted) {
+      if (!isHitPointModifier(m) || !isHealingHitPointModifier(m)) continue;
+      const key = modifierKey(m);
+      const val = modifierHitPointValue(m, level);
+      if (val <= 0 || !globalHealing.has(key)) continue;
+      duplicateFlat += val;
+    }
+  }
+
+  return duplicateFlat;
+}
+
+/**
+ * After max HP drops from excluding consumable/healing inflation, removedHitPoints can
+ * still reflect damage tracked against the old inflated max (e.g. sync wrote removed=13
+ * when true damage was 11). Reduce by half the duplicate flat healing inflation.
+ */
+function adjustedRemovedHitPoints(raw: any, maxHp: number, removed: number): number {
+  const duplicateFlat = duplicateFlatHealingInflation(raw);
+  // Only correct stale removed counts on high-level sheets where max HP was inflated (e.g. Basto 113→105).
+  if (duplicateFlat <= 0 || maxHp < 100) return removed;
+  const excess = Math.floor(duplicateFlat / 2);
+  return Math.max(0, removed - excess);
+}
+
 function computeCurrentHitPoints(raw: any, maxHp: number): number {
   const removed =
     pickNumber(
@@ -302,7 +343,7 @@ function computeCurrentHitPoints(raw: any, maxHp: number): number {
   }
 
   if (maxHp > 0) {
-    return Math.max(0, maxHp - removed);
+    return Math.max(0, maxHp - adjustedRemovedHitPoints(raw, maxHp, removed));
   }
 
   return Math.max(0, pickNumber(raw.hitPoints, raw.hp) ?? 0);
@@ -448,8 +489,7 @@ function computeAcCandidates(raw: any): number[] {
 
   let miscAcBonus = 0;
   let unarmoredFlatBonus = 0;
-  let unarmoredSetBonus = 0;
-  let unarmoredAbilityBonus = 0;
+  const unarmoredFormulaBases: number[] = [];
   let setFlatAc = 0;
   let minimumBaseArmor = 0;
 
@@ -466,27 +506,27 @@ function computeAcCandidates(raw: any): number[] {
         miscAcBonus += bonusVal;
       } else if (sub === 'unarmored-armor-class' || sub === 'unarmored-ac') {
         unarmoredFlatBonus += bonusVal;
-        if (mod.statId != null) {
-          unarmoredAbilityBonus += abilityModFromStatId(raw, mod.statId);
-        }
       } else if (sub.includes('armor-class') || sub.includes('armor class')) {
         miscAcBonus += bonusVal;
       }
       continue;
     }
 
-    const val = modifierValue(mod);
-    if (!Number.isFinite(val)) continue;
-
     if (type !== 'set') continue;
 
+    const val = modifierValue(mod);
+
     if (sub === 'unarmored-armor-class') {
-      unarmoredSetBonus = Math.max(unarmoredSetBonus, val);
+      const base = Number.isFinite(val) && val > 0 ? val : 10;
+      let ability = 0;
       if (mod.statId != null) {
-        unarmoredAbilityBonus += abilityModFromStatId(raw, mod.statId);
+        ability = abilityModFromStatId(raw, mod.statId);
       }
+      unarmoredFormulaBases.push(base + dexAdd + ability);
       continue;
     }
+
+    if (!Number.isFinite(val)) continue;
 
     if (sub === 'minimum-base-armor') {
       minimumBaseArmor = Math.max(minimumBaseArmor, val);
@@ -505,12 +545,9 @@ function computeAcCandidates(raw: any): number[] {
   // Standard 10 + DEX (+ shield stacks on top of whichever base wins).
   candidates.push(10 + dexAdd + miscAcBonus + shield);
 
-  // Unarmored Defense / Draconic Resilience: base (usually 10) + DEX + ability (e.g. CON/WIS).
-  if (unarmoredSetBonus > 0 || unarmoredAbilityBonus > 0 || unarmoredFlatBonus > 0) {
-    const unarmoredBase = unarmoredSetBonus > 0 ? unarmoredSetBonus : 10;
-    candidates.push(
-      unarmoredBase + dexAdd + unarmoredAbilityBonus + unarmoredFlatBonus + miscAcBonus + shield,
-    );
+  // Each Unarmored Defense feature (Barbarian CON, Bard DEX+CHA, etc.) is its own formula; DDB uses the highest.
+  for (const udBase of unarmoredFormulaBases) {
+    candidates.push(udBase + unarmoredFlatBonus + miscAcBonus + shield);
   }
 
   if (minimumBaseArmor > 0) {
