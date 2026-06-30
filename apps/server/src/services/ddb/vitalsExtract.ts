@@ -19,6 +19,33 @@ function normalizeSubType(m: any): string {
     .replace(/\s+/g, '-');
 }
 
+function isItemActive(item: any): boolean {
+  const def = item.definition ?? item;
+  const equipped = item.equipped ?? false;
+  const canEquip = def.canEquip ?? false;
+  const canAttune = def.canAttune ?? item.canAttune ?? false;
+  const attuned = item.isAttuned ?? false;
+  if (canEquip && !equipped) return false;
+  if (canAttune && !attuned) return false;
+  return true;
+}
+
+/** Item-linked modifiers apply only when the item is equipped (and attuned if required). */
+function isModifierActive(raw: any, mod: any): boolean {
+  const componentId = mod.componentId ?? mod.componentID;
+  if (componentId == null || componentId === '') return true;
+  for (const item of raw.inventory ?? []) {
+    const defId = item.definition?.id ?? item.definitionId;
+    if (defId !== componentId) continue;
+    return isItemActive(item);
+  }
+  return false;
+}
+
+function collectActiveModifiers(raw: any): any[] {
+  return collectModifiers(raw).filter((mod) => isModifierActive(raw, mod));
+}
+
 function isHitPointModifier(m: any): boolean {
   const sub = normalizeSubType(m);
   const friendly = String(m.friendlySubtypeName ?? m.friendlyTypeName ?? '').toLowerCase();
@@ -43,7 +70,6 @@ function isPerLevelHitPointModifier(m: any): boolean {
   const friendly = String(m.friendlySubtypeName ?? '').toLowerCase();
   return (
     sub.includes('per-level')
-    || sub.includes('per-level')
     || friendly.includes('per level')
     || sub === 'hit-points-per-level'
     || sub === 'hit-point-per-level'
@@ -55,18 +81,17 @@ function modifierHitPointValue(m: any, level: number): number {
   if (!Number.isFinite(val) || val === 0) return 0;
 
   const type = String(m.type ?? '').toLowerCase();
-  if (type !== 'bonus' && type !== 'maximum' && type !== 'set') return 0;       
+  if (type !== 'bonus' && type !== 'maximum' && type !== 'set') return 0;
 
   if (isPerLevelHitPointModifier(m)) return val * level;
   return val;
 }
 
-/** Collect HP-related modifiers from every DDB source (global, items, feat defs). */
 function collectHitPointModifiers(raw: any): any[] {
-  const list = [...collectModifiers(raw)];
+  const list = [...collectActiveModifiers(raw)];
 
   for (const item of raw.inventory ?? []) {
-    if (!item.equipped) continue;
+    if (!isItemActive(item)) continue;
     const granted = item.definition?.grantedModifiers ?? item.grantedModifiers ?? [];
     if (Array.isArray(granted)) list.push(...granted);
   }
@@ -113,28 +138,17 @@ function constitutionHitPointBonus(raw: any): number {
   return Math.max(0, conMod * characterLevel(raw));
 }
 
-function computeMaxHitPoints(raw: any): number {
-  // Log EVERYTHING HP-related!
-  console.log('[computeMaxHitPoints] All HP-related raw character fields:');
-  for (const key of Object.keys(raw)) {
-    if (key.toLowerCase().includes('hp') || key.toLowerCase().includes('hit')) {
-      console.log(`  - ${key}:`, raw[key]);
-    }
-  }
-  console.log('[computeMaxHitPoints] Character values:', JSON.stringify(raw.characterValues, null, 2));
-
-  // Prioritize sheet-provided max HP first!
-  const sheetMax = pickNumber(
+function pickSheetMaxHp(raw: any): number | undefined {
+  return pickNumber(
     raw.maximumHitPoints,
     raw.maxHitPoints,
-    raw.maxHp,
     raw.hitPointInfo?.maximum,
     raw.hitPointInfo?.max,
     raw.hitPointsInfo?.maximum,
   );
-  console.log('[computeMaxHitPoints] sheetMax:', sheetMax);
-  if (sheetMax != null && sheetMax > 0) return sheetMax;
+}
 
+function computeMaxHitPoints(raw: any): number {
   const base =
     pickNumber(
       raw.baseHitPoints,
@@ -152,15 +166,15 @@ function computeMaxHitPoints(raw: any): number {
     raw.hitPointInfo?.bonusHitPoints,
   );
 
-  // DDB stores rolled/class HP in baseHitPoints; CON×level usually lives in bonusHitPoints
-  // but that field is often null — compute from ability scores when missing. 
   const conBonus = constitutionHitPointBonus(raw);
   const fromModifiers = sumHitPointBonusesFromModifiers(raw);
   const fromFeats = sumFeatHitPointBonus(raw);
   const extraBonus = Math.max(fromModifiers, fromFeats);
   const bonus = (bonusField ?? conBonus) + extraBonus;
 
-  let maxHp = base + bonus;
+  let maxHp = base > 0
+    ? Math.floor(base + bonus)
+    : base + bonus;
 
   const override = pickNumber(raw.overrideHitPoints, raw.hitPointInfo?.override);
   if (override != null && override > 0) maxHp = override;
@@ -171,6 +185,10 @@ function computeMaxHitPoints(raw: any): number {
     raw.hitPointsInfo?.adjusted,
   );
   if (adjusted != null && adjusted > maxHp) maxHp = adjusted;
+
+  // DDB often omits a top-level max — use sheet max only when it exceeds our computed total.
+  const sheetMax = pickSheetMaxHp(raw);
+  if (sheetMax != null && sheetMax > maxHp) maxHp = sheetMax;
 
   return Math.max(maxHp, 1);
 }
@@ -204,20 +222,41 @@ function computeCurrentHitPoints(raw: any, maxHp: number): number {
   return Math.max(0, pickNumber(raw.hitPoints, raw.hp) ?? 0);
 }
 
+function inventoryHasBodyArmor(raw: any): boolean {
+  return (raw.inventory ?? []).some((item: any) => {
+    if (!isItemActive(item)) return false;
+    const def = item.definition ?? {};
+    const filterType = String(def.filterType ?? def.type ?? '').toLowerCase();
+    if (!filterType.includes('armor')) return false;
+    const armorTypeId = Number(def.armorTypeId ?? 0);
+    const baseName = String(def.baseArmorName ?? def.name ?? '').toLowerCase();
+    return !baseName.includes('shield') && armorTypeId !== 4;
+  });
+}
+
+function sumModifierBonus(mods: any[], subType: string): number {
+  return mods.reduce((sum, mod) => {
+    if (String(mod.type ?? '').toLowerCase() !== 'bonus') return sum;
+    if (normalizeSubType(mod) !== subType) return sum;
+    const val = pickNumber(mod.value, mod.fixedValue) ?? 0;
+    return Number.isFinite(val) ? sum + val : sum;
+  }, 0);
+}
+
 function extractAcFromEquipment(raw: any, dexMod: number): number {
   let bodyAc = 0;
   let shieldBonus = 0;
 
   for (const item of raw.inventory ?? []) {
-    if (!item.equipped) continue;
+    if (!isItemActive(item)) continue;
     const def = item.definition ?? {};
-    const filterType = String(def.filterType ?? def.type ?? '').toLowerCase();  
+    const filterType = String(def.filterType ?? def.type ?? '').toLowerCase();
     if (!filterType.includes('armor')) continue;
 
     const ac = Number(def.armorClass ?? 0);
     if (!ac) continue;
 
-    const baseName = String(def.baseArmorName ?? def.name ?? '').toLowerCase(); 
+    const baseName = String(def.baseArmorName ?? def.name ?? '').toLowerCase();
     const armorTypeId = Number(def.armorTypeId ?? 0);
 
     if (baseName.includes('shield') || armorTypeId === 4) {
@@ -227,12 +266,51 @@ function extractAcFromEquipment(raw: any, dexMod: number): number {
 
     let dexAdd = dexMod;
     if (armorTypeId === 3) dexAdd = 0;
-    else if (armorTypeId === 2) dexAdd = Math.min(Math.max(dexMod, 0), 2);      
+    else if (armorTypeId === 2) dexAdd = Math.min(Math.max(dexMod, 0), 2);
 
     bodyAc = Math.max(bodyAc, ac + Math.max(0, dexAdd));
   }
 
-  return bodyAc > 0 ? bodyAc + shieldBonus : 0;
+  if (bodyAc === 0) return 0;
+
+  const armoredBonus = sumModifierBonus(collectActiveModifiers(raw), 'armored-armor-class');
+  return bodyAc + shieldBonus + armoredBonus;
+}
+
+function computeUnarmoredAc(raw: any, dexMod: number, mods: any[]): number {
+  const ignoreDex = mods.some(
+    (mod) => String(mod.type ?? '').toLowerCase() === 'ignore'
+      && normalizeSubType(mod) === 'unarmored-dex-ac-bonus',
+  );
+
+  let maxDex = dexMod;
+  for (const mod of mods) {
+    if (String(mod.type ?? '').toLowerCase() !== 'set') continue;
+    if (normalizeSubType(mod) !== 'ac-max-dex-modifier') continue;
+    const cap = pickNumber(mod.value, mod.fixedValue);
+    if (cap != null) maxDex = Math.min(maxDex, cap);
+  }
+
+  const setUnarmored = mods.find(
+    (mod) => String(mod.type ?? '').toLowerCase() === 'set'
+      && normalizeSubType(mod) === 'unarmored-armor-class',
+  );
+  const unarmoredBonus = sumModifierBonus(mods, 'unarmored-armor-class');
+
+  const minimumBase = mods.find(
+    (mod) => String(mod.type ?? '').toLowerCase() === 'set'
+      && normalizeSubType(mod) === 'minimum-base-armor',
+  );
+  const base = minimumBase
+    ? (pickNumber(minimumBase.value, minimumBase.fixedValue) ?? 10)
+    : 10;
+
+  const unarmoredBase = setUnarmored
+    ? (pickNumber(setUnarmored.value, setUnarmored.fixedValue) ?? base)
+    : base;
+
+  const dexAdd = ignoreDex ? 0 : Math.max(0, maxDex);
+  return unarmoredBase + dexAdd + unarmoredBonus;
 }
 
 export function extractVitals(raw: any): { hp: number; maxHp: number; tempHp: number } {
@@ -255,55 +333,37 @@ export function extractVitals(raw: any): { hp: number; maxHp: number; tempHp: nu
 }
 
 export function extractAc(raw: any): number {
-  // Log EVERYTHING AC-related!
-  console.log('[extractAc] All AC-related raw character fields:');
-  for (const key of Object.keys(raw)) {
-    if (key.toLowerCase().includes('armor') || key.toLowerCase().includes('ac')) {
-      console.log(`  - ${key}:`, raw[key]);
-    }
-  }
-  console.log('[extractAc] Character values:', JSON.stringify(raw.characterValues, null, 2));
-  console.log('[extractAc] Modifiers:', JSON.stringify(raw.modifiers, null, 2));
+  const abilities = extractAbilities(raw);
+  const dexMod = abilities.find((a) => a.name === 'DEX')?.mod ?? 0;
+  const mods = collectActiveModifiers(raw);
+  const armored = inventoryHasBodyArmor(raw);
 
-  // Prioritize sheet-provided AC first!
+  let bonusAc = 0;
+  for (const m of mods) {
+    const sub = normalizeSubType(m);
+    const type = String(m.type ?? '').toLowerCase();
+    const val = pickNumber(m.value, m.fixedValue) ?? 0;
+    if (!Number.isFinite(val) || val === 0) continue;
+    if (type === 'bonus' && sub === 'armor-class') bonusAc += val;
+  }
+
+  const equippedAc = extractAcFromEquipment(raw, dexMod);
+  const unarmored = computeUnarmoredAc(raw, dexMod, mods) + bonusAc;
+
+  let computed = armored
+    ? Math.max(equippedAc + bonusAc, unarmored)
+    : Math.max(unarmored, 10 + dexMod + bonusAc);
+
+  if (equippedAc > 0) computed = Math.max(computed, equippedAc + bonusAc);
+
+  // Prefer computed AC; only trust a sheet value when it is higher (missed bonuses).
   const sheetAc = pickNumber(
     raw.armorClass,
     raw.ac,
     raw.hitPointInfo?.armorClass,
     raw.hitPointsInfo?.armorClass,
   );
-  console.log('[extractAc] sheetAc:', sheetAc);
-  if (sheetAc != null && sheetAc > 0) return sheetAc;
+  if (sheetAc != null && sheetAc > computed) computed = sheetAc;
 
-  const abilities = extractAbilities(raw);
-  const dexMod = abilities.find((a) => a.name === 'DEX')?.mod ?? 0;
-
-  let setAc = 0;
-  let bonusAc = 0;
-
-  for (const m of collectModifiers(raw)) {
-    const sub = String(m.subType ?? m.friendlySubtypeName ?? '').toLowerCase(); 
-    const friendly = String(m.friendlyTypeName ?? m.friendlySubtypeName ?? '').toLowerCase();
-    const type = String(m.type ?? '').toLowerCase();
-    const val = Number(m.value ?? m.fixedValue ?? 0);
-    if (!Number.isFinite(val)) continue;
-
-    const isAc =
-      type === 'armor-class'
-      || sub.includes('armor-class')
-      || sub.includes('unarmored-armor-class')
-      || sub === 'ac'
-      || sub.includes('armor class')
-      || friendly.includes('armor class');
-
-    if (type === 'set' && isAc) setAc = Math.max(setAc, val);
-    if (type === 'bonus' && isAc) bonusAc += val;
-  }
-
-  const equippedAc = extractAcFromEquipment(raw, dexMod);
-  const unarmored = 10 + dexMod + bonusAc;
-
-  if (setAc > 0) return Math.max(setAc + bonusAc, equippedAc, unarmored);       
-  if (equippedAc > 0) return Math.max(equippedAc + bonusAc, unarmored);
-  return Math.max(unarmored, 10);
+  return Math.max(computed, 10);
 }

@@ -2,7 +2,7 @@ import { readPrisma } from '../../lib/prisma';
 import type { Prisma } from '@prisma/client';
 import { decryptToken, encryptToken } from './encryption';
 import { normalizeCobaltToken, validateCobalt } from './cobaltAuth';
-import { extractCharacter, fetchRawCharacter } from './characterExtract';
+import { extractCharacter } from './characterExtract';
 import { fetchDdbCampaigns, fetchDdbCharacterList } from './campaigns';
 import { pushHpToDdb, pushDeathSavesToDdb, type DdbDeathSavesPayload } from './characterUpdate';
 import { fetchDdbEncounters, resolveDdbEncounter, parseDdbEncounterId } from './encounters';
@@ -182,32 +182,6 @@ export async function getOrSyncCharacter(
 
   const cobalt = await getCobaltForUser(providerId);
   if (!cobalt) throw new Error('D&D Beyond account not linked');
-
-  const raw = await fetchRawCharacter(cobalt, ddbCharacterId);
-  
-  // TEMP DEBUG LOG
-  console.log('\n=== DDB RAW CHARACTER DEBUG ===');
-  console.log('Top-level keys:', Object.keys(raw).sort());
-  console.log('Looking for AC fields:');
-  console.log('raw.armorClass:', (raw as any).armorClass);
-  console.log('raw.ac:', (raw as any).ac);
-  console.log('raw.stats:', (raw as any).stats);
-  console.log('raw.overview:', (raw as any).overview);
-  console.log('Looking for HP fields:');
-  console.log('raw.maxHitPoints:', (raw as any).maxHitPoints);
-  console.log('raw.maxHp:', (raw as any).maxHp);
-  console.log('raw.hitPointInfo:', (raw as any).hitPointInfo);
-  console.log('raw.hitPointsInfo:', (raw as any).hitPointsInfo);
-  console.log('raw.currentHitPoints:', (raw as any).currentHitPoints);
-  console.log('raw.removedHitPoints:', (raw as any).removedHitPoints);
-  console.log('raw.overrideHitPoints:', (raw as any).overrideHitPoints);
-  console.log('raw.adjustedHitPoints:', (raw as any).adjustedHitPoints);
-  console.log('raw.baseHitPoints:', (raw as any).baseHitPoints);
-  console.log('raw.bonusHitPoints:', (raw as any).bonusHitPoints);
-  console.log('raw.modifiers:', JSON.stringify((raw as any).modifiers, null, 2));
-  console.log('raw.classes:', JSON.stringify((raw as any).classes, null, 2));
-  console.log('raw.inventory:', JSON.stringify((raw as any).inventory, null, 2));
-  console.log('=== END DEBUG ===\n');
 
   const character = await extractCharacter(cobalt, ddbCharacterId);
   const snapshot = { ...character, ddbNormalizerVersion: DDB_NORMALIZER_VERSION };
