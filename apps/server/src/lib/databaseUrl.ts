@@ -61,9 +61,17 @@ export function resolveDatabaseUrl(raw?: string): string {
   return withSupabaseSsl(url.toString());
 }
 
-/** Dedicated Prisma pool for Better Auth — uses the same transaction pooler URL as the app. */
+/** Dedicated Prisma pool for Better Auth — separate slot so OAuth is not queued behind compendium. */
 export function resolveAuthDatabaseUrl(): string {
-  return resolveDatabaseUrl();
+  const base = resolveDatabaseUrl();
+  try {
+    const url = new URL(base);
+    const fromEnv = process.env['AUTH_DATABASE_CONNECTION_LIMIT']?.trim();
+    url.searchParams.set('connection_limit', fromEnv || '1');
+    return withSupabaseSsl(url.toString());
+  } catch {
+    return base;
+  }
 }
 
 /** @deprecated Same URL as resolveDatabaseUrl — kept for callers/tests. */

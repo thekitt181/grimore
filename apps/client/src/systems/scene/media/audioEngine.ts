@@ -1,9 +1,20 @@
 import { Howl, Howler } from 'howler';
 import type { SceneAudioLayer, SceneMediaConfig, SceneMusicTrack } from '@grimoire/shared';
 import { isEmbedUrl } from './mediaEmbed';
+import { resumeAudioContext } from './audioUnlock';
 
 const FADE_MS = 1200;
 const CROSSFADE_MS = 2500;
+
+function bindMobilePlayUnlock(howl: Howl): void {
+  howl.on('playerror', () => {
+    void resumeAudioContext().then(() => {
+      howl.once('unlock', () => {
+        howl.play();
+      });
+    });
+  });
+}
 
 interface LayerHandle {
   id: string;
@@ -95,6 +106,7 @@ function playMusicTrack(index: number, token: number) {
       }
     },
   });
+  bindMobilePlayUnlock(howl);
   musicHowl = howl;
   howl.play();
 }
@@ -108,6 +120,7 @@ function startAmbientLayers(layers: SceneAudioLayer[]) {
       volume: 0,
       html5: true,
     });
+    bindMobilePlayUnlock(howl);
     howl.play();
     fadeHowl(howl, effectiveVolume(layer.volume, 'ambient'), FADE_MS);
     ambientLayers.push({ id: layer.id, howl, baseVolume: layer.volume });

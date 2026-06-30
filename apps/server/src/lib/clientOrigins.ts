@@ -21,9 +21,29 @@ export function getClientOrigins(): string[] {
   const renderUrl = process.env['RENDER_EXTERNAL_URL']?.trim().replace(/\/$/, '');
   if (renderUrl) origins.add(renderUrl);
 
-  if (origins.size > 0) return [...origins];
+  if (origins.size > 0) return expandOriginWwwVariants([...origins]);
 
   return ['http://localhost:5173'];
+}
+
+/** Allow both apex and www when either is configured (common mobile/bookmark mismatch). */
+function expandOriginWwwVariants(origins: string[]): string[] {
+  const expanded = new Set(origins);
+  for (const origin of origins) {
+    try {
+      const url = new URL(origin);
+      const host = url.hostname.toLowerCase();
+      if (host === 'localhost' || host.startsWith('127.') || host.endsWith('.onrender.com')) continue;
+      if (host.startsWith('www.')) {
+        expanded.add(`${url.protocol}//${host.slice(4)}`);
+      } else {
+        expanded.add(`${url.protocol}//www.${host}`);
+      }
+    } catch {
+      /* ignore invalid URLs */
+    }
+  }
+  return [...expanded];
 }
 
 export function getPrimaryClientUrl(): string {

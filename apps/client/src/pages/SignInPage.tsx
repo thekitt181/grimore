@@ -1,6 +1,7 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { authClient, getAuthBearerToken, signInWithGoogle } from '@/lib/auth-client';
+import { oauthErrorMessage } from '@/lib/oauthHelpers';
 import { useGoogleOAuthAvailable } from '@/hooks/useGoogleOAuthAvailable';
 import { LogoMark } from '@/components/LogoMark';
 
@@ -14,6 +15,13 @@ export function SignInPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    if (params.get('oauth') !== 'error') return;
+    setError(oauthErrorMessage(params.get('error'), params.get('error_description')));
+    navigate('/sign-in', { replace: true, state: location.state });
+  }, [location.search, location.state, navigate]);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();

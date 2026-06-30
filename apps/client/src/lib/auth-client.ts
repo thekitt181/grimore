@@ -3,6 +3,7 @@ import { dashClient } from '@better-auth/infra/client';
 import { getBrowserAppOrigin, getServerOrigin } from './appUrls';
 
 const BEARER_TOKEN_KEY = 'grimoire_bearer_token';
+const GOOGLE_SIGN_IN_TIMEOUT_MS = 25_000;
 
 export function getBearerToken(): string | null {
   if (typeof window === 'undefined') return null;
@@ -118,25 +119,45 @@ export async function signOutAndClear(): Promise<void> {
 export async function signInWithGoogle(): Promise<string | null> {
   if (typeof window === 'undefined') return 'Google sign-in is unavailable';
 
-  const callbackURL = `${getBrowserAppOrigin().replace(/\/$/, '')}/`;
-  const result = await authClient.signIn.social({
-    provider: 'google',
-    callbackURL,
-  });
+  const origin = getBrowserAppOrigin().replace(/\/$/, '');
+  const callbackURL = `${origin}/`;
+  const errorCallbackURL = `${origin}/sign-in?oauth=error`;
 
-  if (result.error) {
-    const message = result.error.message ?? 'Google sign-in failed';
-    if (/provider not found/i.test(message)) {
-      return 'Google sign-in is not configured — add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET on Render, then redeploy.';
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), GOOGLE_SIGN_IN_TIMEOUT_MS);
+
+  try {
+    const result = await authClient.signIn.social({
+      provider: 'google',
+      callbackURL,
+      errorCallbackURL,
+      fetchOptions: { signal: controller.signal },
+    });
+
+    if (result.error) {
+      const message = result.error.message ?? 'Google sign-in failed';
+      if (/provider not found/i.test(message)) {
+        return 'Google sign-in is not configured — add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET on Render, then redeploy.';
+      }
+      if (/invalid callback/i.test(message)) {
+        return 'This site URL is not allowed for sign-in — add it to CLIENT_URL / CLIENT_URLS on Render.';
+      }
+      return message;
     }
-    return message;
-  }
 
-  const redirectUrl = result.data?.url;
-  if (redirectUrl) {
-    window.location.assign(redirectUrl);
-    return null;
-  }
+    const redirectUrl = result.data?.url;
+    if (redirectUrl) {
+      window.location.assign(redirectUrl);
+      return null;
+    }
 
-  return 'Google sign-in did not start — check GOOGLE_CLIENT_ID on the server';
+    return 'Google sign-in did not start — check GOOGLE_CLIENT_ID on the server';
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      return 'Google sign-in timed out — the server may be busy. Wait a few seconds and try again.';
+    }
+    return err instanceof Error ? err.message : 'Google sign-in failed';
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
 }

@@ -67,6 +67,7 @@ import { BackgroundVideoLayer } from '@/systems/scene/media/BackgroundVideoLayer
 import { EmbedAudioLayer } from '@/systems/scene/media/EmbedAudioLayer';
 import { SceneTransitionOverlay } from '@/systems/scene/media/SceneAtmosphere';
 import { SessionMediaBar } from '@/systems/scene/media/SessionMediaBar';
+import { MobileAudioUnlockBanner } from '@/systems/scene/media/MobileAudioUnlockBanner';
 import { GameClockWidget } from '@/systems/scene/media/GameClockWidget';
 import { SessionSceneBar } from '@/systems/scene/manager/SessionSceneBar';
 import { SceneManagerPanel } from '@/systems/scene/manager/SceneManagerPanel';
@@ -560,6 +561,7 @@ export function SessionPage() {
       </div>
       <BackgroundVideoLayer sessionId={sessionInfo.id} allowDismiss={isGM} />
       <EmbedAudioLayer />
+      <MobileAudioUnlockBanner />
       <CatalogRebuildBanner />
     </div>
   );

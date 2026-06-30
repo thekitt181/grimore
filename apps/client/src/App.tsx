@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useState } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { useGrimoireAuth } from '@/hooks/useGrimoireAuth';
 import { getAuthBearerToken, signOutAndClear } from '@/lib/auth-client';
+import { hydrateSessionAfterOAuth } from '@/lib/oauthHelpers';
 import { setAuthTokenGetter, verifyApiSessionState } from '@/lib/axios';
 import { Dashboard } from '@/pages/Dashboard';
 import { CampaignDetail } from '@/pages/CampaignDetail';
@@ -135,11 +136,10 @@ export default function App() {
     setAuthTokenGetter(async (opts) => (await getToken(opts)) ?? null);
   }, [getToken]);
 
-  // Google OAuth / cookie sessions may not have set-auth-token until we hydrate once.
   useEffect(() => {
-    if (isLoaded && isSignedIn) {
-      void getToken({ skipCache: true });
-    }
+    if (!isLoaded || !isSignedIn) return;
+    void getToken({ skipCache: true });
+    void hydrateSessionAfterOAuth(getToken);
   }, [isLoaded, isSignedIn, getToken]);
 
   useEffect(() => {

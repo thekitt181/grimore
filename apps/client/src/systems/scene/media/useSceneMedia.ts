@@ -22,6 +22,7 @@ import { useItemStore } from '../store/itemStore';
 import { useMapStore } from '@/systems/map/store/mapStore';
 import { applyFogData } from '../fogSync';
 import { emitItemsSync } from '../sceneSync';
+import { installAudioUnlock } from './audioUnlock';
 
 export const SESSION_WEATHER_SCENE_ID = 'session-live-weather';
 export const SESSION_TIME_SCENE_ID = 'session-live-time';
@@ -160,24 +161,59 @@ function buildMediaConfig(scene: SceneRecord): SceneMediaConfig {
   };
 }
 
+export function applySceneMediaOnly(scene: SceneRecord) {
+  const prev = useSceneMediaStore.getState().activeScene;
+  const merged: SceneRecord = prev && !isEphemeralLiveScene(prev)
+    ? {
+        ...prev,
+        ambientAudioUrl: scene.ambientAudioUrl,
+        backgroundVideoUrl: scene.backgroundVideoUrl,
+        lightingPreset: scene.lightingPreset,
+        mediaConfig: scene.mediaConfig,
+        weatherOverlay: scene.weatherOverlay ?? prev.weatherOverlay ?? null,
+        timeOfDay: scene.timeOfDay ?? prev.timeOfDay ?? null,
+        gameTime: scene.gameTime ?? prev.gameTime ?? null,
+      }
+    : scene;
+  useSceneMediaStore.getState().setActiveScene(merged, 'none');
+  applyAtmosphere(merged);
+  const media = buildMediaConfig(merged);
+  useSceneMediaStore.getState().setMasterVolume(media.masterVolume);
+  applySceneMediaConfig(media);
+  useSceneMediaStore.getState().setTransitioning(false);
+}
+
+/** Re-apply Howler layers (e.g. after mobile audio unlock). */
+export function replayActiveSceneMedia(): void {
+  const scene = useSceneMediaStore.getState().activeScene;
+  if (!scene) return;
+  applySceneMediaConfig(buildMediaConfig(scene));
+}
+
+function isEphemeralLiveScene(scene: SceneRecord): boolean {
+  return scene.id.startsWith('session-live-');
+}
+
 export function applySceneBundle(scene: SceneRecord, transition: SceneChangePayload['transition'] = 'fade') {
   useSceneMediaStore.getState().setActiveScene(scene, transition);
   applyAtmosphere(scene);
   const media = buildMediaConfig(scene);
   useSceneMediaStore.getState().setMasterVolume(media.masterVolume);
   applySceneMediaConfig(media);
-  
-  // Load items and active map from scene
-  if (scene.items) {
-    useItemStore.getState().setItems(scene.items as any[], scene.activeMapId);
-  }
-  
-  // Load fog from scene
-  if (scene.fogData) {
-    const fogJson = typeof scene.fogData === 'string' 
-      ? scene.fogData 
-      : JSON.stringify(scene.fogData);
-    applyFogData(fogJson, { persist: true });
+
+  // Live media/weather patches carry empty items[] — never wipe the map with those.
+  if (!isEphemeralLiveScene(scene)) {
+    if (Array.isArray(scene.items)) {
+      useItemStore.getState().setItems(scene.items as any[], scene.activeMapId);
+    }
+    if (scene.fogData) {
+      const fogJson = typeof scene.fogData === 'string'
+        ? scene.fogData
+        : JSON.stringify(scene.fogData);
+      applyFogData(fogJson, { persist: true });
+    }
+  } else {
+    useSceneMediaStore.getState().setTransitioning(false);
   }
 }
 
@@ -241,8 +277,7 @@ export function useSceneMedia(sessionId: string | undefined) {
         payload.scene.id === SESSION_MEDIA_SCENE_ID
         || (prev && isMediaOnlyPatch(prev, payload.scene))
       ) {
-        applySceneBundle(payload.scene, 'none');
-        useSceneMediaStore.getState().setTransitioning(false);
+        applySceneMediaOnly(payload.scene);
         return;
       }
       applySceneBundle(payload.scene, payload.transition);
@@ -255,6 +290,10 @@ export function useSceneMedia(sessionId: string | undefined) {
   }, [sessionId]);
 
   useEffect(() => () => disposeMediaEngine(), []);
+
+  useEffect(() => {
+    installAudioUnlock();
+  }, []);
 }
 
 export function emitSceneChange(
@@ -414,15 +453,14 @@ function sanitizeMediaPatch(patch: SessionMediaPatch): SessionMediaPatch {
 /** Push audio/video/lighting changes live without switching maps. */
 export function emitSessionMediaPatch(sessionId: string, patch: SessionMediaPatch) {
   const safePatch = sanitizeMediaPatch(patch);
-  const store = useSceneMediaStore.getState();
-  const active = store.activeScene;
+  const active = useSceneMediaStore.getState().activeScene;
   const campaignId = useSessionStore.getState().campaignId ?? 'local';
 
   const mergedMediaConfig = safePatch.mediaConfig
     ? { ...(active?.mediaConfig ?? DEFAULT_SCENE_MEDIA_CONFIG), ...safePatch.mediaConfig }
     : active?.mediaConfig;
 
-  const scene: SceneRecord = active
+  const merged: SceneRecord = active
     ? {
         ...active,
         ...safePatch,
@@ -433,13 +471,22 @@ export function emitSessionMediaPatch(sessionId: string, patch: SessionMediaPatc
         ...(mergedMediaConfig ? { mediaConfig: mergedMediaConfig } : {}),
       });
 
-  applySceneBundle(scene, 'none');
-  store.setTransitioning(false);
+  const syncScene = createSessionMediaScene(campaignId, {
+    ambientAudioUrl: merged.ambientAudioUrl,
+    backgroundVideoUrl: merged.backgroundVideoUrl,
+    lightingPreset: merged.lightingPreset,
+    weatherOverlay: merged.weatherOverlay,
+    timeOfDay: merged.timeOfDay ?? null,
+    gameTime: merged.gameTime ?? null,
+    mediaConfig: merged.mediaConfig,
+  });
+
+  applySceneMediaOnly(syncScene);
   getSocket().emit('scene:change', {
     sessionId,
-    sceneId: scene.id,
+    sceneId: syncScene.id,
     transition: 'none',
-    scene,
+    scene: syncScene,
   });
 }
 
