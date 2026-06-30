@@ -8,6 +8,7 @@ export interface CompendiumSaveOptions {
     previousName?: string;
     hidePrevious?: boolean;
     saveAs?: CompendiumSaveAs;
+    replaceEntryId?: string;
 }
 export declare function listSources(kind: 'monsters' | 'items' | 'spells'): Promise<Array<{
     id: string;

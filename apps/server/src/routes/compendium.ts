@@ -23,6 +23,7 @@ import {
   searchItems,
   searchMonsters,
   searchSpells,
+  type CompendiumSaveOptions,
 } from '../services/compendiumSync';
 import {
   lockCompendiumSource,
@@ -39,6 +40,20 @@ import {
 const router = Router();
 const auth = [requireAuth] as const;
 const admin = [requireAuth, requireCompendiumAdmin] as const;
+
+function buildCompendiumPatchSaveOpts(
+  entryId: string,
+  existing: { name: string; isCustom: boolean },
+  body: { saveAs?: 'replace' | 'homebrew' },
+): CompendiumSaveOptions {
+  const opts: CompendiumSaveOptions = { replaceEntryId: entryId };
+  if (body.saveAs) opts.saveAs = body.saveAs;
+  if (body.saveAs === 'replace') {
+    opts.previousName = existing.name;
+    opts.hidePrevious = !existing.isCustom;
+  }
+  return opts;
+}
 
 function respondCompendiumError(
   res: import('express').Response,
@@ -337,22 +352,22 @@ router.patch('/monsters/:id', ...admin, async (req: AuthenticatedRequest, res) =
       res.status(400).json({ error: 'Name required' });
       return;
     }
-    const renamed = Boolean(existing?.name && name !== existing.name);
+    if (!existing) {
+      res.status(404).json({ error: 'Monster not found' });
+      return;
+    }
     const saved = await saveMonster({
       ...existing,
       ...body,
       name,
-      type: body.type ?? existing?.type ?? 'Medium humanoid, neutral',
-      source: body.source ?? existing?.source ?? 'Custom',
-      hp: Number(body.hp ?? existing?.hp ?? 10),
-      ac: Number(body.ac ?? existing?.ac ?? 10),
-      cr: String(body.cr ?? existing?.cr ?? '0'),
-      description: body.description ?? existing?.description ?? '',
-      ...(body.image ?? existing?.image ? { image: body.image ?? existing?.image } : {}),
-    }, {
-      ...(renamed ? { previousName: existing!.name, hidePrevious: !existing!.isCustom } : {}),
-      ...(body.saveAs ? { saveAs: body.saveAs } : {}),
-    });
+      type: body.type ?? existing.type ?? 'Medium humanoid, neutral',
+      source: body.source ?? existing.source ?? 'Custom',
+      hp: Number(body.hp ?? existing.hp ?? 10),
+      ac: Number(body.ac ?? existing.ac ?? 10),
+      cr: String(body.cr ?? existing.cr ?? '0'),
+      description: body.description ?? existing.description ?? '',
+      ...(body.image ?? existing.image ? { image: body.image ?? existing.image } : {}),
+    }, buildCompendiumPatchSaveOpts(req.params['id']!, existing, body));
     res.json(saved);
   } catch (err) {
     console.error('[Compendium] save monster:', err);
@@ -447,20 +462,17 @@ router.patch('/items/:id', ...admin, async (req, res) => {
     const body = req.body as Partial<OwlbearItem> & { saveAs?: 'replace' | 'homebrew' };
     const name = (body.name ?? existing?.name)?.trim();
     if (!name) { res.status(400).json({ error: 'Name required' }); return; }
-    const renamed = Boolean(existing?.name && name !== existing.name);
+    if (!existing) { res.status(404).json({ error: 'Not found' }); return; }
     const saved = await saveItem({
       ...existing,
       ...body,
       name,
-      type: body.type ?? existing?.type ?? '',
-      source: body.source ?? existing?.source ?? 'Custom',
-      description: body.description ?? existing?.description ?? '',
-      ...(body.rarity ?? existing?.rarity ? { rarity: body.rarity ?? existing?.rarity } : {}),
-      ...(body.image ?? existing?.image ? { image: body.image ?? existing?.image } : {}),
-    }, {
-      ...(renamed ? { previousName: existing!.name, hidePrevious: !existing!.isCustom } : {}),
-      ...(body.saveAs ? { saveAs: body.saveAs } : {}),
-    });
+      type: body.type ?? existing.type ?? '',
+      source: body.source ?? existing.source ?? 'Custom',
+      description: body.description ?? existing.description ?? '',
+      ...(body.rarity ?? existing.rarity ? { rarity: body.rarity ?? existing.rarity } : {}),
+      ...(body.image ?? existing.image ? { image: body.image ?? existing.image } : {}),
+    }, buildCompendiumPatchSaveOpts(req.params['id']!, existing, body));
     res.json(saved);
   } catch (err) {
     console.error('[Compendium] save item:', err);
@@ -523,22 +535,19 @@ router.patch('/spells/:id', ...admin, async (req, res) => {
     const body = req.body as Partial<OwlbearSpell> & { saveAs?: 'replace' | 'homebrew' };
     const name = (body.name ?? existing?.name)?.trim();
     if (!name) { res.status(400).json({ error: 'Name required' }); return; }
-    const renamed = Boolean(existing?.name && name !== existing.name);
+    if (!existing) { res.status(404).json({ error: 'Not found' }); return; }
     const saved = await saveSpell({
       ...existing,
       ...body,
       name,
-      level: Number(body.level ?? existing?.level ?? 0),
-      ...(body.damage ?? existing?.damage ? { damage: body.damage ?? existing?.damage } : {}),
-      ...(body.type ?? existing?.type ? { type: body.type ?? existing?.type } : {}),
-      ...(body.save ?? existing?.save ? { save: body.save ?? existing?.save } : {}),
-      ...(body.aoe ?? existing?.aoe ? { aoe: body.aoe ?? existing?.aoe } : {}),
-      ...(body.description ?? existing?.description ? { description: body.description ?? existing?.description } : {}),
-      source: body.source ?? existing?.source ?? 'Custom',
-    }, {
-      ...(renamed ? { previousName: existing!.name, hidePrevious: !existing!.isCustom } : {}),
-      ...(body.saveAs ? { saveAs: body.saveAs } : {}),
-    });
+      level: Number(body.level ?? existing.level ?? 0),
+      ...(body.damage ?? existing.damage ? { damage: body.damage ?? existing.damage } : {}),
+      ...(body.type ?? existing.type ? { type: body.type ?? existing.type } : {}),
+      ...(body.save ?? existing.save ? { save: body.save ?? existing.save } : {}),
+      ...(body.aoe ?? existing.aoe ? { aoe: body.aoe ?? existing.aoe } : {}),
+      ...(body.description ?? existing.description ? { description: body.description ?? existing.description } : {}),
+      source: body.source ?? existing.source ?? 'Custom',
+    }, buildCompendiumPatchSaveOpts(req.params['id']!, existing, body));
     res.json(saved);
   } catch (err) {
     console.error('[Compendium] save spell:', err);

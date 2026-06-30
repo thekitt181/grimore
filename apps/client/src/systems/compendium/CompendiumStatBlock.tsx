@@ -6,6 +6,7 @@ import { isFromSourceBook, isHomebrewEntry } from '@grimoire/shared';
 import { RollableText } from '@/systems/dice/RollableText';
 import { saveItem, saveMonster, saveSpell, deleteItem, deleteMonster, deleteSpell, publishCompendiumEntry, unpublishCompendiumEntry } from './compendiumApi';
 import { useCompendiumUiStore } from './compendiumStore';
+import { resolveReplaceSaveSource } from './compendiumSaveSource';
 import { CompendiumImageEditor } from './CompendiumImageEditor';
 import { MonsterRollPanel } from './MonsterRollPanel';
 import { SpellRollPanel } from './SpellRollPanel';
@@ -186,6 +187,7 @@ export function MonsterStatBlock({
   const [desc, setDesc] = useState(monster.description);
   const [saveAs, setSaveAs] = useState<CompendiumSaveAs>('replace');
   const fromBook = isFromSourceBook(monster.isCustom, monster.source);
+  const selectedSource = useCompendiumUiStore((s) => s.selectedSource);
 
   useEffect(() => {
     setName(monster.name);
@@ -201,6 +203,10 @@ export function MonsterStatBlock({
     mutationFn: () => {
       const trimmed = name.trim();
       if (!trimmed) throw new Error('Name required');
+      const effectiveSaveAs = fromBook ? saveAs : 'homebrew';
+      const source = effectiveSaveAs === 'replace'
+        ? resolveReplaceSaveSource(monster.source, selectedSource)
+        : monster.source;
       return saveMonster(monster.id, {
         name: trimmed,
         type,
@@ -208,8 +214,8 @@ export function MonsterStatBlock({
         ac,
         cr,
         description: desc,
-        source: monster.source,
-        saveAs: fromBook ? saveAs : 'homebrew',
+        source: source ?? monster.source ?? 'Custom',
+        saveAs: effectiveSaveAs,
       });
     },
     onSuccess: (saved) => onSaveSuccess(qc, 'monsters', monster.id, saved, setEditing),
@@ -314,6 +320,7 @@ export function ItemStatBlock({
   const [desc, setDesc] = useState(item.description);
   const [saveAs, setSaveAs] = useState<CompendiumSaveAs>('replace');
   const fromBook = isFromSourceBook(item.isCustom, item.source);
+  const selectedSource = useCompendiumUiStore((s) => s.selectedSource);
 
   useEffect(() => {
     setName(item.name);
@@ -326,12 +333,16 @@ export function ItemStatBlock({
     mutationFn: () => {
       const trimmed = name.trim();
       if (!trimmed) throw new Error('Name required');
+      const effectiveSaveAs = fromBook ? saveAs : 'homebrew';
+      const source = effectiveSaveAs === 'replace'
+        ? resolveReplaceSaveSource(item.source, selectedSource)
+        : item.source;
       return saveItem(item.id, {
         name: trimmed,
         type: itemType,
         description: desc,
-        source: item.source,
-        saveAs: fromBook ? saveAs : 'homebrew',
+        source: source ?? item.source ?? 'Custom',
+        saveAs: effectiveSaveAs,
       });
     },
     onSuccess: (saved) => onSaveSuccess(qc, 'items', item.id, saved, setEditing),
@@ -413,6 +424,7 @@ export function SpellStatBlock({ spell, editable = false }: { spell: CompendiumS
   const [editing, setEditing] = useState(false);
   const [saveAs, setSaveAs] = useState<CompendiumSaveAs>('replace');
   const fromBook = isFromSourceBook(spell.isCustom, spell.source);
+  const selectedSource = useCompendiumUiStore((s) => s.selectedSource);
 
   useEffect(() => {
     setName(spell.name);
@@ -424,11 +436,15 @@ export function SpellStatBlock({ spell, editable = false }: { spell: CompendiumS
     mutationFn: () => {
       const trimmed = name.trim();
       if (!trimmed) throw new Error('Name required');
+      const effectiveSaveAs = fromBook ? saveAs : 'homebrew';
+      const source = effectiveSaveAs === 'replace'
+        ? resolveReplaceSaveSource(spell.source, selectedSource)
+        : spell.source;
       return saveSpell(spell.id, {
         name: trimmed,
         level,
-        ...(spell.source ? { source: spell.source } : {}),
-        saveAs: fromBook ? saveAs : 'homebrew',
+        source: source ?? spell.source ?? 'Custom',
+        saveAs: effectiveSaveAs,
       });
     },
     onSuccess: (saved) => onSaveSuccess(qc, 'spells', spell.id, saved, setEditing),

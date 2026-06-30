@@ -56,6 +56,7 @@ import {
 import {
   compendiumCatalogMergeKey,
   compendiumContentFingerprint,
+  compendiumEntryStorageId,
   dedupeByBookSlot,
   resolveEntryId,
 } from './compendiumEntryIdentity';
@@ -1324,6 +1325,8 @@ export interface CompendiumSaveOptions {
   previousName?: string;
   hidePrevious?: boolean;
   saveAs?: CompendiumSaveAs;
+  /** Postgres / catalog row id being edited — removed when replace would create a duplicate. */
+  replaceEntryId?: string;
 }
 
 function resolveSaveAs(entry: { source?: string }, opts?: CompendiumSaveOptions): CompendiumSaveAs {
@@ -1344,6 +1347,39 @@ function prepareSavePayload<T extends { source?: string }>(entry: T, saveAs: Com
     return { ...entry, source: 'Custom' };
   }
   return { ...entry, source: src ? src : 'Custom' };
+}
+
+function storageIdForSavePayload(
+  kind: 'monster' | 'item' | 'spell',
+  payload: OwlbearMonster | OwlbearItem | OwlbearSpell,
+  saveAs: CompendiumSaveAs,
+): string {
+  return compendiumEntryStorageId(
+    payload.name,
+    payload.source?.trim() || (saveAs === 'homebrew' ? 'Custom' : ''),
+    ('_id' in payload ? (payload as { _id?: string })._id : undefined),
+  );
+}
+
+/** Drop the row being replaced so replace-in-source does not leave a duplicate copy. */
+async function removeReplacedCompendiumRows(
+  kind: 'monster' | 'item' | 'spell',
+  payload: OwlbearMonster | OwlbearItem | OwlbearSpell,
+  saveAs: CompendiumSaveAs,
+  opts?: CompendiumSaveOptions,
+): Promise<void> {
+  if (saveAs !== 'replace') return;
+  const newId = storageIdForSavePayload(kind, payload, saveAs);
+  const ids = new Set<string>();
+  const replaceId = opts?.replaceEntryId?.trim();
+  if (replaceId && replaceId !== newId) ids.add(replaceId);
+  if (opts?.previousName && opts.previousName !== payload.name) {
+    const legacyId = slugify(opts.previousName);
+    if (legacyId !== newId) ids.add(legacyId);
+  }
+  for (const id of ids) {
+    await deleteCompendiumEntryBySlug(id);
+  }
 }
 
 function sourceListFilter(
@@ -1908,9 +1944,7 @@ export async function saveMonster(
   const saveAs = resolveSaveAs(entry, opts);
   const payload = prepareSavePayload({ ...entry, source: entry.source || 'Custom' }, saveAs);
 
-  if (opts?.previousName && opts.previousName !== payload.name) {
-    await deleteCompendiumEntryBySlug(slugify(opts.previousName));
-  }
+  await removeReplacedCompendiumRows('monster', payload, saveAs, opts);
 
   await saveOwlbearEntry('monster', payload, {
     saveAs,
@@ -1937,9 +1971,7 @@ export async function saveItem(
   const saveAs = resolveSaveAs(entry, opts);
   const payload = prepareSavePayload({ ...entry, source: entry.source || 'Custom' }, saveAs);
 
-  if (opts?.previousName && opts.previousName !== payload.name) {
-    await deleteCompendiumEntryBySlug(slugify(opts.previousName));
-  }
+  await removeReplacedCompendiumRows('item', payload, saveAs, opts);
 
   await saveOwlbearEntry('item', payload, {
     saveAs,
@@ -1961,9 +1993,7 @@ export async function saveSpell(
   const saveAs = resolveSaveAs(entry, opts);
   const payload = prepareSavePayload({ ...entry, source: entry.source || 'Custom' }, saveAs);
 
-  if (opts?.previousName && opts.previousName !== payload.name) {
-    await deleteCompendiumEntryBySlug(slugify(opts.previousName));
-  }
+  await removeReplacedCompendiumRows('spell', payload, saveAs, opts);
 
   await saveOwlbearEntry('spell', payload, {
     saveAs,

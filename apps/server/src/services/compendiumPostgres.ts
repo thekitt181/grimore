@@ -858,13 +858,18 @@ async function upsertGlobalEntryRow(
     inTypedImport?: boolean;
   },
 ): Promise<void> {
-  const existing = await readPrisma.compendiumEntry.findUnique({ where: { id: slugify(entry.name) } });
   const data = buildUpsertData(kind, entry, {
     isCustom: flags.isCustom,
-    inTypedImport: flags.inTypedImport ?? existing?.inTypedImport ?? false,
-    inGlobalOverride: flags.inGlobalOverride ?? existing?.inGlobalOverride ?? false,
-    inGlobalHomebrew: flags.inGlobalHomebrew ?? existing?.inGlobalHomebrew ?? false,
+    inTypedImport: flags.inTypedImport ?? false,
+    inGlobalOverride: flags.inGlobalOverride ?? false,
+    inGlobalHomebrew: flags.inGlobalHomebrew ?? false,
   });
+  const existing = await readPrisma.compendiumEntry.findUnique({ where: { id: data.id } });
+  if (existing) {
+    data.inTypedImport = flags.inTypedImport ?? existing.inTypedImport;
+    data.inGlobalOverride = flags.inGlobalOverride ?? existing.inGlobalOverride;
+    data.inGlobalHomebrew = flags.inGlobalHomebrew ?? existing.inGlobalHomebrew;
+  }
   await prisma.compendiumEntry.upsert({
     where: { id: data.id },
     create: data,
