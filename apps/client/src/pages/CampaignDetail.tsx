@@ -1,5 +1,6 @@
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import axios from 'axios';
 import { api } from '@/lib/axios';
 import { AppShell } from '@/components/layout/AppShell';
 import { InvitePanel } from '@/components/campaign/InvitePanel';
@@ -20,14 +21,20 @@ export function CampaignDetail() {
   const navigate = useNavigate();
   const qc = useQueryClient();
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, error, isFetching } = useQuery({
     queryKey: ['campaign', id],
     queryFn: async () => {
       const res = await api.get<CampaignDetailResponse>(`/campaigns/${id}`);
       return res.data;
     },
     enabled: !!id,
-    refetchInterval: 5000,
+    refetchInterval: (query) =>
+      query.state.data?.campaign.activeSession?.isActive ? 5000 : false,
+    retry: (failureCount, err) => {
+      if (axios.isAxiosError(err) && err.response?.status === 503) return failureCount < 5;
+      return failureCount < 2;
+    },
+    retryDelay: (attempt) => Math.min(2000 * attempt, 8000),
   });
 
   const startSessionMutation = useMutation({
@@ -46,6 +53,11 @@ export function CampaignDetail() {
     mutationFn: async () => {
       await api.delete(`/campaigns/${id}`);
     },
+    retry: (failureCount, err) => {
+      if (axios.isAxiosError(err) && err.response?.status === 503) return failureCount < 3;
+      return false;
+    },
+    retryDelay: (attempt) => Math.min(2000 * attempt, 8000),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['campaigns'] });
       void qc.removeQueries({ queryKey: ['campaign', id] });
@@ -69,12 +81,13 @@ export function CampaignDetail() {
     navigate(`/session/${sessionId}`);
   };
 
-  if (isLoading) {
+  if (isLoading || (isFetching && !data)) {
+    const dbBusy = axios.isAxiosError(error) && error.response?.status === 503;
     return (
       <AppShell>
         <div className="flex-1 flex items-center justify-center">
           <div className="font-display text-lg animate-torch" style={{ color: 'var(--color-accent-gold)' }}>
-            Loading campaign...
+            {dbBusy ? 'Database busy — retrying…' : 'Loading campaign...'}
           </div>
         </div>
       </AppShell>
@@ -82,10 +95,17 @@ export function CampaignDetail() {
   }
 
   if (!data) {
+    const dbBusy = axios.isAxiosError(error) && error.response?.status === 503;
     return (
       <AppShell>
         <div className="flex-1 flex items-center justify-center">
-          <p style={{ color: 'var(--color-text-secondary)' }}>Campaign not found.</p>
+          <p style={{ color: 'var(--color-text-secondary)' }}>
+            {isError && dbBusy
+              ? 'Database is busy — retrying…'
+              : isError
+                ? 'Could not load this campaign.'
+                : 'Campaign not found.'}
+          </p>
         </div>
       </AppShell>
     );

@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { nanoid } from 'nanoid';
-import { readPrisma } from '../lib/prisma';
+import { readPrisma, runSerializedWrite } from '../lib/prisma';
 import { isDbPoolSaturation, isDbTransientError, withDbTimeout } from '../lib/dbTimeout';
 import { requireAuth, type AuthenticatedRequest } from '../middleware/auth';
 import { INVITE_CODE_LENGTH } from '@grimoire/shared';
@@ -34,8 +34,8 @@ const createCampaignSchema = z.object({
 
 // ─── GET /api/campaigns ───────────────────────────────────────────────────────
 
-const CAMPAIGN_DB_TIMEOUT_MS = 10_000;
-const CAMPAIGN_TX_TIMEOUT_MS = 15_000;
+const CAMPAIGN_DB_TIMEOUT_MS = 15_000;
+const CAMPAIGN_TX_TIMEOUT_MS = 20_000;
 
 function respondCampaignDbError(
   res: import('express').Response,
@@ -145,7 +145,6 @@ router.get('/:id', requireAuth, async (req: AuthenticatedRequest, res) => {
             members: {
               include: { user: { select: { id: true, username: true, avatarUrl: true } } },
             },
-            scenes: { orderBy: { sortOrder: 'asc' } },
             sessions: activeSessionSelect,
             _count: { select: { members: true, scenes: true } },
           },
@@ -280,7 +279,15 @@ router.delete('/:id', requireAuth, async (req: AuthenticatedRequest, res) => {
 
     const campaign = await withDbTimeout(
       CAMPAIGN_DB_TIMEOUT_MS,
-      () => readPrisma.campaign.findUnique({ where: { id }, select: { id: true, gmId: true } }),
+      () =>
+        readPrisma.campaign.findUnique({
+          where: { id },
+          select: {
+            id: true,
+            gmId: true,
+            sessions: { select: { id: true } },
+          },
+        }),
       'campaigns.delete.lookup',
     );
 
@@ -294,16 +301,7 @@ router.delete('/:id', requireAuth, async (req: AuthenticatedRequest, res) => {
       return;
     }
 
-    const sessions = await withDbTimeout(
-      CAMPAIGN_DB_TIMEOUT_MS,
-      () =>
-        readPrisma.gameSession.findMany({
-          where: { campaignId: id },
-          select: { id: true },
-        }),
-      'campaigns.delete.sessions',
-    );
-    const sessionIds = sessions.map((s) => s.id);
+    const sessionIds = campaign.sessions.map((s) => s.id);
 
     for (const sessionId of sessionIds) {
       stopRollBridge(sessionId);
@@ -312,7 +310,8 @@ router.delete('/:id', requireAuth, async (req: AuthenticatedRequest, res) => {
     await withDbTimeout(
       CAMPAIGN_TX_TIMEOUT_MS,
       () =>
-        readPrisma.$transaction([
+        runSerializedWrite(() =>
+          readPrisma.$transaction([
           ...(sessionIds.length > 0
             ? [
                 readPrisma.chatMessage.deleteMany({ where: { sessionId: { in: sessionIds } } }),
@@ -327,6 +326,7 @@ router.delete('/:id', requireAuth, async (req: AuthenticatedRequest, res) => {
           readPrisma.note.deleteMany({ where: { campaignId: id } }),
           readPrisma.campaign.delete({ where: { id } }),
         ]),
+        ),
       'campaigns.delete.tx',
     );
 

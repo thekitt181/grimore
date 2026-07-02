@@ -43,8 +43,8 @@ export function resolveDatabaseUrl(raw?: string): string {
 
   if (!url.searchParams.has('connection_limit')) {
     const fromEnv = process.env['DATABASE_CONNECTION_LIMIT']?.trim();
-    // Render: 2 slots so a slow background query cannot block auth/API (limit=1 caused P2024).
-    const fallback = isRenderDeploy() ? '2' : '4';
+    // Render: 3 slots — concurrent reads + one write without starving auth.
+    const fallback = isRenderDeploy() ? '3' : '4';
     url.searchParams.set('connection_limit', fromEnv || fallback);
   }
 

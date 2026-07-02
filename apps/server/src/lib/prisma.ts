@@ -68,6 +68,19 @@ export async function resetPrismaPool(reason = 'unknown'): Promise<void> {
   return resetInFlight;
 }
 
+/** Serialize writes only — reads can run concurrently within connection_limit. */
+const SERIALIZED_WRITE_OPS = new Set([
+  'create',
+  'createMany',
+  'update',
+  'updateMany',
+  'upsert',
+  'delete',
+  'deleteMany',
+  '$executeRaw',
+  '$executeRawUnsafe',
+]);
+
 function createAppClient(): PrismaClient {
   const base = new PrismaClient({
     datasources: { db: { url: resolveDatabaseUrl() } },
@@ -77,24 +90,32 @@ function createAppClient(): PrismaClient {
   const extended = base.$extends({
     query: {
       $allModels: {
-        async $allOperations({ args, query }) {
-          return runSerialized(async () => {
-            try {
-              return await query(args);
-            } catch (err) {
-              if (isDbPoolSaturation(err)) {
-                await resetPrismaPool('query saturation');
-                return await query(args);
-              }
-              throw err;
+        async $allOperations({ operation, args, query }) {
+          const run = () => query(args);
+          const exec = SERIALIZED_WRITE_OPS.has(operation)
+            ? () => runSerialized(run)
+            : run;
+
+          try {
+            return await exec();
+          } catch (err) {
+            if (isDbPoolSaturation(err)) {
+              await resetPrismaPool('query saturation');
+              return await exec();
             }
-          });
+            throw err;
+          }
         },
       },
     },
   });
 
   return extended as unknown as PrismaClient;
+}
+
+/** Serialize multi-step writes (e.g. $transaction) so they do not interleave with bulk imports. */
+export function runSerializedWrite<T>(fn: () => Promise<T>): Promise<T> {
+  return runSerialized(fn);
 }
 
 function createAuthClient(): PrismaClient {
