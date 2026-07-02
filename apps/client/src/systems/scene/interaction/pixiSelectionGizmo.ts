@@ -3,14 +3,29 @@ import type { TokenGizmoLayout } from '@/systems/scene/token/tokenGizmoLayout';
 
 const GOLD = 0xc9a84c;
 
+function isLiveGraphics(g: Graphics | null | undefined): g is Graphics {
+  return !!g && !g.destroyed;
+}
+
+function safeGraphicsClear(g: Graphics | null | undefined): void {
+  if (!isLiveGraphics(g)) return;
+  try {
+    g.clear();
+  } catch {
+    // Pixi may tear down the graphics context before React effect cleanup runs.
+  }
+}
+
 /** Draw selection box + handles on the Pixi overlay (2D view — same coords as map/tokens). */
 export function drawPixiSelectionGizmo(
   box: Graphics,
   handlesG: Graphics,
   layout: TokenGizmoLayout,
 ): void {
-  box.clear();
-  handlesG.clear();
+  if (!isLiveGraphics(box) || !isLiveGraphics(handlesG)) return;
+
+  safeGraphicsClear(box);
+  safeGraphicsClear(handlesG);
 
   if (layout.mode === 'none' || layout.boxCorners.length < 4) {
     box.visible = false;
@@ -44,8 +59,9 @@ export function drawPixiSelectionGizmo(
 }
 
 export function hidePixiSelectionGizmo(box: Graphics, handlesG: Graphics): void {
-  box.clear();
-  handlesG.clear();
+  if (!isLiveGraphics(box) || !isLiveGraphics(handlesG)) return;
+  safeGraphicsClear(box);
+  safeGraphicsClear(handlesG);
   box.visible = false;
   handlesG.visible = false;
 }

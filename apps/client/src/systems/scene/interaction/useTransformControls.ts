@@ -159,10 +159,15 @@ export function useTransformControls(appReady: boolean) {
     if (!handlesG) { handlesG = new Graphics(); handlesG.label = 'xf-handles'; overlay.addChild(handlesG); }
 
     function hidePixiControls() {
-      box!.visible = false;
-      handlesG!.visible = false;
-      box!.clear();
-      handlesG!.clear();
+      if (!box || !handlesG || box.destroyed || handlesG.destroyed) return;
+      box.visible = false;
+      handlesG.visible = false;
+      try {
+        box.clear();
+        handlesG.clear();
+      } catch {
+        // Graphics context may already be torn down.
+      }
     }
 
     hidePixiControls();
