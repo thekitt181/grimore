@@ -88,7 +88,8 @@ export function usePixiSelectionGizmo(appReady: boolean) {
 
     app.ticker.add(tick);
     return () => {
-      app.ticker.remove(tick);
+      // Pixi may null ticker during app.destroy() before this cleanup runs.
+      app.ticker?.remove(tick);
       hidePixiSelectionGizmo(box!, handlesG!);
     };
   }, [appReady, viewMode, activeTool, selectedIds, items, myRole]);

@@ -62,8 +62,8 @@ export function usePixiApp(
         cleanupRef.current();
       }
       if (appRef.current) {
-        // Remove canvas first to avoid flash
-        appRef.current.canvas.remove();
+        // Remove canvas first to avoid flash (canvas may already be detached).
+        appRef.current.canvas?.remove();
         appRef.current.destroy(true, { children: true });
         appRef.current = null;
       }

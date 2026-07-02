@@ -37,7 +37,13 @@ class AppErrorBoundary extends React.Component<
             <p>Grimoire failed to start.</p>
             <p style={{ color: '#8a8075', marginTop: '0.75rem' }}>{this.state.error.message}</p>
             <p style={{ marginTop: '1rem' }}>
-              <a href="/sign-in" style={{ color: '#c9a84c' }}>
+              <a
+                href="/sign-in"
+                style={{ color: '#c9a84c' }}
+                onClick={() => {
+                  window.location.href = '/sign-in';
+                }}
+              >
                 Open sign-in
               </a>
             </p>
