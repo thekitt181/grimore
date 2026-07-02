@@ -35,7 +35,7 @@ const createCampaignSchema = z.object({
 // ─── GET /api/campaigns ───────────────────────────────────────────────────────
 
 const CAMPAIGN_DB_TIMEOUT_MS = 15_000;
-const CAMPAIGN_TX_TIMEOUT_MS = 20_000;
+const CAMPAIGN_TX_TIMEOUT_MS = 30_000;
 
 function respondCampaignDbError(
   res: import('express').Response,
@@ -311,21 +311,19 @@ router.delete('/:id', requireAuth, async (req: AuthenticatedRequest, res) => {
       CAMPAIGN_TX_TIMEOUT_MS,
       () =>
         runSerializedWrite(() =>
-          readPrisma.$transaction([
-          ...(sessionIds.length > 0
-            ? [
-                readPrisma.chatMessage.deleteMany({ where: { sessionId: { in: sessionIds } } }),
-                readPrisma.sessionLog.deleteMany({ where: { sessionId: { in: sessionIds } } }),
-              ]
-            : []),
-          readPrisma.gameSession.deleteMany({ where: { campaignId: id } }),
-          readPrisma.scene.deleteMany({ where: { campaignId: id } }),
-          readPrisma.gameMap.deleteMany({ where: { campaignId: id } }),
-          readPrisma.encounter.deleteMany({ where: { campaignId: id } }),
-          readPrisma.handout.deleteMany({ where: { campaignId: id } }),
-          readPrisma.note.deleteMany({ where: { campaignId: id } }),
-          readPrisma.campaign.delete({ where: { id } }),
-        ]),
+          readPrisma.$transaction(async (tx) => {
+            if (sessionIds.length > 0) {
+              await tx.chatMessage.deleteMany({ where: { sessionId: { in: sessionIds } } });
+              await tx.sessionLog.deleteMany({ where: { sessionId: { in: sessionIds } } });
+            }
+            await tx.gameSession.deleteMany({ where: { campaignId: id } });
+            await tx.scene.deleteMany({ where: { campaignId: id } });
+            await tx.gameMap.deleteMany({ where: { campaignId: id } });
+            await tx.encounter.deleteMany({ where: { campaignId: id } });
+            await tx.handout.deleteMany({ where: { campaignId: id } });
+            await tx.note.deleteMany({ where: { campaignId: id } });
+            await tx.campaign.delete({ where: { id } });
+          }),
         ),
       'campaigns.delete.tx',
     );

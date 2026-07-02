@@ -11,11 +11,30 @@ let resetInFlight: Promise<void> | null = null;
 let lastResetAt = 0;
 const RESET_COOLDOWN_MS = 3_000;
 
-/** Serialize non-auth Prisma queries so concurrent requests cannot exhaust connection_limit. */
+/** Serialize non-auth Prisma writes; nested calls (e.g. inside $transaction) run inline. */
 let dbTail: Promise<unknown> = Promise.resolve();
+let serializedDepth = 0;
 
 function runSerialized<T>(fn: () => Promise<T>): Promise<T> {
-  const job = dbTail.then(fn, fn);
+  if (serializedDepth > 0) {
+    return fn();
+  }
+
+  const job = dbTail.then(async () => {
+    serializedDepth++;
+    try {
+      return await fn();
+    } finally {
+      serializedDepth--;
+    }
+  }, async () => {
+    serializedDepth++;
+    try {
+      return await fn();
+    } finally {
+      serializedDepth--;
+    }
+  });
   dbTail = job.catch(() => undefined);
   return job;
 }

@@ -54,10 +54,10 @@ export function CampaignDetail() {
       await api.delete(`/campaigns/${id}`);
     },
     retry: (failureCount, err) => {
-      if (axios.isAxiosError(err) && err.response?.status === 503) return failureCount < 3;
+      if (axios.isAxiosError(err) && err.response?.status === 503) return failureCount < 5;
       return false;
     },
-    retryDelay: (attempt) => Math.min(2000 * attempt, 8000),
+    retryDelay: (attempt) => Math.min(3000 * attempt, 12000),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['campaigns'] });
       void qc.removeQueries({ queryKey: ['campaign', id] });
@@ -277,8 +277,16 @@ export function CampaignDetail() {
                 onClick={handleDeleteCampaign}
                 disabled={deleteCampaignMutation.isPending}
               >
-                {deleteCampaignMutation.isPending ? 'Deleting...' : 'Delete Campaign'}
+                {deleteCampaignMutation.isPending ? 'Deleting…' : 'Delete Campaign'}
               </button>
+              {deleteCampaignMutation.isError && (
+                <p className="font-ui text-sm mt-3" style={{ color: 'var(--color-accent-red-hot)' }}>
+                  {axios.isAxiosError(deleteCampaignMutation.error)
+                  && deleteCampaignMutation.error.response?.status === 503
+                    ? 'Database is busy — wait a moment and try again.'
+                    : 'Failed to delete campaign. Please try again.'}
+                </p>
+              )}
             </section>
           </>
         )}
