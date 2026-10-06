@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { useItemStore } from './store/itemStore';
 import { useMapStore } from '@/systems/map/store/mapStore';
 import { useSessionStore } from '@/store/sessionStore';
@@ -16,6 +17,10 @@ import { useCombatStore } from '@/systems/combat/combatStore';
 import { useDdbStore } from '@/systems/ddb/ddbStore';
 import { applyDamage, applyHeal, readTempHp } from '@/systems/initiative/hpUtils';
 import { useCompendiumUiStore } from '@/systems/compendium/compendiumStore';
+import { getMonster, searchMonsters } from '@/systems/compendium/compendiumApi';
+import { parseMonsterStatBlock } from '@/systems/compendium/statBlockImport';
+import { parseAbilities, parseStatsObject } from '@/systems/compendium/statBlockParser';
+import type { CompendiumMonster } from '@grimoire/shared';
 import { SummonMonsterPicker } from '@/systems/compendium/SummonMonsterPicker';
 import { PlaceItemHandoutPicker } from '@/systems/compendium/PlaceItemHandoutPicker';
 import { revealHandoutToPlayers } from '@/systems/compendium/revealHandout';
@@ -334,8 +339,14 @@ export function ItemContextMenu() {
       return;
     }
     const el = ref.current;
-    const { width, height } = el.getBoundingClientRect();
-    setPosition(clampMenuPosition(menu.x, menu.y, width || MENU_WIDTH, height));
+    const place = () => {
+      const { width, height } = el.getBoundingClientRect();
+      setPosition(clampMenuPosition(menu.x, menu.y, width || MENU_WIDTH, height));
+    };
+    place();
+    const observer = new ResizeObserver(place);
+    observer.observe(el);
+    return () => observer.disconnect();
   }, [menu, selected.length, single?.type, isGM]);
 
   function openFloatingPicker(
@@ -639,6 +650,8 @@ export function ItemContextMenu() {
           <Btn label="↺ Reset rotation" onClick={() => { resetTokenRotation(single.id); close(); }} />
         </>
       )}
+
+      {single?.type === 'token' && isGM && <AssignTokenStats token={single as TokenItem} />}
 
       {single?.type === 'token' && isGM && <TokenExtras token={single as TokenItem} />}
 
@@ -1105,6 +1118,214 @@ function TokenOwnerAssign({
         </p>
       )}
     </>
+  );
+}
+
+function dexModFromMonster(monster: CompendiumMonster): number | undefined {
+  if (monster.stats) {
+    const dex = parseStatsObject(monster.stats).find((a) => a.name === 'DEX');
+    if (dex) return dex.mod;
+  }
+  return parseAbilities(monster.description ?? '').find((a) => a.name === 'DEX')?.mod;
+}
+
+/** Combat stats only — never touches the token portrait. */
+function applyTokenStatPatch(tokenId: string, patch: Partial<TokenItem>): void {
+  const { imageUrl: _image, modelUrl: _model, ...stats } = patch;
+  useItemStore.getState().updateItem(tokenId, stats);
+  emitItemUpdate([{ id: tokenId, patch: stats }]);
+  if (stats.hp !== undefined || stats.maxHp !== undefined) {
+    applyTokenHpToCombatants(tokenId, {
+      ...(stats.hp !== undefined ? { hp: stats.hp } : {}),
+      ...(stats.maxHp !== undefined ? { maxHp: stats.maxHp } : {}),
+    });
+  }
+}
+
+function patchFromMonster(monster: CompendiumMonster): Partial<TokenItem> {
+  const dex = dexModFromMonster(monster);
+  return {
+    name: monster.name,
+    hp: monster.hp,
+    maxHp: monster.hp,
+    ac: monster.ac,
+    monsterId: monster.id,
+    monsterCr: String(monster.cr),
+    monsterSource: monster.source,
+    ...(dex !== undefined ? { initiativeMod: dex } : {}),
+  };
+}
+
+function AssignTokenStats({ token }: { token: TokenItem }) {
+  const [open, setOpen] = useState(false);
+  const [hp, setHp] = useState(String(token.hp));
+  const [maxHp, setMaxHp] = useState(String(token.maxHp));
+  const [ac, setAc] = useState(String(token.ac ?? 10));
+  const [init, setInit] = useState(String(token.initiativeMod ?? 0));
+  const [pasted, setPasted] = useState('');
+  const [codexQuery, setCodexQuery] = useState('');
+  const [note, setNote] = useState<string | null>(null);
+  const [applyingId, setApplyingId] = useState<string | null>(null);
+
+  useEffect(() => {
+    setHp(String(token.hp));
+    setMaxHp(String(token.maxHp));
+    setAc(String(token.ac ?? 10));
+    setInit(String(token.initiativeMod ?? 0));
+  }, [token.id, token.hp, token.maxHp, token.ac, token.initiativeMod]);
+
+  const codexQ = useQuery({
+    queryKey: ['compendium', 'assign-stats', codexQuery],
+    queryFn: () => searchMonsters({ q: codexQuery.trim(), limit: 8 }),
+    enabled: open && codexQuery.trim().length > 0,
+  });
+
+  function applyManual() {
+    const nextMax = Math.max(1, Math.round(Number(maxHp) || token.maxHp));
+    const nextHp = Math.max(0, Math.min(nextMax, Math.round(Number(hp) || 0)));
+    const nextAc = Math.max(0, Math.round(Number(ac) || 0));
+    const nextInit = Number(init);
+    applyTokenStatPatch(token.id, {
+      hp: nextHp,
+      maxHp: nextMax,
+      ac: nextAc,
+      ...(Number.isFinite(nextInit) ? { initiativeMod: Math.round(nextInit) } : {}),
+    });
+    setNote('Stats saved. Image unchanged.');
+  }
+
+  function applyPasted() {
+    const raw = pasted.trim();
+    if (!raw) {
+      setNote('Paste a stat block first.');
+      return;
+    }
+    const parsed = parseMonsterStatBlock(raw);
+    const dex = parseAbilities(parsed.description).find((a) => a.name === 'DEX');
+    if (!parsed.name && parsed.hp == null && parsed.ac == null && !dex) {
+      setNote('Could not read HP, AC, or a name from that text.');
+      return;
+    }
+    applyTokenStatPatch(token.id, {
+      ...(parsed.name ? { name: parsed.name } : {}),
+      ...(parsed.hp != null ? { hp: parsed.hp, maxHp: parsed.hp } : {}),
+      ...(parsed.ac != null ? { ac: parsed.ac } : {}),
+      ...(parsed.cr ? { monsterCr: parsed.cr } : {}),
+      ...(dex ? { initiativeMod: dex.mod } : {}),
+    });
+    setNote('Pasted stats applied. Image unchanged.');
+  }
+
+  async function applyCodexMonster(id: string) {
+    setApplyingId(id);
+    setNote(null);
+    try {
+      const monster = await getMonster(id);
+      applyTokenStatPatch(token.id, patchFromMonster(monster));
+      setNote(`Applied ${monster.name}. Image unchanged.`);
+      setCodexQuery('');
+    } catch {
+      setNote('Could not load that monster.');
+    } finally {
+      setApplyingId(null);
+    }
+  }
+
+  return (
+    <>
+      <div className="gold-divider my-1" />
+      <button
+        type="button"
+        className="w-full text-left px-3 py-1.5 text-xs font-ui"
+        style={{ color: 'var(--color-text-primary)' }}
+        onClick={() => setOpen((v) => !v)}
+      >
+        ✎ Assign stats
+      </button>
+      {open && (
+        <div className="px-3 pb-2 space-y-2" style={{ width: 240 }} onPointerDown={(e) => e.stopPropagation()}>
+          <p className="font-ui text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
+            The token image stays as it is.
+          </p>
+          <StatField label="HP" value={hp} onChange={setHp} />
+          <StatField label="Max" value={maxHp} onChange={setMaxHp} />
+          <StatField label="AC" value={ac} onChange={setAc} />
+          <StatField label="Init" value={init} onChange={setInit} />
+          <button type="button" className="btn-primary text-xs w-full py-0.5" onClick={applyManual}>
+            Apply numbers
+          </button>
+
+          <div className="space-y-1">
+            <p className="font-ui text-[10px]" style={{ color: 'var(--color-accent-gold)' }}>Paste stat block</p>
+            <textarea
+              className="input-dark text-xs w-full h-16"
+              placeholder="Paste monster stat block…"
+              value={pasted}
+              onChange={(e) => setPasted(e.target.value)}
+              onKeyDown={(e) => e.stopPropagation()}
+            />
+            <button type="button" className="btn-ghost text-xs w-full py-0.5" onClick={applyPasted}>
+              Apply pasted stats
+            </button>
+          </div>
+
+          <div className="space-y-1">
+            <p className="font-ui text-[10px]" style={{ color: 'var(--color-accent-gold)' }}>Codex monster</p>
+            <input
+              className="input-dark text-xs w-full py-0.5"
+              placeholder="Search compendium…"
+              value={codexQuery}
+              onChange={(e) => setCodexQuery(e.target.value)}
+              onKeyDown={(e) => e.stopPropagation()}
+            />
+            <div className="max-h-28 overflow-y-auto space-y-0.5">
+              {codexQ.isFetching && (
+                <p className="font-ui text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>Searching…</p>
+              )}
+              {codexQ.data?.items.map((monster) => (
+                <button
+                  key={monster.id}
+                  type="button"
+                  className="w-full text-left px-1.5 py-1 rounded text-xs font-ui"
+                  style={{ background: 'var(--color-bg-primary)', color: 'var(--color-text-primary)' }}
+                  disabled={applyingId === monster.id}
+                  onClick={() => { void applyCodexMonster(monster.id); }}
+                >
+                  <span className="block truncate">{monster.name}</span>
+                  <span style={{ color: 'var(--color-text-secondary)', fontSize: 9 }}>CR {monster.cr}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+          {note && (
+            <p className="font-ui text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>{note}</p>
+          )}
+        </div>
+      )}
+    </>
+  );
+}
+
+function StatField({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="flex items-center gap-2 font-ui text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
+      <span className="w-8 shrink-0">{label}</span>
+      <input
+        type="number"
+        className="input-dark text-xs py-0.5 flex-1"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onKeyDown={(e) => e.stopPropagation()}
+      />
+    </label>
   );
 }
 

@@ -23,7 +23,7 @@ export function SummonMonsterPicker({
   });
 
   function pick(monster: CompendiumMonster) {
-    summonMonster(monster, { x: worldX, y: worldY });
+    void summonMonster(monster, { x: worldX, y: worldY });
     onSummon?.();
   }
 

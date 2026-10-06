@@ -5,6 +5,8 @@ import { getActiveMap, useItemStore } from '@/systems/scene/store/itemStore';
 import { emitItemAdd } from '@/systems/scene/sceneSync';
 import { snapPoint } from '@/systems/scene/snap';
 import type { TokenItem } from '@/systems/scene/types';
+import { getEntryImages } from './compendiumApi';
+import { preloadCompendiumImageUrl } from './preloadCompendiumImage';
 import { parseAbilities, parseStatsObject } from './statBlockParser';
 
 function dexModFromMonster(monster: CompendiumMonster): number | undefined {
@@ -23,13 +25,27 @@ export interface SummonPosition {
   y: number;
 }
 
-export function summonMonster(monster: CompendiumMonster, at?: SummonPosition): TokenItem | null {
+async function resolveMonsterPortrait(monster: CompendiumMonster): Promise<string | undefined> {
+  if (monster.imageUrl) return monster.imageUrl;
+  if (monster.image && !monster.image.includes('static-image')) return monster.image;
+  try {
+    const state = await getEntryImages('monster', monster.id);
+    return state.current ?? monster.imageUrl ?? undefined;
+  } catch {
+    return monster.imageUrl;
+  }
+}
+
+export async function summonMonster(monster: CompendiumMonster, at?: SummonPosition): Promise<TokenItem | null> {
   const map = getActiveMap();
   if (!map) return null;
 
+  const portrait = await resolveMonsterPortrait(monster);
+  preloadCompendiumImageUrl(portrait);
+
   const grid = map.gridSize;
   const defaults = monsterToTokenDefaults(
-    { ...monster, ...(monster.imageUrl ? { imageUrl: monster.imageUrl } : {}) },
+    { ...monster, ...(portrait ? { imageUrl: portrait } : {}) },
     grid,
   );
 

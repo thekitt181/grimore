@@ -91,7 +91,7 @@ export function MonsterDexPanel({ onClose }: { onClose: () => void }) {
             editable={canEdit}
             {...(isGM ? {
               onSummon: () => {
-                summonMonster(monsterQ.data!, summonAt ?? undefined);
+                void summonMonster(monsterQ.data!, summonAt ?? undefined);
                 setSummonAt(null);
               },
             } : {})}

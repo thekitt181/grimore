@@ -109,7 +109,8 @@ export function resolveEntryImageUrl(
 
   if (custom) {
     if (custom.startsWith('data:image')) return compendiumStaticImagePath(key);
-    if (/^https?:\/\//.test(custom)) return custom;
+    // Serve remote URLs through our static-image route so WebGL tokens are not blocked by CORS.
+    if (/^https?:\/\//.test(custom)) return compendiumStaticImagePath(key);
     if (custom.includes('static-image')) {
       const staticKey = extractStaticKey(custom);
       return staticKey ? compendiumStaticImagePath(staticKey) : compendiumStaticImagePath(key);
@@ -403,6 +404,50 @@ export function serveAssetFile(relativePath: string, res: import('express').Resp
   const clean = relativePath.replace(/^(\.\.(\/|\\|$))+/, '').replace(/^\/+/, '');
   if (tryServeAssetFile(clean, res)) return;
   res.status(404).json({ error: 'Asset not found' });
+}
+
+const MAX_PROXY_IMAGE_BYTES = 8 * 1024 * 1024;
+
+/** Public http(s) images only — blocks localhost and private networks. */
+export function isPublicHttpImageUrl(raw: string): boolean {
+  try {
+    const u = new URL(raw);
+    if (u.protocol !== 'https:' && u.protocol !== 'http:') return false;
+    if (u.username || u.password) return false;
+    const host = u.hostname.toLowerCase().replace(/^\[|\]$/g, '');
+    if (host === 'localhost' || host.endsWith('.local') || host.endsWith('.internal')) return false;
+    if (host === '0.0.0.0' || host === '::1' || host.startsWith('127.')) return false;
+    if (/^10\./.test(host) || /^192\.168\./.test(host) || /^169\.254\./.test(host)) return false;
+    if (/^172\.(1[6-9]|2\d|3[0-1])\./.test(host)) return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function fetchPublicImage(url: string): Promise<{ body: Buffer; contentType: string } | null> {
+  if (!isPublicHttpImageUrl(url)) return null;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 12_000);
+  try {
+    const res = await fetch(url, {
+      signal: controller.signal,
+      redirect: 'follow',
+      headers: { Accept: 'image/*,*/*', 'User-Agent': 'GrimoireVTT/1.0' },
+    });
+    if (!res.ok) return null;
+    const contentType = (res.headers.get('content-type') ?? '').split(';')[0]?.trim() || 'image/jpeg';
+    if (!contentType.startsWith('image/')) return null;
+    const len = Number(res.headers.get('content-length') ?? '0');
+    if (len > MAX_PROXY_IMAGE_BYTES) return null;
+    const body = Buffer.from(await res.arrayBuffer());
+    if (body.length > MAX_PROXY_IMAGE_BYTES) return null;
+    return { body, contentType };
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function proxyExternalImage(url: string, res: import('express').Response): Promise<void> {

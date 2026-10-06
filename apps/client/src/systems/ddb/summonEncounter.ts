@@ -27,7 +27,7 @@ export async function summonEncounterMonsters(monsters: DdbEncounterMonster[]): 
           const result = await searchMonsters({ q: m.name, limit: 1 });
           const match = result.items[0];
           if (match) {
-            const token = summonMonster(match, { x, y });
+            const token = await summonMonster(match, { x, y });
             if (token) spawned.push(token);
             continue;
           }

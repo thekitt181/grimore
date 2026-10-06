@@ -35,6 +35,7 @@ import {
   getEntryImageState,
   saveEntryImage,
   serveAssetFile,
+  fetchPublicImage,
   serveStaticImage,
 } from '../services/compendiumImages';
 const router = Router();
@@ -87,6 +88,22 @@ router.post('/admin/verify', ...auth, (req: AuthenticatedRequest, res) => {
 
 router.get('/admin/configured', ...auth, (_req, res) => {
   res.json({ configured: Boolean(getCompendiumAdminPassword()) });
+});
+
+router.get('/proxy-image', async (req, res) => {
+  const url = typeof req.query['url'] === 'string' ? req.query['url'] : '';
+  try {
+    const image = await fetchPublicImage(url);
+    if (!image) {
+      res.status(400).json({ error: 'Invalid image URL' });
+      return;
+    }
+    res.setHeader('Content-Type', image.contentType);
+    res.setHeader('Cache-Control', 'private, max-age=86400');
+    res.send(image.body);
+  } catch (err) {
+    respondCompendiumError(res, err, '[Compendium] proxy-image:', 'Failed to proxy image');
+  }
 });
 
 router.get('/static-image', async (req, res) => {

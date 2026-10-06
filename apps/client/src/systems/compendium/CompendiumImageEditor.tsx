@@ -5,7 +5,7 @@ import type { CompendiumImageKind } from '@grimoire/shared';
 import { fileToCompressedDataUrl } from '@/lib/imagePersistence';
 import { getEntryImages, saveEntryImages } from './compendiumApi';
 import { withCompendiumImageCacheBust, sameCompendiumImageUrl } from './compendiumImageUrl';
-import { syncCompendiumImageToHandouts } from './syncHandoutImages';
+import { syncCompendiumImageToHandouts, syncCompendiumImageToMonsterTokens } from './syncHandoutImages';
 import { preloadCompendiumImageUrl } from './preloadCompendiumImage';
 import { useGrimoireAuth } from '@/hooks/useGrimoireAuth';
 
@@ -56,6 +56,9 @@ export function CompendiumImageEditor({
       qc.setQueryData(['compendium', kind, entryId, 'images'], data);
       if (kind === 'item' && data.current) {
         syncCompendiumImageToHandouts(entryId, data.current);
+      }
+      if (kind === 'monster') {
+        syncCompendiumImageToMonsterTokens(entryId, data.current);
       }
       preloadCompendiumImageUrl(data.current, data.updatedAt);
       void qc.invalidateQueries({ queryKey: ['compendium', kind, entryId, 'images'] });
