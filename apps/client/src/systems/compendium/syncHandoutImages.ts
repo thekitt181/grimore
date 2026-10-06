@@ -33,11 +33,7 @@ export function syncCompendiumImageToMonsterTokens(monsterId: string, imageUrl: 
   for (const item of Object.values(store.items)) {
     if (item.type !== 'token' || item.monsterId !== monsterId) continue;
     if (item.imageUrl) evictTexture(item.imageUrl);
-    if (imageUrl) {
-      updates.push({ id: item.id, patch: { imageUrl } });
-    } else {
-      updates.push({ id: item.id, patch: { imageUrl: undefined } });
-    }
+    updates.push({ id: item.id, patch: { imageUrl: imageUrl ?? '' } });
   }
 
   if (updates.length === 0) return;
