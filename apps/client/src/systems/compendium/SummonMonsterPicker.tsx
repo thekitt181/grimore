@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import type { CompendiumMonster } from '@grimoire/shared';
 import { searchMonsters } from './compendiumApi';
+import { useCompendiumUiStore } from './compendiumStore';
 import { summonMonster } from './summonMonster';
 
 export function SummonMonsterPicker({
@@ -16,6 +17,8 @@ export function SummonMonsterPicker({
   onBack?: () => void;
 }) {
   const [query, setQuery] = useState('');
+  const summonHidden = useCompendiumUiStore((s) => s.summonHidden);
+  const setSummonHidden = useCompendiumUiStore((s) => s.setSummonHidden);
 
   const monstersQ = useQuery({
     queryKey: ['compendium', 'summon-picker', query],
@@ -23,7 +26,7 @@ export function SummonMonsterPicker({
   });
 
   function pick(monster: CompendiumMonster) {
-    void summonMonster(monster, { x: worldX, y: worldY });
+    void summonMonster(monster, { x: worldX, y: worldY }, summonHidden ? { hidden: true } : undefined);
     onSummon?.();
   }
 
@@ -39,7 +42,7 @@ export function SummonMonsterPicker({
           ← Back
         </button>
       )}
-      <div className="px-2 py-1">
+      <div className="px-2 py-1 space-y-1">
         <input
           className="input-dark text-xs py-0.5 w-full"
           placeholder="Search monsters…"
@@ -47,6 +50,14 @@ export function SummonMonsterPicker({
           autoFocus
           onChange={(e) => setQuery(e.target.value)}
         />
+        <label className="font-ui text-xs flex items-center gap-1 cursor-pointer" style={{ color: 'var(--color-text-secondary)' }}>
+          <input
+            type="checkbox"
+            checked={summonHidden}
+            onChange={(e) => setSummonHidden(e.target.checked)}
+          />
+          Summon hidden
+        </label>
       </div>
       <div className="max-h-48 overflow-y-auto px-1 space-y-0.5">
         {monstersQ.isLoading && (

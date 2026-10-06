@@ -43,7 +43,13 @@ const CONDITIONS = [
   'Stunned', 'Unconscious', 'Exhaustion',
 ];
 
-interface ItemMenuState { x: number; y: number; kind: 'item' }
+interface ItemMenuState {
+  x: number;
+  y: number;
+  kind: 'item';
+  worldX?: number;
+  worldY?: number;
+}
 interface MapMenuState {
   x: number;
   y: number;
@@ -72,7 +78,7 @@ function resolveContextMenu(
       const store = useItemStore.getState();
       store.select([mapAt.id], 'set');
       store.setActiveMap(mapAt.id);
-      return { x: clientX, y: clientY, kind: 'item' };
+      return { x: clientX, y: clientY, kind: 'item', worldX: wx, worldY: wy };
     }
     useItemStore.getState().clearSelection();
     return { x: clientX, y: clientY, kind: 'map', worldX: wx, worldY: wy };
@@ -631,6 +637,12 @@ export function ItemContextMenu() {
       {single?.type === 'map' && isGM && (
         <>
           <div className="gold-divider my-1" />
+          {menu.worldX != null && menu.worldY != null && (
+            <Btn
+              label="🐉 Summon monster here"
+              onClick={() => openFloatingPicker('monster', menu.worldX!, menu.worldY!, menu.x, menu.y)}
+            />
+          )}
           <MapWeatherMenuSection mapId={single.id} onDone={close} />
           <MapTimeMenuSection onDone={close} />
           <div className="gold-divider my-1" />
