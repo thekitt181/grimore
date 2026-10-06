@@ -94,7 +94,10 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
     }
 
     function canDragToken(item: Item): item is TokenItem {
-      return item.type === 'token' && !item.locked && item.visible !== false;
+      if (item.type !== 'token' || item.locked) return false;
+      // GM can reposition tokens hidden from players; players cannot.
+      if (item.visible === false && !isGm()) return false;
+      return true;
     }
 
     function beginTokenDrag(tokenId: string, e: PointerEvent) {

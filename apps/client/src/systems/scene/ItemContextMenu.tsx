@@ -642,7 +642,7 @@ export function ItemContextMenu() {
         </>
       )}
 
-      {single?.type === 'token' && isGM && !single.locked && single.visible !== false && (
+      {single?.type === 'token' && isGM && !single.locked && (
         <>
           <div className="gold-divider my-1" />
           <Btn label="⟲ Rotate left (45°)" onClick={() => { rotateToken(single.id, -45); close(); }} />

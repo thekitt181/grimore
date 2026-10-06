@@ -22,12 +22,12 @@ export function allTargetableTokens(): TokenItem[] {
   );
 }
 
-/** Unlocked visible tokens the current client may drag (GM: all; players: same rules). */
+/** Unlocked tokens the current client may drag (GM includes hidden; players do not). */
 export function allInteractableTokens(): TokenItem[] {
   const items = useItemStore.getState().items;
   if (useSessionStore.getState().myRole === 'GM') {
     return Object.values(items).filter(
-      (i): i is TokenItem => i.type === 'token' && i.visible !== false && !i.locked,
+      (i): i is TokenItem => i.type === 'token' && !i.locked,
     );
   }
   return playerInteractableTokens(items);
@@ -259,7 +259,7 @@ function pickInteractableAt(clientX: number, clientY: number, tokens: TokenItem[
   const pickId = pickSceneItem(clientX, clientY);
   if (pickId) {
     const ray = useItemStore.getState().items[pickId];
-    if (ray?.type === 'token' && ray.visible !== false && tokens.some((t) => t.id === ray.id)) {
+    if (ray?.type === 'token' && tokens.some((t) => t.id === ray.id)) {
       return ray as TokenItem;
     }
   }

@@ -2,6 +2,8 @@ import { useRef } from 'react';
 import * as THREE from 'three';
 import { useItemStore } from '@/systems/scene/store/itemStore';
 import { useMapStore } from '@/systems/map/store/mapStore';
+import { useSessionStore } from '@/store/sessionStore';
+import { isSceneItemOnTable } from '@/systems/scene/sceneMapsForClient';
 import type { ImageItem } from '@/systems/scene/types';
 import { useThreeTexture } from './useThreeTexture';
 import { SceneItemTransformGroup } from './TokenTransformGroup';
@@ -28,6 +30,7 @@ function MapImageMesh({ item }: { item: ImageItem }) {
           {...(texture ? { map: texture } : {})}
           color={texture ? '#ffffff' : '#1c1c28'}
           transparent
+          opacity={item.visible === false ? 0.35 : 1}
           roughness={0.65}
           metalness={0.05}
           side={THREE.DoubleSide}
@@ -53,7 +56,10 @@ export function Map3DImages({ images }: { images: ImageItem[] }) {
 export function Map3DImageLayer() {
   const viewMode = useMapStore((s) => s.viewMode);
   const items = useItemStore((s) => s.items);
+  const gm = useSessionStore((s) => s.myRole === 'GM');
   if (viewMode !== '3d') return null;
-  const images = Object.values(items).filter((i): i is ImageItem => i.type === 'image' && i.visible !== false);
+  const images = Object.values(items).filter(
+    (i): i is ImageItem => i.type === 'image' && isSceneItemOnTable(i, gm),
+  );
   return <Map3DImages images={images} />;
 }

@@ -29,7 +29,7 @@ export function MobileDdbTokenBar() {
   const isPc = isDdbPcToken(token);
   const isGM = myRole === 'GM';
   const canRotate = playerCanRotateToken(token, myUserId);
-  const canAdjustRotation = (isGM || canRotate) && !token.locked && token.visible !== false;
+  const canAdjustRotation = (isGM || canRotate) && !token.locked;
 
   if (!isPc && !canAdjustRotation) return null;
 

@@ -220,7 +220,7 @@ function manipulableSelected(items: Record<string, Item>, selectedIds: string[],
     .map((id) => items[id])
     .filter((it): it is Item => {
       if (!it || it.locked) return false;
-      if (it.type === 'token') return it.visible !== false;
+      if (it.type === 'token') return gm || it.visible !== false;
       return gm;
     });
 }

@@ -161,7 +161,7 @@ function TokenControls({
   const resetTokenRotation = useTokenStore((s) => s.resetTokenRotation);
   const isMonster = Boolean(token.monsterId);
   const canRotate = playerCanRotateToken(token, myUserId);
-  const showResetRotation = (isGM || canRotate) && !token.locked && token.visible !== false;
+  const showResetRotation = (isGM || canRotate) && !token.locked;
 
   if (!isGM && isMonster) {
     return (

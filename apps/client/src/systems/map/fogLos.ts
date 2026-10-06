@@ -1,4 +1,10 @@
-import type { Point } from '@grimoire/fog-engine';
+import {
+  computeVisibilityPolygon,
+  computeVisibilityPolygonDirectional,
+  rayHitSegment,
+  type Point,
+  type WallSegment as LosWall,
+} from '@grimoire/fog-engine';
 import type { Item, MapItem, TokenItem, WallSegment } from '@/systems/scene/types';
 import { cellKey } from './store/mapStore';
 
@@ -7,8 +13,8 @@ export const DEFAULT_VISION_FT = DEFAULT_VISION_CELLS * 5;
 /** Total vision cone width in degrees (centered on token facing). */
 export const DEFAULT_VISION_ARC_DEG = 90;
 
-/** Player vision is a smooth circle/cone — not wall-blocked or grid-square clipped. */
-const SMOOTH_CIRCLE_SEGMENTS = 96;
+/** Ignore hits closer than this so a token standing against a wall is not blinded. */
+const WALL_HIT_EPSILON = 1.25;
 
 export interface LosOptions {
   /** When true, vision is a forward arc based on token rotation (players). */
@@ -84,55 +90,23 @@ export function visionBounds(
   };
 }
 
-function pointOnVisionRay(
-  origin: Point,
-  angle: number,
-  radius: number,
-  mapW: number,
-  mapH: number,
-): Point {
-  const dx = Math.cos(angle);
-  const dy = Math.sin(angle);
-  let r = radius;
-  if (dx > 1e-10) r = Math.min(r, (mapW - origin.x) / dx);
-  else if (dx < -1e-10) r = Math.min(r, (0 - origin.x) / dx);
-  if (dy > 1e-10) r = Math.min(r, (mapH - origin.y) / dy);
-  else if (dy < -1e-10) r = Math.min(r, (0 - origin.y) / dy);
-  r = Math.max(0, r);
-  return { x: origin.x + dx * r, y: origin.y + dy * r };
+function losWalls(map: MapItem): LosWall[] {
+  return allMapWalls(map);
 }
 
-function smoothVisionCircle(
-  origin: Point,
-  radius: number,
-  mapW: number,
-  mapH: number,
-): Point[] {
-  const points: Point[] = [];
-  for (let i = 0; i < SMOOTH_CIRCLE_SEGMENTS; i++) {
-    const a = (2 * Math.PI * i) / SMOOTH_CIRCLE_SEGMENTS;
-    points.push(pointOnVisionRay(origin, a, radius, mapW, mapH));
+/** True when a drawn wall (or the map edge) sits between the origin and the point. */
+function wallBlocksPoint(origin: Point, px: number, py: number, walls: LosWall[]): boolean {
+  const dx = px - origin.x;
+  const dy = py - origin.y;
+  const dist = Math.hypot(dx, dy);
+  if (dist < 1e-6) return false;
+  const dirX = dx / dist;
+  const dirY = dy / dist;
+  for (const wall of walls) {
+    const t = rayHitSegment(origin, dirX, dirY, wall);
+    if (t !== null && t > WALL_HIT_EPSILON && t < dist - 0.5) return true;
   }
-  return points;
-}
-
-function smoothVisionCone(
-  origin: Point,
-  radius: number,
-  facing: number,
-  arc: number,
-  mapW: number,
-  mapH: number,
-): Point[] {
-  const half = arc / 2;
-  const minA = facing - half;
-  const steps = Math.max(48, Math.ceil((arc / (2 * Math.PI)) * SMOOTH_CIRCLE_SEGMENTS));
-  const points: Point[] = [origin];
-  for (let i = 0; i <= steps; i++) {
-    const a = minA + (arc * i) / steps;
-    points.push(pointOnVisionRay(origin, a, radius, mapW, mapH));
-  }
-  return points;
+  return false;
 }
 
 /** Tokens on this map that contribute line-of-sight. */
@@ -172,7 +146,7 @@ export function getVisionTokens(
   );
 }
 
-/** Smooth circle/cone vision polygons — no wall blocking or auto LOS prediction. */
+/** Vision polygons clipped by drawn walls and the map boundary. */
 export function losPolygons(
   map: MapItem,
   tokens: TokenItem[],
@@ -181,17 +155,22 @@ export function losPolygons(
 ): Point[][] {
   if (tokens.length === 0) return [];
   const directional = options.directional ?? false;
-  const mapW = map.width;
-  const mapH = map.height;
+  const walls = losWalls(map);
 
   return tokens.map((token) => {
     const origin = tokenMapOrigin(token, map);
-    const radius = (token.visionRadius ?? 0) * gridSize;
+    const radius = Math.max(1, (token.visionRadius ?? 0) * gridSize);
     const arc = visionArcRad(token);
     if (directional && arc < Math.PI * 2 - 0.01) {
-      return smoothVisionCone(origin, radius, tokenFacingRad(token, map), arc, mapW, mapH);
+      return computeVisibilityPolygonDirectional(
+        origin,
+        walls,
+        radius,
+        tokenFacingRad(token, map),
+        arc,
+      );
     }
-    return smoothVisionCircle(origin, radius, mapW, mapH);
+    return computeVisibilityPolygon(origin, walls, radius);
   });
 }
 
@@ -214,6 +193,7 @@ function pointVisibleFromOrigin(
   facing: number,
   halfArc: number,
   directional: boolean,
+  walls: LosWall[],
 ): boolean {
   const dx = px - origin.x;
   const dy = py - origin.y;
@@ -221,6 +201,7 @@ function pointVisibleFromOrigin(
   if (dist < 1e-6) return true;
   if (dist > radiusPx + 1e-6) return false;
   if (directional && !angleInArc(Math.atan2(dy, dx), facing, halfArc)) return false;
+  if (wallBlocksPoint(origin, px, py, walls)) return false;
   return true;
 }
 
@@ -237,7 +218,7 @@ function cellSamplePoints(cx: number, cy: number, gridSize: number): Point[] {
   ];
 }
 
-/** Rasterize vision to grid cells (distance + arc only — no wall blocking). */
+/** Rasterize vision to grid cells, stopping at drawn walls. */
 function computeLosVisibleCellKeys(
   map: MapItem,
   tokens: TokenItem[],
@@ -250,6 +231,7 @@ function computeLosVisibleCellKeys(
   const cols = Math.ceil(map.width / gridSize);
   const rows = Math.ceil(map.height / gridSize);
   const directional = options.directional ?? false;
+  const walls = losWalls(map);
 
   for (const token of tokens) {
     const origin = tokenMapOrigin(token, map);
@@ -274,6 +256,7 @@ function computeLosVisibleCellKeys(
             facing,
             halfArc,
             directional,
+            walls,
           ),
         );
         if (visible) cells.add(cellKey(cx, cy));
@@ -285,6 +268,12 @@ function computeLosVisibleCellKeys(
 
 const losCellCache = new Map<string, Set<string>>();
 const LOS_CACHE_MAX = 64;
+
+function wallsSignature(map: MapItem): string {
+  return (map.walls ?? [])
+    .map((w) => `${w.a.x.toFixed(0)},${w.a.y.toFixed(0)}>${w.b.x.toFixed(0)},${w.b.y.toFixed(0)}`)
+    .join('|');
+}
 
 function tokensSignature(map: MapItem, tokens: TokenItem[]): string {
   return tokens.map((t) => {
@@ -309,7 +298,7 @@ export function losVisibleCellKeys(
   options: LosOptions = {},
 ): Set<string> {
   const directional = options.directional ?? false;
-  const key = `${map.id}|${gridSize}|${directional ? 1 : 0}|${tokensSignature(map, tokens)}`;
+  const key = `${map.id}|${gridSize}|${directional ? 1 : 0}|${wallsSignature(map)}|${tokensSignature(map, tokens)}`;
   const hit = losCellCache.get(key);
   if (hit) return hit;
 
