@@ -91,7 +91,8 @@ export function MonsterDexPanel({ onClose }: { onClose: () => void }) {
             editable={canEdit}
             {...(isGM ? {
               onSummon: () => {
-                void summonMonster(monsterQ.data!, summonAt ?? undefined);
+                const hidden = useCompendiumUiStore.getState().summonHidden;
+                void summonMonster(monsterQ.data!, summonAt ?? undefined, hidden ? { hidden: true } : undefined);
                 setSummonAt(null);
               },
             } : {})}

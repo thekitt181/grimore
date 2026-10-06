@@ -18,6 +18,8 @@ interface CompendiumUiState {
   creating: boolean;
   lastSyncAt: string | null;
   summonAt: { x: number; y: number } | null;
+  /** When set, the next codex Summon places a GM-only token. */
+  summonHidden: boolean;
   setTab: (tab: CompendiumTab) => void;
   setBrowseMode: (mode: CompendiumBrowseMode) => void;
   setSelectedSource: (source: string | null) => void;
@@ -30,6 +32,7 @@ interface CompendiumUiState {
   setCreating: (creating: boolean) => void;
   setLastSyncAt: (ts: string | null) => void;
   setSummonAt: (at: { x: number; y: number } | null) => void;
+  setSummonHidden: (summonHidden: boolean) => void;
   startCreate: () => void;
 }
 
@@ -46,6 +49,7 @@ export const useCompendiumUiStore = create<CompendiumUiState>((set) => ({
   creating: false,
   lastSyncAt: null,
   summonAt: null,
+  summonHidden: false,
   setTab: (tab) => set((s) => ({
     tab,
     selectedSource: null,
@@ -93,6 +97,7 @@ export const useCompendiumUiStore = create<CompendiumUiState>((set) => ({
   setCreating: (creating) => set({ creating, ...(creating ? { selectedMonsterId: null, selectedItemId: null, selectedSpellId: null } : {}) }),
   setLastSyncAt: (lastSyncAt) => set({ lastSyncAt }),
   setSummonAt: (summonAt) => set({ summonAt }),
+  setSummonHidden: (summonHidden) => set({ summonHidden }),
   startCreate: () => set({
     creating: true,
     panelOpen: true,

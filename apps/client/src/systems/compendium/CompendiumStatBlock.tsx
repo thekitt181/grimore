@@ -168,6 +168,24 @@ function PublishToDexButton({
   );
 }
 
+function SummonActions({ onSummon }: { onSummon: () => void }) {
+  const summonHidden = useCompendiumUiStore((s) => s.summonHidden);
+  const setSummonHidden = useCompendiumUiStore((s) => s.setSummonHidden);
+  return (
+    <div className="flex flex-1 items-center gap-2 min-w-0">
+      <button type="button" className="btn-primary text-xs px-2 py-1 flex-1" onClick={onSummon}>Summon</button>
+      <label className="font-ui text-xs flex items-center gap-1 shrink-0 cursor-pointer" style={{ color: 'var(--color-text-secondary)' }}>
+        <input
+          type="checkbox"
+          checked={summonHidden}
+          onChange={(e) => setSummonHidden(e.target.checked)}
+        />
+        Hidden
+      </label>
+    </div>
+  );
+}
+
 export function MonsterStatBlock({
   monster,
   editable = false,
@@ -286,7 +304,7 @@ export function MonsterStatBlock({
               <PublishToDexButton kind="monster" name={monster.name} isDraft={monster.isDraft} />
             )}
             {onSummon && (
-              <button className="btn-primary text-xs px-2 py-1 flex-1" onClick={onSummon}>Summon</button>
+              <SummonActions onSummon={onSummon} />
             )}
             {editable && (
               <>

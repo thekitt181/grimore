@@ -36,7 +36,11 @@ async function resolveMonsterPortrait(monster: CompendiumMonster): Promise<strin
   }
 }
 
-export async function summonMonster(monster: CompendiumMonster, at?: SummonPosition): Promise<TokenItem | null> {
+export async function summonMonster(
+  monster: CompendiumMonster,
+  at?: SummonPosition,
+  opts?: { hidden?: boolean },
+): Promise<TokenItem | null> {
   const map = getActiveMap();
   if (!map) return null;
 
@@ -76,7 +80,7 @@ export async function summonMonster(monster: CompendiumMonster, at?: SummonPosit
     height: defaults.height,
     zIndex: 0,
     locked: false,
-    visible: true,
+    visible: opts?.hidden ? false : true,
     name: defaults.name,
     sizeCells: defaults.sizeCells,
     hp: defaults.hp,
