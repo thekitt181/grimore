@@ -32,10 +32,15 @@ export function snapPoint(wx: number, wy: number): { x: number; y: number } {
   };
 }
 
-/** Snap a single dimension (width/height) to a positive multiple of the grid. */
-export function snapSize(value: number): number {
+/**
+ * Snap a dimension to the grid.
+ * `minCells` is the smallest footprint (tokens use 0.25 so they can shrink below one square).
+ */
+export function snapSize(value: number, minCells = 1): number {
   const g = activeGridInfo();
-  return Math.max(g.gridSize, Math.round(value / g.gridSize) * g.gridSize);
+  const cells = Math.max(0.25, minCells);
+  const quantum = Math.max(1, g.gridSize * cells);
+  return Math.max(quantum, Math.round(value / quantum) * quantum);
 }
 
 /** Snap a rotation (degrees) to 15-degree steps. */

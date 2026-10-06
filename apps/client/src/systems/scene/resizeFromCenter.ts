@@ -42,7 +42,10 @@ export function resizeFromCenter(
   if (opts.aspectLock) {
     const ratio = item.width / item.height;
     if (handleSx !== 0 && handleSy !== 0) {
-      const sca = Math.max(newW / item.width, newH / item.height);
+      const denom = item.width * item.width + item.height * item.height;
+      const t = denom > 1e-6 ? (newW * item.width + newH * item.height) / denom : 1;
+      const minScale = MIN / Math.max(item.width, item.height, 1);
+      const sca = Math.max(minScale, t);
       newW = item.width * sca;
       newH = item.height * sca;
     } else if (handleSx !== 0) {
@@ -58,8 +61,9 @@ export function resizeFromCenter(
     if (opts.aspectLock) {
       const ratio = item.width / item.height;
       if (handleSx !== 0 && handleSy !== 0) {
-        const sca = Math.max(newW / item.width, newH / item.height);
-        newW = snapSize(item.width * sca);
+        const denom = item.width * item.width + item.height * item.height;
+        const t = denom > 1e-6 ? (newW * item.width + newH * item.height) / denom : 1;
+        newW = snapSize(item.width * Math.max(t, MIN / Math.max(item.width, 1)));
         newH = newW / ratio;
       } else if (handleSx !== 0) {
         newH = newW / ratio;

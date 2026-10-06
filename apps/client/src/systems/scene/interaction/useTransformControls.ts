@@ -138,6 +138,18 @@ function aspectLocked(item: Item): boolean {
   return item.type === 'map' || item.type === 'token' || item.type === 'handout' || item.type === 'image';
 }
 
+/**
+ * Uniform scale from a corner drag. Projects the pointer onto the original
+ * aspect diagonal so pulling a handle inward shrinks instead of sticking
+ * on whichever axis is still large.
+ */
+function aspectScaleFromCorner(rawW: number, rawH: number, w0: number, h0: number, minScale: number): number {
+  const denom = w0 * w0 + h0 * h0;
+  if (denom < 1e-6) return 1;
+  const t = (rawW * w0 + rawH * h0) / denom;
+  return Math.max(minScale, t);
+}
+
 // ─── Hook ────────────────────────────────────────────────────────────────────
 
 export function useTransformControls(appReady: boolean) {
@@ -305,14 +317,19 @@ export function useTransformControls(appReady: boolean) {
           if (aspectLocked(it)) {
             const ratio = w0 / h0;
             if (sx !== 0 && sy !== 0) {
-              const sca = Math.max(newW / w0, newH / h0);
+              const minScale = MIN / Math.max(w0, h0, 1);
+              const sca = aspectScaleFromCorner(newW, newH, w0, h0, minScale);
               newW = w0 * sca; newH = h0 * sca;
             } else if (sx !== 0) { newH = newW / ratio; }
             else { newW = newH * ratio; }
           }
           if (snap) {
-            if (sx !== 0) newW = snapSize(newW);
-            if (sy !== 0) newH = snapSize(newH);
+            const minCells = it.type === 'token' ? 0.25 : 1;
+            if (sx !== 0) newW = snapSize(newW, minCells);
+            if (sy !== 0) newH = snapSize(newH, minCells);
+            if (aspectLocked(it) && w0 > 0) {
+              newH = h0 * (newW / w0);
+            }
           }
 
           const half = rot(sx * (newW / 2), sy * (newH / 2), rot0);
@@ -353,9 +370,9 @@ export function useTransformControls(appReady: boolean) {
         const aX = drag.groupAnchorX!, aY = drag.groupAnchorY!;
         const w0 = drag.groupMaxX! - drag.groupMinX!;
         const h0 = drag.groupMaxY! - drag.groupMinY!;
-        let scaleX = Math.abs(wx - aX) / (w0 || 1);
-        let scaleY = Math.abs(wy - aY) / (h0 || 1);
-        const s = Math.max(0.1, Math.max(scaleX, scaleY)); // uniform
+        const scaleX = Math.abs(wx - aX) / (w0 || 1);
+        const scaleY = Math.abs(wy - aY) / (h0 || 1);
+        const s = Math.max(0.1, aspectScaleFromCorner(scaleX * w0, scaleY * h0, w0, h0, 0.1));
         (drag as DragState & { _scale?: number })._scale = s;
         const liveEntries: Array<{ id: string; patch: { x: number; y: number; width: number; height: number } }> = [];
         for (const [id, o] of drag.origins) {
