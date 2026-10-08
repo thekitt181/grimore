@@ -6,6 +6,7 @@ import type { Combatant } from '@/systems/map/store/initiativeStore';
 const ITEMS_PREFIX = 'grimoire:items:';
 const FOG_PREFIX = 'grimoire:fog:';
 const INITIATIVE_PREFIX = 'grimoire:initiative:';
+const QUEST_PREFIX = 'grimoire:quests:';
 const DELETED_PREFIX = 'grimoire:deleted:';
 const VIEWPORT_PREFIX = 'grimoire:viewport:';
 
@@ -215,6 +216,62 @@ export function loadInitiativeLocal(sessionId: string): PersistedInitiative | nu
       return JSON.parse(raw) as PersistedInitiative;
     }
     return null;
+  } catch {
+    return null;
+  }
+}
+
+export function persistQuestsLocal(
+  sessionId: string,
+  board: {
+    quests: Array<{ id: string; title: string; location: string; done: boolean; notes: Array<{ id: string; text: string; author: string; at: number }> }>;
+    locations: string[];
+  },
+): void {
+  try {
+    localStorage.setItem(scopedKey(QUEST_PREFIX, sessionId), JSON.stringify(board));
+  } catch {
+    /* quota */
+  }
+}
+
+export function loadQuestsLocal(sessionId: string): {
+  quests: Array<{ id: string; title: string; location: string; done: boolean; notes: Array<{ id: string; text: string; author: string; at: number }> }>;
+  locations: string[];
+} | null {
+  try {
+    const raw = localStorage.getItem(scopedKey(QUEST_PREFIX, sessionId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as unknown;
+    const rows = Array.isArray(parsed) ? parsed : (parsed && typeof parsed === 'object' ? (parsed as { quests?: unknown }).quests : null);
+    if (!Array.isArray(rows)) return null;
+    const quests = rows.flatMap((quest) => {
+      if (!quest || typeof quest !== 'object') return [];
+      const row = quest as { id?: unknown; title?: unknown; location?: unknown; done?: unknown };
+      if (typeof row.id !== 'string' || typeof row.title !== 'string' || typeof row.done !== 'boolean') return [];
+      const location = typeof row.location === 'string' && row.location.trim() ? row.location.trim() : 'General';
+      const notes = Array.isArray((row as { notes?: unknown }).notes)
+        ? (row as { notes: unknown[] }).notes.flatMap((note) => {
+          if (!note || typeof note !== 'object') return [];
+          const item = note as { id?: unknown; text?: unknown; author?: unknown; at?: unknown };
+          if (typeof item.id !== 'string' || typeof item.text !== 'string') return [];
+          return [{
+            id: item.id,
+            text: item.text,
+            author: typeof item.author === 'string' ? item.author : 'Player',
+            at: typeof item.at === 'number' ? item.at : 0,
+          }];
+        })
+        : [];
+      return [{ id: row.id, title: row.title, location, done: row.done, notes }];
+    });
+    const named = !Array.isArray(parsed) && parsed && typeof parsed === 'object'
+      ? (parsed as { locations?: unknown }).locations
+      : null;
+    const locations = Array.isArray(named)
+      ? named.filter((name): name is string => typeof name === 'string' && name.trim().length > 0)
+      : [...new Set(quests.map((quest) => quest.location))];
+    return { quests, locations };
   } catch {
     return null;
   }

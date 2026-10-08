@@ -530,3 +530,18 @@ export async function getSessionSpellEffects(sessionId: string): Promise<string 
   if (fromRedis != null) memorySet(`spellEffects:${sessionId}`, fromRedis);
   return fromRedis;
 }
+
+export async function setSessionQuests(sessionId: string, data: string): Promise<void> {
+  memorySet(`quests:${sessionId}`, data);
+  await safeRedis(undefined, (client) =>
+    client.setex(`quests:${sessionId}`, SESSION_TTL, data),
+  );
+}
+
+export async function getSessionQuests(sessionId: string): Promise<string | null> {
+  const cached = memoryGet(`quests:${sessionId}`);
+  if (cached != null) return cached;
+  const fromRedis = await safeRedis(null, (client) => client.get(`quests:${sessionId}`));
+  if (fromRedis != null) memorySet(`quests:${sessionId}`, fromRedis);
+  return fromRedis;
+}

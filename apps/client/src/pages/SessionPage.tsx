@@ -41,6 +41,8 @@ import { useDdbSocket } from '@/systems/ddb/useDdbSocket';
 import { useCombatStore } from '@/systems/combat/combatStore';
 import { useDiceSocket } from '@/systems/dice/useDiceSocket';
 import { InitiativeTracker } from '@/systems/initiative/InitiativeTracker';
+import { QuestDock } from '@/systems/quests/QuestDock';
+import { emitQuestSync, useQuestStore } from '@/systems/quests/questStore';
 import { MobileSessionDock } from '@/components/MobileSessionDock';
 import { MonsterDexPanel } from '@/systems/compendium/MonsterDexPanel';
 import { ItemHandoutViewer } from '@/systems/compendium/ItemHandoutViewer';
@@ -53,8 +55,8 @@ import { CatalogRebuildBanner } from '@/systems/compendium/CatalogRebuildBanner'
 import { useCompendiumAuthRecovery } from '@/systems/compendium/useCompendiumAuthRecovery';
 import { useCompendiumUiStore } from '@/systems/compendium/compendiumStore';
 import { getSocket, isMobileClient } from '@/lib/socket';
-import type { InitiativeSyncPayload, SpellEffectSyncPayload, SpellEffectReminderPayload } from '@grimoire/shared';
-import { loadInitiativeLocal, persistInitiativeLocal } from '@/systems/scene/sessionPersistence';
+import type { InitiativeSyncPayload, QuestSyncPayload, SpellEffectSyncPayload, SpellEffectReminderPayload } from '@grimoire/shared';
+import { loadInitiativeLocal, loadQuestsLocal, persistInitiativeLocal, persistQuestsLocal } from '@/systems/scene/sessionPersistence';
 import {
   applyEffectReminderPayload,
   applySpellEffectSyncPayload,
@@ -103,6 +105,7 @@ export function SessionPage() {
   const [socketReady, setSocketReady] = useState(false);
   const [showDice, setShowDice] = useState(false);
   const [showInitiative, setShowInitiative] = useState(false);
+  const [showQuests, setShowQuests] = useState(false);
   const [handoutManagerOpen, setHandoutManagerOpen] = useState(false);
   const [journalOpen, setJournalOpen] = useState(false);
   const loadHandoutJournal = useHandoutJournalStore((s) => s.loadJournal);
@@ -182,6 +185,36 @@ export function SessionPage() {
     };
     socket.on('initiative:sync', onInitiativeSync);
     return () => { socket.off('initiative:sync', onInitiativeSync); };
+  }, [socketReady, sessionId]);
+
+  useEffect(() => {
+    if (!socketReady || !sessionId) return;
+
+    const local = loadQuestsLocal(sessionId);
+    if (local) useQuestStore.getState().applyFromServer(local.quests, local.locations);
+
+    let serverSeen = false;
+    const socket = getSocket();
+    const onQuestSync = (payload: QuestSyncPayload) => {
+      if (payload.sessionId !== sessionId) return;
+      if (
+        !serverSeen
+        && payload.quests.length === 0
+        && (payload.locations ?? []).length === 0
+        && local
+        && (local.quests.length > 0 || local.locations.length > 0)
+        && useSessionStore.getState().myRole === 'GM'
+      ) {
+        serverSeen = true;
+        emitQuestSync(local.quests, local.locations);
+        return;
+      }
+      serverSeen = true;
+      useQuestStore.getState().applyFromServer(payload.quests, payload.locations);
+      persistQuestsLocal(sessionId, { quests: payload.quests, locations: payload.locations ?? [] });
+    };
+    socket.on('quest:sync', onQuestSync);
+    return () => { socket.off('quest:sync', onQuestSync); };
   }, [socketReady, sessionId]);
 
   // ── Spell effects sync (duration, concentration, VFX) ─────────────────────
@@ -440,8 +473,10 @@ export function SessionPage() {
           <MobileSessionDock
             showInitiative={showInitiative}
             showDice={showDice}
+            showQuests={showQuests}
             onToggleInitiative={() => setShowInitiative((v) => !v)}
             onToggleDice={() => setShowDice((v) => !v)}
+            onToggleQuests={() => setShowQuests((v) => !v)}
           />
 
           {/* Bottom dock — inspector (center) + tool panels (right); hidden on mobile (use MobileSessionDock). */}
@@ -454,7 +489,12 @@ export function SessionPage() {
             <div className="shrink-0 flex flex-col items-end gap-2 pointer-events-auto">
               <RollModeBar />
 
-              <div className="flex gap-2">
+              <div className="relative flex gap-2">
+                {showQuests && (
+                  <div className="absolute bottom-full right-0 mb-2">
+                    <QuestDock />
+                  </div>
+                )}
                 <MapViewModeToggle variant="dock" />
                 {isGM && (
                   <button
@@ -529,6 +569,18 @@ export function SessionPage() {
                     🐉
                   </button>
                 )}
+                <button
+                  onClick={() => setShowQuests((v) => !v)}
+                  className="w-10 h-10 rounded-lg flex items-center justify-center text-lg shadow-panel transition-all"
+                  style={{
+                    background: showQuests ? 'rgba(201,168,76,0.2)' : 'var(--color-bg-secondary)',
+                    border: `1px solid ${showQuests ? 'var(--color-accent-gold)' : 'var(--color-border)'}`,
+                    color: showQuests ? 'var(--color-accent-gold)' : 'var(--color-text-secondary)',
+                  }}
+                  title="Quests"
+                >
+                  ⚑
+                </button>
                 <button
                   onClick={() => setShowInitiative((v) => !v)}
                   className="w-10 h-10 rounded-lg flex items-center justify-center text-lg shadow-panel transition-all"

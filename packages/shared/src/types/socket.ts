@@ -210,6 +210,27 @@ export interface TokenAuraPayload {
 
 // ─── Initiative extended sync ─────────────────────────────────────────────────
 
+export interface QuestEntry {
+  id: string;
+  title: string;
+  location: string;
+  done: boolean;
+  notes: QuestNote[];
+}
+
+export interface QuestNote {
+  id: string;
+  text: string;
+  author: string;
+  at: number;
+}
+
+export interface QuestSyncPayload {
+  sessionId: string;
+  quests: QuestEntry[];
+  locations: string[];
+}
+
 export interface InitiativeSyncPayload {
   sessionId: string;
   combatants: Array<{
@@ -389,6 +410,7 @@ export interface ServerToClientEvents {
   'drawing:remove':       (payload: DrawingRemovePayload)     => void;
   'drawing:clear':        (payload: DrawingClearPayload)      => void;
   'initiative:sync':      (payload: InitiativeSyncPayload)    => void;
+  'quest:sync':           (payload: QuestSyncPayload)         => void;
   'effect:sync':          (payload: SpellEffectSyncPayload)   => void;
   'effect:remind':        (payload: SpellEffectReminderPayload) => void;
   'combat:initiative':    (payload: InitiativePayload)        => void;
@@ -453,6 +475,7 @@ export interface ClientToServerEvents {
   'drawing:remove':       (payload: DrawingRemovePayload)     => void;
   'drawing:clear':        (payload: DrawingClearPayload)      => void;
   'initiative:sync':      (payload: InitiativeSyncPayload)    => void;
+  'quest:sync':           (payload: QuestSyncPayload)         => void;
   'effect:sync':          (payload: SpellEffectSyncPayload)   => void;
   'effect:remind':        (payload: SpellEffectReminderPayload) => void;
   'combat:initiative':    (payload: InitiativePayload)        => void;

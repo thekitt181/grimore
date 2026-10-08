@@ -1,4 +1,5 @@
 import { MapViewModeToggle } from '@/systems/map/MapViewModeToggle';
+import { QuestDock } from '@/systems/quests/QuestDock';
 
 const GOLD = 'var(--color-accent-gold)';
 const BD = 'var(--color-border)';
@@ -6,37 +7,51 @@ const BD = 'var(--color-border)';
 export function MobileSessionDock({
   showInitiative,
   showDice,
+  showQuests,
   onToggleInitiative,
   onToggleDice,
+  onToggleQuests,
 }: {
   showInitiative: boolean;
   showDice: boolean;
+  showQuests: boolean;
   onToggleInitiative: () => void;
   onToggleDice: () => void;
+  onToggleQuests: () => void;
 }) {
   return (
     <div
-      className="fixed z-[60] flex gap-2 pointer-events-auto md:hidden"
+      className="fixed z-[60] flex flex-col items-end gap-2 pointer-events-auto md:hidden"
       style={{
         right: 'max(0.75rem, env(safe-area-inset-right, 0px))',
         bottom: 'max(0.75rem, env(safe-area-inset-bottom, 0px))',
       }}
     >
-      <DockButton
-        active={showInitiative}
-        label="Init"
-        icon="⚔"
-        title="Initiative tracker"
-        onClick={onToggleInitiative}
-      />
-      <DockButton
-        active={showDice}
-        label="Dice"
-        icon="🎲"
-        title="Dice roller"
-        onClick={onToggleDice}
-      />
-      <MapViewModeToggle variant="dock" />
+      {showQuests && <QuestDock />}
+      <div className="flex gap-2">
+        <DockButton
+          active={showQuests}
+          label="Quests"
+          icon="⚑"
+          title="Quests"
+          onClick={onToggleQuests}
+        />
+        <DockButton
+          active={showInitiative}
+          label="Init"
+          icon="⚔"
+          title="Initiative tracker"
+          onClick={onToggleInitiative}
+        />
+        <DockButton
+          active={showDice}
+          label="Dice"
+          icon="🎲"
+          title="Dice roller"
+          onClick={onToggleDice}
+        />
+        <MapViewModeToggle variant="dock" />
+      </div>
     </div>
   );
 }

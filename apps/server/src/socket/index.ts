@@ -13,9 +13,11 @@ import {
   getSessionItems,
   getSessionMapFocus,
   getSessionSpellEffects,
+  getSessionQuests,
   setSessionItems,
   setSessionMapFocus,
   setSessionSpellEffects,
+  setSessionQuests,
 } from '../lib/redis';
 import {
   dedupeSessionUsers,
@@ -53,6 +55,9 @@ import {
   DrawingRemovePayload,
   DrawingClearPayload,
   InitiativeSyncPayload,
+  QuestSyncPayload,
+  QuestEntry,
+  QuestNote,
   InitiativePayload,
   HpUpdatePayload,
   DiceRollPayload,
@@ -68,6 +73,92 @@ import { persistSessionFogCache } from '../lib/fogSessionCache';
 import { isClientOriginAllowed } from '../lib/clientOrigins';
 import { cacheItemAdd, cacheItemRemove, cacheItemUpdate } from '../lib/sessionItemsCache';
 
+/** Last quest board, so a player tick cannot add or rename quests. */
+interface QuestBoard {
+  quests: QuestEntry[];
+  locations: string[];
+}
+
+const sessionQuests = new Map<string, QuestBoard>();
+
+function sanitizeQuestBoard(rawQuests: QuestEntry[], rawLocations: unknown): QuestBoard {
+  const seenIds = new Set<string>();
+  const draft: QuestEntry[] = [];
+  for (const quest of rawQuests.slice(0, 40)) {
+    if (!quest || typeof quest.id !== 'string' || typeof quest.title !== 'string') continue;
+    const id = quest.id.trim().slice(0, 80);
+    const title = quest.title.trim().slice(0, 120);
+    const location = (typeof quest.location === 'string' ? quest.location : 'General').trim().slice(0, 40) || 'General';
+    if (!id || !title || seenIds.has(id)) continue;
+    seenIds.add(id);
+    draft.push({ id, title, location, done: Boolean(quest.done), notes: sanitizeNotes(quest.notes).slice(0, 20) });
+  }
+
+  const locations: string[] = [];
+  const seenNames = new Set<string>();
+  const pushLocation = (name: string) => {
+    const trimmed = name.trim().slice(0, 40);
+    const key = trimmed.toLowerCase();
+    if (!trimmed || seenNames.has(key)) return;
+    seenNames.add(key);
+    locations.push(trimmed);
+  };
+  if (Array.isArray(rawLocations)) {
+    for (const name of rawLocations.slice(0, 24)) {
+      if (typeof name === 'string') pushLocation(name);
+    }
+  }
+  for (const quest of draft) pushLocation(quest.location);
+
+  const quests = draft.map((quest) => {
+    const location = locations.find((name) => name.toLowerCase() === quest.location.toLowerCase()) ?? quest.location;
+    return location === quest.location ? quest : { ...quest, location };
+  });
+  return { quests, locations };
+}
+
+function sanitizeNotes(raw: unknown): QuestNote[] {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  const notes: QuestNote[] = [];
+  for (const note of raw.slice(0, 80)) {
+    if (!note || typeof note !== 'object') continue;
+    const row = note as { id?: unknown; text?: unknown; author?: unknown; at?: unknown };
+    if (typeof row.id !== 'string' || typeof row.text !== 'string') continue;
+    const id = row.id.trim().slice(0, 80);
+    const text = row.text.trim().slice(0, 280);
+    if (!id || !text || seen.has(id)) continue;
+    seen.add(id);
+    const author = (typeof row.author === 'string' ? row.author : 'Player').trim().slice(0, 40) || 'Player';
+    const at = typeof row.at === 'number' && Number.isFinite(row.at) ? row.at : Date.now();
+    notes.push({ id, text, author, at });
+  }
+  return notes;
+}
+
+function mergeQuestNotes(previous: QuestNote[], incoming: QuestNote[]): QuestNote[] {
+  const incomingIds = new Set(incoming.map((note) => note.id));
+  const kept = previous.filter((note) => incomingIds.has(note.id));
+  const known = new Set(previous.map((note) => note.id));
+  const added = incoming.filter((note) => !known.has(note.id));
+  return [...kept, ...added].slice(0, 20);
+}
+
+function mergePlayerQuestTicks(previous: QuestBoard, incoming: QuestEntry[]): QuestBoard {
+  const byId = new Map(incoming.map((quest) => [quest.id, quest]));
+  return {
+    locations: previous.locations,
+    quests: previous.quests.map((quest) => {
+      const next = byId.get(quest.id);
+      if (!next) return quest;
+      return {
+        ...quest,
+        done: Boolean(next.done),
+        notes: mergeQuestNotes(quest.notes ?? [], next.notes ?? []),
+      };
+    }),
+  };
+}
 /** Per-session fog active flag (GM toggles off during prep). */
 const sessionFogActive = new Map<string, boolean>();
 /** Last GM map focus (active map + viewport) for joining players. */
@@ -111,11 +202,12 @@ async function hydrateSessionFromCache(socket: Socket, sessionId: string): Promi
   }
 
   // Then get cache as fallback
-  const [cachedFog, cachedItemsRaw, cachedFocusRaw, cachedEffectsRaw] = await Promise.all([
+  const [cachedFog, cachedItemsRaw, cachedFocusRaw, cachedEffectsRaw, cachedQuestsRaw] = await Promise.all([
     getSessionFog(sessionId),
     getSessionItems(sessionId),
     getSessionMapFocus(sessionId),
     getSessionSpellEffects(sessionId),
+    getSessionQuests(sessionId),
   ]);
 
   // Use scene data if available, else cache
@@ -157,6 +249,17 @@ async function hydrateSessionFromCache(socket: Socket, sessionId: string): Promi
     try {
       const payload = JSON.parse(cachedEffectsRaw) as SpellEffectSyncPayload;
       socket.emit('effect:sync', { ...payload, sessionId });
+    } catch {
+      /* ignore corrupt cache */
+    }
+  }
+
+  if (cachedQuestsRaw) {
+    try {
+      const payload = JSON.parse(cachedQuestsRaw) as QuestSyncPayload;
+      const board = sanitizeQuestBoard(payload.quests ?? [], payload.locations);
+      sessionQuests.set(sessionId, board);
+      socket.emit('quest:sync', { sessionId, ...board });
     } catch {
       /* ignore corrupt cache */
     }
@@ -657,6 +760,19 @@ export function initSocket(httpServer: HttpServer): Server {
     socket.on('initiative:sync', (payload: InitiativeSyncPayload) => {
       if (!isJoinedSession(socket, payload.sessionId)) return;
       io.to(payload.sessionId).emit('initiative:sync', payload);
+    });
+
+    socket.on('quest:sync', (payload: QuestSyncPayload) => {
+      if (!isJoinedSession(socket, payload.sessionId)) return;
+      const previous = sessionQuests.get(payload.sessionId) ?? { quests: [], locations: [] };
+      const incoming = sanitizeQuestBoard(payload.quests ?? [], payload.locations);
+      const board = isSessionGM(socket)
+        ? incoming
+        : mergePlayerQuestTicks(previous, incoming.quests);
+      sessionQuests.set(payload.sessionId, board);
+      const next: QuestSyncPayload = { sessionId: payload.sessionId, ...board };
+      void setSessionQuests(payload.sessionId, JSON.stringify(next));
+      io.to(payload.sessionId).emit('quest:sync', next);
     });
 
     // ── Spell effects (duration, concentration, VFX) ─────────────────────────
