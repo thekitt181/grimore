@@ -25,7 +25,6 @@ function syncMapFogOverlays(
     items: ReturnType<typeof useItemStore.getState>['items'];
     liveById: ReturnType<typeof useLiveTransformStore.getState>['byId'];
     revealedCells: Set<string>;
-    liveById: ReturnType<typeof useLiveTransformStore.getState>['byId'];
     isGM: boolean;
     selectedIds: string[];
     myUserId: string | null;
