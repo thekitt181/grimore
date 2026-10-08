@@ -1,8 +1,30 @@
 import { Router } from 'express';
 import { z } from 'zod';
+import { requireAuth } from '../middleware/auth';
 import { isFloorplanScanConfigured, scanMapFloorplan } from '../services/floorplan/floorplanScanService';
+import { searchWebMaps } from '../services/mapLibrarySearch';
 
 const router = Router();
+
+router.get('/library', requireAuth, async (req, res) => {
+  const q = typeof req.query['q'] === 'string' ? req.query['q'].trim() : '';
+  const page = Number(req.query['page'] ?? '1');
+  if (!q || q.length > 80) {
+    res.status(400).json({ error: 'Enter a shorter search' });
+    return;
+  }
+  if (!Number.isInteger(page) || page < 1 || page > 10) {
+    res.status(400).json({ error: 'Invalid page' });
+    return;
+  }
+  try {
+    res.json(await searchWebMaps(q, page));
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error('[Maps] library search failed:', message);
+    res.status(502).json({ error: 'Image search failed' });
+  }
+});
 
 const scanBodySchema = z.object({
   backgroundUrl: z.string().min(1),

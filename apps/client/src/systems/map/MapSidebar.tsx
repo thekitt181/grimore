@@ -31,6 +31,7 @@ import {
 import { useCompendiumUiStore } from '@/systems/compendium/compendiumStore';
 import { DungeonGeneratorPanel } from '@/systems/map/dungeon/DungeonGeneratorPanel';
 import { DungeonPropsPanel } from '@/systems/map/props/DungeonPropsPanel';
+import { MapLibraryPanel } from '@/systems/map/library/MapLibraryPanel';
 import { ToolSection } from '@/systems/map/ToolSection';
 
 const GOLD = 'var(--color-accent-gold)';
@@ -397,6 +398,8 @@ function GMSidebarContent() {
           Select a map, then drag its handles to resize/rotate. Drop images or GLB/STL models on the canvas.
         </p>
       </ToolSection>
+
+      <MapLibraryPanel onUse={(map) => applyBackground(map.imageUrl, map.width, map.height)} />
 
       <DungeonGeneratorPanel />
       <DungeonPropsPanel />
