@@ -33,6 +33,7 @@ import { worldDeltaToFeet } from '@/systems/combat/attackRange';
 import { isSpellTargetPicking } from '@/systems/spells/pickSpellTargets';
 import { nearestWallIndex, wallIndicesInWorldRect, wallHandleWorldPoints, pickWallHandle, translateWallIndices, moveWallEndpoint, wallsChanged, worldToMapLocal, mapLocalToWorld, WALL_PICK_RADIUS } from '@/systems/map/wallUtils';
 import { followDungeonStair, stairIndexAt } from '@/systems/map/dungeon/placeGeneratedDungeon';
+import { canTriggerProp, resolvePropId, triggerablePropAt, triggerDungeonProp } from '@/systems/map/props/dungeonProps';
 import type { WallEndpoint } from '@/systems/map/wallUtils';
 import type { TokenItem, WallSegment } from '../types';
 
@@ -124,6 +125,7 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
     let wallMove: WallMoveState | null = null;
     let wallEndpoint: WallEndpointDrag | null = null;
     let stairPress: { mapId: string; index: number; sx: number; sy: number } | null = null;
+    let propClickId: string | null = null;
     let marquee: MarqueeState | null = null;
     let marqueeGfx: Graphics | null = null;
     let wallHandleGfx: Graphics | null = null;
@@ -318,6 +320,7 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
 
     function onDown(e: PointerEvent) {
       stairPress = null;
+      propClickId = null;
       if (e.button !== 0) return;
       if (isAoePlacementActive()) return;
       if (isSpellTargetPicking()) return;
@@ -406,6 +409,10 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
               if (pickHandle(e.clientX, e.clientY)) handleConsumed = true;
             }
             if (!handleConsumed && !is3dNavigate) {
+              const propId = hit.type === 'image' ? resolvePropId(hit) : undefined;
+              if (alreadySelected && !additive && propId && canTriggerProp(propId)) {
+                propClickId = hit.id;
+              }
               e.preventDefault();
               e.stopImmediatePropagation();
               beginMove(freshIds, e);
@@ -570,7 +577,8 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
         const hovered = hitTestMap(selectableItems(), wx, wy);
         const local = hovered?.type === 'map' ? worldToMapLocal(wx, wy, hovered) : null;
         const overStair = local != null && hovered?.type === 'map' && stairIndexAt(hovered, local.x, local.y) >= 0;
-        interactionEl.style.cursor = overStair ? 'pointer' : '';
+        const overProp = triggerablePropAt(wx, wy, true) != null;
+        interactionEl.style.cursor = overStair || overProp ? 'pointer' : '';
       }
 
       if (marquee && marqueeGfx) {
@@ -640,6 +648,11 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
         // A click (negligible pointer travel) should only select — never snap/move.
         const screenTravel = Math.hypot(e.clientX - m.startScreenX, e.clientY - m.startScreenY);
         const isClick = screenTravel < CLICK_MOVE_THRESHOLD_PX;
+        if (isClick && propClickId) {
+          const propItem = useItemStore.getState().items[propClickId];
+          if (propItem?.type === 'image') triggerDungeonProp(propItem);
+        }
+        propClickId = null;
         let { dx, dy } = moveDragDelta(m, e);
         if (!isClick && snap && m.ids.length) {
           const lead = m.ids[0]!;

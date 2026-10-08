@@ -168,6 +168,12 @@ export interface ImageItem extends BaseItem {
   type: 'image';
   name: string;
   imageUrl: string;
+  /** Dungeon prop id. Animated props draw on the map instead of the still image. */
+  propId?: string;
+  /** 0 rests. Toggles use 1 for open or sprung. Arrow traps count each shot. */
+  propState?: number;
+  /** Epoch ms when propState last changed, so every client plays the same motion. */
+  propAt?: number;
 }
 
 export interface HandoutItem extends BaseItem {

@@ -5,6 +5,7 @@ import type { Item, MapItem, TokenItem, ImageItem, HandoutItem, DrawItem, TextIt
 import { tokenShowsHpBarToPlayer } from '../types';
 import { redrawGrid } from '@/systems/map/hooks/useMapGrid';
 import { loadTexture } from '@/lib/textureLoader';
+import { mountPropAnimation } from '@/systems/map/props/propAnimation';
 
 import { getTokenRenderType, tokenHidesPixiBody } from '../token/tokenRenderType';
 
@@ -47,7 +48,7 @@ export function itemVisualSignature(item: Item, ctx: RenderContext): string {
     case 'handout':
       return `${base}|${item.name}|${item.imageUrl}|${item.compendiumItemId}`;
     case 'image':
-      return `${base}|${item.name}|${item.imageUrl}`;
+      return `${base}|${item.name}|${item.imageUrl}|${item.propId ?? ''}|${item.propState ?? 0}|${item.propAt ?? 0}`;
   }
 }
 
@@ -406,6 +407,8 @@ function renderImage(c: Container, item: ImageItem) {
   nameText.x = item.width / 2;
   nameText.y = -4;
   c.addChild(nameText);
+
+  if (mountPropAnimation(c, item)) return;
 
   if (item.imageUrl) {
     void loadTexture(item.imageUrl).then((tex) => {

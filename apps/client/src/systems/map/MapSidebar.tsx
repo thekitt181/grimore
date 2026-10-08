@@ -30,6 +30,8 @@ import {
 } from './mapSidebarStore';
 import { useCompendiumUiStore } from '@/systems/compendium/compendiumStore';
 import { DungeonGeneratorPanel } from '@/systems/map/dungeon/DungeonGeneratorPanel';
+import { DungeonPropsPanel } from '@/systems/map/props/DungeonPropsPanel';
+import { ToolSection } from '@/systems/map/ToolSection';
 
 const GOLD = 'var(--color-accent-gold)';
 const BD = 'var(--color-border)';
@@ -383,8 +385,7 @@ function GMSidebarContent() {
   return (
     <>
       {/* Map Upload */}
-      <div className="panel space-y-2">
-        <h3 className="font-display text-xs font-semibold tracking-wider uppercase" style={{ color: 'var(--color-accent-gold)' }}>Map</h3>
+      <ToolSection id="map" title="Map">
         <input type="file" accept={MAP_ASSET_ACCEPT} ref={fileInputRef} className="hidden" onChange={loadMapFromFile} />
         <button className="btn-ghost w-full text-xs py-1.5" onClick={() => fileInputRef.current?.click()}>Upload Image / 3D</button>
         <div className="flex gap-1">
@@ -395,14 +396,14 @@ function GMSidebarContent() {
         <p className="font-ui text-xs leading-snug" style={{ color: 'var(--color-text-secondary)' }}>
           Select a map, then drag its handles to resize/rotate. Drop images or GLB/STL models on the canvas.
         </p>
-      </div>
+      </ToolSection>
 
       <DungeonGeneratorPanel />
+      <DungeonPropsPanel />
 
       {/* Grid Settings */}
       {activeMap && (
-        <div className="panel space-y-2">
-          <h3 className="font-display text-xs font-semibold tracking-wider uppercase" style={{ color: 'var(--color-accent-gold)' }}>Grid</h3>
+        <ToolSection id="grid" title="Grid">
           <div className="flex gap-1">
             {(['square', 'hex'] as const).map((t) => (
               <button key={t} onClick={() => setGridType(t)}
@@ -429,12 +430,11 @@ function GMSidebarContent() {
           <p className="font-ui text-xs leading-snug" style={{ color: 'var(--color-text-secondary)' }}>
             Lays an even grid of 5ft squares across the map. To match a printed grid instead, use the Calibrate tool (drag one cell).
           </p>
-        </div>
+        </ToolSection>
       )}
 
       {/* Maps list */}
-      <div className="panel space-y-2">
-        <h3 className="font-display text-xs font-semibold tracking-wider uppercase" style={{ color: 'var(--color-accent-gold)' }}>Maps ({maps.length})</h3>
+      <ToolSection id="maps" title={`Maps (${maps.length})`}>
         <div className="space-y-1">
           {maps.map((m) => (
             <div key={m.id}
@@ -460,7 +460,7 @@ function GMSidebarContent() {
           ))}
         </div>
         <button className="btn-ghost w-full text-xs py-1" onClick={addMap}>+ Add Map</button>
-      </div>
+      </ToolSection>
 
       {/* Quick Add Token */}
       <AddTokenForm />
@@ -473,12 +473,11 @@ function GMSidebarContent() {
 
       {/* Token list */}
       {tokenIds.length > 0 && (
-        <div className="panel space-y-1.5">
-          <h3 className="font-display text-xs font-semibold tracking-wider uppercase mb-2" style={{ color: 'var(--color-accent-gold)' }}>
-            Tokens ({tokenIds.length})
-          </h3>
-          {tokenIds.map((id) => <TokenRow key={id} tokenId={id} />)}
-        </div>
+        <ToolSection id="tokens" title={`Tokens (${tokenIds.length})`}>
+          <div className="space-y-1.5">
+            {tokenIds.map((id) => <TokenRow key={id} tokenId={id} />)}
+          </div>
+        </ToolSection>
       )}
     </>
   );
@@ -488,17 +487,14 @@ function SceneSidebarSection() {
   const setSceneManagerOpen = useSceneUiStore((s) => s.setSceneManagerOpen);
 
   return (
-    <div className="panel space-y-2">
-      <h3 className="font-display text-xs font-semibold tracking-wider uppercase" style={{ color: 'var(--color-accent-gold)' }}>
-        Scenes
-      </h3>
+    <ToolSection id="scenes" title="Scenes">
       <button type="button" className="btn-primary w-full text-xs py-1.5" onClick={() => setSceneManagerOpen(true)}>
         Scene Manager
       </button>
       <p className="font-ui text-xs leading-snug" style={{ color: 'var(--color-text-secondary)' }}>
         Prepare maps, ambience, video, lighting, and weather — then push scenes live to the table.
       </p>
-    </div>
+    </ToolSection>
   );
 }
 
@@ -507,10 +503,7 @@ function DmScreenSidebarSection() {
   const open = useDmScreenStore((s) => s.open);
 
   return (
-    <div className="panel space-y-2">
-      <h3 className="font-display text-xs font-semibold tracking-wider uppercase" style={{ color: 'var(--color-accent-gold)' }}>
-        DM Screen
-      </h3>
+    <ToolSection id="dm-screen" title="DM Screen">
       <button
         type="button"
         className="btn-primary w-full text-xs py-1.5"
@@ -521,7 +514,7 @@ function DmScreenSidebarSection() {
       <p className="font-ui text-xs leading-snug" style={{ color: 'var(--color-text-secondary)' }}>
         Party sync, conditions reference, DDB encounters, private notes, and secret rolls.
       </p>
-    </div>
+    </ToolSection>
   );
 }
 
@@ -532,10 +525,7 @@ function DdbSidebarSection() {
   const setLinkPanelOpen = useDdbStore((s) => s.setLinkPanelOpen);
 
   return (
-    <div className="panel space-y-2">
-      <h3 className="font-display text-xs font-semibold tracking-wider uppercase" style={{ color: 'var(--color-accent-gold)' }}>
-        D&D Beyond
-      </h3>
+    <ToolSection id="ddb" title="D&D Beyond">
       <div className="flex flex-wrap gap-1.5">
         <button type="button" className="btn-ghost text-xs py-1 flex-1" onClick={() => setImportModalOpen(true)}>
           Import PC
@@ -551,7 +541,7 @@ function DdbSidebarSection() {
         </button>
       </div>
       <p className="font-ui text-[9px] opacity-50">Powered by D&D Beyond</p>
-    </div>
+    </ToolSection>
   );
 }
 
@@ -594,8 +584,7 @@ function AddTokenForm() {
   }
 
   return (
-    <div className="panel space-y-2">
-      <h3 className="font-display text-xs font-semibold tracking-wider uppercase" style={{ color: 'var(--color-accent-gold)' }}>Add Token</h3>
+    <ToolSection id="add-token" title="Add Token">
       <input className="input-dark text-xs py-1" placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
       <input className="input-dark text-xs py-1" placeholder="Image or GLB/STL URL (optional)" value={imageUrl} onChange={(e) => setImageUrl(e.target.value)} />
       <div className="flex items-center gap-3">
@@ -613,7 +602,7 @@ function AddTokenForm() {
         </label>
       </div>
       <button className="btn-primary w-full text-xs py-1.5" onClick={handleAdd}>+ Place Token</button>
-    </div>
+    </ToolSection>
   );
 }
 

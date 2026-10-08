@@ -13,6 +13,7 @@ import {
   type StairsStyle,
 } from './generateDungeon';
 import { placeDungeonFloors } from './placeGeneratedDungeon';
+import { ToolSection } from '@/systems/map/ToolSection';
 
 const LAYOUTS: Array<{ id: DungeonLayout; label: string }> = [
   { id: 'rooms', label: 'Rooms' },
@@ -166,10 +167,7 @@ export function DungeonGeneratorPanel() {
   }
 
   return (
-    <div className="panel space-y-2">
-      <h3 className="font-display text-xs font-semibold tracking-wider uppercase" style={{ color: 'var(--color-accent-gold)' }}>
-        Dungeon
-      </h3>
+    <ToolSection id="dungeon" title="Dungeon">
       <ChoiceRow label="Layout" value={layout} options={LAYOUTS} onChange={setLayout} />
       <ChoiceRow label="Size" value={size} options={SIZES} onChange={setSize} />
       <label className="block space-y-1">
@@ -240,6 +238,6 @@ export function DungeonGeneratorPanel() {
       <p className="font-ui text-xs leading-snug" style={{ color: 'var(--color-text-secondary)' }}>
         Motif changes the stone and the hidden key. Shut, locked, and secret doors block vision. Wide corridors are 10 ft. Set how many floors to build. The bottom floor only has stairs back up. Click a stair flight to move between floors.
       </p>
-    </div>
+    </ToolSection>
   );
 }
