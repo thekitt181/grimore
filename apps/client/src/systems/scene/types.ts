@@ -81,6 +81,41 @@ export interface MapItem extends BaseItem {
   showGrid: boolean;
   /** LOS wall segments in map-local coordinates. */
   walls: WallSegment[];
+  /** Generated dungeon floors. Clicking a stair opens the linked level. */
+  dungeon?: DungeonFloorLink;
+}
+
+export interface DungeonStairRef {
+  col: number;
+  row: number;
+  direction: 'up' | 'down';
+  toMapId?: string;
+}
+
+export interface DungeonFloorLink {
+  delveId: string;
+  floor: number;
+  baseName: string;
+  cols: number;
+  rows: number;
+  cell: number;
+  options: {
+    layout: 'rooms' | 'cavern' | 'five-room';
+    size: 'small' | 'medium' | 'large';
+    doors: 'open' | 'closed' | 'mixed';
+    seed: number;
+    motif: 'mixed' | 'crypt' | 'temple' | 'fortress' | 'mine' | 'ruin';
+    corridors: 'straight' | 'winding' | 'wide';
+    passages: 'sparse' | 'linked' | 'maze';
+    deadEnds: 'none' | 'few' | 'many';
+    stairs: 'none' | 'down' | 'up' | 'both';
+    key: 'brief' | 'full' | 'stocked';
+    secrets: 'none' | 'few' | 'many';
+    cavern: 'tight' | 'natural' | 'open';
+  };
+  stairs: DungeonStairRef[];
+  /** Planned depth of this delve. The last floor has no stairs going deeper. */
+  floorCount?: number;
 }
 
 export interface TokenItem extends BaseItem {

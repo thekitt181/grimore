@@ -29,6 +29,41 @@ export function toMapLocal(wx: number, wy: number, map: MapItem) {
   return worldToMapLocal(wx, wy, map);
 }
 
+/** Scale wall and grid geometry when a map image is resized. */
+export function scaledMapGeometry(map: MapItem, sx: number, sy: number): Partial<MapItem> {
+  const patch: Partial<MapItem> = {
+    gridSize: Math.max(4, map.gridSize * ((sx + sy) / 2)),
+    gridOffsetX: map.gridOffsetX * sx,
+    gridOffsetY: map.gridOffsetY * sy,
+  };
+  if (map.walls?.length) {
+    patch.walls = map.walls.map((wall) => ({
+      a: { x: wall.a.x * sx, y: wall.a.y * sy },
+      b: { x: wall.b.x * sx, y: wall.b.y * sy },
+    }));
+  }
+  return patch;
+}
+
+/**
+ * Generated dungeon walls are stored in the original image pixels.
+ * After a resize the picture stretches, so those walls need the same scale.
+ */
+export function dungeonWallStretch(map: MapItem): { sx: number; sy: number } | null {
+  const link = map.dungeon;
+  if (!link || link.cell <= 0) return null;
+  const authoredW = link.cols * link.cell;
+  const authoredH = link.rows * link.cell;
+  if (authoredW <= 0 || authoredH <= 0 || !map.walls?.length) return null;
+  const sx = map.width / authoredW;
+  const sy = map.height / authoredH;
+  if (Math.abs(sx - 1) < 0.01 && Math.abs(sy - 1) < 0.01) return null;
+  const maxX = (map.walls ?? []).reduce((max, wall) => Math.max(max, wall.a.x, wall.b.x), 0);
+  const maxY = (map.walls ?? []).reduce((max, wall) => Math.max(max, wall.a.y, wall.b.y), 0);
+  if (maxX > authoredW * 1.05 || maxY > authoredH * 1.05) return null;
+  return { sx, sy };
+}
+
 /** Convert world coords to map-local (accounts for map rotation). */
 export function worldToMapLocal(wx: number, wy: number, map: MapItem): { x: number; y: number } {
   const cx = map.x + map.width / 2;

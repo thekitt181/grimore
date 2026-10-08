@@ -10,7 +10,8 @@ import { worldXZToClientScreen } from '@/systems/map3d/perspectiveCameraSync';
 import { snapAngle, snapSize } from '../snap';
 import { emitItemUpdate } from '../sceneSync';
 import { emitTokenRotate } from '../token/tokenSync';
-import { getItemContainer } from '../render/useItemRenderer';
+import { getItemContainer, getWallContainer } from '../render/useItemRenderer';
+import { scaledMapGeometry } from '@/systems/map/wallUtils';
 import { useLiveTransformStore } from '../store/liveTransformStore';
 import { resizeFromCenter } from '../resizeFromCenter';
 import { isInteriorClickBounds } from '../hitTest';
@@ -18,7 +19,16 @@ import { resolveItemBounds } from '@/systems/map3d/sceneItemBounds';
 import { isTokenMoveClick } from '../token/tokenMovePick';
 import { worldToGridColRow } from '../token/tokenGrid';
 import { scheduleFogRepaintDuringDrag } from '@/systems/map/fogRepaintBridge';
-import type { Item, TokenItem } from '../types';
+import type { Item, MapItem, TokenItem } from '../types';
+
+function placeWallOverlay(map: MapItem, cx: number, cy: number, width: number, height: number, rotation: number) {
+  const overlay = getWallContainer(sceneRefs.items.current, map.id);
+  if (!overlay || map.width <= 0 || map.height <= 0) return;
+  overlay.pivot.set(map.width / 2, map.height / 2);
+  overlay.position.set(cx, cy);
+  overlay.scale.set(width / map.width, height / map.height);
+  overlay.rotation = (rotation * Math.PI) / 180;
+}
 import type { TokenGizmoLayout, GizmoHandle } from '../token/tokenGizmoLayout';
 import { formatResizeFeetLabel, hideResizeSizeLabel, showResizeSizeLabel } from './resizeSizeLabel';
 import { playerCanRotateToken } from '../token/clientTokenVisibility';
@@ -351,6 +361,7 @@ export function useTransformControls(appReady: boolean) {
             c.position.set(cx, cy);
             c.scale.set(newW / it.width, newH / it.height);
           }
+          if (it.type === 'map') placeWallOverlay(it, cx, cy, newW, newH, it.rotation);
         } else {
           const c = getItemContainer(layer, it.id);
           if (c) {
@@ -388,6 +399,7 @@ export function useTransformControls(appReady: boolean) {
             c.position.set(nx + nw / 2, ny + nh / 2);
             c.scale.set(nw / it.width, nh / it.height);
           }
+          if (it?.type === 'map') placeWallOverlay(it, nx + nw / 2, ny + nh / 2, nw, nh, it.rotation);
         }
         useLiveTransformStore.getState().setLiveMany(liveEntries, { bumpTick: false });
       }
@@ -433,9 +445,13 @@ export function useTransformControls(appReady: boolean) {
             tokenPatch.gridCol = grid.gridCol;
             tokenPatch.gridRow = grid.gridRow;
           }
+          if (it.type === 'map') {
+            Object.assign(patch, scaledMapGeometry(it, it.width > 0 ? newW / it.width : 1, it.height > 0 ? newH / it.height : 1));
+          }
           if (it.type !== 'token') {
             const c = getItemContainer(layer, it.id);
             if (c) c.scale.set(1, 1);
+            if (it.type === 'map') getWallContainer(layer, it.id)?.scale.set(1, 1);
           }
           useItemStore.getState().updateItem(it.id, patch);
           emitItemUpdate([{ id: it.id, patch }]);
@@ -448,11 +464,18 @@ export function useTransformControls(appReady: boolean) {
         for (const [id, o] of drag.origins) {
           const nx = aX + (o.x - aX) * s;
           const ny = aY + (o.y - aY) * s;
-          patches.push({ id, patch: { x: nx, y: ny, width: o.w * s, height: o.h * s } as Partial<Item> });
           const it = useItemStore.getState().items[id];
+          const nw = o.w * s;
+          const nh = o.h * s;
+          const patch: Partial<Item> = { x: nx, y: ny, width: nw, height: nh };
+          if (it?.type === 'map' && it.width > 0 && it.height > 0) {
+            Object.assign(patch, scaledMapGeometry(it, nw / it.width, nh / it.height));
+          }
+          patches.push({ id, patch });
           if (it?.type !== 'token') {
             const c = getItemContainer(layer, id);
             if (c) c.scale.set(1, 1);
+            if (it?.type === 'map') getWallContainer(layer, id)?.scale.set(1, 1);
           }
           clearedIds.push(id);
         }

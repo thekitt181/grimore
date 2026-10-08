@@ -9,6 +9,7 @@ import type { Item, MapItem } from '@/systems/scene/types';
 import {
   getVisionTokens,
   losPolygons,
+  revealedCellsPastDungeonWalls,
 } from './fogLos';
 
 export interface FogDrawOptions {
@@ -156,8 +157,14 @@ export function paintFogCanvas(
 
   const punchRevealed =
     (opts.isGM && opts.selectedIds.length === 0) || !opts.isGM;
+  const revealed = revealedCellsPastDungeonWalls(
+    map,
+    opts.revealedCells,
+    visionTokens,
+    gridSize,
+  );
   if (punchRevealed) {
-    for (const key of opts.revealedCells) {
+    for (const key of revealed) {
       const cell = parseCellKey(key);
       if (!cell) continue;
       ctx.fillRect(

@@ -32,6 +32,7 @@ import { isAoePlacementActive } from '@/systems/combat/aoePlacementUtils';
 import { worldDeltaToFeet } from '@/systems/combat/attackRange';
 import { isSpellTargetPicking } from '@/systems/spells/pickSpellTargets';
 import { nearestWallIndex, wallIndicesInWorldRect, wallHandleWorldPoints, pickWallHandle, translateWallIndices, moveWallEndpoint, wallsChanged, worldToMapLocal, mapLocalToWorld, WALL_PICK_RADIUS } from '@/systems/map/wallUtils';
+import { followDungeonStair, stairIndexAt } from '@/systems/map/dungeon/placeGeneratedDungeon';
 import type { WallEndpoint } from '@/systems/map/wallUtils';
 import type { TokenItem, WallSegment } from '../types';
 
@@ -122,6 +123,7 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
     let move: MoveState | null = null;
     let wallMove: WallMoveState | null = null;
     let wallEndpoint: WallEndpointDrag | null = null;
+    let stairPress: { mapId: string; index: number; sx: number; sy: number } | null = null;
     let marquee: MarqueeState | null = null;
     let marqueeGfx: Graphics | null = null;
     let wallHandleGfx: Graphics | null = null;
@@ -306,7 +308,16 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
       interactionEl.setPointerCapture(e.pointerId);
     }
 
+    function noteStairPress(map: MapItem, wx: number, wy: number, e: PointerEvent) {
+      if (!isGm()) return;
+      const local = worldToMapLocal(wx, wy, map);
+      const index = stairIndexAt(map, local.x, local.y);
+      if (index < 0) return;
+      stairPress = { mapId: map.id, index, sx: e.clientX, sy: e.clientY };
+    }
+
     function onDown(e: PointerEvent) {
+      stairPress = null;
       if (e.button !== 0) return;
       if (isAoePlacementActive()) return;
       if (isSpellTargetPicking()) return;
@@ -379,7 +390,11 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
           return it && canManipulate(it);
         });
 
-        if (freshIds.length) {
+        if (hit.type === 'map') noteStairPress(hit, wx, wy, e);
+        const onStair = stairPress != null;
+        if (onStair) interactionEl.setPointerCapture(e.pointerId);
+
+        if (freshIds.length && !onStair) {
           if (hit.type === 'token' && canDragToken(hit)) {
             const b = resolveItemBounds(hit, liveById[hit.id]);
             if (isTokenMoveClick(e.clientX, e.clientY, b) || !pickHandle(e.clientX, e.clientY)) {
@@ -445,6 +460,7 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
           ? pickedItem
           : hitTestMap(selectableItems(), wx, wy);
         if (mapHit) {
+          if (mapHit.type === 'map') noteStairPress(mapHit, wx, wy, e);
           const additive = e.shiftKey;
           const alreadySelected = store.selectedIds.includes(mapHit.id);
           if (additive) store.select([mapHit.id], 'toggle');
@@ -471,6 +487,7 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
           ? pickedItem
           : hitTestMap(selectableItems(), wx, wy);
         if (mapHit) {
+          if (mapHit.type === 'map') noteStairPress(mapHit, wx, wy, e);
           const additive = e.shiftKey;
           const alreadySelected = store.selectedIds.includes(mapHit.id);
           if (additive) store.select([mapHit.id], 'toggle');
@@ -549,6 +566,13 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
         return;
       }
 
+      if (!move && !wallMove && !wallEndpoint && isGm()) {
+        const hovered = hitTestMap(selectableItems(), wx, wy);
+        const local = hovered?.type === 'map' ? worldToMapLocal(wx, wy, hovered) : null;
+        const overStair = local != null && hovered?.type === 'map' && stairIndexAt(hovered, local.x, local.y) >= 0;
+        interactionEl.style.cursor = overStair ? 'pointer' : '';
+      }
+
       if (marquee && marqueeGfx) {
         const x = Math.min(marquee.startWX, wx);
         const y = Math.min(marquee.startWY, wy);
@@ -563,6 +587,23 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
     }
 
     function onUp(e: PointerEvent) {
+      const press = stairPress;
+      stairPress = null;
+      const stairClick = press && isGm() && Math.hypot(e.clientX - press.sx, e.clientY - press.sy) < 24
+        ? press
+        : null;
+      if (stairClick) {
+        const stairMap = useItemStore.getState().items[stairClick.mapId];
+        if (stairMap?.type === 'map') followDungeonStair(stairMap, stairClick.index);
+      } else if (!press && !move && !wallMove && !wallEndpoint && isGm() && e.button === 0) {
+        const { x: sx, y: sy } = clientToWorld(e.clientX, e.clientY);
+        const under = hitTestMap(selectableItems(), sx, sy);
+        if (under?.type === 'map') {
+          const local = worldToMapLocal(sx, sy, under);
+          const index = stairIndexAt(under, local.x, local.y);
+          if (index >= 0) followDungeonStair(under, index);
+        }
+      }
       if (move) {
         e.preventDefault();
         e.stopImmediatePropagation();
@@ -743,6 +784,7 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
       interactionEl.removeEventListener('pointermove', onMove, captureOpts);
       interactionEl.removeEventListener('pointerup', onUp, captureOpts);
       interactionEl.removeEventListener('pointercancel', onUp, captureOpts);
+      interactionEl.style.cursor = '';
       marqueeGfx?.destroy();
       marqueeGfx = null;
       wallHandleGfx?.destroy();

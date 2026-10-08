@@ -1,7 +1,8 @@
 import { useEffect, useRef } from 'react';
 import { Container } from 'pixi.js';
 import { useMapStore } from '../store/mapStore';
-import { useItemStore, getActiveMap } from '@/systems/scene/store/itemStore';
+import { useItemStore } from '@/systems/scene/store/itemStore';
+import { resolveItemBounds } from '@/systems/map3d/sceneItemBounds';
 import {
   useLiveTransformStore,
   itemsWithLiveTransforms,
@@ -24,13 +25,13 @@ function syncMapFogOverlays(
     items: ReturnType<typeof useItemStore.getState>['items'];
     liveById: ReturnType<typeof useLiveTransformStore.getState>['byId'];
     revealedCells: Set<string>;
+    liveById: ReturnType<typeof useLiveTransformStore.getState>['byId'];
     isGM: boolean;
     selectedIds: string[];
     myUserId: string | null;
     showFogOverlay: boolean;
   },
 ): void {
-  const activeMap = getActiveMap();
   const itemsForFog = itemsWithDragLiveTransforms(
     itemsWithLiveTransforms(opts.items, opts.liveById),
   );
@@ -61,15 +62,18 @@ function syncMapFogOverlays(
     }
 
     const fogLayers = ensureFogLayers(fc);
+    const bounds = resolveItemBounds(map, opts.liveById[map.id]);
 
-    fc.scale.set(1, 1);
     fc.pivot.set(map.width / 2, map.height / 2);
-    fc.position.set(map.x + map.width / 2, map.y + map.height / 2);
-    fc.rotation = (map.rotation * Math.PI) / 180;
+    fc.scale.set(
+      map.width > 0 ? bounds.width / map.width : 1,
+      map.height > 0 ? bounds.height / map.height : 1,
+    );
+    fc.position.set(bounds.cx, bounds.cz);
+    fc.rotation = (bounds.rotation * Math.PI) / 180;
     fc.zIndex = fogDisplayZIndex(map.zIndex);
 
-    const isActive = activeMap?.id === map.id;
-    const showThis = isActive && opts.showFogOverlay;
+    const showThis = opts.showFogOverlay;
 
     if (map.visible) {
       fc.visible = showThis;
@@ -81,7 +85,7 @@ function syncMapFogOverlays(
       fc.visible = false;
     }
 
-    if (isActive) {
+    if (showThis) {
       drawFogLayers(fogLayers, map, {
         revealedCells: opts.revealedCells,
         gridSize: map.gridSize,
@@ -89,7 +93,7 @@ function syncMapFogOverlays(
         items: itemsForFog,
         selectedIds: opts.selectedIds,
         myUserId: opts.myUserId,
-        visible: showThis,
+        visible: true,
       }, sceneRefs.app.current?.renderer ?? null);
     } else {
       clearFogLayers(fogLayers);

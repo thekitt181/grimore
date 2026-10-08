@@ -22,6 +22,8 @@ import type { Item, MapItem } from '../types';
 import { itemDisplayZIndex, wallDisplayZIndex } from '../zOrder';
 import { tokenRendersInThree } from '../token/tokenRenderType';
 import { sceneRefs } from '../sceneRefs';
+import { emitItemUpdate } from '../sceneSync';
+import { dungeonWallStretch, scaledMapGeometry } from '@/systems/map/wallUtils';
 import { clientVisibleTokenIdSet } from '../sceneMapsForClient';
 import { resolveItemBounds } from '@/systems/map3d/sceneItemBounds';
 import { hasDragLivePositions } from '../interaction/dragLivePositions';
@@ -236,10 +238,14 @@ export function useItemRenderer(
           renderMapWalls(wc, map.walls ?? [], new Set(wallSel));
           wallSignatures.current.set(map.id, wallSig);
         }
-        wc.scale.set(1, 1);
+        const wallBounds = resolveItemBounds(map, liveById[map.id]);
         wc.pivot.set(map.width / 2, map.height / 2);
-        wc.position.set(map.x + map.width / 2, map.y + map.height / 2);
-        wc.rotation = (map.rotation * Math.PI) / 180;
+        wc.scale.set(
+          map.width > 0 ? wallBounds.width / map.width : 1,
+          map.height > 0 ? wallBounds.height / map.height : 1,
+        );
+        wc.position.set(wallBounds.cx, wallBounds.cz);
+        wc.rotation = (wallBounds.rotation * Math.PI) / 180;
         wc.zIndex = wallDisplayZIndex(map.zIndex);
         // LOS walls affect everyone; only the GM sees the wall overlay.
         if (gm && (viewMode !== '3d' || activeTool === 'wall')) {
@@ -310,6 +316,21 @@ export function useItemRenderer(
     appReady,
   ]);
 
+  // Generated maps remember walls in the original image pixels. Stretch them once
+  // so a resized picture and its red wall outline share the same size.
+  useEffect(() => {
+    if (myRole !== 'GM') return;
+    const live = useLiveTransformStore.getState().byId;
+    for (const item of Object.values(items)) {
+      if (item.type !== 'map' || live[item.id]?.width != null) continue;
+      const stretch = dungeonWallStretch(item);
+      if (!stretch) continue;
+      const patch = scaledMapGeometry(item, stretch.sx, stretch.sy) as Partial<Item>;
+      useItemStore.getState().updateItem(item.id, patch);
+      emitItemUpdate([{ id: item.id, patch }]);
+    }
+  }, [items, myRole]);
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
@@ -325,6 +346,11 @@ export function useItemRenderer(
 }
 
 /** Returns the live PixiJS container for an item (used by interaction hooks). */
+export function getWallContainer(layer: Container | null, id: string): Container | null {
+  if (!layer) return null;
+  return (layer.getChildByLabel(`walls_${id}`) as Container) ?? null;
+}
+
 export function getItemContainer(layer: Container | null, id: string): Container | null {
   const label = `item_${id}`;
   const tokenLayer = sceneRefs.tokens.current;

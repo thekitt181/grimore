@@ -13,7 +13,7 @@ function pickBackgroundUrl(a: string | null, b: string | null): string | null {
 }
 
 function mergeMapItem(server: MapItem, local: MapItem): MapItem {
-  return {
+  const merged: MapItem = {
     ...server,
     backgroundUrl: pickBackgroundUrl(server.backgroundUrl, local.backgroundUrl),
     modelUrl: pickAssetUrl(local.modelUrl ?? null, server.modelUrl ?? null),
@@ -24,6 +24,9 @@ function mergeMapItem(server: MapItem, local: MapItem): MapItem {
     gridOffsetX: server.gridOffsetX ?? local.gridOffsetX,
     gridOffsetY: server.gridOffsetY ?? local.gridOffsetY,
   };
+  const dungeon = server.dungeon ?? local.dungeon;
+  if (dungeon) merged.dungeon = dungeon;
+  return merged;
 }
 
 export type MergeSceneOptions = {

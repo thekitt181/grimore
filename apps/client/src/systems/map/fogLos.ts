@@ -26,8 +26,12 @@ export function visionArcRad(token: TokenItem): number {
   return (Math.max(15, Math.min(360, deg)) * Math.PI) / 180;
 }
 
+function visionCells(token: TokenItem): number {
+  return token.visionRadius ?? DEFAULT_VISION_CELLS;
+}
+
 export function visionFeet(token: TokenItem): number {
-  return (token.visionRadius ?? 0) * 5;
+  return visionCells(token) * 5;
 }
 
 export function visionRadiusFromFeet(feet: number): number {
@@ -80,7 +84,7 @@ export function visionBounds(
   gridSize: number,
 ): { minX: number; minY: number; maxX: number; maxY: number } {
   const { x: cx, y: cy } = tokenMapOrigin(token, map);
-  const cells = token.visionRadius ?? 0;
+  const cells = visionCells(token);
   const radiusPx = Math.max(1, cells) * gridSize;
   return {
     minX: Math.max(0, cx - radiusPx),
@@ -90,8 +94,60 @@ export function visionBounds(
   };
 }
 
+/** Lengthen a segment so fog rays cannot slip through a corner joint. */
+function extendWall(wall: WallSegment, pad: number): WallSegment {
+  const dx = wall.b.x - wall.a.x;
+  const dy = wall.b.y - wall.a.y;
+  const len = Math.hypot(dx, dy);
+  if (len < 1e-6) return wall;
+  const ux = (dx / len) * pad;
+  const uy = (dy / len) * pad;
+  return {
+    a: { x: wall.a.x - ux, y: wall.a.y - uy },
+    b: { x: wall.b.x + ux, y: wall.b.y + uy },
+  };
+}
+
 function losWalls(map: MapItem): LosWall[] {
-  return allMapWalls(map);
+  const drawn = map.dungeon
+    ? (map.walls ?? []).map((wall) => extendWall(wall, 2))
+    : (map.walls ?? []);
+  return [...drawn, ...mapBoundaryWalls(map.width, map.height)];
+}
+
+function parseCellKey(key: string): { x: number; y: number } | null {
+  const comma = key.indexOf(',');
+  if (comma <= 0) return null;
+  const x = Number(key.slice(0, comma));
+  const y = Number(key.slice(comma + 1));
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+  return { x, y };
+}
+
+/**
+ * On a generated dungeon, explored squares stay fogged when a red wall
+ * sits between them and every vision token. Other maps are unchanged.
+ */
+export function revealedCellsPastDungeonWalls(
+  map: MapItem,
+  revealedCells: Set<string>,
+  tokens: TokenItem[],
+  gridSize: number,
+): Set<string> {
+  if (!map.dungeon || tokens.length === 0 || revealedCells.size === 0 || gridSize <= 0) {
+    return revealedCells;
+  }
+  const walls = losWalls(map);
+  const origins = tokens.map((token) => tokenMapOrigin(token, map));
+  const kept = new Set<string>();
+  for (const key of revealedCells) {
+    const cell = parseCellKey(key);
+    if (!cell) continue;
+    const px = (cell.x + 0.5) * gridSize;
+    const py = (cell.y + 0.5) * gridSize;
+    if (origins.some((origin) => !wallBlocksPoint(origin, px, py, walls))) kept.add(key);
+  }
+  return kept;
 }
 
 /** True when a drawn wall (or the map edge) sits between the origin and the point. */
@@ -159,7 +215,7 @@ export function losPolygons(
 
   return tokens.map((token) => {
     const origin = tokenMapOrigin(token, map);
-    const radius = Math.max(1, (token.visionRadius ?? 0) * gridSize);
+    const radius = Math.max(gridSize, visionCells(token) * gridSize);
     const arc = visionArcRad(token);
     if (directional && arc < Math.PI * 2 - 0.01) {
       return computeVisibilityPolygonDirectional(
@@ -235,7 +291,7 @@ function computeLosVisibleCellKeys(
 
   for (const token of tokens) {
     const origin = tokenMapOrigin(token, map);
-    const radiusPx = (token.visionRadius ?? 0) * gridSize;
+    const radiusPx = Math.max(gridSize, visionCells(token) * gridSize);
     const facing = tokenFacingRad(token, map);
     const halfArc = visionArcRad(token) / 2;
 
@@ -278,7 +334,7 @@ function wallsSignature(map: MapItem): string {
 function tokensSignature(map: MapItem, tokens: TokenItem[]): string {
   return tokens.map((t) => {
     const o = tokenMapOrigin(t, map);
-    return `${t.id}:${o.x.toFixed(1)}:${o.y.toFixed(1)}:${t.rotation.toFixed(1)}:${t.visionRadius ?? 0}:${t.visionArc ?? DEFAULT_VISION_ARC_DEG}`;
+    return `${t.id}:${o.x.toFixed(1)}:${o.y.toFixed(1)}:${t.rotation.toFixed(1)}:${visionCells(t)}:${t.visionArc ?? DEFAULT_VISION_ARC_DEG}`;
   }).join(';');
 }
 
@@ -400,7 +456,7 @@ export function playerVisibleCells(
 ): Set<string> {
   const tokens = getVisionTokens(items, selectedIds, false, userId, map);
   const los = losVisibleCellKeys(map, tokens, gridSize, { directional: true });
-  const visible = new Set(revealedCells);
+  const visible = new Set(revealedCellsPastDungeonWalls(map, revealedCells, tokens, gridSize));
   for (const k of los) visible.add(k);
   return visible;
 }
@@ -413,8 +469,8 @@ export function gmVisibleCells(
   selectedIds: string[],
   gridSize: number,
 ): Set<string> {
-  const visible = new Set(revealedCells);
   const tokens = getVisionTokens(items, selectedIds, true, null, map);
+  const visible = new Set(revealedCellsPastDungeonWalls(map, revealedCells, tokens, gridSize));
   for (const k of losVisibleCellKeys(map, tokens, gridSize, { directional: true })) {
     visible.add(k);
   }

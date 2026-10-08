@@ -29,6 +29,7 @@ import {
   useMapSidebarStore,
 } from './mapSidebarStore';
 import { useCompendiumUiStore } from '@/systems/compendium/compendiumStore';
+import { DungeonGeneratorPanel } from '@/systems/map/dungeon/DungeonGeneratorPanel';
 
 const GOLD = 'var(--color-accent-gold)';
 const BD = 'var(--color-border)';
@@ -395,6 +396,8 @@ function GMSidebarContent() {
           Select a map, then drag its handles to resize/rotate. Drop images or GLB/STL models on the canvas.
         </p>
       </div>
+
+      <DungeonGeneratorPanel />
 
       {/* Grid Settings */}
       {activeMap && (
