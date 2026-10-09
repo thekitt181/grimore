@@ -13,6 +13,7 @@ import {
   importDdbLibraryEntries,
   importAllDdbLibraryFromSource,
   importAllDdbLibraryFromSources,
+  markImportedSources,
   finishDdbLibraryImport,
   searchDdbItems,
   searchDdbMonsters,
@@ -332,7 +333,13 @@ export async function listDdbLibrarySources(
   opts?: { campaignId?: number; force?: boolean },
 ) {
   const ctx = await requireDdbAuth(userId);
-  return listAccessibleDdbSources(ctx, opts);
+  const sources = await listAccessibleDdbSources(ctx, opts);
+  try {
+    return await markImportedSources(sources);
+  } catch (err) {
+    console.warn('[DDB] imported-book check failed:', err);
+    return sources;
+  }
 }
 
 export async function browseDdbLibraryMonsters(

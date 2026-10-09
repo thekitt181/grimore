@@ -169,6 +169,7 @@ export function DdbLibraryPanel({ onClose }: { onClose: () => void }) {
               : 'Nothing to import from the selected books.',
         );
       }
+      void qc.invalidateQueries({ queryKey: ['ddb', 'library', 'sources'] });
       return;
     }
     if (job.status === 'failed') {
@@ -176,7 +177,7 @@ export function DdbLibraryPanel({ onClose }: { onClose: () => void }) {
     } else if (job.status === 'cancelled') {
       setMessage(job.errorMessage ?? `${verb} cancelled`);
     }
-  }, [importJob.job]);
+  }, [importJob.job, qc]);
 
   const { data: compendiumSources = [] } = useQuery({
     queryKey: ['compendium', 'sources', tab],
@@ -621,6 +622,9 @@ export function DdbLibraryPanel({ onClose }: { onClose: () => void }) {
                         onChange={() => toggleSourceId(s.id)}
                       />
                       <span className="truncate">
+                        {s.fullyImported && (
+                          <span className="mr-1" style={{ color: '#4ade80' }} title="Imported">✓</span>
+                        )}
                         {s.name}
                         {s.id === DDB_HOMEBREW_SOURCE_ID && (
                           <span style={{ color: '#60a5fa', fontSize: 9 }}> · homebrew</span>

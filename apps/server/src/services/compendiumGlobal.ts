@@ -477,8 +477,12 @@ export async function syncCompendiumStorageOnStartup(): Promise<void> {
 
     const isRender = process.env['RENDER'] === 'true' || Boolean(process.env['RENDER_SERVICE_ID']);
     if (!isRender) {
-      const { scheduleFallbackMongoSync } = await import('./compendiumFallbackMongoSync');
-      scheduleFallbackMongoSync('startup');
+      // Let the first catalog read finish before a full storage reconcile takes the pool.
+      setTimeout(() => {
+        void import('./compendiumFallbackMongoSync').then(({ scheduleFallbackMongoSync }) => {
+          scheduleFallbackMongoSync('startup');
+        });
+      }, 30_000);
     }
 
     const version = await readMongoGlobalVersion();

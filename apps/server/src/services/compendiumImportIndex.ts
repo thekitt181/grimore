@@ -63,6 +63,21 @@ export class ImportSkipIndex {
   rowsForKind(kind: CompendiumKind): readonly NameSourceRow[] {
     return this.byKind[kind];
   }
+
+  /** Complete imported rows whose source label matches this book. */
+  countCompleteForSource(kind: CompendiumKind, sourceLabel: string): number {
+    const homebrew = sourceLabel === DDB_HOMEBREW_SOURCE_LABEL;
+    let count = 0;
+    for (const row of this.byKind[kind]) {
+      if (!rowIsComplete(kind, row)) continue;
+      if (entryMatchesSource(row.source, sourceLabel)) {
+        count += 1;
+        continue;
+      }
+      if (homebrew && (row.source === 'Custom' || !row.source?.trim())) count += 1;
+    }
+    return count;
+  }
 }
 
 let cachedIndex: { at: number; index: ImportSkipIndex } | null = null;

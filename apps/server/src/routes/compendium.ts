@@ -3,7 +3,7 @@ import type { OwlbearItem, OwlbearMonster, OwlbearSpell } from '@grimoire/shared
 import { requireAuth, type AuthenticatedRequest } from '../middleware/auth';
 import { requireCompendiumAdmin, isCompendiumAdmin, getCompendiumAdminPassword, matchesCompendiumAdminPassword } from '../middleware/requireCompendiumAdmin';
 import { isDbPoolSaturation } from '../lib/dbTimeout';
-import { ensureCompendiumStartup, scheduleCompendiumStartupBackground } from '../services/compendiumStartup';
+import { scheduleCompendiumStartupBackground } from '../services/compendiumStartup';
 import {
   deleteCompendiumEntry,
   findCatalogItem,
@@ -20,6 +20,7 @@ import {
   saveItem,
   saveMonster,
   saveSpell,
+  listVisibleItems,
   searchItems,
   searchMonsters,
   searchSpells,
@@ -38,6 +39,9 @@ import {
   fetchPublicImage,
   serveStaticImage,
 } from '../services/compendiumImages';
+import { rollLootFromItems } from '../services/lootRoll';
+import { rollShopStock } from '../services/shopStock';
+
 const router = Router();
 const auth = [requireAuth] as const;
 const admin = [requireAuth, requireCompendiumAdmin] as const;
@@ -149,13 +153,10 @@ router.post('/reconcile-mongo', ...auth, async (req: AuthenticatedRequest, res) 
   }
 });
 
-// Catalog routes wait for startup but continue in degraded mode if it fails.
+// Startup can sit on a large database write. Lists use the in-memory catalog and must not wait for it.
 router.use((_req, _res, next) => {
-  void ensureCompendiumStartup()
-    .catch((err) => {
-      console.warn('[Compendium] Startup incomplete — continuing degraded:', err);
-    })
-    .finally(() => next());
+  scheduleCompendiumStartupBackground();
+  next();
 });
 
 router.get('/admin/visibility-policy', ...admin, async (_req, res) => {
@@ -421,6 +422,39 @@ router.delete('/monsters/:id', ...admin, async (req, res) => {
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: 'Failed to delete monster' });
+  }
+});
+
+router.get('/shop', ...auth, async (req: AuthenticatedRequest, res) => {
+  const shop = typeof req.query['shop'] === 'string' ? req.query['shop'].trim().slice(0, 80) : '';
+  try {
+    const items = await listVisibleItems(isCompendiumAdmin(req));
+    res.json(rollShopStock(items, shop));
+  } catch {
+    res.status(500).json({ error: 'Failed to stock the shop' });
+  }
+});
+
+router.get('/loot', ...auth, async (req: AuthenticatedRequest, res) => {
+  const levelRaw = typeof req.query['level'] === 'string' ? req.query['level'].trim() : '';
+  const level = levelRaw === '' ? null : Number(levelRaw);
+  const min = Number(req.query['min']);
+  const max = Number(req.query['max']);
+  const source = typeof req.query['source'] === 'string' ? req.query['source'].trim().slice(0, 40) : 'any';
+  const name = typeof req.query['name'] === 'string' ? req.query['name'].trim().slice(0, 80) : '';
+  if (!Number.isFinite(min) || !Number.isFinite(max)) {
+    res.status(400).json({ error: 'Min and max are required' });
+    return;
+  }
+  if ((level != null && (!Number.isFinite(level) || level < 1 || level > 20)) || min < 1 || max < 1 || min > 20 || max > 20) {
+    res.status(400).json({ error: 'Level must be blank or 1–20, and the loot count must be 1–20' });
+    return;
+  }
+  try {
+    const items = await listVisibleItems(isCompendiumAdmin(req));
+    res.json(rollLootFromItems(items, level, min, max, source || 'any', name));
+  } catch {
+    res.status(500).json({ error: 'Failed to roll loot' });
   }
 });
 

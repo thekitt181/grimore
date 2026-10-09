@@ -97,6 +97,26 @@ import {
   updateCatalogRebuild,
 } from './compendiumCatalogRebuildProgress';
 
+let pdfSourceLabels: Set<string> | null = null;
+
+function pdfSourceLabelSet(): Set<string> {
+  if (!pdfSourceLabels) pdfSourceLabels = bundledSourceLabelSet();
+  return pdfSourceLabels;
+}
+
+/** Bundled PDF catalog entries. D&D Beyond imports and homebrew stay. */
+function isPdfCatalogEntry(entry: { source?: string; isCustom?: boolean }): boolean {
+  if (isHomebrewEntry(Boolean(entry.isCustom), entry.source)) return false;
+  const parts = splitCompendiumSources(entry.source ?? '');
+  if (parts.length === 0) return false;
+  const pdfSources = pdfSourceLabelSet();
+  return parts.every((part) => /\.pdf\b/i.test(part) || pdfSources.has(normalizeSourceLabel(part)));
+}
+
+function withoutPdfCatalog<T extends { source?: string; isCustom?: boolean }>(entries: T[]): T[] {
+  return entries.filter((entry) => !isPdfCatalogEntry(entry));
+}
+
 type StoredMonster = OwlbearMonster & { _id: string; isCustom?: boolean };
 type StoredItem = OwlbearItem & { _id: string; isCustom?: boolean };
 type StoredSpell = OwlbearSpell & { _id: string; isCustom?: boolean };
@@ -193,7 +213,7 @@ function mergeMonsters(
     );
   }
 
-  return Array.from(out.values());
+  return withoutPdfCatalog(Array.from(out.values()));
 }
 
 function mergeItems(
@@ -277,7 +297,7 @@ function mergeItems(
     remember(item, c);
   }
 
-  return Array.from(out.values());
+  return withoutPdfCatalog(Array.from(out.values()));
 }
 
 function mergeSpells(
@@ -363,7 +383,7 @@ function mergeSpells(
     remember(spell, c);
   }
 
-  return Array.from(out.values());
+  return withoutPdfCatalog(Array.from(out.values()));
 }
 
 function filterMonsters(list: CompendiumMonster[], q: string, crMin?: number, crMax?: number): CompendiumMonster[] {
@@ -497,7 +517,8 @@ async function tallyBookSourceCountsFromPostgres(
   const compendiumKind = kindToCompendiumKind(kind);
   const { readImportedNameSourceRowsForBooks } = await import('./compendiumPostgres');
   const imported = await readImportedNameSourceRowsForBooks();
-  return tallyBooksSourceCountsForKind(imported[compendiumKind], compendiumKind, policy, counts);
+  const rows = withoutPdfCatalog(imported[compendiumKind]);
+  return tallyBooksSourceCountsForKind(rows, compendiumKind, policy, counts);
 }
 
 async function resolveBookSourceCountsForKind(
@@ -941,8 +962,7 @@ async function getCachedMonsters(): Promise<CompendiumMonster[]> {
     async () => {
       const policy = await getCatalogPolicy();
       const list = await monstersFromRawOverrides(undefined, policy);
-      if (list.length > 0) return filterVisible('monster', list, policy, false);
-      return loadLocalMonsters().map((b) => toMonster(b, false, undefined, true));
+      return withoutPdfCatalog(filterVisible('monster', list, policy, false));
     },
   );
 }
@@ -953,15 +973,7 @@ async function getCachedItems(): Promise<CompendiumItem[]> {
     async () => {
       const policy = await getCatalogPolicy();
       const list = await itemsFromRawOverrides(undefined, policy);
-      if (list.length > 0) return filterVisible('item', list, policy, false);
-      return loadLocalItems().map((b) => ({
-        id: b._id,
-        name: b.name,
-        type: b.type,
-        source: b.source,
-        description: b.description,
-        isCustom: false,
-      }));
+      return withoutPdfCatalog(filterVisible('item', list, policy, false));
     },
   );
 }
@@ -972,14 +984,7 @@ async function getCachedSpells(): Promise<CompendiumSpell[]> {
     async () => {
       const policy = await getCatalogPolicy();
       const list = await spellsFromRawOverrides(undefined, policy);
-      if (list.length > 0) return filterVisible('spell', list, policy, false);
-      return loadLocalSpells().map((b) => ({
-        id: b._id,
-        name: b.name,
-        level: b.level,
-        ...(b.source ? { source: b.source } : {}),
-        isCustom: false,
-      }));
+      return withoutPdfCatalog(filterVisible('spell', list, policy, false));
     },
   );
 }
@@ -1586,7 +1591,7 @@ export async function getMonsterById(id: string, opts?: CompendiumGetByIdOpts): 
     await ensureCatalogIncludesOverrides();
     hit = (await getCachedMonsters()).find((m) => m.id === id);
   }
-  if (!hit) return null;
+  if (!hit || isPdfCatalogEntry(hit)) return null;
   const marked = markDraft('monster', hit, policy);
   if (!(await allowCompendiumEntryDetail('monster', marked, id, opts, policy))) return null;
   const imageUrl = await resolveCompendiumEntryImageUrl('monster', hit.name, hit.image);
@@ -1648,6 +1653,13 @@ export async function searchItems(opts: {
   return paginate(filtered, page, limit);
 }
 
+/** Visible item codex entries, used to sample random loot. */
+export async function listVisibleItems(includeDrafts: boolean): Promise<CompendiumItem[]> {
+  await ensureCatalogIncludesOverrides();
+  const policy = await getCatalogPolicy();
+  return filterVisible('item', await getCachedItems(), policy, includeDrafts);
+}
+
 export async function getItemById(id: string, opts?: CompendiumGetByIdOpts): Promise<CompendiumItem | null> {
   const policy = await getCatalogPolicy();
   let hit = (await getCachedItems()).find((i) => i.id === id);
@@ -1678,7 +1690,7 @@ export async function getItemById(id: string, opts?: CompendiumGetByIdOpts): Pro
     await ensureCatalogIncludesOverrides();
     hit = (await getCachedItems()).find((i) => i.id === id);
   }
-  if (!hit) return null;
+  if (!hit || isPdfCatalogEntry(hit)) return null;
   const marked = markDraft('item', hit, policy);
   if (!(await allowCompendiumEntryDetail('item', marked, id, opts, policy))) return null;
   const imageUrl = await resolveCompendiumEntryImageUrl('item', hit.name, hit.image);
@@ -1772,7 +1784,7 @@ export async function getSpellById(id: string, opts?: CompendiumGetByIdOpts): Pr
     await ensureCatalogIncludesOverrides();
     hit = (await getCachedSpells()).find((s) => s.id === id);
   }
-  if (!hit) return null;
+  if (!hit || isPdfCatalogEntry(hit)) return null;
   const marked = markDraft('spell', hit, policy);
   if (!(await allowCompendiumEntryDetail('spell', marked, id, opts, policy))) return null;
   const imageUrl = await resolveCompendiumEntryImageUrl('spell', hit.name, undefined);

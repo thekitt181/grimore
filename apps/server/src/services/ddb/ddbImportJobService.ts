@@ -537,6 +537,8 @@ async function runDdbLibraryImportJob(jobId: string): Promise<void> {
         completedKinds: [],
       });
       completedSourceIds.add(sourceId);
+      const { invalidateFullyImportedMarks } = await import('./ddbLibrary');
+      invalidateFullyImportedMarks(ctx.cacheId);
       await persistPartialResult(jobId, merged);
     }
 

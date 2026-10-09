@@ -3,6 +3,7 @@ import type {
   DdbLibraryItemSummary,
   DdbLibraryMonsterSummary,
   DdbLibrarySpellSummary,
+  DdbSourceSummary,
   OwlbearItem,
   OwlbearMonster,
   OwlbearSpell,
@@ -1318,4 +1319,127 @@ export async function finishDdbLibraryImport(
     importedEntryCount,
     catalogRebuildPending: Boolean(status.catalogRebuild?.active),
   };
+}
+
+const FULLY_IMPORTED_TTL = 10 * 60;
+const FULLY_IMPORTED_MEMORY_MS = FULLY_IMPORTED_TTL * 1000;
+
+const fullyImportedMemory = new Map<string, { at: number; ids: number[] }>();
+
+function fullyImportedCacheKey(cacheId: string): string {
+  return `ddb:book-imported:v1:${cacheId}`;
+}
+
+function rememberFullyImported(cacheId: string, ids: number[]): void {
+  fullyImportedMemory.set(cacheId, { at: Date.now(), ids });
+}
+
+function readFullyImportedMemory(cacheId: string): Set<number> | null {
+  const hit = fullyImportedMemory.get(cacheId);
+  if (!hit || Date.now() - hit.at > FULLY_IMPORTED_MEMORY_MS) return null;
+  return new Set(hit.ids);
+}
+
+export function applyCachedFullyImported(
+  cacheId: string,
+  sources: DdbSourceSummary[],
+): DdbSourceSummary[] {
+  const ids = readFullyImportedMemory(cacheId);
+  if (!ids) return sources;
+  return sources.map((source) => (ids.has(source.id) ? { ...source, fullyImported: true } : source));
+}
+
+/** Books that already have compendium entries. One local index read, no D&D Beyond calls. */
+export async function markImportedSources(sources: DdbSourceSummary[]): Promise<DdbSourceSummary[]> {
+  if (sources.length === 0) return sources;
+  const index = await loadImportSkipIndex();
+  return sources.map((source) => {
+    const label = source.id === DDB_HOMEBREW_SOURCE_ID ? DDB_HOMEBREW_SOURCE_LABEL : source.name;
+    const imported = index.countCompleteForSource('monster', label)
+      + index.countCompleteForSource('spell', label)
+      + index.countCompleteForSource('item', label);
+    return imported > 0 ? { ...source, fullyImported: true } : source;
+  });
+}
+
+export function invalidateFullyImportedMarks(cacheId: string): void {
+  void safeRedis(undefined, (client) => client.del(fullyImportedCacheKey(cacheId)));
+}
+
+async function mapLimited<T>(items: T[], limit: number, fn: (item: T) => Promise<void>): Promise<void> {
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (cursor < items.length) {
+      const index = cursor;
+      cursor += 1;
+      await fn(items[index]!);
+    }
+  });
+  await Promise.all(workers);
+}
+
+async function sourceIsFullyImported(
+  ctx: DdbAuthContext,
+  source: DdbSourceSummary,
+  index: ImportSkipIndex,
+  spellPool: Record<string, unknown>[],
+  itemPool: Record<string, unknown>[],
+): Promise<boolean> {
+  const label = source.id === DDB_HOMEBREW_SOURCE_ID ? DDB_HOMEBREW_SOURCE_LABEL : source.name;
+  let monsters = 0;
+  try {
+    const found = await searchDdbMonsters(ctx, { sourceIds: [source.id], skip: 0, take: 1 });
+    monsters = found.total;
+  } catch {
+    return false;
+  }
+  const spells = source.id === DDB_HOMEBREW_SOURCE_ID
+    ? filterPoolByHomebrew(spellPool).length
+    : filterPoolBySource(spellPool, source.id).length;
+  const items = source.id === DDB_HOMEBREW_SOURCE_ID
+    ? filterPoolByHomebrew(itemPool).length
+    : filterPoolBySource(itemPool, source.id).length;
+  if (monsters + spells + items === 0) return false;
+  return index.countCompleteForSource('monster', label) >= monsters
+    && index.countCompleteForSource('spell', label) >= spells
+    && index.countCompleteForSource('item', label) >= items;
+}
+
+/** Mark books whose monsters, spells, and items are all already in the compendium. */
+export async function attachFullyImported(
+  ctx: DdbAuthContext,
+  sources: DdbSourceSummary[],
+  campaignId?: number,
+  force = false,
+): Promise<DdbSourceSummary[]> {
+  if (sources.length === 0) return sources;
+  const key = fullyImportedCacheKey(ctx.cacheId);
+  if (!force) {
+    const memoryIds = readFullyImportedMemory(ctx.cacheId);
+    if (memoryIds) {
+      return sources.map((source) => (memoryIds.has(source.id) ? { ...source, fullyImported: true } : source));
+    }
+    const cached = await safeRedis<string | null>(null, (client) => client.get(key));
+    if (cached) {
+      const ids = JSON.parse(cached) as number[];
+      rememberFullyImported(ctx.cacheId, ids);
+      const done = new Set(ids);
+      return sources.map((source) => (done.has(source.id) ? { ...source, fullyImported: true } : source));
+    }
+  }
+
+  const [index, spellPool, itemPool] = await Promise.all([
+    loadImportSkipIndex(),
+    loadSpellPool(ctx, campaignId),
+    loadItemPool(ctx, campaignId),
+  ]);
+  const done = new Set<number>();
+  await mapLimited(sources, 4, async (source) => {
+    if (await sourceIsFullyImported(ctx, source, index, spellPool, itemPool)) done.add(source.id);
+  });
+  await safeRedis(undefined, (client) =>
+    client.setex(key, FULLY_IMPORTED_TTL, JSON.stringify([...done])),
+  );
+  rememberFullyImported(ctx.cacheId, [...done]);
+  return sources.map((source) => (done.has(source.id) ? { ...source, fullyImported: true } : source));
 }

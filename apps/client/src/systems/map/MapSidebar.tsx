@@ -32,6 +32,8 @@ import { useCompendiumUiStore } from '@/systems/compendium/compendiumStore';
 import { DungeonGeneratorPanel } from '@/systems/map/dungeon/DungeonGeneratorPanel';
 import { DungeonPropsPanel } from '@/systems/map/props/DungeonPropsPanel';
 import { MapLibraryPanel } from '@/systems/map/library/MapLibraryPanel';
+import { LootPanel } from '@/systems/compendium/LootPanel';
+import { ShopPanel } from '@/systems/compendium/ShopPanel';
 import { ToolSection } from '@/systems/map/ToolSection';
 
 const GOLD = 'var(--color-accent-gold)';
@@ -401,6 +403,8 @@ function GMSidebarContent() {
 
       <MapLibraryPanel onUse={(map) => applyBackground(map.imageUrl, map.width, map.height)} />
 
+      <LootPanel />
+      <ShopPanel />
       <DungeonGeneratorPanel />
       <DungeonPropsPanel />
 

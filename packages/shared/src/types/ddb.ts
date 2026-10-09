@@ -159,6 +159,8 @@ export interface DdbSourceSummary {
   category?: string;
   accessType?: string;
   isEnabled?: boolean;
+  /** Every monster, spell, and item from this book is already in the compendium. */
+  fullyImported?: boolean;
 }
 
 export interface DdbLibraryMonsterSummary {

@@ -135,6 +135,66 @@ export async function deleteMonster(id: string): Promise<void> {
   await api.delete(`/compendium/monsters/${encodeURIComponent(id)}`);
 }
 
+export interface LootCurrencyDrop {
+  kind: 'currency';
+  label: string;
+}
+
+export interface LootItemDrop {
+  kind: 'item';
+  id: string;
+  name: string;
+  type: string;
+  rarity?: string;
+  source?: string;
+}
+
+export interface LootFlavorDrop {
+  kind: 'flavor';
+  name: string;
+  detail: string;
+}
+
+export type LootDrop = LootCurrencyDrop | LootItemDrop | LootFlavorDrop;
+
+export interface LootRollResult {
+  partyLevel: number | null;
+  tier: string;
+  source: string;
+  count: number;
+  drops: LootDrop[];
+}
+
+export interface ShopLine {
+  name: string;
+  cost: string;
+  note?: string;
+  id?: string;
+}
+
+export interface ShopStock {
+  shop: string;
+  kind: string;
+  staples: ShopLine[];
+  visit: ShopLine[];
+}
+
+export async function rollShop(shop: string): Promise<ShopStock> {
+  const { data } = await api.get<ShopStock>('/compendium/shop', { params: { shop } });
+  return data;
+}
+
+export async function rollLoot(params: {
+  min: number;
+  max: number;
+  level?: number;
+  source?: string;
+  name?: string;
+}): Promise<LootRollResult> {
+  const { data } = await api.get<LootRollResult>('/compendium/loot', { params });
+  return data;
+}
+
 export async function searchItems(params: {
   q?: string;
   page?: number;

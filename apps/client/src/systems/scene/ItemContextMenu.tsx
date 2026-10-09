@@ -23,6 +23,8 @@ import { parseAbilities, parseStatsObject } from '@/systems/compendium/statBlock
 import type { CompendiumMonster } from '@grimoire/shared';
 import { SummonMonsterPicker } from '@/systems/compendium/SummonMonsterPicker';
 import { PlaceItemHandoutPicker } from '@/systems/compendium/PlaceItemHandoutPicker';
+import { LootRoller } from '@/systems/compendium/LootRoller';
+import { lootSubjectName } from '@/systems/compendium/placeLoot';
 import { revealHandoutToPlayers } from '@/systems/compendium/revealHandout';
 import { useHandoutViewerStore } from '@/systems/compendium/handoutViewerStore';
 import { getPersistSessionId } from './sessionPersistence';
@@ -113,11 +115,13 @@ function resolveContextMenu(
 }
 
 interface FloatingPickerState {
-  kind: 'monster' | 'item';
+  kind: 'monster' | 'item' | 'loot';
   worldX: number;
   worldY: number;
   anchorX: number;
   anchorY: number;
+  targetId?: string;
+  targetName?: string;
 }
 
 const MENU_WIDTH = 210;
@@ -374,14 +378,20 @@ export function ItemContextMenu() {
     };
     return (
       <DraggablePanel
-        title={kind === 'monster' ? 'Summon monster' : 'Place item handout'}
-        subtitle="Search compendium, click to place on map"
+        title={kind === 'loot' ? `Loot · ${floatingPicker.targetName || 'This'}` : kind === 'monster' ? 'Summon monster' : 'Place item handout'}
+        subtitle={kind === 'loot' ? 'Keep what you want, reroll the rest, then summon' : 'Search compendium, click to place on map'}
         onClose={() => setFloatingPicker(null)}
         defaultPosition={defaultPosition}
-        width={280}
+        width={kind === 'loot' ? 320 : 280}
         zIndex={170}
       >
-        {kind === 'monster' ? (
+        {kind === 'loot' ? (
+          <LootRoller
+            {...(floatingPicker.targetId ? { targetId: floatingPicker.targetId } : {})}
+            {...(floatingPicker.targetName ? { targetName: floatingPicker.targetName } : {})}
+            onDone={() => setFloatingPicker(null)}
+          />
+        ) : kind === 'monster' ? (
           <SummonMonsterPicker
             worldX={worldX}
             worldY={worldY}
@@ -747,6 +757,27 @@ export function ItemContextMenu() {
             useHandoutViewerStore.getState().openHandout(single as HandoutItem);
             close();
           }} />
+        </>
+      )}
+
+      {isGM && single && single.type !== 'map' && (
+        <>
+          <div className="gold-divider my-1" />
+          <Btn
+            label="💰 Loot"
+            onClick={() => {
+              setMenu(null);
+              setFloatingPicker({
+                kind: 'loot',
+                worldX: single.x,
+                worldY: single.y,
+                anchorX: menu.x,
+                anchorY: menu.y,
+                targetId: single.id,
+                targetName: lootSubjectName(single),
+              });
+            }}
+          />
         </>
       )}
 
