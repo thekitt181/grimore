@@ -17,7 +17,7 @@ export interface MapLibraryPage {
   hasMore: boolean;
 }
 
-const PAGE = 16;
+const PAGE = 50;
 const NOT_TABLETOP = /location map|relief map|\blocator\b|census|enumeration|railway|railroad|transit|street ?map|road ?map|topograph|ordnance|\bnat grid\b|\bgeograph\b|metro map|subway|tube map|bus map|administrative|political map|satellite|google earth|openstreetmap|\bgis\b|cadastre|zoning|provincial park|coat of arms|flag of|\blogo\b|\bicon\b|minecraft|fortnite|zelda|skyrim|warcraft|pokemon/i;
 const BATTLE_MAP = /battle\s*-?\s*maps?|battlemaps?|dungeon\s*maps?|encounter maps?|dungeondraft|inkarnate/i;
 const DND = /\bd\s*&\s*d\b|\bdnd\b|\b5e\b|\bvtt\b|roll20|foundry vtt/i;
@@ -135,7 +135,7 @@ async function searchOpenverse(query: string, page: number): Promise<MapLibraryP
   const params = new URLSearchParams({
     q: `${query} battle map`,
     page: String(page),
-    page_size: String(PAGE),
+    page_size: '20',
     extension: 'jpg,png,webp',
     filter_dead: 'true',
     mature: 'false',

@@ -14,7 +14,7 @@ export interface GoogleCharacterHit {
 /** Real people, maps, idea boards, commodities, and generated pictures are not a D&D character. */
 const SKIP = /\b(cosplays?|cosplayer|selfie|photograph|photoshoot|photo shoot|real life|\birl\b|actor|actress|celebrity|meme|screenshot|logo|headshots?|businessman|business man|stock photos?|battle ?map|dungeon map|world map|rulebook|dice set|sprites?|spritesheets?|chibi|pixel|8-?bit|16-?bit|tilesets?|asset packs?|art packs?|rpg maker|ideas|gold bars?|silver bars?|bullion|ingots?|gold coins?|silver coins?|krugerrand|karats?|fine gold|gold price|gold investment|buy gold|nuggets?|jewell?ery|necklaces?|bracelets?)\b|pexels\.com|unsplash\.com|shutterstock\.com|gettyimages\.com|istockphoto\.com|dreamstime\.com|depositphotos\.com|alamy\.com|123rf\.com|pixabay\.com|craiyon|midjourney|leonardo\.ai|nightcafe|starryai|\bdall-?e\b|stable diffusion|ideogram|getimg\.ai|lexica\.art|char-gen\.com|charsheet-gen|seaart\.ai|tensor\.art|novelai|mage\.space|\bdndai\b|ai generated|ai art|openai\.com|apmex|kitco|jmbullion/i;
 
-const batches = new Map<string, { at: number; hits: GoogleCharacterHit[] }>();
+const batches = new Map<string, { at: number; hits: GoogleCharacterHit[]; hasMore: boolean }>();
 let googleChain: Promise<unknown> = Promise.resolve();
 let googleBlockedUntil = 0;
 
@@ -33,25 +33,25 @@ const COLOR_WORD = /^(gold|golden|silver|copper|bronze|brass|red|blue|green|blac
 const WEAK_WORD = /^(man|men|woman|women|male|female|boy|girl|person|people|lady|guy)$/i;
 
 /** D&D character portraits. Google Images first, then the web index if Google refuses. */
-export async function searchGoogleCharacters(subject: string): Promise<GoogleCharacterHit[]> {
+export async function searchGoogleCharacters(subject: string, page = 1): Promise<{ hits: GoogleCharacterHit[]; hasMore: boolean }> {
   const term = subject.trim().replace(/[^\w\s'-]/g, ' ').replace(/\s+/g, ' ').slice(0, 100);
-  if (!term) return [];
-  const key = term.toLowerCase();
+  if (!term) return { hits: [], hasMore: false };
+  const key = `${term.toLowerCase()}:${page}`;
   const cached = batches.get(key);
-  if (cached && Date.now() - cached.at < 600_000) return cached.hits;
+  if (cached && Date.now() - cached.at < 600_000) return { hits: cached.hits, hasMore: cached.hasMore };
 
   const lookup = `${term} dnd`;
-  let hits = await collectCharacters(lookup, term);
-  if (hits.length === 0) {
+  let found = await collectCharacters(lookup, term, page);
+  if (found.hits.length === 0 && page === 1) {
     const narrower = characterLookup(term);
-    if (narrower !== lookup) hits = await collectCharacters(narrower, term);
+    if (narrower !== lookup) found = await collectCharacters(narrower, term, page);
   }
-  if (hits.length > 0) batches.set(key, { at: Date.now(), hits });
+  if (found.hits.length > 0) batches.set(key, { at: Date.now(), hits: found.hits, hasMore: found.hasMore });
   if (batches.size > 40) {
     const oldest = batches.keys().next().value;
     if (oldest) batches.delete(oldest);
   }
-  return hits;
+  return found;
 }
 
 const CHARACTER = /\b(characters?|portraits?|dnd|fantasy|dragonborn|elves|elf|dwarves|dwarf|orcs?|goblins?|tieflings?|halflings?|gnomes?|humans?|clerics?|wizards?|rogues?|paladins?|rangers?|fighters?|barbarians?|bards?|druids?|warlocks?|sorcerers?|monks?|blacksmiths?|knights?|thieves|thief)\b/i;
@@ -70,18 +70,22 @@ function takeCharacters(found: GoogleCharacterHit[], term: string): GoogleCharac
   return found.filter((hit) => CHARACTER.test(`${hit.title} ${hit.pageUrl}`));
 }
 
-async function collectCharacters(lookup: string, term: string): Promise<GoogleCharacterHit[]> {
+async function collectCharacters(lookup: string, term: string, page: number): Promise<{ hits: GoogleCharacterHit[]; hasMore: boolean }> {
   let found: GoogleCharacterHit[] = [];
+  let hasMore = false;
   if (Date.now() >= googleBlockedUntil) {
     try {
-      found = await enqueueGoogle(() => loadGoogle(lookup));
+      const google = await enqueueGoogle(() => loadGoogle(lookup, page));
+      found = google.hits;
+      hasMore = google.hasMore;
     } catch {
       found = [];
     }
   }
   const googleHits = takeCharacters(found, term);
-  if (googleHits.length > 0) return googleHits;
-  return takeCharacters(await searchWebCharacters(lookup), term);
+  if (googleHits.length > 0) return { hits: googleHits, hasMore };
+  const web = await searchWebCharacters(lookup, page);
+  return { hits: takeCharacters(web.hits, term), hasMore: web.hasMore };
 }
 
 /** A gold-bar listing does not name the character that was searched. */
@@ -97,28 +101,37 @@ function mentionsSubject(blob: string, term: string): boolean {
 }
 
 /** Image results for a D&D portrait search. */
-async function searchWebCharacters(query: string): Promise<GoogleCharacterHit[]> {
+async function searchWebCharacters(query: string, page: number): Promise<{ hits: GoogleCharacterHit[]; hasMore: boolean }> {
   const res = await fetch(`https://www.bing.com/images/async?${new URLSearchParams({
     q: query,
-    first: '1',
-    count: '35',
+    first: String(1 + (page - 1) * 35),
+    count: '150',
     adlt: 'off',
+    mkt: 'en-GB',
+    setlang: 'en-GB',
   })}`, {
-    headers: { 'User-Agent': UA, Accept: 'text/html', Referer: 'https://www.bing.com/' },
+    headers: {
+      'User-Agent': UA,
+      Accept: 'text/html',
+      'Accept-Language': 'en-GB,en;q=0.9',
+      Referer: 'https://www.bing.com/',
+      Cookie: '_EDGE_S=mkt=en-gb',
+    },
     signal: AbortSignal.timeout(12_000),
   });
-  if (!res.ok) return [];
+  if (!res.ok) return { hits: [], hasMore: false };
   const html = await res.text();
   const hits: GoogleCharacterHit[] = [];
   const seen = new Set<string>();
+  let blocks = 0;
   for (const block of html.matchAll(/\bm="([^"]+)"/g)) {
+    blocks += 1;
     const hit = bingHit(block[1] ?? '');
     if (!hit || seen.has(hit.imageUrl)) continue;
     seen.add(hit.imageUrl);
     hits.push(hit);
-    if (hits.length >= 12) break;
   }
-  return hits;
+  return { hits, hasMore: blocks >= 35 };
 }
 
 function bingHit(encoded: string): GoogleCharacterHit | null {
@@ -156,13 +169,13 @@ function hash(value: string): string {
   return (h >>> 0).toString(36);
 }
 
-async function loadGoogle(query: string, attempt = 0): Promise<GoogleCharacterHit[]> {
+async function loadGoogle(query: string, page = 1, attempt = 0): Promise<{ hits: GoogleCharacterHit[]; hasMore: boolean }> {
   const headers = {
     'User-Agent': UA,
     Accept: 'text/html,application/json',
     'Accept-Language': 'en-GB,en;q=0.9',
   };
-  const home = await fetch(`https://www.google.com/search?${new URLSearchParams({ q: query, udm: '2', hl: 'en', gl: 'us' })}`, {
+  const home = await fetch(`https://www.google.com/search?${new URLSearchParams({ q: query, udm: '2', hl: 'en-GB', gl: 'uk' })}`, {
     headers,
     signal: AbortSignal.timeout(12_000),
   });
@@ -170,9 +183,9 @@ async function loadGoogle(query: string, attempt = 0): Promise<GoogleCharacterHi
   const res = await fetch(`https://www.google.com/search?${new URLSearchParams({
     q: query,
     tbm: 'isch',
-    hl: 'en',
-    gl: 'us',
-    ijn: '0',
+    hl: 'en-GB',
+    gl: 'uk',
+    ijn: String(Math.max(0, page - 1)),
     start: '0',
     asearch: 'isch',
     async: '_fmt:json',
@@ -184,11 +197,11 @@ async function loadGoogle(query: string, attempt = 0): Promise<GoogleCharacterHi
     googleBlockedUntil = Date.now() + 600_000;
     if (attempt < 1) {
       await wait(2500);
-      return loadGoogle(query, attempt + 1);
+      return loadGoogle(query, page, attempt + 1);
     }
-    return [];
+    return { hits: [], hasMore: false };
   }
-  if (!res.ok) return [];
+  if (!res.ok) return { hits: [], hasMore: false };
   const text = await res.text();
   const wrapped = JSON.parse(text.replace(/^\)\]\}'\s*/, '')) as { ischj?: { results?: string } };
   const rows = JSON.parse(wrapped.ischj?.results ?? '[]') as GoogleImage[];
@@ -200,7 +213,7 @@ async function loadGoogle(query: string, attempt = 0): Promise<GoogleCharacterHi
     seen.add(hit.imageUrl);
     hits.push(hit);
   }
-  return hits;
+  return { hits, hasMore: rows.length >= 10 };
 }
 
 function toHit(row: GoogleImage): GoogleCharacterHit | null {

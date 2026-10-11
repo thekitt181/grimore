@@ -10,10 +10,9 @@ export interface WebMapHit {
   license: string;
 }
 
-const PAGE = 16;
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 
-const batches = new Map<string, { at: number; results: WebMapHit[] }>();
+const batches = new Map<string, { at: number; results: WebMapHit[]; hasMore: boolean }>();
 let googleChain: Promise<unknown> = Promise.resolve();
 let googleBlockedUntil = 0;
 
@@ -33,12 +32,7 @@ export async function searchWebMaps(query: string, page: number): Promise<{ maps
   const term = query.trim().replace(/\s+/g, ' ').slice(0, 100);
   if (!term) return { maps: [], hasMore: false };
   const lookup = mapLookup(term);
-  const results = await loadBatch(lookup, term);
-  const start = (page - 1) * PAGE;
-  return {
-    maps: results.slice(start, start + PAGE),
-    hasMore: start + PAGE < results.length,
-  };
+  return loadBatch(lookup, term, page);
 }
 
 /** The typed phrase, plus dnd maps, so a tavern search stays a tabletop map. */
@@ -47,36 +41,43 @@ function mapLookup(term: string): string {
   return `${term} dnd maps`;
 }
 
-async function loadBatch(lookup: string, term: string): Promise<WebMapHit[]> {
-  const key = lookup.toLowerCase();
+async function loadBatch(lookup: string, term: string, page: number): Promise<{ maps: WebMapHit[]; hasMore: boolean }> {
+  const key = `${lookup.toLowerCase()}:${page}`;
   const cached = batches.get(key);
-  if (cached && Date.now() - cached.at < 120_000) return cached.results;
+  if (cached && Date.now() - cached.at < 120_000) return { maps: cached.results, hasMore: cached.hasMore };
 
   let hits: WebMapHit[] = [];
+  let hasMore = false;
   if (Date.now() >= googleBlockedUntil) {
     try {
-      hits = await enqueueGoogle(() => loadGoogle(lookup, term));
+      const google = await enqueueGoogle(() => loadGoogle(lookup, term, page));
+      hits = google.hits;
+      hasMore = google.hasMore;
     } catch {
       hits = [];
     }
   }
-  if (hits.length === 0) hits = await searchBingMaps(lookup, term);
+  if (hits.length === 0) {
+    const web = await searchBingMaps(lookup, term, page);
+    hits = web.hits;
+    hasMore = web.hasMore;
+  }
   const unique = dedupe(hits);
-  batches.set(key, { at: Date.now(), results: unique });
+  batches.set(key, { at: Date.now(), results: unique, hasMore });
   if (batches.size > 40) {
     const oldest = batches.keys().next().value;
     if (oldest) batches.delete(oldest);
   }
-  return unique;
+  return { maps: unique, hasMore };
 }
 
-async function loadGoogle(query: string, term: string, attempt = 0): Promise<WebMapHit[]> {
+async function loadGoogle(query: string, term: string, page = 1, attempt = 0): Promise<{ hits: WebMapHit[]; hasMore: boolean }> {
   const headers = {
     'User-Agent': UA,
     Accept: 'text/html,application/json',
     'Accept-Language': 'en-GB,en;q=0.9',
   };
-  const home = await fetch(`https://www.google.com/search?${new URLSearchParams({ q: query, udm: '2', hl: 'en', gl: 'us' })}`, {
+  const home = await fetch(`https://www.google.com/search?${new URLSearchParams({ q: query, udm: '2', hl: 'en-GB', gl: 'uk' })}`, {
     headers,
     signal: AbortSignal.timeout(12_000),
   });
@@ -84,9 +85,9 @@ async function loadGoogle(query: string, term: string, attempt = 0): Promise<Web
   const res = await fetch(`https://www.google.com/search?${new URLSearchParams({
     q: query,
     tbm: 'isch',
-    hl: 'en',
-    gl: 'us',
-    ijn: '0',
+    hl: 'en-GB',
+    gl: 'uk',
+    ijn: String(Math.max(0, page - 1)),
     start: '0',
     asearch: 'isch',
     async: '_fmt:json',
@@ -98,11 +99,11 @@ async function loadGoogle(query: string, term: string, attempt = 0): Promise<Web
     googleBlockedUntil = Date.now() + 600_000;
     if (attempt < 1) {
       await wait(2500);
-      return loadGoogle(query, term, attempt + 1);
+      return loadGoogle(query, term, page, attempt + 1);
     }
-    return [];
+    return { hits: [], hasMore: false };
   }
-  if (!res.ok) return [];
+  if (!res.ok) return { hits: [], hasMore: false };
   const text = await res.text();
   const wrapped = JSON.parse(text.replace(/^\)\]\}'\s*/, '')) as { ischj?: { results?: string } };
   const rows = JSON.parse(wrapped.ischj?.results ?? '[]') as GoogleImage[];
@@ -113,33 +114,41 @@ async function loadGoogle(query: string, term: string, attempt = 0): Promise<Web
     if (!hit || seen.has(hit.imageUrl)) continue;
     seen.add(hit.imageUrl);
     hits.push(hit);
-    if (hits.length >= 24) break;
   }
-  return hits;
+  return { hits, hasMore: rows.length >= 10 };
 }
 
-async function searchBingMaps(query: string, term: string): Promise<WebMapHit[]> {
+async function searchBingMaps(query: string, term: string, page: number): Promise<{ hits: WebMapHit[]; hasMore: boolean }> {
   const res = await fetch(`https://www.bing.com/images/async?${new URLSearchParams({
     q: query,
-    first: '1',
-    count: '35',
+    first: String(1 + (page - 1) * 35),
+    count: '150',
     adlt: 'off',
+    mkt: 'en-GB',
+    setlang: 'en-GB',
   })}`, {
-    headers: { 'User-Agent': UA, Accept: 'text/html', Referer: 'https://www.bing.com/' },
+    headers: {
+      'User-Agent': UA,
+      Accept: 'text/html',
+      'Accept-Language': 'en-GB,en;q=0.9',
+      Referer: 'https://www.bing.com/',
+      Cookie: '_EDGE_S=mkt=en-gb',
+    },
     signal: AbortSignal.timeout(12_000),
   });
-  if (!res.ok) return [];
+  if (!res.ok) return { hits: [], hasMore: false };
   const html = await res.text();
   const hits: WebMapHit[] = [];
   const seen = new Set<string>();
+  let blocks = 0;
   for (const block of html.matchAll(/\bm="([^"]+)"/g)) {
+    blocks += 1;
     const hit = bingHit(block[1] ?? '', term);
     if (!hit || seen.has(hit.imageUrl)) continue;
     seen.add(hit.imageUrl);
     hits.push(hit);
-    if (hits.length >= 24) break;
   }
-  return hits;
+  return { hits, hasMore: blocks >= 35 };
 }
 
 function googleHit(row: GoogleImage, term: string): WebMapHit | null {

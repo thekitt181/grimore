@@ -43,10 +43,9 @@ let catalogCache: { at: number; packs: CatalogPack[] } | null = null;
 
 /** D&D character portraits. Pack sites stay on the map search; they are sprites and tiles, not portraits. */
 export async function searchCharacterArt(query: string, page: number): Promise<{ portraits: CharacterArtHit[]; hasMore: boolean }> {
-  if (page !== 1) return { portraits: [], hasMore: false };
   const parsed = parseArtQuery(query, 'character');
-  const hits = await searchGoogleCharacters(query.trim());
-  return { portraits: rankHits(hits, parsed), hasMore: false };
+  const found = await searchGoogleCharacters(query.trim(), page);
+  return { portraits: rankHits(found.hits, parsed), hasMore: found.hasMore };
 }
 
 /** Map and tileset packs from the sites that actually publish them. Game-icons does not. */
@@ -114,7 +113,7 @@ async function searchOpenGameArt(parsed: ArtQuery, page: number, maps: boolean):
     }
   }
   hits.sort((a, b) => scoreHit(b, parsed) - scoreHit(a, parsed));
-  return { hits: hits.slice(0, PAGE), hasMore };
+  return { hits, hasMore };
 }
 
 async function fetchOpenGameArt(query: string, page: number, maps: boolean, words: string[]): Promise<ArtPage<CharacterArtHit>> {
@@ -144,9 +143,8 @@ async function fetchOpenGameArt(query: string, page: number, maps: boolean, word
       creator: 'OpenGameArt',
       license: 'See asset page',
     });
-    if (hits.length >= PAGE) break;
   }
-  return { hits, hasMore: hits.length >= PAGE };
+  return { hits, hasMore: hits.length >= 12 };
 }
 
 async function searchKenney(parsed: ArtQuery, maps: boolean): Promise<ArtPage<CharacterArtHit>> {
@@ -163,7 +161,7 @@ async function searchKenney(parsed: ArtQuery, maps: boolean): Promise<ArtPage<Ch
     }
   }
   hits.sort((a, b) => scoreHit(b, parsed) - scoreHit(a, parsed));
-  return { hits: hits.slice(0, PAGE), hasMore: false };
+  return { hits, hasMore: false };
 }
 
 async function fetchKenney(query: string, maps: boolean, words: string[]): Promise<ArtPage<CharacterArtHit>> {
@@ -189,24 +187,22 @@ async function fetchKenney(query: string, maps: boolean, words: string[]): Promi
       creator: 'Kenney',
       license: 'CC0',
     });
-    if (hits.length >= PAGE) break;
   }
   return { hits, hasMore: false };
 }
 
 async function searchTiddybub(parsed: ArtQuery, page: number, maps: boolean): Promise<ArtPage<CharacterArtHit>> {
+  if (page !== 1) return { hits: [], hasMore: false };
   const packs = await loadCatalog();
   const ranked = packs
     .map((pack) => ({ pack, score: packScore(pack, parsed, maps) }))
     .filter((row) => row.score > 0)
     .sort((a, b) => b.score - a.score);
-  const start = (page - 1) * PAGE;
-  const slice = ranked.slice(start, start + PAGE);
-  const hits = slice.flatMap(({ pack }) => {
+  const hits = ranked.flatMap(({ pack }) => {
     const hit = toPackHit(pack);
     return hit ? [hit] : [];
   });
-  return { hits, hasMore: start + PAGE < ranked.length };
+  return { hits, hasMore: false };
 }
 
 async function searchGameIcons(parsed: ArtQuery, page: number): Promise<ArtPage<CharacterArtHit>> {
@@ -225,7 +221,7 @@ async function searchGameIcons(parsed: ArtQuery, page: number): Promise<ArtPage<
     }
   }
   hits.sort((a, b) => scoreHit(b, parsed) - scoreHit(a, parsed));
-  return { hits: hits.slice(0, PAGE), hasMore };
+  return { hits, hasMore };
 }
 
 async function queryGameIcons(query: string, page: number): Promise<ArtPage<CharacterArtHit>> {

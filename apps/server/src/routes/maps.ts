@@ -14,7 +14,7 @@ router.get('/library', requireAuth, async (req, res) => {
     res.status(400).json({ error: 'Enter a shorter search' });
     return;
   }
-  if (!Number.isInteger(page) || page < 1 || page > 10) {
+  if (!Number.isInteger(page) || page < 1) {
     res.status(400).json({ error: 'Invalid page' });
     return;
   }

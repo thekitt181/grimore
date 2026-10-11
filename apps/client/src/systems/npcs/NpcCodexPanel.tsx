@@ -319,18 +319,22 @@ function NpcDetail({
     setPortraitQuery(portraitSearchText(npc.ancestry, npc.role, npcProse(npc), npc.name, npc.prompt ?? ''));
   }, [npc.id, npc.prompt, npc.ancestry, npc.role, npc.appearance, npc.name]);
   const [portraits, setPortraits] = useState<NpcPortrait[]>([]);
+  const [portraitPage, setPortraitPage] = useState(1);
+  const [hasMorePortraits, setHasMorePortraits] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  async function findPortraits() {
+  async function findPortraits(nextPage = 1, append = false) {
     const term = portraitQuery.trim();
     if (!term) return;
     setLoading(true);
     setError('');
     try {
-      const found = await searchNpcPortraits(term, 1);
-      setPortraits(found.portraits);
-      if (found.portraits.length === 0) setError('No D&D character pictures for that search.');
+      const found = await searchNpcPortraits(term, nextPage);
+      setPortraits((prev) => (append ? mergePortraits(prev, found.portraits) : found.portraits));
+      setPortraitPage(nextPage);
+      setHasMorePortraits(found.hasMore);
+      if (!append && found.portraits.length === 0) setError('No D&D character pictures for that search.');
     } catch {
       setError('Could not reach the picture libraries.');
     } finally {
@@ -389,7 +393,7 @@ function NpcDetail({
         className="flex gap-1"
         onSubmit={(event) => {
           event.preventDefault();
-          void findPortraits();
+          void findPortraits(1, false);
         }}
       >
         <input
@@ -430,6 +434,16 @@ function NpcDetail({
           ))}
         </div>
       )}
+      {hasMorePortraits && portraits.length > 0 && (
+        <button
+          type="button"
+          className="btn-ghost w-full text-xs py-1"
+          disabled={loading}
+          onClick={() => void findPortraits(portraitPage + 1, true)}
+        >
+          {loading ? 'Loading…' : 'More pictures'}
+        </button>
+      )}
       <p className="font-ui text-[10px] leading-snug" style={{ color: 'var(--color-text-secondary)' }}>
         Pictures are D&amp;D character portraits. Sprite sheets, cartoons, photographs of real people, and generated art are left out. Each picture keeps its creator and source.
       </p>
@@ -445,6 +459,11 @@ function NpcDetail({
       {message && <p className="font-ui text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>{message}</p>}
     </div>
   );
+}
+
+function mergePortraits(current: NpcPortrait[], next: NpcPortrait[]): NpcPortrait[] {
+  const seen = new Set(current.map((portrait) => portrait.imageUrl));
+  return [...current, ...next.filter((portrait) => !seen.has(portrait.imageUrl))];
 }
 
 function NpcEditor({
