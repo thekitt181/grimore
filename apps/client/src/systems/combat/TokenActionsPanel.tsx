@@ -20,6 +20,7 @@ const BD = 'var(--color-border)';
 import { PanelAttackResult, PanelTargetPicker } from '@/systems/combat/TokenPanelCombatFlow';
 import { SpellcastingCard } from './SpellcastingCard';
 import { TokenActionCard } from './TokenActionCard';
+import { parseNpcAttacks } from '@/systems/npcs/npcAttack';
 
 export function TokenActionsPanel({ token, onClose }: { token: TokenItem; onClose: () => void }) {
   const targetPick = useCombatStore((s) => s.targetPick);
@@ -96,6 +97,10 @@ export function TokenActionsPanel({ token, onClose }: { token: TokenItem; onClos
   );
 
   const dexMod = abilities.find((a) => a.name === 'DEX')?.mod;
+  const npcActions = useMemo(
+    () => (token.attackText ? parseNpcAttacks(token.attackText) : []),
+    [token.attackText],
+  );
   const activePickName = targetPick?.attackerTokenId === token.id ? targetPick.actionName : null;
 
   function ActionSection({ title, items }: { title: string; items: ParsedAction[] }) {
@@ -131,7 +136,25 @@ export function TokenActionsPanel({ token, onClose }: { token: TokenItem; onClos
       <PanelAttackResult token={token} />
 
       <div className="p-2 space-y-2">
-        {!token.monsterId && (
+        {!token.monsterId && npcActions.length > 0 && (
+          <>
+            <div className="pb-1" style={{ borderBottom: `1px solid ${BD}` }}>
+              <RollModeBar className="w-full" />
+            </div>
+            <ActionSection title="Actions" items={npcActions} />
+            {token.attackText && (
+              <p className="font-ui text-[10px] leading-snug" style={{ color: 'var(--color-text-secondary)' }}>
+                {token.attackText}
+              </p>
+            )}
+          </>
+        )}
+        {!token.monsterId && npcActions.length === 0 && token.attackText && (
+          <p className="font-ui text-xs leading-snug" style={{ color: 'var(--color-text-secondary)' }}>
+            {token.attackText}
+          </p>
+        )}
+        {!token.monsterId && !token.attackText && (
           <p className="font-ui text-xs text-center py-4" style={{ color: 'var(--color-text-secondary)' }}>
             Token has no linked monster
           </p>

@@ -150,6 +150,8 @@ export interface TokenItem extends BaseItem {
   monsterId?: string;
   monsterCr?: string;
   monsterSource?: string;
+  /** Plain attack line from the NPC codex, rolled from the token actions panel. */
+  attackText?: string;
   /** When true, players do not see this token's HP bar (GM always sees it). */
   hideHpFromPlayers?: boolean;
   /** Initiative modifier (typically DEX mod) for Roll Initiative. */

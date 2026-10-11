@@ -2,7 +2,8 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { requireAuth } from '../middleware/auth';
 import { isFloorplanScanConfigured, scanMapFloorplan } from '../services/floorplan/floorplanScanService';
-import { searchWebMaps } from '../services/mapLibrarySearch';
+import { searchMapPacks } from '../services/freeArtSearch';
+import { searchWebMaps, type WebMapHit } from '../services/mapLibrarySearch';
 
 const router = Router();
 
@@ -18,7 +19,33 @@ router.get('/library', requireAuth, async (req, res) => {
     return;
   }
   try {
-    res.json(await searchWebMaps(q, page));
+    const settled = await Promise.allSettled([searchWebMaps(q, page), searchMapPacks(q, page)]);
+    const groups: WebMapHit[][] = [];
+    let hasMore = false;
+    for (const result of settled) {
+      if (result.status !== 'fulfilled') {
+        console.error('[Maps] one library source failed:', result.reason);
+        continue;
+      }
+      groups.push(result.value.maps);
+      if (result.value.hasMore) hasMore = true;
+    }
+    if (groups.length === 0) {
+      res.status(502).json({ error: 'Image search failed' });
+      return;
+    }
+    const seen = new Set<string>();
+    const maps: WebMapHit[] = [];
+    const longest = Math.max(0, ...groups.map((group) => group.length));
+    for (let i = 0; i < longest; i += 1) {
+      for (const group of groups) {
+        const map = group[i];
+        if (!map || seen.has(map.imageUrl)) continue;
+        seen.add(map.imageUrl);
+        maps.push(map);
+      }
+    }
+    res.json({ maps, hasMore });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error('[Maps] library search failed:', message);

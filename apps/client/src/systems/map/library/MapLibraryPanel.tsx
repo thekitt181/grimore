@@ -118,7 +118,7 @@ export function MapLibraryPanel({ onUse }: { onUse: (map: LibraryMap) => void })
         </button>
       )}
       <p className="font-ui text-xs leading-snug" style={{ color: 'var(--color-text-secondary)' }}>
-        D&D battle maps only, from the web and open collections. Click a picture to use only that image as the map.
+        Battle maps and dungeon packs from the web, OpenGameArt, Kenney, and Tiddybub. Click a picture to use that image as the map.
       </p>
     </ToolSection>
   );

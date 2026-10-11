@@ -8,6 +8,7 @@ import { loadTexture } from '@/lib/textureLoader';
 import { mountPropAnimation } from '@/systems/map/props/propAnimation';
 
 import { getTokenRenderType, tokenHidesPixiBody } from '../token/tokenRenderType';
+import { tokenDisc } from '../token/tokenGrid';
 
 export interface RenderContext {
   gm: boolean;
@@ -216,7 +217,7 @@ function renderTokenBase(c: Container, item: TokenItem, ctx: RenderContext) {
   const cellPx = w / item.sizeCells;
   const cx = w / 2;
   const cy = h / 2;
-  const radius = Math.min(w, h) / 2 - 4;
+  const { radius, ring } = tokenDisc(Math.min(w, h));
   const renderType = getTokenRenderType(item);
   /** Hide Pixi body when Three.js renders the token (3D view model, or 2D model overlay). */
   const hidePixiBody = tokenHidesPixiBody(
@@ -247,11 +248,11 @@ function renderTokenBase(c: Container, item: TokenItem, ctx: RenderContext) {
     circle.fill({ color: 0xffffff, alpha: 0.001 });
   } else if (renderType === '3d' && !item.imageUrl) {
     circle.fill({ color: 0x1c1c28 });
-    circle.setStrokeStyle({ width: 3, color: borderColor });
+    circle.setStrokeStyle({ width: ring, color: borderColor, alignment: 0 });
     circle.stroke();
   } else {
     circle.fill({ color: 0x1c1c28 });
-    circle.setStrokeStyle({ width: 3, color: borderColor });
+    circle.setStrokeStyle({ width: ring, color: borderColor, alignment: 0 });
     circle.stroke();
   }
   c.addChild(circle);
@@ -279,10 +280,11 @@ function renderTokenBase(c: Container, item: TokenItem, ctx: RenderContext) {
       sprite.label = 'image';
       sprite.anchor.set(0.5, 0.5);
       sprite.x = cx; sprite.y = cy;
-      const d = radius * 2;
+      const imageRadius = Math.max(1, radius - ring);
+      const d = imageRadius * 2;
       sprite.scale.set(d / Math.max(tex.width, tex.height));
       const mask = new Graphics();
-      mask.circle(cx, cy, radius - 2);
+      mask.circle(cx, cy, imageRadius);
       mask.fill({ color: 0xffffff });
       sprite.mask = mask;
       c.addChildAt(sprite, Math.min(2, c.children.length));
@@ -309,29 +311,30 @@ function renderTokenOverlay(c: Container, item: TokenItem, ctx: RenderContext) {
   const cellPx = item.width / item.sizeCells;
   const cx = size / 2;
   const cy = size / 2;
-  const radius = size / 2 - 4;
+  const { radius, ring } = tokenDisc(size);
 
   if (ctx.activeTurnItemId === item.id && !hidePixiBody) {
     const turn = new Graphics();
     turn.label = 'turn-ring';
-    turn.circle(cx, cy, radius + 6);
-    turn.setStrokeStyle({ width: 3, color: 0xffd700, alpha: 1 });
+    turn.circle(cx, cy, radius + ring);
+    turn.setStrokeStyle({ width: ring, color: 0xffd700, alpha: 1, alignment: 1 });
     turn.stroke();
     overlay.addChild(turn);
   }
 
   const selected = ctx.selectedIds?.includes(item.id);
   if (selected && !hidePixiBody) {
-    const ring = new Graphics();
-    ring.label = 'select-ring';
-    ring.circle(cx, cy, radius + 5);
-    ring.setStrokeStyle({
-      width: 3,
+    const selectRing = new Graphics();
+    selectRing.label = 'select-ring';
+    selectRing.circle(cx, cy, radius + ring);
+    selectRing.setStrokeStyle({
+      width: ring,
       color: 0xc9a84c,
       alpha: 1,
+      alignment: 1,
     });
-    ring.stroke();
-    overlay.addChild(ring);
+    selectRing.stroke();
+    overlay.addChild(selectRing);
   }
 
   const showHpBar = (ctx.gm || tokenShowsHpBarToPlayer(item)) && !item.modelUrl;

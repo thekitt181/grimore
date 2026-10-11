@@ -1,3 +1,5 @@
+import { parseArtQuery, scoreText } from '@grimoire/shared';
+
 export interface LibraryMap {
   id: string;
   title: string;
@@ -21,15 +23,17 @@ const BATTLE_MAP = /battle\s*-?\s*maps?|battlemaps?|dungeon\s*maps?|encounter ma
 const DND = /\bd\s*&\s*d\b|\bdnd\b|\b5e\b|\bvtt\b|roll20|foundry vtt/i;
 const MAP_WORD = /\bmaps?\b/i;
 
-/** Search D&D battle maps across the web image index, Wikimedia Commons, and Openverse. */
+/** Search battle maps across the web index, Wikimedia, Openverse, OpenGameArt, Kenney, and Tiddybub. */
 export async function searchMapLibrary(query: string, page: number): Promise<MapLibraryPage> {
   const term = query.trim();
   if (!term) return { maps: [], hasMore: false };
+  const parsed = parseArtQuery(term, 'map');
+  const phrases = page === 1 ? [parsed.detailed, ...parsed.broader.slice(0, 2)] : [parsed.detailed];
 
   const settled = await Promise.allSettled([
     searchWeb(term, page),
-    searchCommons(term, page),
-    searchOpenverse(term, page),
+    searchPhrases(phrases, page, searchCommons),
+    searchPhrases(phrases, page, searchOpenverse),
   ]);
 
   const groups: LibraryMap[][] = [];
@@ -54,6 +58,32 @@ export async function searchMapLibrary(query: string, page: number): Promise<Map
       maps.push(map);
     }
   }
+  maps.sort((a, b) => scoreText(b.title, parsed.keywords, parsed.words) - scoreText(a.title, parsed.keywords, parsed.words));
+  return { maps, hasMore };
+}
+
+async function searchPhrases(
+  phrases: string[],
+  page: number,
+  search: (phrase: string, page: number) => Promise<MapLibraryPage>,
+): Promise<MapLibraryPage> {
+  const unique = [...new Set(phrases.map((phrase) => phrase.trim()).filter(Boolean))];
+  const settled = await Promise.allSettled(unique.map((phrase) => search(phrase, page)));
+  const maps: LibraryMap[] = [];
+  const seen = new Set<string>();
+  let hasMore = false;
+  let reached = 0;
+  for (const result of settled) {
+    if (result.status !== 'fulfilled') continue;
+    reached += 1;
+    if (result.value.hasMore) hasMore = true;
+    for (const map of result.value.maps) {
+      if (seen.has(map.imageUrl)) continue;
+      seen.add(map.imageUrl);
+      maps.push(map);
+    }
+  }
+  if (reached === 0) throw new Error('Map library unreachable');
   return { maps, hasMore };
 }
 
@@ -103,7 +133,7 @@ async function searchCommons(query: string, page: number): Promise<MapLibraryPag
 
 async function searchOpenverse(query: string, page: number): Promise<MapLibraryPage> {
   const params = new URLSearchParams({
-    q: `${query} dnd battle map`,
+    q: `${query} battle map`,
     page: String(page),
     page_size: String(PAGE),
     extension: 'jpg,png,webp',

@@ -49,6 +49,14 @@ export function tokenBoundsFromGrid(
   };
 }
 
+/** Circle path and gold ring for a token of this pixel size. The ring stays a slim fraction of the disc so a 5ft token is not a thick band. */
+export function tokenDisc(size: number): { radius: number; ring: number } {
+  const outer = Math.max(2, size / 2);
+  const ring = Math.max(0.5, Math.min(1.75, outer * 0.055));
+  const radius = Math.max(ring + 1, outer - 0.5);
+  return { radius, ring };
+}
+
 export function syncTokenGridFields(token: TokenItem): Pick<TokenItem, 'gridCol' | 'gridRow'> {
   const map = getActiveMap();
   if (!map) return {};

@@ -34,6 +34,7 @@ import { DungeonPropsPanel } from '@/systems/map/props/DungeonPropsPanel';
 import { MapLibraryPanel } from '@/systems/map/library/MapLibraryPanel';
 import { LootPanel } from '@/systems/compendium/LootPanel';
 import { ShopPanel } from '@/systems/compendium/ShopPanel';
+import { NpcCodexPanel } from '@/systems/npcs/NpcCodexPanel';
 import { ToolSection } from '@/systems/map/ToolSection';
 
 const GOLD = 'var(--color-accent-gold)';
@@ -405,6 +406,7 @@ function GMSidebarContent() {
 
       <LootPanel />
       <ShopPanel />
+      <NpcCodexPanel />
       <DungeonGeneratorPanel />
       <DungeonPropsPanel />
 

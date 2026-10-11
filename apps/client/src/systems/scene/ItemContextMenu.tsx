@@ -685,6 +685,16 @@ export function ItemContextMenu() {
         />
       )}
 
+      {single?.type === 'token' && isGM && !(single as TokenItem).monsterId && (single as TokenItem).attackText && (
+        <>
+          <div className="gold-divider my-1" />
+          <Btn label="⚔ Actions" onClick={() => {
+            openTokenActions(single as TokenItem);
+            close();
+          }} />
+        </>
+      )}
+
       {single?.type === 'token' && (single as TokenItem).monsterId && isGM && (
         <>
           <div className="gold-divider my-1" />

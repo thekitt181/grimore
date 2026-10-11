@@ -13,6 +13,7 @@ import { TokenConditionDots } from './TokenConditionDots';
 import { TokenTransformGroup } from './TokenTransformGroup';
 import { TokenSelectionGizmo } from './Map3DTokenGizmo';
 import { TABLE_MINI_VIEW_AZIMUTH_OFFSET } from './orthographicCameraSync';
+import { tokenDisc } from '@/systems/scene/token/tokenGrid';
 
 /** GLB forward axis: most minis face +Z; map north is -Z at rotation 0. */
 const MODEL_2D_IMPORT_YAW = Math.PI + TABLE_MINI_VIEW_AZIMUTH_OFFSET;
@@ -82,7 +83,7 @@ function Token2DFlat({
   const meshBase = useTokenMeshBase(token);
   const modelRootRef = useRef<Group>(null);
   const targetSize = Math.min(meshBase.w, meshBase.h);
-  const radius = targetSize / 2 - 4;
+  const { radius, ring } = tokenDisc(targetSize);
   const borderColor = parseBorderColor(token.borderColour);
   const stretchX = meshBase.w / targetSize;
   const stretchZ = meshBase.h / targetSize;
@@ -101,13 +102,13 @@ function Token2DFlat({
       </mesh>
 
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.02, 0]} renderOrder={11}>
-        <ringGeometry args={[radius - 3, radius, 48]} />
+        <ringGeometry args={[Math.max(0.5, radius - ring), radius, 48]} />
         <meshStandardMaterial color={borderColor} roughness={0.45} metalness={0.35} />
       </mesh>
 
       {texture && (
         <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.04, 0]} renderOrder={12}>
-          <circleGeometry args={[radius - 5, 48]} />
+          <circleGeometry args={[Math.max(0.5, radius - ring), 48]} />
           <meshStandardMaterial map={texture} transparent roughness={0.55} metalness={0.05} />
         </mesh>
       )}
@@ -118,7 +119,7 @@ function Token2DFlat({
 
       {activeTurn && (
         <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.08, 0]}>
-          <ringGeometry args={[radius + 2, radius + 8, 48]} />
+          <ringGeometry args={[radius + ring * 0.4, radius + ring * 1.8, 48]} />
           <meshStandardMaterial color="#ffd700" emissive="#ffd700" emissiveIntensity={0.4} />
         </mesh>
       )}
