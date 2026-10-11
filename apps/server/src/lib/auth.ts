@@ -83,6 +83,13 @@ export const auth = betterAuth({
     // OAuth state is still validated against the verification table; skip the extra
     // signed cookie check that breaks on mobile / www↔apex redirects when cookies drop.
     skipStateCookieCheck: true,
+    accountLinking: {
+      enabled: true,
+      trustedProviders: ['google'],
+      // Password sign-up does not require a verified email, so Google must still
+      // be able to join the existing user who owns that address.
+      requireLocalEmailVerified: false,
+    },
   },
   verification: {
     modelName: 'AuthVerification',

@@ -8,6 +8,7 @@ const OAUTH_ERROR_MESSAGES: Record<string, string> = {
   unable_to_get_user_info: 'Could not read your Google profile. Try again.',
   no_callback_url: 'Sign-in configuration error — contact support.',
   invalid_callback_request: 'Invalid sign-in response from Google. Try again.',
+  account_not_linked: 'This email already has a password account. Sign in with email and password instead.',
 };
 
 export function oauthErrorMessage(code: string | null, description: string | null): string | null {
