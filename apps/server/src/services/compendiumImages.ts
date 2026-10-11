@@ -425,6 +425,11 @@ export function isPublicHttpImageUrl(raw: string): boolean {
   }
 }
 
+/** Same-origin image URL so the browser does not ask Google or the host for CORS. */
+export function proxyPublicImage(url: string): string {
+  return `/api/compendium/proxy-image?url=${encodeURIComponent(url)}`;
+}
+
 export async function fetchPublicImage(url: string): Promise<{ body: Buffer; contentType: string } | null> {
   if (!isPublicHttpImageUrl(url)) return null;
   const controller = new AbortController();
@@ -433,7 +438,11 @@ export async function fetchPublicImage(url: string): Promise<{ body: Buffer; con
     const res = await fetch(url, {
       signal: controller.signal,
       redirect: 'follow',
-      headers: { Accept: 'image/*,*/*', 'User-Agent': 'GrimoireVTT/1.0' },
+      headers: {
+        Accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+        Referer: 'https://www.google.com/',
+      },
     });
     if (!res.ok) return null;
     const contentType = (res.headers.get('content-type') ?? '').split(';')[0]?.trim() || 'image/jpeg';

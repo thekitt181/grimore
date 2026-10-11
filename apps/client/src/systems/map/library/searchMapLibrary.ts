@@ -87,6 +87,10 @@ async function searchPhrases(
   return { maps, hasMore };
 }
 
+function isShownImage(url: string): boolean {
+  return url.startsWith('https://') || url.startsWith('/api/compendium/proxy-image?');
+}
+
 async function searchWeb(query: string, page: number): Promise<MapLibraryPage> {
   const params = new URLSearchParams({ q: query, page: String(page) });
   const res = await fetch(`/api/maps/library?${params}`, {
@@ -96,8 +100,8 @@ async function searchWeb(query: string, page: number): Promise<MapLibraryPage> {
   if (!res.ok) throw new Error(`Web ${res.status}`);
   const data = (await res.json()) as { maps?: LibraryMap[]; hasMore?: boolean };
   const maps = (data.maps ?? []).filter((map): map is LibraryMap => (
-    typeof map?.imageUrl === 'string' && map.imageUrl.startsWith('https://')
-    && typeof map.thumbUrl === 'string' && map.thumbUrl.startsWith('https://')
+    typeof map?.imageUrl === 'string' && isShownImage(map.imageUrl)
+    && typeof map.thumbUrl === 'string' && isShownImage(map.thumbUrl)
     && typeof map.title === 'string'
     && typeof map.id === 'string'
   ));

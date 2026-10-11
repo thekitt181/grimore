@@ -1,3 +1,5 @@
+import { proxyPublicImage } from './compendiumImages';
+
 export interface WebMapHit {
   id: string;
   title: string;
@@ -14,7 +16,6 @@ const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,
 
 const batches = new Map<string, { at: number; results: WebMapHit[]; hasMore: boolean }>();
 let googleChain: Promise<unknown> = Promise.resolve();
-let googleBlockedUntil = 0;
 
 /** One Google search at a time, so a few map searches do not get blocked. */
 function enqueueGoogle<T>(work: () => Promise<T>): Promise<T> {
@@ -48,14 +49,12 @@ async function loadBatch(lookup: string, term: string, page: number): Promise<{ 
 
   let hits: WebMapHit[] = [];
   let hasMore = false;
-  if (Date.now() >= googleBlockedUntil) {
-    try {
-      const google = await enqueueGoogle(() => loadGoogle(lookup, term, page));
-      hits = google.hits;
-      hasMore = google.hasMore;
-    } catch {
-      hits = [];
-    }
+  try {
+    const google = await enqueueGoogle(() => loadGoogle(lookup, term, page));
+    hits = google.hits;
+    hasMore = google.hasMore;
+  } catch {
+    hits = [];
   }
   if (hits.length === 0) {
     const web = await searchBingMaps(lookup, term, page);
@@ -69,6 +68,17 @@ async function loadBatch(lookup: string, term: string, page: number): Promise<{ 
     if (oldest) batches.delete(oldest);
   }
   return { maps: unique, hasMore };
+}
+
+function readGoogleRows(text: string): GoogleImage[] {
+  const body = text.replace(/^\)\]\}'\s*/, '').trim();
+  try {
+    const wrapped = JSON.parse(body) as { ischj?: { results?: string } };
+    if (typeof wrapped.ischj?.results === 'string') return JSON.parse(wrapped.ischj.results) as GoogleImage[];
+  } catch {
+    // A consent or block page is HTML, not image JSON. The web index is used instead.
+  }
+  return [];
 }
 
 async function loadGoogle(query: string, term: string, page = 1, attempt = 0): Promise<{ hits: WebMapHit[]; hasMore: boolean }> {
@@ -96,7 +106,6 @@ async function loadGoogle(query: string, term: string, page = 1, attempt = 0): P
     signal: AbortSignal.timeout(12_000),
   });
   if (res.status === 429) {
-    googleBlockedUntil = Date.now() + 600_000;
     if (attempt < 1) {
       await wait(2500);
       return loadGoogle(query, term, page, attempt + 1);
@@ -105,8 +114,7 @@ async function loadGoogle(query: string, term: string, page = 1, attempt = 0): P
   }
   if (!res.ok) return { hits: [], hasMore: false };
   const text = await res.text();
-  const wrapped = JSON.parse(text.replace(/^\)\]\}'\s*/, '')) as { ischj?: { results?: string } };
-  const rows = JSON.parse(wrapped.ischj?.results ?? '[]') as GoogleImage[];
+  const rows = readGoogleRows(text);
   const hits: WebMapHit[] = [];
   const seen = new Set<string>();
   for (const row of rows) {
@@ -164,8 +172,8 @@ function googleHit(row: GoogleImage, term: string): WebMapHit | null {
   return {
     id: `web-${hash(imageUrl)}`,
     title,
-    thumbUrl,
-    imageUrl,
+    thumbUrl: proxyPublicImage(thumbUrl),
+    imageUrl: proxyPublicImage(imageUrl),
     width: width || 1920,
     height: height || 1080,
     source: siteLabel(pageUrl),
@@ -191,8 +199,8 @@ function bingHit(encoded: string, term: string): WebMapHit | null {
   return {
     id: `web-${hash(imageUrl)}`,
     title,
-    thumbUrl,
-    imageUrl,
+    thumbUrl: proxyPublicImage(thumbUrl),
+    imageUrl: proxyPublicImage(imageUrl),
     width: 1920,
     height: 1080,
     source: siteLabel(pageUrl),

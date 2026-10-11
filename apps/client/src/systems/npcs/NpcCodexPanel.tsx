@@ -416,7 +416,7 @@ function NpcDetail({
               className="text-left"
               title={`${portrait.title} — ${portrait.creator} (${portrait.license})`}
               onClick={() => {
-                const chosen = portrait.thumbUrl.startsWith('https://') ? portrait.thumbUrl : portrait.imageUrl;
+                const chosen = portrait.thumbUrl || portrait.imageUrl;
                 onPortrait({
                   ...portrait,
                   imageUrl: chosen,

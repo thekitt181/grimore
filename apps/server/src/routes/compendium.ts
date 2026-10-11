@@ -103,7 +103,9 @@ router.get('/proxy-image', async (req, res) => {
       return;
     }
     res.setHeader('Content-Type', image.contentType);
-    res.setHeader('Cache-Control', 'private, max-age=86400');
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
     res.send(image.body);
   } catch (err) {
     respondCompendiumError(res, err, '[Compendium] proxy-image:', 'Failed to proxy image');

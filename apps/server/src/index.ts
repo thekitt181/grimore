@@ -76,7 +76,9 @@ app.use((req, res, next) => {
 // ─── Middleware ────────────────────────────────────────────────────────────────
 app.use(helmet({
   contentSecurityPolicy: false,
+  crossOriginEmbedderPolicy: false,
   crossOriginResourcePolicy: false,
+  referrerPolicy: false,
 }));
 
 const corsOptions: cors.CorsOptions = {

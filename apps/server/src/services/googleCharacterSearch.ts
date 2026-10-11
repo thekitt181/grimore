@@ -1,3 +1,5 @@
+import { proxyPublicImage } from './compendiumImages';
+
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 
 export interface GoogleCharacterHit {
@@ -16,7 +18,6 @@ const SKIP = /\b(cosplays?|cosplayer|selfie|photograph|photoshoot|photo shoot|re
 
 const batches = new Map<string, { at: number; hits: GoogleCharacterHit[]; hasMore: boolean }>();
 let googleChain: Promise<unknown> = Promise.resolve();
-let googleBlockedUntil = 0;
 
 /** One Google search at a time, so a full codex does not get blocked. */
 function enqueueGoogle<T>(work: () => Promise<T>): Promise<T> {
@@ -73,14 +74,12 @@ function takeCharacters(found: GoogleCharacterHit[], term: string): GoogleCharac
 async function collectCharacters(lookup: string, term: string, page: number): Promise<{ hits: GoogleCharacterHit[]; hasMore: boolean }> {
   let found: GoogleCharacterHit[] = [];
   let hasMore = false;
-  if (Date.now() >= googleBlockedUntil) {
-    try {
-      const google = await enqueueGoogle(() => loadGoogle(lookup, page));
-      found = google.hits;
-      hasMore = google.hasMore;
-    } catch {
-      found = [];
-    }
+  try {
+    const google = await enqueueGoogle(() => loadGoogle(lookup, page));
+    found = google.hits;
+    hasMore = google.hasMore;
+  } catch {
+    found = [];
   }
   const googleHits = takeCharacters(found, term);
   if (googleHits.length > 0) return { hits: googleHits, hasMore };
@@ -154,8 +153,8 @@ function bingHit(encoded: string): GoogleCharacterHit | null {
   return {
     id: `web-${hash(imageUrl)}`,
     title,
-    thumbUrl,
-    imageUrl,
+    thumbUrl: proxyPublicImage(thumbUrl),
+    imageUrl: proxyPublicImage(imageUrl),
     pageUrl,
     source: 'Web',
     creator: hostName(pageUrl),
@@ -167,6 +166,17 @@ function hash(value: string): string {
   let h = 0;
   for (let i = 0; i < value.length; i += 1) h = (Math.imul(31, h) + value.charCodeAt(i)) | 0;
   return (h >>> 0).toString(36);
+}
+
+function readGoogleRows(text: string): GoogleImage[] {
+  const body = text.replace(/^\)\]\}'\s*/, '').trim();
+  try {
+    const wrapped = JSON.parse(body) as { ischj?: { results?: string } };
+    if (typeof wrapped.ischj?.results === 'string') return JSON.parse(wrapped.ischj.results) as GoogleImage[];
+  } catch {
+    // A consent or block page is HTML, not image JSON. The web index is used instead.
+  }
+  return [];
 }
 
 async function loadGoogle(query: string, page = 1, attempt = 0): Promise<{ hits: GoogleCharacterHit[]; hasMore: boolean }> {
@@ -194,7 +204,6 @@ async function loadGoogle(query: string, page = 1, attempt = 0): Promise<{ hits:
     signal: AbortSignal.timeout(12_000),
   });
   if (res.status === 429) {
-    googleBlockedUntil = Date.now() + 600_000;
     if (attempt < 1) {
       await wait(2500);
       return loadGoogle(query, page, attempt + 1);
@@ -203,8 +212,7 @@ async function loadGoogle(query: string, page = 1, attempt = 0): Promise<{ hits:
   }
   if (!res.ok) return { hits: [], hasMore: false };
   const text = await res.text();
-  const wrapped = JSON.parse(text.replace(/^\)\]\}'\s*/, '')) as { ischj?: { results?: string } };
-  const rows = JSON.parse(wrapped.ischj?.results ?? '[]') as GoogleImage[];
+  const rows = readGoogleRows(text);
   const hits: GoogleCharacterHit[] = [];
   const seen = new Set<string>();
   for (const row of rows) {
@@ -231,8 +239,8 @@ function toHit(row: GoogleImage): GoogleCharacterHit | null {
   return {
     id: `google-${hash.toString(36)}`,
     title,
-    thumbUrl,
-    imageUrl,
+    thumbUrl: proxyPublicImage(thumbUrl),
+    imageUrl: proxyPublicImage(imageUrl),
     pageUrl,
     source: 'Google Images',
     creator: (row.st ?? '').trim() || hostName(pageUrl),

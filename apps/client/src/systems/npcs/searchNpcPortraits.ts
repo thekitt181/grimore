@@ -97,6 +97,10 @@ const AI_HOST = /craiyon|lexica\.art|char-gen|charsheet-gen|midjourney|nightcafe
 /** Painted D&D character art from Google Images. Sprite sheets and pack previews are not portraits. */
 const FANTASY_ART = /^(google images|web)$/i;
 
+function isShownImage(url: string): boolean {
+  return url.startsWith('https://') || url.startsWith('/api/compendium/proxy-image?');
+}
+
 function isCharacterPortrait(portrait: { title: string; imageUrl: string; source: string }): boolean {
   return FANTASY_ART.test(portrait.source)
     && !/\.svg(\?|$)/i.test(portrait.imageUrl)
@@ -302,8 +306,8 @@ async function searchPacks(query: string, page: number): Promise<PortraitPage> {
   if (!res.ok) throw new Error(`Art ${res.status}`);
   const data = (await res.json()) as { portraits?: NpcPortrait[]; hasMore?: boolean };
   const portraits = (data.portraits ?? []).filter((portrait): portrait is NpcPortrait => (
-    typeof portrait?.imageUrl === 'string' && portrait.imageUrl.startsWith('https://')
-    && typeof portrait.thumbUrl === 'string' && portrait.thumbUrl.startsWith('https://')
+    typeof portrait?.imageUrl === 'string' && isShownImage(portrait.imageUrl)
+    && typeof portrait.thumbUrl === 'string' && isShownImage(portrait.thumbUrl)
     && typeof portrait.title === 'string'
     && typeof portrait.id === 'string'
     && typeof portrait.pageUrl === 'string'
