@@ -1,5 +1,3 @@
-import { parseArtQuery } from '@grimoire/shared';
-
 export interface WebMapHit {
   id: string;
   title: string;
@@ -29,8 +27,7 @@ export async function searchWebMaps(query: string, page: number): Promise<{ maps
 }
 
 function webQuery(query: string): string {
-  const scene = parseArtQuery(query, 'map').detailed;
-  return `${scene} (dnd OR "d&d" OR battlemap OR "battle map" OR "dungeon map")`;
+  return query.trim();
 }
 
 async function loadBatch(query: string): Promise<WebMapHit[]> {

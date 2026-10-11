@@ -12,7 +12,7 @@ export interface GoogleCharacterHit {
 }
 
 /** Real people, maps, idea boards, commodities, and generated pictures are not a D&D character. */
-const SKIP = /\b(cosplays?|cosplayer|selfie|photograph|photoshoot|photo shoot|real life|\birl\b|actor|actress|celebrity|meme|screenshot|logo|battle ?map|dungeon map|world map|rulebook|dice set|sprites?|spritesheets?|chibi|pixel|8-?bit|16-?bit|tilesets?|asset packs?|art packs?|rpg maker|ideas|gold bars?|silver bars?|bullion|ingots?|gold coins?|silver coins?|krugerrand|karats?|fine gold|gold price|gold investment|buy gold|nuggets?|jewell?ery|necklaces?|bracelets?)\b|craiyon|midjourney|leonardo\.ai|nightcafe|starryai|\bdall-?e\b|stable diffusion|ideogram|getimg\.ai|lexica\.art|char-gen\.com|charsheet-gen|seaart\.ai|tensor\.art|novelai|mage\.space|\bdndai\b|ai generated|ai art|openai\.com|apmex|kitco|jmbullion/i;
+const SKIP = /\b(cosplays?|cosplayer|selfie|photograph|photoshoot|photo shoot|real life|\birl\b|actor|actress|celebrity|meme|screenshot|logo|headshots?|businessman|business man|stock photos?|battle ?map|dungeon map|world map|rulebook|dice set|sprites?|spritesheets?|chibi|pixel|8-?bit|16-?bit|tilesets?|asset packs?|art packs?|rpg maker|ideas|gold bars?|silver bars?|bullion|ingots?|gold coins?|silver coins?|krugerrand|karats?|fine gold|gold price|gold investment|buy gold|nuggets?|jewell?ery|necklaces?|bracelets?)\b|pexels\.com|unsplash\.com|shutterstock\.com|gettyimages\.com|istockphoto\.com|dreamstime\.com|depositphotos\.com|alamy\.com|123rf\.com|pixabay\.com|craiyon|midjourney|leonardo\.ai|nightcafe|starryai|\bdall-?e\b|stable diffusion|ideogram|getimg\.ai|lexica\.art|char-gen\.com|charsheet-gen|seaart\.ai|tensor\.art|novelai|mage\.space|\bdndai\b|ai generated|ai art|openai\.com|apmex|kitco|jmbullion/i;
 
 const batches = new Map<string, { at: number; hits: GoogleCharacterHit[] }>();
 let googleChain: Promise<unknown> = Promise.resolve();
@@ -30,8 +30,9 @@ function wait(ms: number): Promise<void> {
 }
 
 const COLOR_WORD = /^(gold|golden|silver|copper|bronze|brass|red|blue|green|black|white|purple|crimson|scarlet|amber)$/i;
+const WEAK_WORD = /^(man|men|woman|women|male|female|boy|girl|person|people|lady|guy)$/i;
 
-/** D&D character portraits. Web image results first, because Google often refuses a full codex. */
+/** D&D character portraits. Google Images first, then the web index if Google refuses. */
 export async function searchGoogleCharacters(subject: string): Promise<GoogleCharacterHit[]> {
   const term = subject.trim().replace(/[^\w\s'-]/g, ' ').replace(/\s+/g, ' ').slice(0, 100);
   if (!term) return [];
@@ -39,30 +40,17 @@ export async function searchGoogleCharacters(subject: string): Promise<GoogleCha
   const cached = batches.get(key);
   if (cached && Date.now() - cached.at < 600_000) return cached.hits;
 
-  const hits: GoogleCharacterHit[] = [];
-  const seen = new Set<string>();
-  for (const lookup of portraitLookups(term)) {
-    const found = await searchWebCharacters(lookup, term);
-    for (const hit of found) {
-      if (seen.has(hit.imageUrl)) continue;
-      seen.add(hit.imageUrl);
-      hits.push(hit);
-    }
-    if (hits.length >= 8) break;
-  }
-  if (hits.length === 0 && Date.now() >= googleBlockedUntil) {
+  const lookup = `${term} dnd`;
+  let hits: GoogleCharacterHit[] = [];
+  if (Date.now() >= googleBlockedUntil) {
     try {
-      const googleHits = await enqueueGoogle(() => loadGoogle(`${term} dnd character portrait -cosplay -cosplayer -sprite -pixel`));
-      for (const hit of googleHits) {
-        if (!mentionsSubject(`${hit.title} ${hit.pageUrl}`, term)) continue;
-        if (seen.has(hit.imageUrl)) continue;
-        seen.add(hit.imageUrl);
-        hits.push(hit);
-      }
+      const googleHits = await enqueueGoogle(() => loadGoogle(lookup));
+      hits = googleHits.filter((hit) => mentionsSubject(`${hit.title} ${hit.pageUrl}`, term));
     } catch {
-      // The web results above are enough when Google refuses.
+      hits = [];
     }
   }
+  if (hits.length === 0) hits = await searchWebCharacters(lookup, term);
   batches.set(key, { at: Date.now(), hits });
   if (batches.size > 40) {
     const oldest = batches.keys().next().value;
@@ -71,23 +59,12 @@ export async function searchGoogleCharacters(subject: string): Promise<GoogleCha
   return hits;
 }
 
-/** Character words first, then colour, so "gold" is not searched as bullion. */
-function portraitLookups(term: string): string[] {
-  const parts = term.split(/\s+/).filter(Boolean);
-  const colors = parts.filter((word) => COLOR_WORD.test(word));
-  const rest = parts.filter((word) => !COLOR_WORD.test(word));
-  const ordered = [...rest, ...colors].join(' ');
-  const lookups = [`${ordered} fantasy character portrait dnd -bullion -ingot -coin -karat -jewelry -price`];
-  if (rest.length > 0) lookups.push(`${rest.join(' ')} character portrait fantasy dnd`);
-  return [...new Set(lookups)];
-}
-
 /** A gold-bar listing does not name the character that was searched. */
 const SUBJECT_STOP = new Set(['and', 'the', 'for', 'with', 'from', 'her', 'his', 'she', 'him', 'that', 'this']);
 
 function mentionsSubject(blob: string, term: string): boolean {
   const words = term.toLowerCase().split(/[^a-z0-9-]+/).filter((word) => (
-    word.length > 2 && !COLOR_WORD.test(word) && !SUBJECT_STOP.has(word)
+    word.length > 2 && !COLOR_WORD.test(word) && !WEAK_WORD.test(word) && !SUBJECT_STOP.has(word)
   ));
   const text = blob.toLowerCase();
   if (words.length === 0) return /\b(character|portrait|fantasy|dnd|dragonborn|elf|dwarf)\b/i.test(blob);

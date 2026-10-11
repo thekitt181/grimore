@@ -28,7 +28,7 @@ export async function searchMapLibrary(query: string, page: number): Promise<Map
   const term = query.trim();
   if (!term) return { maps: [], hasMore: false };
   const parsed = parseArtQuery(term, 'map');
-  const phrases = page === 1 ? [parsed.detailed, ...parsed.broader.slice(0, 2)] : [parsed.detailed];
+  const phrases = [term];
 
   const settled = await Promise.allSettled([
     searchWeb(term, page),
@@ -110,7 +110,7 @@ async function searchCommons(query: string, page: number): Promise<MapLibraryPag
     format: 'json',
     origin: '*',
     generator: 'search',
-    gsrsearch: `${query} (dnd OR "d&d" OR battlemap OR "battle map" OR "dungeon map") -geograph filetype:bitmap`,
+    gsrsearch: `${query} (battlemap OR "battle map" OR "dungeon map") -geograph filetype:bitmap`,
     gsrnamespace: '6',
     gsrlimit: String(PAGE),
     gsroffset: String((page - 1) * PAGE),

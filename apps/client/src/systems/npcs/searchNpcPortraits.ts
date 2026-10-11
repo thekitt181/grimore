@@ -92,7 +92,7 @@ const ROLE_TOKENS: Record<string, string[]> = {
 };
 
 const ANCESTRY_TOKEN = /^(dwarf|elf|orc|gnome|halfling|goblin|dragon|dragonborn|tiefling|half-elf|half-orc|kobold|tabaxi|aasimar|goliath)$/;
-const JUNK = /\b(bad|hamster|lego|minecraft|pokemon|logo|diagram|map|flag|icon|sprites?|spritesheets?|sprite sheets?|chibi|pixel|8-?bit|16-?bit|tilesets?|rigged|model|photo|photograph|cosplay|selfie|asset packs?|art packs?|rpg maker|chargen|lexica|craiyon|gold bars?|silver bars?|bullion|ingots?|gold coins?|silver coins?|krugerrand|karats?|fine gold|gold price|nuggets?|jewell?ery|necklaces?|bracelets?)\b/i;
+const JUNK = /\b(bad|hamster|lego|minecraft|pokemon|logo|diagram|map|flag|icon|sprites?|spritesheets?|sprite sheets?|chibi|pixel|8-?bit|16-?bit|tilesets?|rigged|model|photo|photograph|headshots?|businessman|stock photos?|cosplay|selfie|asset packs?|art packs?|rpg maker|chargen|lexica|craiyon|gold bars?|silver bars?|bullion|ingots?|gold coins?|silver coins?|krugerrand|karats?|fine gold|gold price|nuggets?|jewell?ery|necklaces?|bracelets?)\b/i;
 const AI_HOST = /craiyon|lexica\.art|char-gen|charsheet-gen|midjourney|nightcafe|starryai|getimg\.ai|seaart|tensor\.art|novelai|mage\.space/i;
 /** Painted D&D character art from Google Images. Sprite sheets and pack previews are not portraits. */
 const FANTASY_ART = /^(google images|web)$/i;
@@ -124,11 +124,12 @@ const QUERY_STOP = new Set([
   'a', 'an', 'the', 'in', 'on', 'of', 'with', 'and', 'or', 'to', 'for', 'from', 'by', 'at',
 ]);
 const COLOR_WORD = /^(gold|golden|silver|copper|bronze|brass|red|blue|green|black|white|purple|crimson|scarlet|amber)$/;
+const WEAK_WORD = /^(man|men|woman|women|male|female|boy|girl|person|people|lady|guy)$/;
 
-/** Gold bars do not count just because the search said gold. The title has to name the character. */
+/** A colour or the word man is not enough. The title has to name the race or the job. */
 function mentionsSearch(title: string, query: string): boolean {
   const words = query.toLowerCase().split(/[^a-z0-9-]+/).filter((word) => (
-    word.length > 2 && !QUERY_STOP.has(word) && !COLOR_WORD.test(word)
+    word.length > 2 && !QUERY_STOP.has(word) && !COLOR_WORD.test(word) && !WEAK_WORD.test(word)
     && word !== 'dnd' && word !== 'fantasy' && word !== 'character' && word !== 'portrait'
   ));
   if (words.length === 0) return true;
