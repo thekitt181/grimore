@@ -29,6 +29,8 @@ function wait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+const COLOR_WORD = /^(gold|golden|silver|copper|bronze|brass|red|blue|green|black|white|purple|crimson|scarlet|amber)$/i;
+
 /** D&D character portraits. Web image results first, because Google often refuses a full codex. */
 export async function searchGoogleCharacters(subject: string): Promise<GoogleCharacterHit[]> {
   const term = subject.trim().replace(/[^\w\s'-]/g, ' ').replace(/\s+/g, ' ').slice(0, 100);
@@ -37,12 +39,28 @@ export async function searchGoogleCharacters(subject: string): Promise<GoogleCha
   const cached = batches.get(key);
   if (cached && Date.now() - cached.at < 600_000) return cached.hits;
 
-  let hits = await searchWebCharacters(`${term} fantasy character portrait dnd -bullion -ingot -coin -karat -jewelry`);
+  const hits: GoogleCharacterHit[] = [];
+  const seen = new Set<string>();
+  for (const lookup of portraitLookups(term)) {
+    const found = await searchWebCharacters(lookup, term);
+    for (const hit of found) {
+      if (seen.has(hit.imageUrl)) continue;
+      seen.add(hit.imageUrl);
+      hits.push(hit);
+    }
+    if (hits.length >= 8) break;
+  }
   if (hits.length === 0 && Date.now() >= googleBlockedUntil) {
     try {
-      hits = await enqueueGoogle(() => loadGoogle(`${term} dnd character portrait -cosplay -cosplayer -sprite -pixel`));
+      const googleHits = await enqueueGoogle(() => loadGoogle(`${term} dnd character portrait -cosplay -cosplayer -sprite -pixel`));
+      for (const hit of googleHits) {
+        if (!mentionsSubject(`${hit.title} ${hit.pageUrl}`, term)) continue;
+        if (seen.has(hit.imageUrl)) continue;
+        seen.add(hit.imageUrl);
+        hits.push(hit);
+      }
     } catch {
-      hits = [];
+      // The web results above are enough when Google refuses.
     }
   }
   batches.set(key, { at: Date.now(), hits });
@@ -53,8 +71,31 @@ export async function searchGoogleCharacters(subject: string): Promise<GoogleCha
   return hits;
 }
 
+/** Character words first, then colour, so "gold" is not searched as bullion. */
+function portraitLookups(term: string): string[] {
+  const parts = term.split(/\s+/).filter(Boolean);
+  const colors = parts.filter((word) => COLOR_WORD.test(word));
+  const rest = parts.filter((word) => !COLOR_WORD.test(word));
+  const ordered = [...rest, ...colors].join(' ');
+  const lookups = [`${ordered} fantasy character portrait dnd -bullion -ingot -coin -karat -jewelry -price`];
+  if (rest.length > 0) lookups.push(`${rest.join(' ')} character portrait fantasy dnd`);
+  return [...new Set(lookups)];
+}
+
+/** A gold-bar listing does not name the character that was searched. */
+const SUBJECT_STOP = new Set(['and', 'the', 'for', 'with', 'from', 'her', 'his', 'she', 'him', 'that', 'this']);
+
+function mentionsSubject(blob: string, term: string): boolean {
+  const words = term.toLowerCase().split(/[^a-z0-9-]+/).filter((word) => (
+    word.length > 2 && !COLOR_WORD.test(word) && !SUBJECT_STOP.has(word)
+  ));
+  const text = blob.toLowerCase();
+  if (words.length === 0) return /\b(character|portrait|fantasy|dnd|dragonborn|elf|dwarf)\b/i.test(blob);
+  return words.some((word) => text.includes(word));
+}
+
 /** Image results for a D&D portrait search. */
-async function searchWebCharacters(query: string): Promise<GoogleCharacterHit[]> {
+async function searchWebCharacters(query: string, term: string): Promise<GoogleCharacterHit[]> {
   const res = await fetch(`https://www.bing.com/images/async?${new URLSearchParams({
     q: query,
     first: '1',
@@ -69,7 +110,7 @@ async function searchWebCharacters(query: string): Promise<GoogleCharacterHit[]>
   const hits: GoogleCharacterHit[] = [];
   const seen = new Set<string>();
   for (const block of html.matchAll(/\bm="([^"]+)"/g)) {
-    const hit = bingHit(block[1] ?? '');
+    const hit = bingHit(block[1] ?? '', term);
     if (!hit || seen.has(hit.imageUrl)) continue;
     seen.add(hit.imageUrl);
     hits.push(hit);
@@ -78,7 +119,7 @@ async function searchWebCharacters(query: string): Promise<GoogleCharacterHit[]>
   return hits;
 }
 
-function bingHit(encoded: string): GoogleCharacterHit | null {
+function bingHit(encoded: string, term: string): GoogleCharacterHit | null {
   let row: BingImage;
   try {
     row = JSON.parse(encoded.replace(/&quot;/g, '"').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')) as BingImage;
@@ -88,10 +129,12 @@ function bingHit(encoded: string): GoogleCharacterHit | null {
   const imageUrl = row.murl ?? '';
   const pageUrl = row.purl ?? '';
   const title = (row.t ?? '').replace(/\s+/g, ' ').trim();
+  const desc = (row.desc ?? '').replace(/\s+/g, ' ').trim();
   if (!imageUrl.startsWith('https://') || !pageUrl.startsWith('https://') || !title) return null;
   if (/\.svg(\?|$)/i.test(imageUrl)) return null;
   if (/instagram\.com|facebook\.com|tiktok\.com|flickr\.com/i.test(`${pageUrl} ${imageUrl}`)) return null;
-  if (SKIP.test(`${title} ${pageUrl} ${imageUrl}`)) return null;
+  const blob = `${title} ${desc} ${pageUrl} ${imageUrl}`;
+  if (SKIP.test(blob) || !mentionsSubject(blob, term)) return null;
   const thumbUrl = row.turl?.startsWith('https://') ? row.turl : imageUrl;
   return {
     id: `web-${hash(imageUrl)}`,
@@ -195,6 +238,7 @@ interface BingImage {
   turl?: string;
   purl?: string;
   t?: string;
+  desc?: string;
 }
 
 interface GoogleImage {
