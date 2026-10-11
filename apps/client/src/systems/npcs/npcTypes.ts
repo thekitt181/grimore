@@ -7,6 +7,10 @@ export interface NpcPortrait {
   source: string;
   creator: string;
   license: string;
+  /** The words that were searched when this picture was chosen. */
+  query?: string;
+  /** The user chose this picture. Automatic search must leave it alone. */
+  picked?: boolean;
 }
 
 export interface NpcEntry {

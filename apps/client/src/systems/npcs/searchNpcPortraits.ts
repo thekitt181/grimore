@@ -120,8 +120,14 @@ export function characterGender(text: string, name = ''): 'female' | 'male' | ''
 
 const LOOK = /\b(gold|golden|silver|copper|bronze|brass|red|blue|green|black|white|purple|crimson|scarlet|hooded|cloaked)\b/i;
 
-/** Search words that follow the written person, including woman or man and a detail such as gold. */
-export function portraitSearchText(ancestry: string, role: string, appearance: string, name = ''): string {
+const QUERY_STOP = new Set([
+  'a', 'an', 'the', 'in', 'on', 'of', 'with', 'and', 'or', 'to', 'for', 'from', 'by', 'at',
+]);
+
+/** The picture search. A typed description is kept whole; catalog people use their written details. */
+export function portraitSearchText(ancestry: string, role: string, appearance: string, name = '', prompt = ''): string {
+  const typed = prompt.trim();
+  if (typed) return typed;
   const gender = characterGender(appearance, name);
   const who = gender === 'female' ? 'woman' : gender === 'male' ? 'man' : '';
   const look = appearance.match(LOOK)?.[1] ?? '';
@@ -155,30 +161,36 @@ export function suggestNpcPortrait(
   role: string,
   appearance = '',
   name = '',
+  prompt = '',
 ): Promise<NpcPortrait | null> {
   const gender = characterGender(appearance, name);
-  const key = `bing:${id}:${ancestry}:${role}:${gender}`;
+  const typed = prompt.trim();
+  const key = typed
+    ? `words:${id}:${typed.toLowerCase()}`
+    : `bing:${id}:${ancestry}:${role}:${gender}`;
   const existing = portraitJobs.get(key);
   if (existing) return existing;
   const job = (async () => {
     await takePortraitSlot();
     try {
-      const queries = portraitQueries(ancestry, role, appearance, name);
+      const queries = portraitQueries(ancestry, role, appearance, name, typed);
+      const wanted = promptWords(typed);
       let loose: NpcPortrait | null = null;
       let looseScore = 0;
       for (const query of queries) {
         const packs = await searchPacks(query, 1);
         const ranked = packs.portraits
           .filter((hit) => portraitMatches(hit, ancestry, role, appearance, name))
-          .sort((a, b) => pictureScore(b.title, ancestry, role, appearance, name) - pictureScore(a.title, ancestry, role, appearance, name));
-        const fitted = ranked.find((hit) => (
-          roleWords(role).some((word) => nameHas(hit.title, word))
-          && pictureScore(hit.title, ancestry, role, appearance, name) >= 6
-        ));
+          .sort((a, b) => pictureScore(b.title, ancestry, role, appearance, name, typed) - pictureScore(a.title, ancestry, role, appearance, name, typed));
+        const fitted = ranked.find((hit) => {
+          const score = pictureScore(hit.title, ancestry, role, appearance, name, typed);
+          if (wanted.length > 0) return wanted.some((word) => nameHas(hit.title, word)) && score >= 6;
+          return roleWords(role).some((word) => nameHas(hit.title, word)) && score >= 6;
+        });
         if (fitted) return fitted;
         const top = ranked[0];
         if (!top) continue;
-        const score = pictureScore(top.title, ancestry, role, appearance, name);
+        const score = pictureScore(top.title, ancestry, role, appearance, name, typed);
         if (score >= 6 && score > looseScore) {
           loose = top;
           looseScore = score;
@@ -199,14 +211,23 @@ export function suggestNpcPortrait(
 }
 
 /** The written person, then a wider fantasy wording if that finds nobody. */
-function portraitQueries(ancestry: string, role: string, appearance: string, name: string): string[] {
+function portraitQueries(ancestry: string, role: string, appearance: string, name: string, prompt: string): string[] {
+  const typed = prompt.trim();
   const primary = portraitSearchText(ancestry, role, appearance, name);
   const gender = characterGender(appearance, name);
   const who = gender === 'female' ? 'woman' : gender === 'male' ? 'man' : '';
   const race = ancestry.trim().toLowerCase() === 'human' ? '' : ancestry.trim();
   const job = roleWords(role)[0] ?? role.trim();
   const wider = [who, race, job, 'fantasy character'].filter(Boolean).join(' ');
-  return [...new Set([primary, wider].map((item) => item.trim()).filter(Boolean))];
+  return [...new Set([typed, primary, wider].map((item) => item.trim()).filter(Boolean))];
+}
+
+function promptWords(prompt: string): string[] {
+  const words: string[] = [];
+  for (const word of prompt.toLowerCase().split(/[^a-z0-9-]+/)) {
+    if (word.length > 2 && !QUERY_STOP.has(word) && !words.includes(word)) words.push(word);
+  }
+  return words;
 }
 
 function wrongGender(title: string, appearance: string, name: string): boolean {
@@ -243,7 +264,7 @@ function nameHas(title: string, token: string): boolean {
   return blob.includes(` ${word} `) || blob.includes(` ${word}`);
 }
 
-function pictureScore(title: string, ancestry: string, role: string, appearance: string, name: string): number {
+function pictureScore(title: string, ancestry: string, role: string, appearance: string, name: string, prompt = ''): number {
   const ancestryWord = ancestry.trim().toLowerCase();
   let score = 1;
   if (/\bportrait\b/i.test(title)) score += 6;
@@ -253,6 +274,9 @@ function pictureScore(title: string, ancestry: string, role: string, appearance:
   const gender = characterGender(appearance, name);
   if (gender === 'female' && FEMALE_WORD.test(title)) score += 6;
   if (gender === 'male' && MALE_WORD.test(title)) score += 6;
+  for (const word of promptWords(prompt)) {
+    if (nameHas(title, word)) score += 5;
+  }
   return score;
 }
 

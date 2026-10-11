@@ -45,7 +45,7 @@ let catalogCache: { at: number; packs: CatalogPack[] } | null = null;
 export async function searchCharacterArt(query: string, page: number): Promise<{ portraits: CharacterArtHit[]; hasMore: boolean }> {
   if (page !== 1) return { portraits: [], hasMore: false };
   const parsed = parseArtQuery(query, 'character');
-  const hits = await searchGoogleCharacters(parsed.detailed);
+  const hits = await searchGoogleCharacters(query.trim());
   return { portraits: rankHits(hits, parsed), hasMore: false };
 }
 

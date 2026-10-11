@@ -31,7 +31,7 @@ function wait(ms: number): Promise<void> {
 
 /** D&D character portraits. Web image results first, because Google often refuses a full codex. */
 export async function searchGoogleCharacters(subject: string): Promise<GoogleCharacterHit[]> {
-  const term = subject.trim().replace(/[^\w\s'-]/g, ' ').replace(/\s+/g, ' ').slice(0, 60);
+  const term = subject.trim().replace(/[^\w\s'-]/g, ' ').replace(/\s+/g, ' ').slice(0, 100);
   if (!term) return [];
   const key = term.toLowerCase();
   const cached = batches.get(key);

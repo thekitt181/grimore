@@ -75,22 +75,25 @@ export function NpcCodexPanel() {
   useEffect(() => {
     if (!selected) return;
     const saved = selected.portrait;
-    if (saved && portraitMatches(saved, selected.ancestry, selected.role, npcProse(selected), selected.name)) return;
+    const prompt = selected.prompt?.trim() ?? '';
+    const prose = npcProse(selected);
+    if (saved?.picked) return;
+    if (saved && portraitMatches(saved, selected.ancestry, selected.role, prose, selected.name) && (!prompt || saved.query === prompt)) return;
     if (saved) {
       clearNpcPortrait(selected.id);
       refresh();
       return;
     }
     let live = true;
-    void suggestNpcPortrait(selected.id, selected.ancestry, selected.role, npcProse(selected), selected.name).then((portrait) => {
+    void suggestNpcPortrait(selected.id, selected.ancestry, selected.role, prose, selected.name, prompt).then((portrait) => {
       if (!live || !portrait) return;
-      saveNpcPortrait(selected.id, portrait);
+      saveNpcPortrait(selected.id, prompt ? { ...portrait, query: prompt } : portrait);
       refresh();
     });
     return () => {
       live = false;
     };
-  }, [selected?.id, selected?.portrait?.imageUrl, selected?.appearance]);
+  }, [selected?.id, selected?.portrait?.imageUrl, selected?.portrait?.query, selected?.appearance, selected?.prompt]);
 
   return (
     <ToolSection id="npcs" title="NPC codex">
@@ -238,23 +241,30 @@ function NpcListRow({ npc, onOpen }: { npc: NpcRecord; onOpen: (npc: NpcRecord) 
 
   useEffect(() => {
     const saved = npc.portrait;
-    if (saved && portraitMatches(saved, npc.ancestry, npc.role, npcProse(npc), npc.name)) {
+    const prompt = npc.prompt?.trim() ?? '';
+    const prose = npcProse(npc);
+    if (saved?.picked) {
+      setThumb(saved.thumbUrl || saved.imageUrl);
+      return;
+    }
+    if (saved && portraitMatches(saved, npc.ancestry, npc.role, prose, npc.name) && (!prompt || saved.query === prompt)) {
       setThumb(saved.thumbUrl);
       return;
     }
     if (saved) clearNpcPortrait(npc.id);
     setThumb('');
     let live = true;
-    void suggestNpcPortrait(npc.id, npc.ancestry, npc.role, npcProse(npc), npc.name).then((portrait) => {
+    void suggestNpcPortrait(npc.id, npc.ancestry, npc.role, prose, npc.name, prompt).then((portrait) => {
       if (!live) return;
       if (!portrait) return;
-      saveNpcPortrait(npc.id, portrait);
-      setThumb(portrait.thumbUrl);
+      const next = prompt ? { ...portrait, query: prompt } : portrait;
+      saveNpcPortrait(npc.id, next);
+      setThumb(next.thumbUrl);
     });
     return () => {
       live = false;
     };
-  }, [npc.id, npc.ancestry, npc.role, npc.appearance, npc.portrait]);
+  }, [npc.id, npc.ancestry, npc.role, npc.appearance, npc.portrait, npc.prompt]);
 
   return (
     <button
@@ -304,7 +314,10 @@ function NpcDetail({
   onDelete?: () => void;
   onSummon: () => void;
 }) {
-  const [portraitQuery, setPortraitQuery] = useState(portraitSearchText(npc.ancestry, npc.role, npcProse(npc), npc.name));
+  const [portraitQuery, setPortraitQuery] = useState(portraitSearchText(npc.ancestry, npc.role, npcProse(npc), npc.name, npc.prompt ?? ''));
+  useEffect(() => {
+    setPortraitQuery(portraitSearchText(npc.ancestry, npc.role, npcProse(npc), npc.name, npc.prompt ?? ''));
+  }, [npc.id, npc.prompt, npc.ancestry, npc.role, npc.appearance, npc.name]);
   const [portraits, setPortraits] = useState<NpcPortrait[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -337,7 +350,7 @@ function NpcDetail({
             style={{ background: 'var(--color-bg-primary)', border: '1px solid var(--color-border)' }}
           >
             {npc.portrait ? (
-              <img src={npc.portrait.imageUrl} alt="" className="w-full h-full object-cover" />
+              <img src={npc.portrait.thumbUrl || npc.portrait.imageUrl} alt="" className="w-full h-full object-cover" />
             ) : (
               <span className="font-display text-sm" style={{ color: 'var(--color-text-secondary)' }}>
                 {(npc.name || '?').slice(0, 1)}
@@ -398,7 +411,16 @@ function NpcDetail({
               type="button"
               className="text-left"
               title={`${portrait.title} — ${portrait.creator} (${portrait.license})`}
-              onClick={() => onPortrait(portrait)}
+              onClick={() => {
+                const chosen = portrait.thumbUrl.startsWith('https://') ? portrait.thumbUrl : portrait.imageUrl;
+                onPortrait({
+                  ...portrait,
+                  imageUrl: chosen,
+                  thumbUrl: chosen,
+                  picked: true,
+                  ...(portraitQuery.trim() ? { query: portraitQuery.trim() } : {}),
+                });
+              }}
             >
               <img src={portrait.thumbUrl} alt={portrait.title} className="w-full h-16 object-cover rounded" />
               <span className="font-ui text-[9px] block truncate" style={{ color: 'var(--color-text-secondary)' }}>

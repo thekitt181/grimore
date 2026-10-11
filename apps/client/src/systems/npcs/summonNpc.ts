@@ -36,7 +36,7 @@ export function summonNpc(npc: NpcRecord): TokenItem | null {
     hideHpFromPlayers: true,
     monsterSource: credit,
     ...(npc.attack.trim() ? { attackText: npc.attack.trim() } : {}),
-    ...(npc.portrait ? { imageUrl: npc.portrait.imageUrl } : {}),
+    ...(npc.portrait ? { imageUrl: npc.portrait.thumbUrl || npc.portrait.imageUrl } : {}),
   };
   useItemStore.getState().addItem(token);
   emitItemAdd(token);
