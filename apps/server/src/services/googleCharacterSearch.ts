@@ -41,22 +41,47 @@ export async function searchGoogleCharacters(subject: string): Promise<GoogleCha
   if (cached && Date.now() - cached.at < 600_000) return cached.hits;
 
   const lookup = `${term} dnd`;
-  let hits: GoogleCharacterHit[] = [];
-  if (Date.now() >= googleBlockedUntil) {
-    try {
-      const googleHits = await enqueueGoogle(() => loadGoogle(lookup));
-      hits = googleHits.filter((hit) => mentionsSubject(`${hit.title} ${hit.pageUrl}`, term));
-    } catch {
-      hits = [];
-    }
+  let hits = await collectCharacters(lookup, term);
+  if (hits.length === 0) {
+    const narrower = characterLookup(term);
+    if (narrower !== lookup) hits = await collectCharacters(narrower, term);
   }
-  if (hits.length === 0) hits = await searchWebCharacters(lookup, term);
-  batches.set(key, { at: Date.now(), hits });
+  if (hits.length > 0) batches.set(key, { at: Date.now(), hits });
   if (batches.size > 40) {
     const oldest = batches.keys().next().value;
     if (oldest) batches.delete(oldest);
   }
   return hits;
+}
+
+const CHARACTER = /\b(characters?|portraits?|dnd|fantasy|dragonborn|elves|elf|dwarves|dwarf|orcs?|goblins?|tieflings?|halflings?|gnomes?|humans?|clerics?|wizards?|rogues?|paladins?|rangers?|fighters?|barbarians?|bards?|druids?|warlocks?|sorcerers?|monks?|blacksmiths?|knights?|thieves|thief)\b/i;
+
+/** Race and job, without a leading colour, when the full phrase only found commodities. */
+function characterLookup(term: string): string {
+  const words = term.split(/\s+/).filter((word) => !COLOR_WORD.test(word) && !WEAK_WORD.test(word));
+  const phrase = words.join(' ').trim();
+  return phrase ? `${phrase} dnd character` : `${term} dnd character`;
+}
+
+/** Prefer pictures that name the search. Otherwise keep a D&D character picture. */
+function takeCharacters(found: GoogleCharacterHit[], term: string): GoogleCharacterHit[] {
+  const named = found.filter((hit) => mentionsSubject(`${hit.title} ${hit.pageUrl}`, term));
+  if (named.length > 0) return named;
+  return found.filter((hit) => CHARACTER.test(`${hit.title} ${hit.pageUrl}`));
+}
+
+async function collectCharacters(lookup: string, term: string): Promise<GoogleCharacterHit[]> {
+  let found: GoogleCharacterHit[] = [];
+  if (Date.now() >= googleBlockedUntil) {
+    try {
+      found = await enqueueGoogle(() => loadGoogle(lookup));
+    } catch {
+      found = [];
+    }
+  }
+  const googleHits = takeCharacters(found, term);
+  if (googleHits.length > 0) return googleHits;
+  return takeCharacters(await searchWebCharacters(lookup), term);
 }
 
 /** A gold-bar listing does not name the character that was searched. */
@@ -72,7 +97,7 @@ function mentionsSubject(blob: string, term: string): boolean {
 }
 
 /** Image results for a D&D portrait search. */
-async function searchWebCharacters(query: string, term: string): Promise<GoogleCharacterHit[]> {
+async function searchWebCharacters(query: string): Promise<GoogleCharacterHit[]> {
   const res = await fetch(`https://www.bing.com/images/async?${new URLSearchParams({
     q: query,
     first: '1',
@@ -87,7 +112,7 @@ async function searchWebCharacters(query: string, term: string): Promise<GoogleC
   const hits: GoogleCharacterHit[] = [];
   const seen = new Set<string>();
   for (const block of html.matchAll(/\bm="([^"]+)"/g)) {
-    const hit = bingHit(block[1] ?? '', term);
+    const hit = bingHit(block[1] ?? '');
     if (!hit || seen.has(hit.imageUrl)) continue;
     seen.add(hit.imageUrl);
     hits.push(hit);
@@ -96,7 +121,7 @@ async function searchWebCharacters(query: string, term: string): Promise<GoogleC
   return hits;
 }
 
-function bingHit(encoded: string, term: string): GoogleCharacterHit | null {
+function bingHit(encoded: string): GoogleCharacterHit | null {
   let row: BingImage;
   try {
     row = JSON.parse(encoded.replace(/&quot;/g, '"').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')) as BingImage;
@@ -111,7 +136,7 @@ function bingHit(encoded: string, term: string): GoogleCharacterHit | null {
   if (/\.svg(\?|$)/i.test(imageUrl)) return null;
   if (/instagram\.com|facebook\.com|tiktok\.com|flickr\.com/i.test(`${pageUrl} ${imageUrl}`)) return null;
   const blob = `${title} ${desc} ${pageUrl} ${imageUrl}`;
-  if (SKIP.test(blob) || !mentionsSubject(blob, term)) return null;
+  if (SKIP.test(blob)) return null;
   const thumbUrl = row.turl?.startsWith('https://') ? row.turl : imageUrl;
   return {
     id: `web-${hash(imageUrl)}`,

@@ -91,7 +91,7 @@ async function searchWeb(query: string, page: number): Promise<MapLibraryPage> {
   const params = new URLSearchParams({ q: query, page: String(page) });
   const res = await fetch(`/api/maps/library?${params}`, {
     credentials: 'include',
-    signal: AbortSignal.timeout(14_000),
+    signal: AbortSignal.timeout(25_000),
   });
   if (!res.ok) throw new Error(`Web ${res.status}`);
   const data = (await res.json()) as { maps?: LibraryMap[]; hasMore?: boolean };

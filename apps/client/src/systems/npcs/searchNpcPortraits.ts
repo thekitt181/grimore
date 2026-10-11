@@ -35,7 +35,7 @@ export async function searchNpcPortraits(query: string, page: number): Promise<P
       portraits.push(portrait);
     }
   }
-  const fantasy = portraits.filter((portrait) => isCharacterPortrait(portrait) && mentionsSearch(portrait.title, term));
+  const fantasy = portraits.filter((portrait) => isCharacterPortrait(portrait));
   fantasy.sort((a, b) => (
     scoreText(`${b.title} ${b.creator}`, parsed.keywords, parsed.words)
     - scoreText(`${a.title} ${a.creator}`, parsed.keywords, parsed.words)
@@ -123,19 +123,6 @@ const LOOK = /\b(gold|golden|silver|copper|bronze|brass|red|blue|green|black|whi
 const QUERY_STOP = new Set([
   'a', 'an', 'the', 'in', 'on', 'of', 'with', 'and', 'or', 'to', 'for', 'from', 'by', 'at',
 ]);
-const COLOR_WORD = /^(gold|golden|silver|copper|bronze|brass|red|blue|green|black|white|purple|crimson|scarlet|amber)$/;
-const WEAK_WORD = /^(man|men|woman|women|male|female|boy|girl|person|people|lady|guy)$/;
-
-/** A colour or the word man is not enough. The title has to name the race or the job. */
-function mentionsSearch(title: string, query: string): boolean {
-  const words = query.toLowerCase().split(/[^a-z0-9-]+/).filter((word) => (
-    word.length > 2 && !QUERY_STOP.has(word) && !COLOR_WORD.test(word) && !WEAK_WORD.test(word)
-    && word !== 'dnd' && word !== 'fantasy' && word !== 'character' && word !== 'portrait'
-  ));
-  if (words.length === 0) return true;
-  return words.some((word) => nameHas(title, word));
-}
-
 /** The picture search. A typed description is kept whole; catalog people use their written details. */
 export function portraitSearchText(ancestry: string, role: string, appearance: string, name = '', prompt = ''): string {
   const typed = prompt.trim();
@@ -323,7 +310,6 @@ async function searchPacks(query: string, page: number): Promise<PortraitPage> {
     && typeof portrait.source === 'string'
     && typeof portrait.creator === 'string'
     && typeof portrait.license === 'string'
-    && mentionsSearch(portrait.title, query)
   ));
   return { portraits, hasMore: Boolean(data.hasMore) };
 }

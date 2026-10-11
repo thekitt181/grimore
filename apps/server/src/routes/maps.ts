@@ -10,7 +10,7 @@ const router = Router();
 router.get('/library', requireAuth, async (req, res) => {
   const q = typeof req.query['q'] === 'string' ? req.query['q'].trim() : '';
   const page = Number(req.query['page'] ?? '1');
-  if (!q || q.length > 80) {
+  if (!q || q.length > 120) {
     res.status(400).json({ error: 'Enter a shorter search' });
     return;
   }
