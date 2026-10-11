@@ -11,8 +11,8 @@ export interface GoogleCharacterHit {
   license: string;
 }
 
-/** Real people, maps, idea boards, and generated pictures are not a D&D character. */
-const SKIP = /\b(cosplays?|cosplayer|selfie|photograph|photoshoot|photo shoot|real life|\birl\b|actor|actress|celebrity|meme|screenshot|logo|battle ?map|dungeon map|world map|rulebook|dice set|sprites?|spritesheets?|chibi|pixel|8-?bit|16-?bit|tilesets?|asset packs?|art packs?|rpg maker|ideas)\b|craiyon|midjourney|leonardo\.ai|nightcafe|starryai|\bdall-?e\b|stable diffusion|ideogram|getimg\.ai|lexica\.art|char-gen\.com|charsheet-gen|seaart\.ai|tensor\.art|novelai|mage\.space|ai generated|ai art|openai\.com/i;
+/** Real people, maps, idea boards, commodities, and generated pictures are not a D&D character. */
+const SKIP = /\b(cosplays?|cosplayer|selfie|photograph|photoshoot|photo shoot|real life|\birl\b|actor|actress|celebrity|meme|screenshot|logo|battle ?map|dungeon map|world map|rulebook|dice set|sprites?|spritesheets?|chibi|pixel|8-?bit|16-?bit|tilesets?|asset packs?|art packs?|rpg maker|ideas|gold bars?|silver bars?|bullion|ingots?|gold coins?|silver coins?|krugerrand|karats?|fine gold|gold price|gold investment|buy gold|nuggets?|jewell?ery|necklaces?|bracelets?)\b|craiyon|midjourney|leonardo\.ai|nightcafe|starryai|\bdall-?e\b|stable diffusion|ideogram|getimg\.ai|lexica\.art|char-gen\.com|charsheet-gen|seaart\.ai|tensor\.art|novelai|mage\.space|\bdndai\b|ai generated|ai art|openai\.com|apmex|kitco|jmbullion/i;
 
 const batches = new Map<string, { at: number; hits: GoogleCharacterHit[] }>();
 let googleChain: Promise<unknown> = Promise.resolve();
@@ -37,7 +37,7 @@ export async function searchGoogleCharacters(subject: string): Promise<GoogleCha
   const cached = batches.get(key);
   if (cached && Date.now() - cached.at < 600_000) return cached.hits;
 
-  let hits = await searchWebCharacters(`${term} dnd character art`);
+  let hits = await searchWebCharacters(`${term} fantasy character portrait dnd -bullion -ingot -coin -karat -jewelry`);
   if (hits.length === 0 && Date.now() >= googleBlockedUntil) {
     try {
       hits = await enqueueGoogle(() => loadGoogle(`${term} dnd character portrait -cosplay -cosplayer -sprite -pixel`));

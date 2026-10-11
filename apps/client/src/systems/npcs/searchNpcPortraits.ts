@@ -92,7 +92,7 @@ const ROLE_TOKENS: Record<string, string[]> = {
 };
 
 const ANCESTRY_TOKEN = /^(dwarf|elf|orc|gnome|halfling|goblin|dragon|dragonborn|tiefling|half-elf|half-orc|kobold|tabaxi|aasimar|goliath)$/;
-const JUNK = /\b(bad|hamster|lego|minecraft|pokemon|logo|diagram|map|flag|icon|sprites?|spritesheets?|sprite sheets?|chibi|pixel|8-?bit|16-?bit|tilesets?|rigged|model|photo|photograph|cosplay|selfie|asset packs?|art packs?|rpg maker|chargen|lexica|craiyon)\b/i;
+const JUNK = /\b(bad|hamster|lego|minecraft|pokemon|logo|diagram|map|flag|icon|sprites?|spritesheets?|sprite sheets?|chibi|pixel|8-?bit|16-?bit|tilesets?|rigged|model|photo|photograph|cosplay|selfie|asset packs?|art packs?|rpg maker|chargen|lexica|craiyon|gold bars?|silver bars?|bullion|ingots?|gold coins?|silver coins?|krugerrand|karats?|fine gold|gold price|nuggets?|jewell?ery|necklaces?|bracelets?)\b/i;
 const AI_HOST = /craiyon|lexica\.art|char-gen|charsheet-gen|midjourney|nightcafe|starryai|getimg\.ai|seaart|tensor\.art|novelai|mage\.space/i;
 /** Painted D&D character art from Google Images. Sprite sheets and pack previews are not portraits. */
 const FANTASY_ART = /^(google images|web)$/i;
