@@ -1,14 +1,17 @@
 import { useState } from 'react';
 import {
   type CavernOpenness,
+  type ChamberScale,
   type CorridorStyle,
   type DeadEndStyle,
   type DoorStyle,
   type DungeonLayout,
   type DungeonMotif,
   type DungeonSize,
+  type FurnishingStyle,
   type KeyDetail,
   type PassageStyle,
+  type RoomDensity,
   type SecretStyle,
   type StairsStyle,
 } from './generateDungeon';
@@ -18,19 +21,32 @@ import { ToolSection } from '@/systems/map/ToolSection';
 const LAYOUTS: Array<{ id: DungeonLayout; label: string }> = [
   { id: 'rooms', label: 'Rooms' },
   { id: 'five-room', label: '5-room' },
+  { id: 'hub', label: 'Hub' },
+  { id: 'gauntlet', label: 'Gauntlet' },
   { id: 'cavern', label: 'Cavern' },
 ];
 
 const SIZES: Array<{ id: DungeonSize; label: string }> = [
+  { id: 'tiny', label: 'XS' },
   { id: 'small', label: 'S' },
   { id: 'medium', label: 'M' },
   { id: 'large', label: 'L' },
+  { id: 'huge', label: 'XL' },
+  { id: 'vast', label: '2XL' },
+  { id: 'mega', label: '3XL' },
+];
+
+const CHAMBERS: Array<{ id: ChamberScale; label: string }> = [
+  { id: 'cramped', label: 'Cramped' },
+  { id: 'normal', label: 'Normal' },
+  { id: 'grand', label: 'Grand' },
 ];
 
 const DOORS: Array<{ id: DoorStyle; label: string }> = [
   { id: 'mixed', label: 'Mixed' },
   { id: 'open', label: 'Open' },
   { id: 'closed', label: 'Shut' },
+  { id: 'locked', label: 'Locked' },
 ];
 
 const SECRETS: Array<{ id: SecretStyle; label: string }> = [
@@ -60,6 +76,7 @@ const DEAD_ENDS: Array<{ id: DeadEndStyle; label: string }> = [
 const STAIRS: Array<{ id: StairsStyle; label: string }> = [
   { id: 'none', label: 'None' },
   { id: 'down', label: 'Down' },
+  { id: 'up', label: 'Up' },
   { id: 'both', label: 'Both' },
 ];
 
@@ -73,6 +90,18 @@ const CAVERNS: Array<{ id: CavernOpenness; label: string }> = [
   { id: 'tight', label: 'Tight' },
   { id: 'natural', label: 'Natural' },
   { id: 'open', label: 'Open' },
+];
+
+const DENSITY: Array<{ id: RoomDensity; label: string }> = [
+  { id: 'sparse', label: 'Sparse' },
+  { id: 'normal', label: 'Normal' },
+  { id: 'packed', label: 'Packed' },
+];
+
+const FURNISH: Array<{ id: FurnishingStyle; label: string }> = [
+  { id: 'none', label: 'None' },
+  { id: 'light', label: 'Light' },
+  { id: 'full', label: 'Full' },
 ];
 
 const MOTIFS: Array<{ id: DungeonMotif; label: string }> = [
@@ -98,13 +127,13 @@ function ChoiceRow<T extends string>({
   return (
     <div className="space-y-1">
       <p className="font-ui text-[10px] uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>{label}</p>
-      <div className="flex gap-1">
+      <div className="flex flex-wrap gap-1">
         {options.map((option) => (
           <button
             key={option.id}
             type="button"
             onClick={() => onChange(option.id)}
-            className={`flex-1 text-xs py-1 rounded font-ui transition-all ${
+            className={`min-w-[2.4rem] flex-1 text-xs py-1 rounded font-ui transition-all ${
               value === option.id
                 ? 'bg-[#c9a84c22] text-[#c9a84c] ring-1 ring-[#c9a84c44]'
                 : 'text-[#8a8075] border border-[#2a2a3a] hover:text-[#e8e0d0]'
@@ -131,6 +160,9 @@ export function DungeonGeneratorPanel() {
   const [floors, setFloors] = useState(1);
   const [keyDetail, setKeyDetail] = useState<KeyDetail>('full');
   const [cavern, setCavern] = useState<CavernOpenness>('natural');
+  const [density, setDensity] = useState<RoomDensity>('normal');
+  const [chambers, setChambers] = useState<ChamberScale>('normal');
+  const [furnishings, setFurnishings] = useState<FurnishingStyle>('full');
   const [seedText, setSeedText] = useState('');
   const [lastSeed, setLastSeed] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
@@ -156,6 +188,9 @@ export function DungeonGeneratorPanel() {
       key: keyDetail,
       secrets,
       cavern,
+      density,
+      chambers,
+      furnishings,
     };
     try {
       await new Promise<void>((resolve) => { setTimeout(resolve, 0); });
@@ -170,6 +205,12 @@ export function DungeonGeneratorPanel() {
     <ToolSection id="dungeon" title="Dungeon">
       <ChoiceRow label="Layout" value={layout} options={LAYOUTS} onChange={setLayout} />
       <ChoiceRow label="Size" value={size} options={SIZES} onChange={setSize} />
+      {built && layout !== 'five-room' && (
+        <ChoiceRow label="Density" value={density} options={DENSITY} onChange={setDensity} />
+      )}
+      {built && (
+        <ChoiceRow label="Chambers" value={chambers} options={CHAMBERS} onChange={setChambers} />
+      )}
       <label className="block space-y-1">
         <span className="font-ui text-[10px] uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>Motif</span>
         <select
@@ -193,17 +234,18 @@ export function DungeonGeneratorPanel() {
       ) : (
         <ChoiceRow label="Cavern" value={cavern} options={CAVERNS} onChange={setCavern} />
       )}
+      <ChoiceRow label="Furnishings" value={furnishings} options={FURNISH} onChange={setFurnishings} />
       <label className="block space-y-1">
         <span className="font-ui text-[10px] uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>Floors</span>
         <input
           className="input-dark w-full text-xs py-1"
           inputMode="numeric"
           min={1}
-          max={8}
+          max={12}
           value={floors}
           onChange={(event) => {
             const next = Number(event.target.value);
-            setFloors(Number.isFinite(next) ? Math.min(8, Math.max(1, Math.floor(next))) : 1);
+            setFloors(Number.isFinite(next) ? Math.min(12, Math.max(1, Math.floor(next))) : 1);
           }}
         />
       </label>
@@ -236,7 +278,7 @@ export function DungeonGeneratorPanel() {
         </button>
       )}
       <p className="font-ui text-xs leading-snug" style={{ color: 'var(--color-text-secondary)' }}>
-        Motif changes the stone and the hidden key. Shut, locked, and secret doors block vision. Wide corridors are 10 ft. Set how many floors to build. The bottom floor only has stairs back up. Click a stair flight to move between floors.
+        2XL/3XL are big floors (3XL can take a few seconds). Gauntlet is a left-to-right spine. Chambers scales room size. Floors go up to 12. Mega + packed + grand is the heaviest combo.
       </p>
     </ToolSection>
   );

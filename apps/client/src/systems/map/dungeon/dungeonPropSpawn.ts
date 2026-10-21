@@ -1,5 +1,11 @@
 import { v4 as uuidv4 } from 'uuid';
-import type { DungeonMotif, DungeonRoom, DungeonStair, GeneratedDungeon } from './generateDungeon';
+import type {
+  DungeonMotif,
+  DungeonRoom,
+  DungeonStair,
+  FurnishingStyle,
+  GeneratedDungeon,
+} from './generateDungeon';
 import type { ImageItem, MapItem } from '@/systems/scene/types';
 import { canonicalPropId, ensurePropCatalogEntry, propIdsFromNoteText } from '@/systems/map/props/propArt';
 import { isDoorPropId } from '@/systems/map/props/doorCollision';
@@ -114,7 +120,12 @@ function plansFromNotePhrases(note: string): PropSpawnPlan[] {
   return plans;
 }
 
-function plansFromRoom(room: DungeonRoom, motif: DungeonMotif): PropSpawnPlan[] {
+function plansFromRoom(
+  room: DungeonRoom,
+  motif: DungeonMotif,
+  furnishings: FurnishingStyle,
+): PropSpawnPlan[] {
+  if (furnishings === 'none') return [];
   const plans: PropSpawnPlan[] = [];
   for (const note of room.notes) {
     const lower = note.toLowerCase();
@@ -133,17 +144,18 @@ function plansFromRoom(room: DungeonRoom, motif: DungeonMotif): PropSpawnPlan[] 
   ) {
     plans.push({ propId: 'chest', slot: 'center' });
   }
-  if (plans.length === 0) {
+  if (plans.length === 0 && furnishings === 'full') {
     for (const id of MOTIF_AMBIENT[motif].slice(0, 2)) {
       plans.push({ propId: id, slot: id === 'torch' ? 'edge' : 'corner' });
     }
   }
   const seen = new Set<string>();
+  const cap = furnishings === 'light' ? 2 : 4;
   return withoutDoorwayProps(plans).filter((p) => {
     if (seen.has(p.propId)) return false;
     seen.add(p.propId);
     return Boolean(propDef(p.propId));
-  }).slice(0, 4);
+  }).slice(0, cap);
 }
 
 function floorCells(room: DungeonRoom, cols: number, rows: number, floor: Uint8Array): Array<{ col: number; row: number }> {
@@ -253,13 +265,22 @@ function spawnStairProps(map: MapItem, dungeon: GeneratedDungeon, used: Set<stri
 }
 
 /** 3D-capable props from generator room notes — placed on matching grid cells. */
-export function buildDungeonPropItems(map: MapItem, dungeon: GeneratedDungeon): ImageItem[] {
+export function buildDungeonPropItems(
+  map: MapItem,
+  dungeon: GeneratedDungeon,
+  opts?: { furnishings?: FurnishingStyle },
+): ImageItem[] {
+  const furnishings = opts?.furnishings
+    ?? map.dungeon?.options.furnishings
+    ?? 'full';
+  if (furnishings === 'none') return spawnStairProps(map, dungeon, stairCells(dungeon.stairs));
+
   const rnd = mulberry32((dungeon.keyText.length * 997 + map.x * 13 + map.y * 17) >>> 0);
   const used = stairCells(dungeon.stairs);
   const items: ImageItem[] = spawnStairProps(map, dungeon, used);
 
   for (const room of dungeon.rooms) {
-    const plans = plansFromRoom(room, dungeon.motif);
+    const plans = plansFromRoom(room, dungeon.motif, furnishings);
     const cells = floorCells(room, dungeon.cols, dungeon.rows, dungeon.floor).filter(
       (c) => !used.has(`${c.col},${c.row}`),
     );

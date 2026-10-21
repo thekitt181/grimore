@@ -54,6 +54,9 @@ export function regenerateDungeonForMap(map: MapItem): GeneratedDungeon | null {
     key: link.options.key,
     secrets: link.options.secrets,
     cavern: link.options.cavern,
+    density: link.options.density ?? 'normal',
+    furnishings: link.options.furnishings ?? 'full',
+    chambers: link.options.chambers ?? 'normal',
   };
   const generated = generateDungeon(opts);
   return {

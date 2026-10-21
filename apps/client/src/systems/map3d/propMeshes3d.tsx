@@ -148,6 +148,7 @@ export function PropMesh3D({
   open = false,
   amount,
   size = 1,
+  depth,
   /** World-unit height (doors/gates match extruded wall height). */
   height,
   doorTheme,
@@ -158,8 +159,10 @@ export function PropMesh3D({
   open?: boolean;
   /** Smooth 0–1 pose (lid / door / gate). Falls back to open boolean. */
   amount?: number;
-  /** Footprint scale (world units ≈ map cell). */
+  /** Footprint X (world units ≈ map px). */
   size?: number;
+  /** Footprint Z (defaults to size). */
+  depth?: number;
   height?: number;
   doorTheme?: DoorSurfaceStyle;
   /** Hidden secret door — flush wall (GM ghost), no handle. */
@@ -168,12 +171,13 @@ export function PropMesh3D({
   doorLongAxisX?: boolean;
 }) {
   const sx = Math.max(size, 8);
-  const sy = height != null ? Math.max(height, 8) : sx;
+  const sz = Math.max(depth ?? size, 8);
+  const sy = height != null ? Math.max(height, 8) : Math.max(sx, sz);
   const a = amount ?? (open ? 1 : 0);
   const theme = doorTheme ?? resolveDoorSurfaceStyle('mixed');
 
   return (
-    <group scale={[sx, sy, sx]}>
+    <group scale={[sx, sy, sz]}>
       <PropBody
         id={propId}
         amount={a}

@@ -64,19 +64,14 @@ function PropArtBillboard({
   displayOnly?: boolean;
 }) {
   const { texture, status } = usePropDisplayTexture(item, propId);
-  const footprint = Math.min(item.width, item.height);
-  const img = texture?.image as { width?: number; height?: number } | undefined;
-  const aspect =
-    img && typeof img.width === 'number' && typeof img.height === 'number' && img.height > 0
-      ? img.width / img.height
-      : 1;
-  const planeW = footprint;
-  const planeH = Math.max(footprint * 0.85, footprint / Math.max(aspect, 0.35));
+  const planeW = Math.max(item.width, 8);
+  const planeH = Math.max(item.height, 8);
+  const footprint = Math.max(planeW, planeH);
   const opacity = item.visible === false ? 0.35 : 1;
 
   if (!texture || status === 'error') {
     // Always try procedural mesh — canvas-art props have meshes too.
-    return <MeshProp item={item} propId={propId} footprint={footprint} />;
+    return <MeshProp item={item} propId={propId} />;
   }
 
   const lockFacing =
@@ -120,18 +115,13 @@ function GenericImageBillboard({
 }) {
   const fallbackPropId = resolvePropId(item);
   const { texture, status } = usePropDisplayTexture(item, fallbackPropId);
-  const footprint = Math.min(item.width, item.height);
-  const img = texture?.image as { width?: number; height?: number } | undefined;
-  const aspect =
-    img && typeof img.width === 'number' && typeof img.height === 'number' && img.height > 0
-      ? img.width / img.height
-      : 1;
-  const planeW = footprint;
-  const planeH = Math.max(footprint * 0.85, footprint / Math.max(aspect, 0.35));
+  const planeW = Math.max(item.width, 8);
+  const planeH = Math.max(item.height, 8);
+  const footprint = Math.max(planeW, planeH);
   const opacity = item.visible === false ? 0.35 : 1;
 
   if (fallbackPropId && (hasPropMesh3D(fallbackPropId) || !texture || status === 'error')) {
-    return <MeshProp item={item} propId={fallbackPropId} footprint={footprint} />;
+    return <MeshProp item={item} propId={fallbackPropId} />;
   }
 
   const lockFacing =
@@ -166,25 +156,28 @@ function GenericImageBillboard({
   );
 }
 
-function GlbProp({ item, propId, footprint }: { item: ImageItem; propId: string; footprint: number }) {
+function GlbProp({ item, propId }: { item: ImageItem; propId: string }) {
   const open = (item.propState ?? 0) > 0;
   const light = propModelLight(propId);
+  const len = Math.max(item.width, 8);
+  const depth = Math.max(item.height, 8);
+  const animSize = Math.max(len, depth);
   const fallback = hasPropMesh3D(propId) ? (
-    <MeshProp item={item} propId={propId} footprint={footprint} />
+    <MeshProp item={item} propId={propId} />
   ) : hasPropCanvasArt(propId) ? (
     <PropArtBillboard item={item} propId={propId} />
   ) : (
-    <MeshProp item={item} propId={propId} footprint={footprint} />
+    <MeshProp item={item} propId={propId} />
   );
   return (
     <PropGlbErrorBoundary fallback={fallback}>
       <PropAnim3D
         item={item}
-        size={footprint}
+        size={animSize}
         {...(light ? { light } : {})}
         driveGroup
       >
-        <PropModel3D propId={propId} open={open} size={footprint} />
+        <PropModel3D propId={propId} open={open} size={len} depth={depth} />
       </PropAnim3D>
     </PropGlbErrorBoundary>
   );
@@ -193,12 +186,10 @@ function GlbProp({ item, propId, footprint }: { item: ImageItem; propId: string;
 function MeshProp({
   item,
   propId,
-  footprint,
   wallHeight,
 }: {
   item: ImageItem;
   propId: string;
-  footprint: number;
   wallHeight?: number;
 }) {
   const amount = useLivePropAmount(item);
@@ -206,12 +197,16 @@ function MeshProp({
   const doorTheme = resolveDoorSurfaceStyle(item.propDoorTheme || doorStyleId);
   const secretConcealed = propId === 'secret-door' && item.visible === false;
   const doorLongAxisX = isDoorPropId(propId) ? item.width >= item.height : undefined;
+  const len = Math.max(item.width, 8);
+  const depth = Math.max(item.height, 8);
+  const animSize = Math.max(len, depth);
   return (
-    <PropAnim3D item={item} size={footprint} driveGroup={false}>
+    <PropAnim3D item={item} size={animSize} driveGroup={false}>
       <PropMesh3D
         propId={propId}
         amount={amount}
-        size={footprint}
+        size={len}
+        depth={depth}
         doorTheme={doorTheme}
         secretConcealed={secretConcealed}
         {...(wallHeight != null ? { height: wallHeight } : {})}
@@ -230,9 +225,7 @@ function MapImageMesh({ item, displayOnly = false }: { item: ImageItem; displayO
     return getActiveMap()?.gridSize ?? 96;
   });
   const isDoor = isDoorPropId(propId);
-  const footprint = isDoor
-    ? Math.max(item.width, item.height)
-    : Math.min(item.width, item.height);
+  const footprint = Math.max(item.width, item.height, 8);
   const wallHeight = isDoor ? gridSize * wallHeightCells : undefined;
   // Prefer real 3D (GLB → procedural mesh) over flat canvas billboards.
   const useGlb = Boolean(propId && hasPropModel3D(propId));
@@ -276,12 +269,11 @@ function MapImageMesh({ item, displayOnly = false }: { item: ImageItem; displayO
               <MeshProp
                 item={item}
                 propId={propId}
-                footprint={footprint}
                 {...(wallHeight != null ? { wallHeight } : {})}
               />
             }
           >
-            <GlbProp item={item} propId={propId} footprint={footprint} />
+            <GlbProp item={item} propId={propId} />
           </Suspense>
           {!displayOnly && (
             <TokenPickVolume
@@ -309,7 +301,6 @@ function MapImageMesh({ item, displayOnly = false }: { item: ImageItem; displayO
           <MeshProp
             item={item}
             propId={propId}
-            footprint={footprint}
             {...(wallHeight != null ? { wallHeight } : {})}
           />
           {!displayOnly && (

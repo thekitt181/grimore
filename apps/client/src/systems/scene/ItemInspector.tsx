@@ -32,6 +32,7 @@ import {
   fitPropOnWallItem,
   wallMountPatchForItem,
 } from '@/systems/map/props/wallPropFit';
+import { isMapBoundProp, mapLocalPatchAfterPropMove } from '@/systems/map/props/mapBoundProps';
 import { resolveTokenModelUrl } from '@/systems/map3d/defaultTokenModel';
 
 function numHex(n: number): string { return '#' + n.toString(16).padStart(6, '0'); }
@@ -321,10 +322,31 @@ function ImagePropPoseControls({
 }) {
   const mount = image.propMount === 'wall' ? 'wall' : 'floor';
   const merged = image.propWallMerge === true;
-  const heightCells = image.propWallHeightCells ?? DEFAULT_WALL_PROP_HEIGHT_CELLS;
+  const liftCells = image.propWallHeightCells ?? DEFAULT_WALL_PROP_HEIGHT_CELLS;
+  const map = getActiveMap();
+  const grid = Math.max(8, map?.gridSize ?? 96);
+  const lengthCells = Math.round((image.width / grid) * 100) / 100;
+  const heightCells = Math.round((image.height / grid) * 100) / 100;
   const angle = Math.round(normDeg(image.rotation));
   const pitch = normSignedDeg(image.propPitch ?? 0);
   const roll = normSignedDeg(image.propRoll ?? 0);
+
+  function setFootprint(nextLengthCells: number, nextHeightCells: number) {
+    const len = Math.max(0.25, Math.min(12, nextLengthCells));
+    const ht = Math.max(0.25, Math.min(12, nextHeightCells));
+    const w = len * grid;
+    const h = ht * grid;
+    const cx = image.x + image.width / 2;
+    const cy = image.y + image.height / 2;
+    const x = cx - w / 2;
+    const y = cy - h / 2;
+    const patch: Partial<ImageItem> = { width: w, height: h, x, y };
+    const active = getActiveMap();
+    if (active && isMapBoundProp(image) && image.dungeonPropForMapId === active.id) {
+      Object.assign(patch, mapLocalPatchAfterPropMove(image, active, x, y, image.rotation));
+    }
+    update(patch);
+  }
 
   function setAngle(deg: number) {
     const rotation = normDeg(deg);
@@ -352,19 +374,19 @@ function ImagePropPoseControls({
       update({ propMount: 'floor' });
       return;
     }
-    const map = getActiveMap();
-    const pose = fitPropOnWallItem(image, map, { merge: merged });
+    const active = getActiveMap();
+    const pose = fitPropOnWallItem(image, active, { merge: merged });
     if (pose) {
       update(
-        wallMountPatchForItem(image, pose, map, {
-          propWallHeightCells: heightCells,
+        wallMountPatchForItem(image, pose, active, {
+          propWallHeightCells: liftCells,
           propWallMerge: merged,
         }),
       );
     } else {
       update({
         propMount: 'wall',
-        propWallHeightCells: heightCells,
+        propWallHeightCells: liftCells,
         propWallMerge: merged,
       });
     }
@@ -375,36 +397,36 @@ function ImagePropPoseControls({
       update({ propWallMerge: next });
       return;
     }
-    const map = getActiveMap();
+    const active = getActiveMap();
     const trial = { ...image, propMount: 'wall' as const, propWallMerge: next };
-    const pose = fitPropOnWallItem(trial, map, { merge: next });
+    const pose = fitPropOnWallItem(trial, active, { merge: next });
     if (pose) {
       update(
-        wallMountPatchForItem(image, pose, map, {
+        wallMountPatchForItem(image, pose, active, {
           propMount: 'wall',
           propWallMerge: next,
-          propWallHeightCells: heightCells,
+          propWallHeightCells: liftCells,
         }),
       );
     } else {
       update({
         propMount: 'wall',
         propWallMerge: next,
-        propWallHeightCells: heightCells,
+        propWallHeightCells: liftCells,
       });
     }
   }
 
   function snapWall() {
-    const map = getActiveMap();
-    const pose = fitPropOnWallItem(image, map, { merge: merged });
+    const active = getActiveMap();
+    const pose = fitPropOnWallItem(image, active, { merge: merged });
     if (!pose) {
       window.alert('No wall nearby — draw a wall or move the prop closer.');
       return;
     }
     update(
-      wallMountPatchForItem(image, pose, map, {
-        propWallHeightCells: heightCells,
+      wallMountPatchForItem(image, pose, active, {
+        propWallHeightCells: liftCells,
         propWallMerge: merged,
       }),
     );
@@ -415,6 +437,41 @@ function ImagePropPoseControls({
       <span className="font-ui text-[10px] uppercase tracking-wide px-1" style={{ color: 'var(--color-accent-gold)' }}>
         Pose
       </span>
+      <Field label="Length">
+        <input
+          type="number"
+          className="input-stat w-14"
+          min={0.25}
+          max={12}
+          step={0.25}
+          title="Prop length in grid cells (map X when yaw is 0). Scales 2D + 3D."
+          value={lengthCells}
+          onChange={(e) => setFootprint(Number(e.target.value) || lengthCells, heightCells)}
+        />
+      </Field>
+      <Field label="Height">
+        <input
+          type="number"
+          className="input-stat w-14"
+          min={0.25}
+          max={12}
+          step={0.25}
+          title="Prop height/depth in grid cells (map Y when yaw is 0). Scales 2D + 3D."
+          value={heightCells}
+          onChange={(e) => setFootprint(lengthCells, Number(e.target.value) || heightCells)}
+        />
+      </Field>
+      <button
+        type="button"
+        className="btn-ghost text-xs px-1.5 py-0.5"
+        title="Match length and height (square footprint)"
+        onClick={() => {
+          const side = Math.max(lengthCells, heightCells);
+          setFootprint(side, side);
+        }}
+      >
+        □ Square
+      </button>
       <Field label="Yaw">
         <input
           type="number"
@@ -516,15 +573,15 @@ function ImagePropPoseControls({
         </select>
       </Field>
       {mount === 'wall' && (
-        <Field label="Height">
+        <Field label="Lift">
           <input
             type="number"
             className="input-stat w-14"
             min={0.25}
             max={6}
             step={0.25}
-            title="Height above the floor in grid cells (torch ≈ 1.15)"
-            value={heightCells}
+            title="How high on the wall (grid cells above the floor; torch ≈ 1.15)"
+            value={liftCells}
             onChange={(e) =>
               update({
                 propWallHeightCells: Math.max(0.25, Math.min(6, Number(e.target.value) || DEFAULT_WALL_PROP_HEIGHT_CELLS)),

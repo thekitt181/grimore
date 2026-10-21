@@ -134,9 +134,9 @@ export interface DungeonFloorLink {
   rows: number;
   cell: number;
   options: {
-    layout: 'rooms' | 'cavern' | 'five-room';
-    size: 'small' | 'medium' | 'large';
-    doors: 'open' | 'closed' | 'mixed';
+    layout: 'rooms' | 'cavern' | 'five-room' | 'hub' | 'gauntlet';
+    size: 'tiny' | 'small' | 'medium' | 'large' | 'huge' | 'vast' | 'mega';
+    doors: 'open' | 'closed' | 'mixed' | 'locked';
     seed: number;
     motif: 'mixed' | 'crypt' | 'temple' | 'fortress' | 'mine' | 'ruin';
     corridors: 'straight' | 'winding' | 'wide';
@@ -146,6 +146,9 @@ export interface DungeonFloorLink {
     key: 'brief' | 'full' | 'stocked';
     secrets: 'none' | 'few' | 'many';
     cavern: 'tight' | 'natural' | 'open';
+    density?: 'sparse' | 'normal' | 'packed';
+    furnishings?: 'none' | 'light' | 'full';
+    chambers?: 'cramped' | 'normal' | 'grand';
   };
   stairs: DungeonStairRef[];
   /** Planned depth of this delve. The last floor has no stairs going deeper. */

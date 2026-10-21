@@ -40,6 +40,9 @@ function floorOptions(options: DungeonOptions): DungeonFloorLink['options'] {
     key: options.key ?? 'full',
     secrets: options.secrets ?? 'few',
     cavern: options.cavern ?? 'natural',
+    density: options.density ?? 'normal',
+    furnishings: options.furnishings ?? 'full',
+    chambers: options.chambers ?? 'normal',
   };
 }
 
@@ -242,7 +245,8 @@ export async function placeGeneratedDungeon(dungeon: GeneratedDungeon, level?: D
     store.addItem(prop);
     emitItemAdd(prop);
   }
-  for (const prop of tagProps(buildDungeonPropItems(map, dungeon))) {
+  const furnish = level?.options.furnishings ?? 'full';
+  for (const prop of tagProps(buildDungeonPropItems(map, dungeon, { furnishings: furnish }))) {
     store.addItem(prop);
     emitItemAdd(prop);
   }
@@ -255,7 +259,7 @@ export async function placeGeneratedDungeon(dungeon: GeneratedDungeon, level?: D
 
 /** Build every floor of a delve. The bottom floor only has stairs back up. */
 export async function placeDungeonFloors(base: DungeonOptions, floorCount: number): Promise<void> {
-  const count = Math.min(8, Math.max(1, Math.floor(floorCount)));
+  const count = Math.min(12, Math.max(1, Math.floor(floorCount)));
   const delveId = uuidv4();
   let baseName: string | undefined;
   let from: { mapId: string; col: number; row: number } | undefined;

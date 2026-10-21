@@ -13,16 +13,21 @@ export function PropModel3D({
   propId,
   open = false,
   size = 1,
+  depth,
 }: {
   propId: string;
   open?: boolean;
+  /** Footprint width (map X when yaw 0). */
   size?: number;
+  /** Footprint depth (map Y when yaw 0). Defaults to size. */
+  depth?: number;
 }) {
   const spec = resolvePropModel3D(propId, open);
   if (!spec) return null;
 
-  const footprint = Math.max(size, 8);
-  const targetSize = footprint * (spec.sizeBias ?? 1);
+  const w = Math.max(size, 8);
+  const h = Math.max(depth ?? size, 8);
+  const targetSize = Math.max(w, h) * (spec.sizeBias ?? 1);
 
   return (
     <SceneModel
@@ -30,7 +35,7 @@ export function PropModel3D({
       targetSize={targetSize}
       groundAlign
       propRender
-      footprint={{ width: footprint, height: footprint }}
+      footprint={{ width: w, height: h }}
     />
   );
 }

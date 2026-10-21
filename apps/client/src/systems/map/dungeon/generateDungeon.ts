@@ -1,8 +1,8 @@
 import type { WallSegment } from '@/systems/scene/types';
 
-export type DungeonLayout = 'rooms' | 'cavern' | 'five-room';
-export type DungeonSize = 'small' | 'medium' | 'large';
-export type DoorStyle = 'open' | 'closed' | 'mixed';
+export type DungeonLayout = 'rooms' | 'cavern' | 'five-room' | 'hub' | 'gauntlet';
+export type DungeonSize = 'tiny' | 'small' | 'medium' | 'large' | 'huge' | 'vast' | 'mega';
+export type DoorStyle = 'open' | 'closed' | 'mixed' | 'locked';
 export type DoorKind = 'open' | 'closed' | 'locked' | 'secret';
 export type DungeonMotif = 'mixed' | 'crypt' | 'temple' | 'fortress' | 'mine' | 'ruin';
 export type CorridorStyle = 'straight' | 'winding' | 'wide';
@@ -12,6 +12,12 @@ export type StairsStyle = 'none' | 'down' | 'up' | 'both';
 export type KeyDetail = 'brief' | 'full' | 'stocked';
 export type SecretStyle = 'none' | 'few' | 'many';
 export type CavernOpenness = 'tight' | 'natural' | 'open';
+/** How tightly rooms pack into the map bounds. */
+export type RoomDensity = 'sparse' | 'normal' | 'packed';
+/** How many note-driven props to place on the map. */
+export type FurnishingStyle = 'none' | 'light' | 'full';
+/** Individual chamber footprint — cramped dens vs grand halls. */
+export type ChamberScale = 'cramped' | 'normal' | 'grand';
 
 export interface DungeonStair {
   x: number;
@@ -32,6 +38,9 @@ export interface DungeonOptions {
   key?: KeyDetail;
   secrets?: SecretStyle;
   cavern?: CavernOpenness;
+  density?: RoomDensity;
+  furnishings?: FurnishingStyle;
+  chambers?: ChamberScale;
 }
 
 export interface DungeonRoom {
@@ -148,9 +157,15 @@ interface SizePreset {
 }
 
 const SIZES: Record<DungeonSize, SizePreset> = {
+  tiny: { cols: 16, rows: 12, roomCount: [3, 5], maxW: 5, maxH: 4 },
   small: { cols: 22, rows: 16, roomCount: [5, 7], maxW: 6, maxH: 5 },
   medium: { cols: 34, rows: 24, roomCount: [9, 13], maxW: 8, maxH: 6 },
   large: { cols: 46, rows: 32, roomCount: [14, 20], maxW: 9, maxH: 7 },
+  huge: { cols: 58, rows: 40, roomCount: [20, 28], maxW: 10, maxH: 8 },
+  /** ~360×250 ft at 5 ft/cell — multi-wing complex. */
+  vast: { cols: 72, rows: 50, roomCount: [28, 40], maxW: 11, maxH: 9 },
+  /** Megadungeon floor — slow to paint; use sparingly. */
+  mega: { cols: 96, rows: 64, roomCount: [40, 56], maxW: 12, maxH: 10 },
 };
 
 function mulberry32(seed: number): () => number {
@@ -194,7 +209,8 @@ function placeRooms(
   gap = 2,
 ): DungeonRoom[] {
   const rooms: DungeonRoom[] = [];
-  for (let attempt = 0; attempt < 400 && rooms.length < count; attempt++) {
+  const maxAttempts = Math.min(2400, Math.max(400, count * 80));
+  for (let attempt = 0; attempt < maxAttempts && rooms.length < count; attempt++) {
     const w = randInt(rnd, 3, maxW);
     const h = randInt(rnd, 3, maxH);
     if (w + 2 >= cols || h + 2 >= rows) continue;
@@ -225,34 +241,56 @@ function center(room: DungeonRoom): { x: number; y: number } {
 function connectRooms(
   rooms: DungeonRoom[],
   rnd: () => number,
-  chainOnly: boolean,
+  mode: 'tree' | 'chain' | 'hub' | 'gauntlet',
   extraLinks: number,
 ): Array<[number, number]> {
   const edges: Array<[number, number]> = [];
   if (rooms.length < 2) return edges;
-  if (chainOnly) {
+  if (mode === 'chain') {
     for (let i = 0; i < rooms.length - 1; i++) edges.push([i, i + 1]);
-  } else {
-  const inTree = new Set<number>([0]);
-  while (inTree.size < rooms.length) {
-    let best: [number, number] | null = null;
-    let bestD = Infinity;
-    for (const i of inTree) {
-      for (let j = 0; j < rooms.length; j++) {
-        if (inTree.has(j)) continue;
-        const a = center(rooms[i]!);
-        const b = center(rooms[j]!);
-        const d = Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
-        if (d < bestD) {
-          bestD = d;
-          best = [i, j];
-        }
+  } else if (mode === 'gauntlet') {
+    // Left→right spine so the delve reads as a run.
+    const order = rooms
+      .map((room, index) => ({ index, x: center(room).x, y: center(room).y }))
+      .sort((a, b) => a.x - b.x || a.y - b.y);
+    for (let i = 0; i < order.length - 1; i++) {
+      edges.push([order[i]!.index, order[i + 1]!.index]);
+    }
+  } else if (mode === 'hub') {
+    // Largest chamber is the hub; every other room spokes to it.
+    let hub = 0;
+    let hubArea = rooms[0]!.w * rooms[0]!.h;
+    for (let i = 1; i < rooms.length; i++) {
+      const area = rooms[i]!.w * rooms[i]!.h;
+      if (area > hubArea) {
+        hub = i;
+        hubArea = area;
       }
     }
-    if (!best) break;
-    edges.push(best);
-    inTree.add(best[1]);
-  }
+    for (let i = 0; i < rooms.length; i++) {
+      if (i !== hub) edges.push([hub, i]);
+    }
+  } else {
+    const inTree = new Set<number>([0]);
+    while (inTree.size < rooms.length) {
+      let best: [number, number] | null = null;
+      let bestD = Infinity;
+      for (const i of inTree) {
+        for (let j = 0; j < rooms.length; j++) {
+          if (inTree.has(j)) continue;
+          const a = center(rooms[i]!);
+          const b = center(rooms[j]!);
+          const d = Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
+          if (d < bestD) {
+            bestD = d;
+            best = [i, j];
+          }
+        }
+      }
+      if (!best) break;
+      edges.push(best);
+      inTree.add(best[1]);
+    }
   }
   for (let n = 0; n < extraLinks; n++) {
     const a = Math.floor(rnd() * rooms.length);
@@ -268,6 +306,12 @@ function rollDoor(rnd: () => number, style: DoorStyle, secrets: SecretStyle): Do
   if (style === 'open') {
     if (secrets === 'few' && rnd() < 0.08) return 'secret';
     return 'open';
+  }
+  if (style === 'locked') {
+    const roll = rnd();
+    const kind: DoorKind = roll < 0.7 ? 'locked' : roll < 0.9 ? 'closed' : 'open';
+    if (secrets === 'few' && rnd() < 0.1) return 'secret';
+    return kind;
   }
   const roll = rnd();
   const kind: DoorKind = style === 'closed'
@@ -735,9 +779,31 @@ function extraLinksFor(roomCount: number, layout: DungeonLayout, passages: Passa
     if (passages === 'linked') return 1;
     return 0;
   }
+  if (layout === 'gauntlet') {
+    if (passages === 'sparse') return 0;
+    if (passages === 'maze') return Math.max(1, Math.floor(roomCount * 0.15));
+    return Math.max(0, Math.floor(roomCount * 0.05));
+  }
+  if (layout === 'hub') {
+    if (passages === 'sparse') return 0;
+    if (passages === 'maze') return Math.max(1, Math.floor(roomCount * 0.25));
+    return Math.max(0, Math.floor(roomCount * 0.1));
+  }
   if (passages === 'sparse') return 0;
   const ratio = passages === 'maze' ? 0.55 : 0.22;
   return Math.max(1, Math.floor(roomCount * ratio));
+}
+
+function densityScale(density: RoomDensity): number {
+  if (density === 'sparse') return 0.62;
+  if (density === 'packed') return 1.38;
+  return 1;
+}
+
+function chamberScale(chambers: ChamberScale): { w: number; h: number } {
+  if (chambers === 'cramped') return { w: 0.72, h: 0.72 };
+  if (chambers === 'grand') return { w: 1.45, h: 1.4 };
+  return { w: 1, h: 1 };
 }
 
 function deadEndCount(roomCount: number, style: DeadEndStyle): number {
@@ -756,9 +822,16 @@ export function generateDungeon(options: DungeonOptions): GeneratedDungeon {
   const stairsStyle = options.stairs ?? 'down';
   const subtitle = `${MOTIF_LABEL[motif]} · seed ${options.seed >>> 0}`;
   const chain = options.layout === 'five-room';
+  const hub = options.layout === 'hub';
+  const gauntlet = options.layout === 'gauntlet';
+  const density = options.density ?? 'normal';
+  const chambers = options.chambers ?? 'normal';
   const roomTarget = chain
     ? 5
-    : randInt(rnd, preset.roomCount[0], preset.roomCount[1]);
+    : Math.max(
+      2,
+      Math.round(randInt(rnd, preset.roomCount[0], preset.roomCount[1]) * densityScale(density)),
+    );
 
   if (options.layout === 'cavern') {
     const floor = generateCavern(preset.cols, preset.rows, rnd, options.cavern ?? 'natural');
@@ -784,8 +857,15 @@ export function generateDungeon(options: DungeonOptions): GeneratedDungeon {
 
   const corridors = options.corridors ?? 'straight';
   const secrets = options.secrets ?? 'few';
-  const maxW = chain ? Math.max(preset.maxW, 6) : preset.maxW;
-  const maxH = chain ? Math.max(preset.maxH, 5) : preset.maxH;
+  const chamberMul = chamberScale(chambers);
+  const maxW = Math.max(
+    3,
+    Math.round((chain ? Math.max(preset.maxW, 6) : preset.maxW) * chamberMul.w),
+  );
+  const maxH = Math.max(
+    3,
+    Math.round((chain ? Math.max(preset.maxH, 5) : preset.maxH) * chamberMul.h),
+  );
   let rooms = placeRooms(preset.cols, preset.rows, roomTarget, maxW, maxH, rnd, 2);
   if (rooms.length < roomTarget) {
     const retry = placeRooms(
@@ -811,13 +891,14 @@ export function generateDungeon(options: DungeonOptions): GeneratedDungeon {
   }
   const doors = new Map<string, DoorKind>();
   const passages = options.passages ?? 'linked';
+  const linkMode = chain ? 'chain' : gauntlet ? 'gauntlet' : hub ? 'hub' : 'tree';
   carveLinks(
     preset.cols,
     preset.rows,
     floor,
     roomOf,
     rooms,
-    connectRooms(rooms, rnd, chain, extraLinksFor(rooms.length, options.layout, passages)),
+    connectRooms(rooms, rnd, linkMode, extraLinksFor(rooms.length, options.layout, passages)),
     doors,
     rnd,
     options.doors,
