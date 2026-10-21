@@ -26,6 +26,10 @@ function mergeMapItem(server: MapItem, local: MapItem): MapItem {
   };
   const dungeon = server.dungeon ?? local.dungeon;
   if (dungeon) merged.dungeon = dungeon;
+  const breachFx = server.breachFx ?? local.breachFx;
+  if (breachFx) merged.breachFx = breachFx;
+  const wallCuts = (server.wallCuts?.length ? server.wallCuts : local.wallCuts) ?? [];
+  if (wallCuts.length) merged.wallCuts = wallCuts;
   return merged;
 }
 

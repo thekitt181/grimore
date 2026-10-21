@@ -1,7 +1,7 @@
 import {
   Container, Graphics, Sprite, Text, TextStyle,
 } from 'pixi.js';
-import type { Item, MapItem, TokenItem, ImageItem, HandoutItem, DrawItem, TextItem, WallSegment } from '../types';
+import type { Item, MapItem, TokenItem, ImageItem, HandoutItem, DrawItem, TextItem, SurfaceDecalItem, WallSegment } from '../types';
 import { tokenShowsHpBarToPlayer } from '../types';
 import { redrawGrid } from '@/systems/map/hooks/useMapGrid';
 import { loadTexture } from '@/lib/textureLoader';
@@ -17,6 +17,8 @@ export interface RenderContext {
   selectedIds?: string[];
   /** Mobile: show flat token art when Three.js is unavailable. */
   pixiTokenFallback?: boolean;
+  /** GM live 2D editor beside 3D — draw full Pixi tokens/maps. */
+  gm2dEditor?: boolean;
 }
 
 import { tokenConditionColor } from '../token/tokenConditionColors';
@@ -39,11 +41,13 @@ export function itemVisualSignature(item: Item, ctx: RenderContext): string {
   const base = `${item.type}|${item.width}|${item.height}`;
   switch (item.type) {
     case 'map':
-      return `${base}|${item.backgroundUrl}|${item.modelUrl ?? ''}|${item.gridSize}|${item.gridType}|${item.gridColor}|${item.gridOpacity}|${item.gridOffsetX}|${item.gridOffsetY}|${item.showGrid}`;
+      return `${base}|${item.backgroundUrl}|${item.modelUrl ?? ''}|${item.gridSize}|${item.gridType}|${item.gridColor}|${item.gridOpacity}|${item.gridOffsetX}|${item.gridOffsetY}|${item.showGrid}|${ctx.gm2dEditor ? 'e' : ''}|${ctx.viewMode ?? '2d'}`;
     case 'token':
-      return `${base}|${tokenBaseVisualSignature(item)}|${ctx.viewMode ?? '2d'}`;
+      return `${base}|${tokenBaseVisualSignature(item)}|${ctx.viewMode ?? '2d'}|${ctx.gm2dEditor ? 'e' : ''}`;
     case 'drawing':
       return `${base}|${item.shape}|${item.color}|${item.stroke}|${item.points.length}`;
+    case 'surfaceDecal':
+      return `${base}|${item.surface}|${item.mapId}|${item.color}|${item.stroke}|${item.points.length}|${item.wallIndex ?? ''}`;
     case 'text':
       return `${base}|${item.text}|${item.color}|${item.fontSize}`;
     case 'handout':
@@ -60,6 +64,7 @@ export function renderItem(container: Container, item: Item, ctx: RenderContext)
     case 'map':     renderMap(container, item, ctx); break;
     case 'token':   renderToken(container, item, ctx); break;
     case 'drawing': renderDrawing(container, item); break;
+    case 'surfaceDecal': renderSurfaceDecal(container, item); break;
     case 'text':    renderText(container, item); break;
     case 'handout': renderHandout(container, item); break;
     case 'image':   renderImage(container, item); break;
@@ -69,11 +74,16 @@ export function renderItem(container: Container, item: Item, ctx: RenderContext)
 // ─── Map ────────────────────────────────────────────────────────────────────
 
 function renderMap(c: Container, item: MapItem, ctx: RenderContext) {
-  const in3dView = ctx.viewMode === '3d';
-  /** Three.js draws the GLB — hide Pixi map body in 2D model preview and for model-only maps in 3D. */
+  /** Three.js draws the GLB — hide Pixi map art so it can't bury underlay tokens. */
   const hidePixiMapBody =
     Boolean(item.modelUrl) &&
-    (ctx.viewMode !== '3d' || !item.backgroundUrl);
+    (
+      // Pure 2D / model-only 3D: Three owns the map mesh.
+      ctx.viewMode !== '3d'
+      || !item.backgroundUrl
+      // GM 2D editor: underlay draws the GLB; an opaque Pixi map would hide token minis.
+      || Boolean(ctx.gm2dEditor)
+    );
 
   const bg = new Graphics();
   bg.label = 'bg';
@@ -85,7 +95,12 @@ function renderMap(c: Container, item: MapItem, ctx: RenderContext) {
   }
   c.addChild(bg);
 
-  if (item.backgroundUrl) {
+  if (hidePixiMapBody) {
+    return;
+  }
+
+  // Skip when Three owns the map — an opaque sprite would bury underlay minis / GLB.
+  if (item.backgroundUrl && !hidePixiMapBody) {
     void loadTexture(item.backgroundUrl).then((tex) => {
       if (c.destroyed) return;
       const sprite = new Sprite(tex);
@@ -94,32 +109,8 @@ function renderMap(c: Container, item: MapItem, ctx: RenderContext) {
       sprite.height = item.height;
       c.addChildAt(sprite, 1);
     }).catch(() => {});
-  } else if (item.modelUrl && !item.backgroundUrl && !in3dView) {
-    const modelBadge = new Graphics();
-    modelBadge.label = 'model-badge';
-    modelBadge.rect(item.width * 0.2, item.height * 0.25, item.width * 0.6, item.height * 0.5);
-    modelBadge.fill({ color: 0x1a1a28, alpha: 0.75 });
-    modelBadge.setStrokeStyle({ width: 2, color: 0x8a7a50, alpha: 0.6 });
-    modelBadge.stroke();
-    c.addChildAt(modelBadge, 1);
-
-    const label = new Text({
-      text: '3D map\n(use 3D view toggle)',
-      style: new TextStyle({
-        fontFamily: 'Inter',
-        fontSize: Math.max(12, Math.min(item.width, item.height) * 0.04),
-        fill: 0x8a7a50,
-        align: 'center',
-        wordWrap: true,
-        wordWrapWidth: item.width * 0.55,
-      }),
-    });
-    label.label = 'model-label';
-    label.anchor.set(0.5);
-    label.x = item.width / 2;
-    label.y = item.height / 2;
-    c.addChild(label);
   }
+  // Model-only maps: Three.js (2D overlay / GM 2D editor underlay) draws the GLB.
 
   // Grid
   const grid = new Graphics();
@@ -149,7 +140,7 @@ export function wallVisualSignature(mapId: string, walls: WallSegment[], selecte
   return `walls|${mapId}|${walls.map((w) => `${w.a.x},${w.a.y},${w.b.x},${w.b.y}`).join(';')}${sel}`;
 }
 
-/** LOS walls — GM-only overlay above the map image/grid. */
+/** LOS wall segments above the map (2D view; 3D uses extruded Map3DWalls). */
 export function renderMapWalls(c: Container, walls: WallSegment[], selectedIndices?: ReadonlySet<number>) {
   c.removeChildren();
   if (walls.length === 0) return;
@@ -224,6 +215,7 @@ function renderTokenBase(c: Container, item: TokenItem, ctx: RenderContext) {
     item,
     ctx.viewMode ?? '2d',
     Boolean(ctx.pixiTokenFallback),
+    Boolean(ctx.gm2dEditor),
   );
   const borderColor = item.borderColour ? cssHex(item.borderColour) : 0xc9a84c;
 
@@ -302,6 +294,7 @@ function renderTokenOverlay(c: Container, item: TokenItem, ctx: RenderContext) {
     item,
     ctx.viewMode ?? '2d',
     Boolean(ctx.pixiTokenFallback),
+    Boolean(ctx.gm2dEditor),
   );
 
   const overlay = new Container();
@@ -546,6 +539,20 @@ function renderDrawing(c: Container, item: DrawItem) {
       break;
     }
   }
+  c.addChild(g);
+}
+
+/** Floor spray as a flat polyline for GM awareness on the 2D map. */
+function renderSurfaceDecal(c: Container, item: SurfaceDecalItem) {
+  if (item.surface !== 'floor' || item.points.length < 4) return;
+  const g = new Graphics();
+  const color = cssHex(item.color);
+  g.setStrokeStyle({ width: Math.max(1, item.stroke), color, alpha: 0.85 });
+  g.moveTo(item.points[0]!, item.points[1]!);
+  for (let i = 2; i < item.points.length - 1; i += 2) {
+    g.lineTo(item.points[i]!, item.points[i + 1]!);
+  }
+  g.stroke();
   c.addChild(g);
 }
 

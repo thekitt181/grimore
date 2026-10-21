@@ -194,6 +194,14 @@ async function connectSocketOnce(token: string | null): Promise<void> {
 
   const { bindDdbRollSocket } = await import('@/systems/ddb/bindDdbRollSocket');
   bindDdbRollSocket(true);
+  const { bindPoseRelay } = await import('@/systems/scene/token/poseRelay');
+  const { bindWalkLiveIngress } = await import('@/systems/scene/token/walkLiveIngress');
+  bindPoseRelay(s);
+  bindWalkLiveIngress(s);
+  s.on('connect', () => {
+    bindPoseRelay(s);
+    bindWalkLiveIngress(s);
+  });
 }
 
 export function disconnectSocket(): void {

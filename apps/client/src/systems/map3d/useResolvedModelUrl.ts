@@ -5,6 +5,20 @@ import { isGrimoireModelRef, resolveModelAssetUrl, parseGrimoireModelRef } from 
 const blobCache = new Map<string, string>();
 const inflight = new Map<string, Promise<string>>();
 
+/** Drop cached blob URL so the next resolve re-reads IndexedDB (after auto-rig overwrite). */
+export function invalidateModelBlobCache(ref: string): void {
+  const prev = blobCache.get(ref);
+  if (prev) {
+    try {
+      URL.revokeObjectURL(prev);
+    } catch {
+      /* ignore */
+    }
+    blobCache.delete(ref);
+  }
+  inflight.delete(ref);
+}
+
 function loadBlobUrl(ref: string): Promise<string> {
   const cached = blobCache.get(ref);
   if (cached) return Promise.resolve(cached);
@@ -91,6 +105,7 @@ export function useResolvedModelUrl(url: string | null | undefined): {
     const onReady = (ev: Event) => {
       const detail = (ev as CustomEvent<{ itemId?: string }>).detail;
       if (!detail?.itemId || !parsed.key.endsWith(`:${detail.itemId}`)) return;
+      invalidateModelBlobCache(url);
       void loadBlobUrl(url)
         .then((blobUrl) => {
           setResolved(blobUrl);

@@ -9,6 +9,10 @@ import { useInitiativeStore } from '@/systems/map/store/initiativeStore';
 import { MapCanvas } from '@/systems/map/MapCanvas';
 import { MapToolbar } from '@/systems/map/MapToolbar';
 import { MapViewModeToggle } from '@/systems/map/MapViewModeToggle';
+import { FirstPersonToggle } from '@/systems/map/FirstPersonToggle';
+import { FirstPersonPaintHud } from '@/systems/map/FirstPersonPaintHud';
+import { Gm2dEditorToggle } from '@/systems/map/Gm2dEditorToggle';
+import { GmMapFreezeToggle } from '@/systems/map/GmMapFreezeToggle';
 import { MapSidebar } from '@/systems/map/MapSidebar';
 import { useMapSidebarStore } from '@/systems/map/mapSidebarStore';
 import { ItemInspector } from '@/systems/scene/ItemInspector';
@@ -17,6 +21,7 @@ import { DrawingTextInput } from '@/systems/map/DrawingTextInput';
 import { DiceRoller } from '@/systems/dice/DiceRoller';
 import { RollModeBar } from '@/systems/dice/RollModeBar';
 import { RollToast } from '@/systems/dice/RollToast';
+import { PropDdbArmBanner } from '@/systems/map/props/PropDdbArmBanner';
 import { DiceTrayOverlay } from '@/systems/dice/DiceTrayOverlay';
 import { AttackTargetPicker } from '@/systems/combat/AttackTargetPicker';
 import { AttackTargetHint } from '@/systems/combat/AttackTargetHint';
@@ -51,7 +56,6 @@ import { HandoutManagerPanel } from '@/systems/handouts/HandoutManagerPanel';
 import { HandoutJournalPanel } from '@/systems/handouts/HandoutJournalPanel';
 import { useHandoutJournalStore } from '@/systems/handouts/handoutJournalStore';
 import { useCompendiumSyncPoll } from '@/systems/compendium/useCompendiumSync';
-import { CatalogRebuildBanner } from '@/systems/compendium/CatalogRebuildBanner';
 import { useCompendiumAuthRecovery } from '@/systems/compendium/useCompendiumAuthRecovery';
 import { useCompendiumUiStore } from '@/systems/compendium/compendiumStore';
 import { getSocket, isMobileClient } from '@/lib/socket';
@@ -69,6 +73,7 @@ import { useSceneMedia } from '@/systems/scene/media/useSceneMedia';
 import { BackgroundVideoLayer } from '@/systems/scene/media/BackgroundVideoLayer';
 import { EmbedAudioLayer } from '@/systems/scene/media/EmbedAudioLayer';
 import { SceneTransitionOverlay } from '@/systems/scene/media/SceneAtmosphere';
+import { FpLookLayer } from '@/systems/map3d/FpLookLayer';
 import { SessionMediaBar } from '@/systems/scene/media/SessionMediaBar';
 import { MobileAudioUnlockBanner } from '@/systems/scene/media/MobileAudioUnlockBanner';
 import { GameClockWidget } from '@/systems/scene/media/GameClockWidget';
@@ -375,6 +380,7 @@ export function SessionPage() {
         {/* Map canvas + overlay panels */}
         <div className="flex-1 min-h-0 relative overflow-hidden">
           <MapCanvas />
+          <FpLookLayer />
           <SceneTransitionOverlay />
           <MobileDdbTokenBar />
 
@@ -496,6 +502,11 @@ export function SessionPage() {
                   </div>
                 )}
                 <MapViewModeToggle variant="dock" />
+                <div className="flex flex-col items-end gap-1">
+                  <FirstPersonPaintHud />
+                  <FirstPersonToggle variant="dock" />
+                </div>
+                <Gm2dEditorToggle variant="dock" />
                 {isGM && (
                   <button
                     onClick={() => setHandoutManagerOpen(!handoutManagerOpen)}
@@ -616,7 +627,6 @@ export function SessionPage() {
       <BackgroundVideoLayer sessionId={sessionInfo.id} allowDismiss={isGM} />
       <EmbedAudioLayer />
       <MobileAudioUnlockBanner />
-      <CatalogRebuildBanner />
     </div>
   );
 }

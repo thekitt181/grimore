@@ -4,13 +4,13 @@ import { itemDisplayZIndex } from '@/systems/scene/zOrder';
 import { useItemStore } from '@/systems/scene/store/itemStore';
 import { useLiveTransformStore } from '@/systems/scene/store/liveTransformStore';
 import type { LiveTransform } from '@/systems/scene/store/liveTransformStore';
-import { useMapStore } from '@/systems/map/store/mapStore';
+import { isGm2dEditorInteraction, useMapStore } from '@/systems/map/store/mapStore';
 import { useSessionStore } from '@/store/sessionStore';
-import { clientToWorld } from '@/systems/scene/sceneRefs';
 import { resolveItemBounds } from '@/systems/map3d/sceneItemBounds';
 import { getPickCanvasRect } from '@/systems/map3d/pickCamera';
 import { sceneCameraRef } from '@/systems/map3d/sceneCameraRef';
 import { worldXZToClientScreen } from '@/systems/map3d/perspectiveCameraSync';
+import { pointerToMapWorld } from '@/systems/map3d/screenToGround';
 import { playerInteractableTokens } from './clientTokenVisibility';
 import type { TokenItem } from '../types';
 
@@ -56,7 +56,7 @@ function tokenScreenRect(
   const viewMode = useMapStore.getState().viewMode;
   const viewport = useMapStore.getState().viewport;
 
-  if (viewMode === '3d' && rect && sceneCameraRef.liveCamera) {
+  if (viewMode === '3d' && !isGm2dEditorInteraction() && rect && sceneCameraRef.liveCamera) {
     const corners = [
       worldXZToClientScreen(b.x, b.y, rect),
       worldXZToClientScreen(b.x + b.width, b.y, rect),
@@ -157,7 +157,7 @@ function pickSmallestTokenUnderPointer(
   nearby.sort(rankCandidates);
   if (nearby.length > 0) return nearby[0]!.token;
 
-  const { x: wx, y: wy } = clientToWorld(clientX, clientY);
+  const { x: wx, y: wy } = pointerToMapWorld(clientX, clientY);
   let best: PickCandidate | null = null;
   const scale = Math.max(useMapStore.getState().viewport.scale, 0.08);
   for (const token of tokens) {
@@ -200,17 +200,18 @@ function pickByScreenBox(clientX: number, clientY: number, tokens: TokenItem[]):
   const rect = getPickCanvasRect();
   const liveById = useLiveTransformStore.getState().byId;
   const viewMode = useMapStore.getState().viewMode;
-  const pad = viewMode === '3d' ? 40 : 20;
+  const live2dPane = isGm2dEditorInteraction();
+  const pad = viewMode === '3d' && !live2dPane ? 40 : 20;
 
   let best: TokenItem | null = null;
   let bestDist = Infinity;
-  const { x: wx, y: wy } = clientToWorld(clientX, clientY);
+  const { x: wx, y: wy } = pointerToMapWorld(clientX, clientY);
   const scale = scaleFromViewport();
 
   for (const token of sortTopmost(tokens)) {
     const b = resolveItemBounds(token, liveById[token.id]);
 
-    if (viewMode === '3d' && rect && sceneCameraRef.liveCamera) {
+    if (viewMode === '3d' && !live2dPane && rect && sceneCameraRef.liveCamera) {
       const corners = [
         worldXZToClientScreen(b.x, b.y, rect),
         worldXZToClientScreen(b.x + b.width, b.y, rect),
@@ -256,18 +257,21 @@ function scaleFromViewport(): number {
 function pickInteractableAt(clientX: number, clientY: number, tokens: TokenItem[]): TokenItem | null {
   if (tokens.length === 0) return null;
 
-  const pickId = pickSceneItem(clientX, clientY);
-  if (pickId) {
-    const ray = useItemStore.getState().items[pickId];
-    if (ray?.type === 'token' && tokens.some((t) => t.id === ray.id)) {
-      return ray as TokenItem;
+  // Live 2D editor: Pixi owns picks — Three's left-pane camera must not steal right-pane clicks.
+  if (!isGm2dEditorInteraction()) {
+    const pickId = pickSceneItem(clientX, clientY);
+    if (pickId) {
+      const ray = useItemStore.getState().items[pickId];
+      if (ray?.type === 'token' && tokens.some((t) => t.id === ray.id)) {
+        return ray as TokenItem;
+      }
     }
   }
 
   const screenHit = pickByScreenBox(clientX, clientY, tokens);
   if (screenHit) return screenHit;
 
-  const { x: wx, y: wy } = clientToWorld(clientX, clientY);
+  const { x: wx, y: wy } = pointerToMapWorld(clientX, clientY);
   return pickByWorldPoint(wx, wy, tokens);
 }
 

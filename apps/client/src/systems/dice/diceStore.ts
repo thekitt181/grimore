@@ -55,6 +55,8 @@ interface DiceState {
       animate?: boolean;
       /** Pre-computed roll — avoids re-rolling (combat attacks, scripted rolls). */
       result?: RollResult;
+      /** Map token that made this roll — links ability/skill checks to nearby props. */
+      actorTokenId?: string;
     },
   ) => DiceHistoryEntry | null;
   addRemoteEntry: (payload: DiceRollPayload) => void;
@@ -268,6 +270,26 @@ export const useDiceStore = create<DiceState>((set, get) => ({
       };
       getSocket().emit('dice:roll', payload);
     }
+
+    // Link skill/ability rolls to nearby props (chest/gate/door) within 15 ft.
+    void import('@/systems/map/props/ingestDdbPropRoll').then(({ ingestVttPropRoll }) => {
+      const ingest: {
+        label: string;
+        notation: string;
+        total: number;
+        characterName?: string;
+        actorTokenId?: string;
+      } = {
+        label: displayLabel,
+        notation: displayNotation,
+        total: entry.total,
+      };
+      if (options?.actorTokenId) ingest.actorTokenId = options.actorTokenId;
+      // Prefer the name in the label ("Grog · Strength check") over tray "You".
+      const fromLabel = displayLabel.split('·')[0]?.trim();
+      if (fromLabel && fromLabel.toLowerCase() !== 'you') ingest.characterName = fromLabel;
+      ingestVttPropRoll(ingest);
+    });
 
     return entry;
   },

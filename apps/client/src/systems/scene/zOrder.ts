@@ -15,6 +15,7 @@ export function itemDisplayZIndex(item: Item): number {
     case 'token':
       return Z_TOKEN + z;
     case 'drawing':
+    case 'surfaceDecal':
     case 'text':
       return Z_DRAW + z;
     default:

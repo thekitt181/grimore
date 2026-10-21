@@ -22,6 +22,19 @@ import { TokenActionCard } from '@/systems/combat/TokenActionCard';
 const GOLD = 'var(--color-accent-gold)';
 const BD = 'var(--color-border)';
 
+const ABILITY_FULL: Record<string, string> = {
+  STR: 'Strength',
+  DEX: 'Dexterity',
+  CON: 'Constitution',
+  INT: 'Intelligence',
+  WIS: 'Wisdom',
+  CHA: 'Charisma',
+};
+
+function abilityFullName(name: string): string {
+  return ABILITY_FULL[name.trim().toUpperCase()] ?? name;
+}
+
 export function CharacterSheetPanel({ token, onClose }: { token: TokenItem; onClose: () => void }) {
   const qc = useQueryClient();
   const openPcActions = useDdbStore((s) => s.openPcActions);
@@ -309,13 +322,21 @@ function SheetBody({
       {abilities.length > 0 && (
         <Section title="Abilities">
           <div className="grid grid-cols-6 gap-1 text-center">
-            {abilities.map((a) => (
-              <div key={a.name} className="rounded px-1 py-1" style={{ background: 'var(--color-bg-tertiary)' }}>
-                <div className="text-[9px] opacity-70">{a.name}</div>
-                <div className="font-display" style={{ color: GOLD }}>{a.score}</div>
-                <RollChip label={`${roller} · ${a.name} check`} mod={a.mod ?? 0} compact />
-              </div>
-            ))}
+            {abilities.map((a) => {
+              const full = abilityFullName(a.name);
+              return (
+                <div key={a.name} className="rounded px-1 py-1" style={{ background: 'var(--color-bg-tertiary)' }}>
+                  <div className="text-[9px] opacity-70 truncate" title={full}>{full}</div>
+                  <div className="font-display" style={{ color: GOLD }}>{a.score}</div>
+                  <RollChip
+                    label={`${roller} · ${full} check`}
+                    mod={a.mod ?? 0}
+                    compact
+                    actorTokenId={liveToken.id}
+                  />
+                </div>
+              );
+            })}
           </div>
         </Section>
       )}
@@ -323,19 +344,27 @@ function SheetBody({
       {saves.length > 0 && (
         <Section title="Saving throws">
           <div className="grid grid-cols-3 gap-1">
-            {saves.map((s) => (
-              <div
-                key={s.name}
-                className="flex items-center justify-between gap-1 rounded px-2 py-1"
-                style={{ background: 'var(--color-bg-tertiary)' }}
-              >
-                <span className="truncate">
-                  {s.proficient ? '● ' : '○ '}
-                  {s.name}
-                </span>
-                <RollChip label={`${roller} · ${s.name} save`} mod={s.mod} compact />
-              </div>
-            ))}
+            {saves.map((s) => {
+              const full = abilityFullName(s.name);
+              return (
+                <div
+                  key={s.name}
+                  className="flex items-center justify-between gap-1 rounded px-2 py-1"
+                  style={{ background: 'var(--color-bg-tertiary)' }}
+                >
+                  <span className="truncate">
+                    {s.proficient ? '● ' : '○ '}
+                    {full}
+                  </span>
+                  <RollChip
+                    label={`${roller} · ${full} save`}
+                    mod={s.mod}
+                    compact
+                    actorTokenId={liveToken.id}
+                  />
+                </div>
+              );
+            })}
           </div>
         </Section>
       )}
@@ -349,7 +378,12 @@ function SheetBody({
                   {s.proficient ? '● ' : '○ '}
                   {s.name}
                 </span>
-                <RollChip label={`${roller} · ${s.name}`} mod={s.mod} compact />
+                <RollChip
+                  label={`${roller} · ${s.name}`}
+                  mod={s.mod}
+                  compact
+                  actorTokenId={liveToken.id}
+                />
               </div>
             ))}
           </div>
@@ -384,7 +418,12 @@ function SheetBody({
                   <span className="opacity-70"> · {parsed.damages[0].dice} {parsed.damages[0].type}</span>
                 ) : null}
               </span>
-              <RollChip label={`${roller} · ${parsed.name} attack`} mod={parsed.toHit ?? 0} compact />
+              <RollChip
+                label={`${roller} · ${parsed.name} attack`}
+                mod={parsed.toHit ?? 0}
+                compact
+                actorTokenId={liveToken.id}
+              />
             </div>
           ))}
         </Section>
@@ -442,7 +481,18 @@ function SheetBody({
   );
 }
 
-function RollChip({ label, mod, compact }: { label: string; mod: number; compact?: boolean }) {
+function RollChip({
+  label,
+  mod,
+  compact,
+  actorTokenId,
+}: {
+  label: string;
+  mod: number;
+  compact?: boolean;
+  /** Token on the map — required so Strength/etc. can open nearby props. */
+  actorTokenId?: string;
+}) {
   const rollMode = useDiceStore((s) => s.rollMode);
   const notation = `1d20${mod >= 0 ? `+${mod}` : mod}`;
 
@@ -453,7 +503,10 @@ function RollChip({ label, mod, compact }: { label: string; mod: number; compact
       style={{ background: 'rgba(201,168,76,0.15)', border: `1px solid ${BD}`, color: GOLD }}
       title={`Roll ${notation}`}
       onClick={() => {
-        useDiceStore.getState().performRoll(notation, label, { rollMode });
+        useDiceStore.getState().performRoll(notation, label, {
+          rollMode,
+          ...(actorTokenId ? { actorTokenId } : {}),
+        });
       }}
     >
       {formatMod(mod)}

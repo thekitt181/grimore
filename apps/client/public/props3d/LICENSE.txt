@@ -1,0 +1,5 @@
+KayKit Dungeon Remastered (CC0 1.0 Universal)
+https://github.com/KayKit-Game-Assets/KayKit-Dungeon-Remastered-1.0
+
+These GLB props are from KayKit Game Assets, dedicated to the public domain
+under Creative Commons CC0. No attribution required; attribution appreciated.

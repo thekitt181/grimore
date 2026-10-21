@@ -1,12 +1,42 @@
 import { getSocket } from '@/lib/socket';
 import { useSessionStore } from '@/store/sessionStore';
 import { useItemStore, getActiveMap } from '../store/itemStore';
+import { useLiveTransformStore } from '../store/liveTransformStore';
 import { emitItemAdd, emitItemRemove, emitItemUpdate } from '../sceneSync';
+import { clearWalkPose, getWalkPose, setWalkPose } from '@/systems/scene/token/walkPoseBus';
+import { applyRemoteWalkPose } from '@/systems/scene/token/remotePoseApply';
+import { ingestWalkLive } from '@/systems/scene/token/walkLiveIngress';
 import { DEFAULT_MAP_GRID_SIZE } from '../types';
 import type { TokenItem } from '../types';
+import { useFirstPersonStore } from '@/systems/map3d/firstPersonStore';
+import { firstPersonPose } from '@/systems/map3d/firstPersonPose';
+import { firstPersonLook } from '@/systems/map3d/firstPersonLook';
 
 function sid(): string | null {
   return useSessionStore.getState().sessionId;
+}
+
+/** Debounced item-store commit — never sync updateItem on the socket hot path. */
+const poseCommitTimers = new Map<string, ReturnType<typeof setTimeout>>();
+function scheduleRemotePoseCommit(
+  tokenId: string,
+  patch: { x: number; y: number; gridCol: number; gridRow: number },
+): void {
+  const prev = poseCommitTimers.get(tokenId);
+  if (prev) clearTimeout(prev);
+  poseCommitTimers.set(
+    tokenId,
+    setTimeout(() => {
+      poseCommitTimers.delete(tokenId);
+      // Still receiving live walk — mesh owns feet; skip Zustand (freezes remotes).
+      const walk = getWalkPose(tokenId);
+      if (walk && performance.now() - walk.at < 800) {
+        return;
+      }
+      useItemStore.getState().updateItem(tokenId, patch);
+      clearWalkPose(tokenId);
+    }, 500),
+  );
 }
 
 export function emitTokenPlace(token: TokenItem) {
@@ -34,16 +64,51 @@ export function emitTokenPlace(token: TokenItem) {
   });
 }
 
-export function emitTokenMove(tokenId: string, gridCol: number, gridRow: number, x: number, y: number) {
+export function emitTokenMove(
+  tokenId: string,
+  gridCol: number,
+  gridRow: number,
+  x: number,
+  y: number,
+  opts?: { persist?: boolean },
+) {
   const s = sid();
   if (!s) return;
   const patch = { x, y, gridCol, gridRow };
-  useItemStore.getState().updateItem(tokenId, patch);
-  emitItemUpdate([{ id: tokenId, patch }]);
-  const socket = getSocket();
-  if (socket.connected) {
-    socket.emit('token:move', { sessionId: s, tokenId, gridCol, gridRow, x, y });
+  if (opts?.persist === false) {
+    // Soft mid-walk — do not touch remotes (FP uses token:rotate+xy).
+    return;
   }
+  // Local commit only; remotes get token:move (debounced updateItem there).
+  useItemStore.getState().updateItem(tokenId, patch);
+  getSocket().emit('token:move', { sessionId: s, tokenId, gridCol, gridRow, x, y });
+}
+
+/**
+ * Mid-walk / drag live pose — same class of event as token:rotate (relay only).
+ * Remotes apply via applyTokenSocketPatch (useTokenSocket).
+ */
+export function emitTokenLive(
+  tokenId: string,
+  x: number,
+  y: number,
+  rotation: number,
+  gridCol?: number,
+  gridRow?: number,
+) {
+  const s = sid();
+  if (!s) return;
+  const socket = getSocket();
+  if (!socket.connected) return;
+  socket.emit('token:live', {
+    sessionId: s,
+    tokenId,
+    x,
+    y,
+    rotation,
+    ...(gridCol != null ? { gridCol } : {}),
+    ...(gridRow != null ? { gridRow } : {}),
+  });
 }
 
 export function emitTokenHp(tokenId: string, hp: number, maxHp: number) {
@@ -65,9 +130,37 @@ export function emitTokenType(tokenId: string, type: '2d' | '3d') {
 export function emitTokenRotate(tokenId: string, rotation: number) {
   const s = sid();
   if (!s) return;
+  const socket = getSocket();
+  if (!socket.connected) return;
+
+  // Local UI only — never emitItemUpdate (that froze remotes when combined with walk).
   useItemStore.getState().updateItem(tokenId, { rotation });
-  emitItemUpdate([{ id: tokenId, patch: { rotation } }]);
-  (getSocket() as any).emit('token:rotate', { sessionId: s, tokenId, rotation });
+
+  // Always send x/y so remotes use mesh apply (never Zustand updateItem on receive).
+  let x: number;
+  let y: number;
+  if (firstPersonPose.active && firstPersonPose.tokenId === tokenId) {
+    x = firstPersonPose.x;
+    y = firstPersonPose.y;
+  } else {
+    const item = useItemStore.getState().items[tokenId];
+    if (!item || item.type !== 'token') {
+      socket.emit('token:rotate', { sessionId: s, tokenId, rotation });
+      return;
+    }
+    x = item.x;
+    y = item.y;
+  }
+
+  socket.emit('token:rotate', {
+    sessionId: s,
+    tokenId,
+    rotation: firstPersonPose.active && firstPersonPose.tokenId === tokenId
+      ? firstPersonLook.yaw
+      : rotation,
+    x,
+    y,
+  });
 }
 
 export function emitTokenHide(tokenId: string, hidden: boolean) {
@@ -102,10 +195,56 @@ export function applyTokenSocketPatch(
   const store = useItemStore.getState();
   switch (event) {
     case 'token:move': {
-      const { tokenId, x, y, gridCol, gridRow } = payload as {
-        tokenId: string; x: number; y: number; gridCol: number; gridRow: number;
+      const { tokenId, x, y, gridCol, gridRow, sessionId } = payload as {
+        tokenId: string; x: number; y: number; gridCol: number; gridRow: number; sessionId?: string;
       };
-      store.updateItem(tokenId, { x, y, gridCol, gridRow });
+      const fp = useFirstPersonStore.getState();
+      if (fp.enabled && fp.tokenId === tokenId) break;
+      {
+        const sidResolved = sessionId ?? sid();
+        ingestWalkLive({
+          ...(sidResolved ? { sessionId: sidResolved } : {}),
+          tokenId,
+          x,
+          y,
+        });
+      }
+      scheduleRemotePoseCommit(tokenId, { x, y, gridCol, gridRow });
+      break;
+    }
+    case 'map:tokenMove': {
+      const { tokenId, x, y, sessionId } = payload as {
+        tokenId: string; x: number; y: number; sessionId?: string;
+      };
+      {
+        const sidResolved = sessionId ?? sid();
+        ingestWalkLive({
+          ...(sidResolved ? { sessionId: sidResolved } : {}),
+          tokenId,
+          x,
+          y,
+        });
+      }
+      break;
+    }
+    case 'token:live': {
+      const { tokenId, x, y, rotation, sessionId } = payload as {
+        tokenId: string;
+        x: number;
+        y: number;
+        rotation: number;
+        sessionId?: string;
+      };
+      {
+        const sidResolved = sessionId ?? sid();
+        ingestWalkLive({
+          ...(sidResolved ? { sessionId: sidResolved } : {}),
+          tokenId,
+          x,
+          y,
+          rotation,
+        });
+      }
       break;
     }
     case 'token:hp': {
@@ -119,8 +258,28 @@ export function applyTokenSocketPatch(
       break;
     }
     case 'token:rotate': {
-      const { tokenId, rotation } = payload as { tokenId: string; rotation: number };
+      const { tokenId, rotation, x, y, sessionId } = payload as {
+        tokenId: string;
+        rotation: number;
+        x?: number;
+        y?: number;
+        sessionId?: string;
+      };
+      const fp = useFirstPersonStore.getState();
+      if (fp.enabled && fp.tokenId === tokenId) break;
+      if (typeof x === 'number' && typeof y === 'number') {
+        const sidResolved = sessionId ?? sid();
+        ingestWalkLive({
+          ...(sidResolved ? { sessionId: sidResolved } : {}),
+          tokenId,
+          x,
+          y,
+          rotation,
+        });
+        break;
+      }
       store.updateItem(tokenId, { rotation });
+      useLiveTransformStore.getState().setLive(tokenId, { rotation }, { bumpTick: false });
       break;
     }
     case 'token:hide': {

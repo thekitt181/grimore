@@ -39,7 +39,7 @@ export function DungeonPropsPanel() {
         ))}
       </div>
       <p className="font-ui text-xs leading-snug" style={{ color: 'var(--color-text-secondary)' }}>
-        Click a prop to drop it on the active map, then drag it into place. Click a selected prop again to play it. Rotate an arrow trap to aim it. Torches, fires, fountains, fungus, and portals move on their own. Hidden props stay visible only to you until you reveal them.
+        Click a prop to drop it on the active map, then drag it into place. Doors and gates snap to wall openings. Within 15 ft: set Reveal (e.g. Perception DC) to find hidden props, and Open (e.g. Athletics DC) to open them — two separate rolls. Use / U / VTT or D&D Beyond checks apply to the nearest matching step.
       </p>
     </ToolSection>
   );

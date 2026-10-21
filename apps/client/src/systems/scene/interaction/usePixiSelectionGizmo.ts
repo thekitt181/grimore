@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { Graphics } from 'pixi.js';
-import { useMapStore } from '@/systems/map/store/mapStore';
+import { isGm2dEditorInteraction, useMapStore } from '@/systems/map/store/mapStore';
 import { useItemStore } from '../store/itemStore';
 import { useSessionStore } from '@/store/sessionStore';
 import { useLiveTransformStore } from '../store/liveTransformStore';
@@ -27,6 +27,7 @@ function manipulableSelected(items: Record<string, Item>, selectedIds: string[],
 export function usePixiSelectionGizmo(appReady: boolean) {
   const activeTool = useMapStore((s) => s.activeTool);
   const viewMode = useMapStore((s) => s.viewMode);
+  const gm2dEditorOpen = useMapStore((s) => s.gm2dEditorOpen);
   const selectedIds = useItemStore((s) => s.selectedIds);
   const items = useItemStore((s) => s.items);
   const myRole = useSessionStore((s) => s.myRole);
@@ -35,7 +36,8 @@ export function usePixiSelectionGizmo(appReady: boolean) {
     if (!appReady) return;
 
     // 3D gizmo + handle registry owned by Map3DTokenGizmo — do not clear here.
-    if (viewMode !== '2d') return;
+    // GM 2D editor still has viewMode 3d but needs the Pixi gizmo on the side pane.
+    if (viewMode !== '2d' && !gm2dEditorOpen) return;
 
     const app = sceneRefs.app.current;
     const overlay = sceneRefs.overlay.current;
@@ -57,7 +59,8 @@ export function usePixiSelectionGizmo(appReady: boolean) {
     const tick = () => {
       const tool = useMapStore.getState().activeTool;
       const mode = useMapStore.getState().viewMode;
-      if (mode !== '2d' || tool !== 'select') {
+      const live2d = mode === '2d' || isGm2dEditorInteraction();
+      if (!live2d || tool !== 'select') {
         hidePixiSelectionGizmo(box!, handlesG!);
         return;
       }
@@ -65,9 +68,12 @@ export function usePixiSelectionGizmo(appReady: boolean) {
       const storeItems = useItemStore.getState().items;
       const selIds = useItemStore.getState().selectedIds;
       const gm = useSessionStore.getState().myRole === 'GM';
-      const selected = manipulableSelected(storeItems, selIds, gm).filter(
-        (it) => !itemSelectionGizmoRendersInThree(it, mode),
-      );
+      const sideEditor = isGm2dEditorInteraction();
+      // Side editor: Pixi owns the full selection gizmo (tokens + props + maps).
+      const selected = manipulableSelected(storeItems, selIds, gm).filter((it) => {
+        if (sideEditor) return true;
+        return !itemSelectionGizmoRendersInThree(it, mode);
+      });
       const liveById = useLiveTransformStore.getState().byId;
 
       if (selected.length === 0) {
@@ -92,5 +98,5 @@ export function usePixiSelectionGizmo(appReady: boolean) {
       app.ticker?.remove(tick);
       if (box && handlesG) hidePixiSelectionGizmo(box, handlesG);
     };
-  }, [appReady, viewMode, activeTool, selectedIds, items, myRole]);
+  }, [appReady, viewMode, gm2dEditorOpen, activeTool, selectedIds, items, myRole]);
 }

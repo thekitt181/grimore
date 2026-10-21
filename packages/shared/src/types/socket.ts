@@ -28,6 +28,18 @@ export interface FogActivePayload {
   active: boolean;
 }
 
+/** GM 3D wall extrude settings — players need these to see extruded walls. */
+export interface WallExtrudePayload {
+  sessionId: string;
+  autoExtrudeWalls: boolean;
+  wallHeightCells: number;
+  scanImageWalls: boolean;
+  /** Extruded / scanned wall look (motif id). */
+  wallStyleId?: string;
+  /** Blank floor look when map has no background image. */
+  floorStyleId?: string;
+}
+
 export interface GridUpdatePayload {
   sessionId: string;
   gridSize: number;
@@ -103,6 +115,8 @@ export interface ItemAddPayload {
 export interface ItemUpdatePayload {
   sessionId: string;
   patches: Array<{ id: string; patch: Record<string, unknown> }>;
+  /** High-rate transform stream (FP walk / prop drag) — relay + cache, skip DB persist. */
+  live?: boolean;
 }
 
 export interface ItemRemovePayload {
@@ -133,6 +147,28 @@ export interface TokenMovePayload {
   y: number;
 }
 
+/** Ephemeral high-rate pose — relay only, not persisted. */
+export interface TokenLivePayload {
+  sessionId: string;
+  tokenId: string;
+  x: number;
+  y: number;
+  rotation: number;
+  gridCol?: number;
+  gridRow?: number;
+}
+
+/** First-person walk pose — dedicated relay channel (not persisted). */
+export interface FpPosePayload {
+  sessionId: string;
+  tokenId: string;
+  x: number;
+  y: number;
+  rotation: number;
+  gridCol: number;
+  gridRow: number;
+}
+
 export interface TokenHpPayload {
   sessionId: string;
   tokenId: string;
@@ -150,6 +186,9 @@ export interface TokenRotatePayload {
   sessionId: string;
   tokenId: string;
   rotation: number;
+  /** When set with y — FP walk pose piggybacked on the look-around channel. */
+  x?: number;
+  y?: number;
 }
 
 export interface TokenHidePayload {
@@ -385,6 +424,8 @@ export interface ServerToClientEvents {
   'items:sync':           (payload: ItemsSyncPayload)         => void;
   'token:place':          (payload: TokenPlacePayload)         => void;
   'token:move':           (payload: TokenMovePayload)          => void;
+  'token:live':           (payload: TokenLivePayload)          => void;
+  'fp:pose':              (payload: FpPosePayload)             => void;
   'token:hp':             (payload: TokenHpPayload)            => void;
   'token:type':           (payload: TokenTypePayload)          => void;
   'token:rotate':         (payload: TokenRotatePayload)        => void;
@@ -395,6 +436,7 @@ export interface ServerToClientEvents {
   'map:fogUpdate':        (payload: FogUpdatePayload)         => void;
   'fog:sync':             (payload: FogSyncPayload)          => void;
   'fog:active':           (payload: FogActivePayload)         => void;
+  'map:wallExtrude':      (payload: WallExtrudePayload)       => void;
   'map:gridUpdate':       (payload: GridUpdatePayload)        => void;
   'map:mapMove':          (payload: MapMovePayload)           => void;
   'map:mapResize':        (payload: MapResizePayload)         => void;
@@ -450,6 +492,8 @@ export interface ClientToServerEvents {
   'items:sync':           (payload: ItemsSyncPayload)         => void;
   'token:place':          (payload: TokenPlacePayload)         => void;
   'token:move':           (payload: TokenMovePayload)          => void;
+  'token:live':           (payload: TokenLivePayload)          => void;
+  'fp:pose':              (payload: FpPosePayload)             => void;
   'token:hp':             (payload: TokenHpPayload)            => void;
   'token:type':           (payload: TokenTypePayload)          => void;
   'token:rotate':         (payload: TokenRotatePayload)        => void;
@@ -460,6 +504,7 @@ export interface ClientToServerEvents {
   'map:fogUpdate':        (payload: FogUpdatePayload)         => void;
   'fog:sync':             (payload: FogSyncPayload)          => void;
   'fog:active':           (payload: FogActivePayload)         => void;
+  'map:wallExtrude':      (payload: WallExtrudePayload)       => void;
   'map:gridUpdate':       (payload: GridUpdatePayload)        => void;
   'map:mapMove':          (payload: MapMovePayload)           => void;
   'map:mapResize':        (payload: MapResizePayload)         => void;

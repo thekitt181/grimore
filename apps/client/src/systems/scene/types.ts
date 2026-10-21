@@ -4,7 +4,7 @@
 // All items share the same transform (x/y/rotation/width/height), z-order,
 // lock/visibility and ownership. Type-specific data lives on each subtype.
 
-export type ItemType = 'map' | 'token' | 'image' | 'handout' | 'drawing' | 'text';
+export type ItemType = 'map' | 'token' | 'image' | 'handout' | 'drawing' | 'text' | 'surfaceDecal';
 
 export type GridType = 'square' | 'hex';
 
@@ -81,8 +81,42 @@ export interface MapItem extends BaseItem {
   showGrid: boolean;
   /** LOS wall segments in map-local coordinates. */
   walls: WallSegment[];
+  /**
+   * Freehand FP breach shapes carved from walls (surface space).
+   * Visual holes always; walk/LOS punches only where a cut opens near the floor.
+   */
+  wallCuts?: WallCut[];
+  /** Last wall-breach FX cue (synced so all clients play debris once). */
+  breachFx?: MapBreachFx | null;
   /** Generated dungeon floors. Clicking a stair opens the linked level. */
   dungeon?: DungeonFloorLink;
+}
+
+/**
+ * Drawn breach on a wall face — only this shape is removed (not a rectangular section).
+ * `points` are wall-surface [along, height, ...] from wallA toward wallB.
+ */
+export interface WallCut {
+  id: string;
+  wallA: WallPoint;
+  wallB: WallPoint;
+  points: number[];
+  /** Brush half-width used to thicken an open stroke into a hole. */
+  stroke: number;
+  /** True when the stroke closed on itself — treat points as a fill polygon. */
+  closed?: boolean;
+}
+
+/** Lightweight debris burst spawn point after a GM wall punch. */
+export interface MapBreachFx {
+  id: string;
+  /** World-space center of the breach. */
+  x: number;
+  y: number;
+  z: number;
+  /** Outward wall normal on XZ (unit-ish). */
+  nx: number;
+  nz: number;
 }
 
 export interface DungeonStairRef {
@@ -131,6 +165,8 @@ export interface TokenItem extends BaseItem {
   imageUrl?: string;
   /** GLB/GLTF/STL mini (shown in 3D view; 2D shows a placeholder). */
   modelUrl?: string;
+  /** Bumped when IndexedDB mesh is repaired/restored so Three reloads the GLB. */
+  modelRevision?: number;
   /** Size in grid cells (0.5, 1, 2, 3, 4). width/height derive from this. */
   sizeCells: number;
   hp: number;
@@ -176,6 +212,28 @@ export interface ImageItem extends BaseItem {
   propState?: number;
   /** Epoch ms when propState last changed, so every client plays the same motion. */
   propAt?: number;
+  /**
+   * When > 0 and the prop is hidden, revealing it to players requires a roll ≥ this DC
+   * (search / Perception). Separate from opening.
+   */
+  propRevealDc?: number;
+  /** Dice notation for the reveal check (default 1d20). */
+  propRevealNotation?: string;
+  /** Skill/ability for the reveal check (perception, investigation, …). */
+  propRevealCheck?: string;
+  /**
+   * When > 0, activating this prop (open chest/door/gate, fire trap) requires a
+   * dice roll ≥ this DC. Closing an already-open toggle skips the roll.
+   */
+  propActivateDc?: number;
+  /** Dice notation for the activate check (default 1d20). Used when no check type / no character mod. */
+  propActivateNotation?: string;
+  /**
+   * Linked skill or ability check id (perception, investigation, strength, …).
+   * VTT rolls use the covering token’s DDB character modifier; DDB game-log rolls
+   * can also satisfy an armed check.
+   */
+  propActivateCheck?: string;
 }
 
 export interface HandoutItem extends BaseItem {
@@ -200,6 +258,24 @@ export interface DrawItem extends BaseItem {
   stroke: number;       // px
 }
 
+/**
+ * Permanent spray paint on a map floor or wall (FP tool).
+ * Floor points: map-local [x,y,...]. Wall points: [along, height,...]
+ * where along is distance from wallA toward wallB and height is world Y.
+ */
+export interface SurfaceDecalItem extends BaseItem {
+  type: 'surfaceDecal';
+  surface: 'floor' | 'wall';
+  mapId: string;
+  color: string;
+  stroke: number;
+  points: number[];
+  /** Authored wall index at paint time (hint; prefer wallA/wallB). */
+  wallIndex?: number;
+  wallA?: WallPoint;
+  wallB?: WallPoint;
+}
+
 export interface TextItem extends BaseItem {
   type: 'text';
   text: string;
@@ -207,7 +283,7 @@ export interface TextItem extends BaseItem {
   fontSize: number;
 }
 
-export type Item = MapItem | TokenItem | ImageItem | HandoutItem | DrawItem | TextItem;
+export type Item = MapItem | TokenItem | ImageItem | HandoutItem | DrawItem | TextItem | SurfaceDecalItem;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -237,4 +313,5 @@ export function isToken(i: Item): i is TokenItem { return i.type === 'token'; }
 export function isImage(i: Item): i is ImageItem { return i.type === 'image'; }
 export function isHandout(i: Item): i is HandoutItem { return i.type === 'handout'; }
 export function isDrawing(i: Item): i is DrawItem { return i.type === 'drawing'; }
+export function isSurfaceDecal(i: Item): i is SurfaceDecalItem { return i.type === 'surfaceDecal'; }
 export function isText(i: Item): i is TextItem { return i.type === 'text'; }

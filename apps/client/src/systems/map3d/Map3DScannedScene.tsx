@@ -1,33 +1,87 @@
+import { useMemo, useEffect } from 'react';
 import type { MapItem } from '@/systems/scene/types';
+import { useMapStore } from '@/systems/map/store/mapStore';
 import type { MapSceneScanResult, ScannedDoor, ScannedWallSegment } from './mapImageSceneScan';
 import { useImageSceneScan } from './useImageWallScan';
-import { clayMaterialProps } from './clayMaterials';
+import { resolveMapSurfaceStyle } from './mapSurfaceStyles';
+import { getMapSurfaceTexture, tileSurfaceTexture } from './mapSurfaceTextures';
 
-function WallSegments({ segments, wallHeight }: { segments: ScannedWallSegment[]; wallHeight: number }) {
+function WallSegments({
+  mapId,
+  segments,
+  wallHeight,
+  color,
+  roughness,
+  art,
+  tileWorld,
+}: {
+  mapId: string;
+  segments: ScannedWallSegment[];
+  wallHeight: number;
+  color: string;
+  roughness: number;
+  art: ReturnType<typeof getMapSurfaceTexture>;
+  tileWorld: number;
+}) {
+  const maps = useMemo(() => {
+    if (!art) return null;
+    return segments.map((seg) => tileSurfaceTexture(art, seg.length, wallHeight, tileWorld));
+  }, [art, segments, wallHeight, tileWorld]);
+
+  useEffect(() => () => {
+    maps?.forEach((t) => t.dispose());
+  }, [maps]);
+
   if (segments.length === 0) return null;
   return (
     <group>
-      {segments.map((seg) => (
+      {segments.map((seg, i) => (
         <mesh
           key={seg.id}
           position={[seg.cx, wallHeight / 2, seg.cz]}
           rotation={[0, seg.rotation, 0]}
           castShadow
           receiveShadow
+          userData={{
+            fpSurface: 'wall',
+            mapId,
+            wallIndex: i,
+            // Box length is local +X; after rotY: world Δ = (cos θ, −sin θ).
+            ax: seg.cx - Math.cos(seg.rotation) * (seg.length / 2),
+            ay: seg.cz + Math.sin(seg.rotation) * (seg.length / 2),
+            bx: seg.cx + Math.cos(seg.rotation) * (seg.length / 2),
+            by: seg.cz - Math.sin(seg.rotation) * (seg.length / 2),
+          }}
         >
           <boxGeometry args={[seg.length, wallHeight, seg.thickness]} />
-          <meshStandardMaterial {...clayMaterialProps('wall')} />
+          {maps?.[i] ? (
+            <meshStandardMaterial map={maps[i]} color="#ffffff" roughness={roughness} metalness={0.06} />
+          ) : (
+            <meshStandardMaterial color={color} roughness={roughness} metalness={0.02} />
+          )}
         </mesh>
       ))}
     </group>
   );
 }
 
-function DoorOpening({ door, gridSize, wallHeight }: { door: ScannedDoor; gridSize: number; wallHeight: number }) {
+function DoorOpening({
+  door,
+  gridSize,
+  wallHeight,
+  color,
+  roughness,
+}: {
+  door: ScannedDoor;
+  gridSize: number;
+  wallHeight: number;
+  color: string;
+  roughness: number;
+}) {
   const w = Math.max(gridSize * 0.5, door.widthCells * gridSize);
   const frameW = gridSize * 0.08;
   const frameD = gridSize * 0.1;
-  const mat = clayMaterialProps('wallDark');
+  const mat = { color, roughness, metalness: 0.02 };
 
   if (door.rotation === 0) {
     return (
@@ -68,12 +122,30 @@ function DoorOpening({ door, gridSize, wallHeight }: { door: ScannedDoor; gridSi
 
 function ScannedSceneMeshes({ map, scene, wallHeight }: { map: MapItem; scene: MapSceneScanResult; wallHeight: number }) {
   const gs = map.gridSize;
+  const wallStyleId = useMapStore((s) => s.wallStyleId);
+  const style = resolveMapSurfaceStyle(wallStyleId);
+  const art = useMemo(() => getMapSurfaceTexture(wallStyleId, 'wall'), [wallStyleId]);
 
   return (
     <group>
-      <WallSegments segments={scene.wallSegments} wallHeight={wallHeight} />
+      <WallSegments
+        mapId={map.id}
+        segments={scene.wallSegments}
+        wallHeight={wallHeight}
+        color={style.wall}
+        roughness={style.wallRoughness}
+        art={art}
+        tileWorld={gs * 0.85}
+      />
       {scene.doors.map((d) => (
-        <DoorOpening key={d.id} door={d} gridSize={gs} wallHeight={wallHeight} />
+        <DoorOpening
+          key={d.id}
+          door={d}
+          gridSize={gs}
+          wallHeight={wallHeight}
+          color={style.wallDark}
+          roughness={style.wallRoughness}
+        />
       ))}
     </group>
   );

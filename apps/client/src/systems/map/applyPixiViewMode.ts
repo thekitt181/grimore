@@ -18,28 +18,30 @@ export function applyPixiViewMode(is3d: boolean): void {
   if (!app || !world) return;
 
   const mobile = isMobileClient();
-  const activeTool = useMapStore.getState().activeTool;
-  // Desktop: hide Pixi maps in 3D. Mobile: keep map images as an underlay for Three.js.
-  const hidePixiMaps = is3d && !mobile;
+  const { activeTool, gm2dEditorOpen } = useMapStore.getState();
+  // GM 2D editor beside 3D keeps the full Pixi map live for real-time edits.
+  const show2dEditor = is3d && gm2dEditorOpen;
+  const hidePixiMaps = is3d && !mobile && !show2dEditor;
   const pixiTokenFallback = is3d && mobile && !isThreeCanvasHealthy();
-  const hidePixiTokens = is3d && !pixiTokenFallback;
+  const hidePixiTokens = is3d && !pixiTokenFallback && !show2dEditor;
 
-  world.eventMode = is3d ? 'none' : 'static';
+  world.eventMode = is3d && !show2dEditor ? 'none' : 'static';
 
   app.renderer.background.alpha = 0;
+  // Transparent so the GM 2D-editor Three underlay (GLB top-down) shows through Pixi.
   app.canvas.style.background = 'transparent';
 
   if (sceneRefs.fog.current) {
-    const showPixiFog = !is3d;
+    const showPixiFog = !is3d || show2dEditor;
     sceneRefs.fog.current.visible = showPixiFog;
     sceneRefs.fog.current.alpha = showPixiFog ? 1 : 0;
   }
   if (sceneRefs.measure.current) {
-    const showMeasure = !is3d || activeTool === 'measure';
+    const showMeasure = !is3d || show2dEditor || activeTool === 'measure';
     sceneRefs.measure.current.alpha = showMeasure ? 1 : 0;
   }
   if (sceneRefs.drawPreview.current) {
-    const showPreview = !is3d || usesDrawPreview(activeTool);
+    const showPreview = !is3d || show2dEditor || usesDrawPreview(activeTool);
     sceneRefs.drawPreview.current.alpha = showPreview ? 1 : 0;
   }
 
@@ -47,7 +49,7 @@ export function applyPixiViewMode(is3d: boolean): void {
     if (hidePixiMaps) {
       sceneRefs.items.current.alpha = 0;
       sceneRefs.items.current.visible = false;
-    } else if (is3d && mobile) {
+    } else if (is3d && mobile && !show2dEditor) {
       sceneRefs.items.current.alpha = 1;
       sceneRefs.items.current.visible = true;
       for (const child of sceneRefs.items.current.children) {
@@ -73,7 +75,7 @@ export function applyPixiViewMode(is3d: boolean): void {
     sceneRefs.overlay.current.alpha = 1;
     for (const child of sceneRefs.overlay.current.children) {
       if (child.label === 'xf-box' || child.label === 'xf-handles') {
-        child.visible = !is3d;
+        child.visible = !is3d || show2dEditor;
       }
     }
   }

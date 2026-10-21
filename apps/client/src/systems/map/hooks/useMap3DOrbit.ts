@@ -1,7 +1,8 @@
 import { useEffect, useRef } from 'react';
 import { useMapStore, type MapViewMode } from '../store/mapStore';
 import { useItemStore } from '@/systems/scene/store/itemStore';
-import { sceneRefs, getMapInteractionEl } from '@/systems/scene/sceneRefs';
+import { sceneRefs, getOrbitInteractionEl } from '@/systems/scene/sceneRefs';
+import { useFirstPersonStore } from '@/systems/map3d/firstPersonStore';
 
 const AZIMUTH_SENS = 0.005;
 const POLAR_SENS = 0.005;
@@ -29,9 +30,18 @@ export function useMap3DOrbit(appReady: boolean, viewMode: MapViewMode, interact
     s.selectedIds.length === 1 ? s.selectedIds[0]! : '',
   );
   const activeTool = useMapStore((s) => s.activeTool);
+  const gm2dEditorOpen = useMapStore((s) => s.gm2dEditorOpen);
+  const mapFrozen = useMapStore((s) => s.mapFrozen);
+  const firstPerson = useFirstPersonStore((s) => s.enabled);
   const prevTokenRef = useRef<string | null>(null);
 
   useEffect(() => {
+    // Side 2D editor: never retarget the left 3D camera when selecting/placing tokens.
+    if (useMapStore.getState().gm2dEditorOpen) {
+      prevTokenRef.current = null;
+      return;
+    }
+
     const tokenId = selectedOrbitTokenId();
     const prev = prevTokenRef.current;
     const store = useMapStore.getState();
@@ -45,13 +55,13 @@ export function useMap3DOrbit(appReady: boolean, viewMode: MapViewMode, interact
     }
 
     prevTokenRef.current = tokenId;
-  }, [selectedKey, viewMode, activeTool]);
+  }, [selectedKey, viewMode, activeTool, gm2dEditorOpen]);
 
   useEffect(() => {
-    if (!appReady || !interactionReady || viewMode !== '3d') return;
+    if (!appReady || !interactionReady || viewMode !== '3d' || firstPerson || mapFrozen) return;
     const app = sceneRefs.app.current;
     if (!app) return;
-    const canvas = getMapInteractionEl() ?? app.canvas;
+    const canvas = getOrbitInteractionEl() ?? app.canvas;
 
     let orbiting = false;
     let orbitDragged = false;
@@ -82,8 +92,9 @@ export function useMap3DOrbit(appReady: boolean, viewMode: MapViewMode, interact
       }
       lastX = e.clientX;
       lastY = e.clientY;
-      const tokenId = selectedOrbitTokenId();
-      useMapStore.getState().adjustView3dOrbit(
+      const store = useMapStore.getState();
+      const tokenId = store.gm2dEditorOpen ? null : selectedOrbitTokenId();
+      store.adjustView3dOrbit(
         -dx * AZIMUTH_SENS,
         dy * POLAR_SENS,
         tokenId ?? undefined,
@@ -131,5 +142,5 @@ export function useMap3DOrbit(appReady: boolean, viewMode: MapViewMode, interact
       canvas.removeEventListener('contextmenu', onContextMenu, true);
       canvas.style.cursor = '';
     };
-  }, [appReady, interactionReady, viewMode]);
+  }, [appReady, interactionReady, viewMode, gm2dEditorOpen, firstPerson, mapFrozen]);
 }

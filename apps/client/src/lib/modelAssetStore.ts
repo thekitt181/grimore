@@ -86,6 +86,38 @@ export function toGrimoireModelRef(
   return `${GRIMOIRE_MODEL_PREFIX}${format}/${assetKey(sessionId, itemId)}`;
 }
 
+function backupKey(sessionId: string, itemId: string): string {
+  return `${assetKey(sessionId, itemId)}:pre-rig`;
+}
+
+/** Snapshot current asset before auto-rig overwrite (best-effort). */
+export async function backupModelAsset(sessionId: string, itemId: string): Promise<boolean> {
+  const existing = await idbGet(assetKey(sessionId, itemId));
+  if (!existing) return false;
+  await idbPut(backupKey(sessionId, itemId), existing);
+  return true;
+}
+
+/** Restore pre-rig backup if present. Returns true when restored. */
+export async function restoreModelAssetBackup(
+  sessionId: string,
+  itemId: string,
+): Promise<boolean> {
+  const bak = await idbGet(backupKey(sessionId, itemId));
+  if (!bak) return false;
+  await idbPut(assetKey(sessionId, itemId), bak);
+  return true;
+}
+
+/** Byte size of the pre-rig backup, or null if missing. */
+export async function getModelAssetBackupBytes(
+  sessionId: string,
+  itemId: string,
+): Promise<number | null> {
+  const bak = await idbGet(backupKey(sessionId, itemId));
+  return bak?.size ?? null;
+}
+
 export async function saveModelAsset(
   sessionId: string,
   itemId: string,
@@ -97,12 +129,26 @@ export async function saveModelAsset(
   return toGrimoireModelRef(sessionId, itemId, format);
 }
 
+/** Emptied auto-rig stubs are tiny; a real Meshy/KayKit GLB is hundreds of KB+. */
+export const MIN_MODEL_ASSET_BYTES = 24_000;
+
+export async function getModelAssetBytes(url: string): Promise<number | null> {
+  if (!isGrimoireModelRef(url)) return null;
+  const parsed = parseGrimoireModelRef(url);
+  if (!parsed) return null;
+  const blob = await idbGet(parsed.key);
+  return blob?.size ?? null;
+}
+
 export async function resolveModelAssetUrl(url: string): Promise<string> {
   if (!isGrimoireModelRef(url)) return url;
   const parsed = parseGrimoireModelRef(url);
   if (!parsed) return url;
   const blob = await idbGet(parsed.key);
   if (!blob) throw new Error('3D model asset not found in browser storage');
+  if (blob.size < MIN_MODEL_ASSET_BYTES) {
+    throw new Error('3D model asset is empty or truncated');
+  }
   return URL.createObjectURL(blob);
 }
 

@@ -11,6 +11,7 @@ import {
   losPolygons,
   revealedCellsPastDungeonWalls,
 } from './fogLos';
+import { visionWalls } from './props/doorCollision';
 
 export interface FogDrawOptions {
   revealedCells: Set<string>;
@@ -139,8 +140,9 @@ export function paintFogCanvas(
     map,
   );
 
+  const vWalls = visionWalls(map, opts.items);
   const polys = visionTokens.length > 0
-    ? losPolygons(map, visionTokens, gridSize, { directional: true })
+    ? losPolygons(map, visionTokens, gridSize, { directional: true, walls: vWalls })
     : [];
 
   // Solid fog, then erase holes. Display-only — does not write to revealedCells.
@@ -162,6 +164,7 @@ export function paintFogCanvas(
     opts.revealedCells,
     visionTokens,
     gridSize,
+    vWalls,
   );
   if (punchRevealed) {
     for (const key of revealed) {

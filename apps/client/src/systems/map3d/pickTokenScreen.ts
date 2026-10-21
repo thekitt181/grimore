@@ -1,4 +1,3 @@
-import { clientToWorld } from '@/systems/scene/sceneRefs';
 import { pointInItem } from '@/systems/scene/hitTest';
 import { getPickCanvasRect } from './pickCamera';
 import { sceneCameraRef } from './sceneCameraRef';
@@ -6,10 +5,11 @@ import { useLiveTransformStore } from '@/systems/scene/store/liveTransformStore'
 import { useMapStore } from '@/systems/map/store/mapStore';
 import { resolveItemBounds } from '@/systems/map3d/sceneItemBounds';
 import { worldXZToClientScreen } from './perspectiveCameraSync';
+import { pointerToMapWorld } from './screenToGround';
 import type { TokenItem } from '@/systems/scene/types';
 
 function pickTokenAtScreen2d(clientX: number, clientY: number, tokens: TokenItem[]): string | null {
-  const { x: clickWx, y: clickWy } = clientToWorld(clientX, clientY);
+  const { x: clickWx, y: clickWy } = pointerToMapWorld(clientX, clientY);
   const scale = Math.max(useMapStore.getState().viewport.scale, 0.08);
   const pad = 8 / scale;
   const liveById = useLiveTransformStore.getState().byId;

@@ -1,6 +1,7 @@
 import type { Container } from 'pixi.js';
 import type { MapViewMode } from './store/mapStore';
 import { useMapStore } from './store/mapStore';
+import { useFirstPersonStore } from '@/systems/map3d/firstPersonStore';
 import { getActiveMap } from '@/systems/scene/store/itemStore';
 import { pointerHitsToken } from '@/systems/scene/token/tokenPointerPick';
 import {
@@ -37,11 +38,19 @@ export function shouldStartMapPan(
   viewMode: MapViewMode,
 ): boolean {
   if (toolOwnsMapPointer(activeTool)) return false;
+  if (viewMode === '3d' && useFirstPersonStore.getState().enabled) return false;
   if (e.button === 1) return true;
   if (spaceDown && e.button === 0) return true;
   if (activeTool === 'pan' && e.button === 0) return true;
   // 3D: drag the map/table surface to pan (Shift+drag = marquee in select tool).
-  if (viewMode === '3d' && activeTool === 'select' && e.button === 0 && !e.shiftKey) {
+  // GM 2D editor pane uses 2D select/move — do not steal left-drag for orbit pan.
+  if (
+    viewMode === '3d'
+    && !useMapStore.getState().gm2dEditorOpen
+    && activeTool === 'select'
+    && e.button === 0
+    && !e.shiftKey
+  ) {
     return !pointerTargetsToken(e.clientX, e.clientY);
   }
   return false;

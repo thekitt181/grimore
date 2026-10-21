@@ -123,7 +123,9 @@ export function TokenSelectionGizmo({
     const activeTool = useMapStore.getState().activeTool;
     const box = boxRef.current;
     if (activeTool !== 'select') {
-      syncTransformHandleRegistry(EMPTY_LAYOUT);
+      if (!useMapStore.getState().gm2dEditorOpen) {
+        syncTransformHandleRegistry(EMPTY_LAYOUT);
+      }
       if (box) box.visible = false;
       for (const m of meshRefs.current) if (m) m.visible = false;
       return;
@@ -141,7 +143,10 @@ export function TokenSelectionGizmo({
       handleMode = 'rotate';
     }
     const layout = computeTokenGizmoLayout([item], liveById, { handleMode });
-    syncTransformHandleRegistry(layout);
+    // GM 2D side editor: Pixi owns pick handles — don't overwrite every frame.
+    if (!useMapStore.getState().gm2dEditorOpen) {
+      syncTransformHandleRegistry(layout);
+    }
 
     let hw = meshBaseWidth / 2;
     let hh = meshBaseHeight / 2;
@@ -255,7 +260,9 @@ function WorldSelectionGizmo() {
     const show = activeTool === 'select' && gizmoItems.length > 0;
     const layout = show ? computeTokenGizmoLayout(gizmoItems, liveById, { moveOnly: !gm }) : EMPTY_LAYOUT;
 
-    syncTransformHandleRegistry(show && layout.mode !== 'none' ? layout : EMPTY_LAYOUT);
+    if (!useMapStore.getState().gm2dEditorOpen) {
+      syncTransformHandleRegistry(show && layout.mode !== 'none' ? layout : EMPTY_LAYOUT);
+    }
 
     const box = boxRef.current;
     if (!box || layout.mode === 'none' || layout.boxCorners.length < 4) {

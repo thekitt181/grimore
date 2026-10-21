@@ -1,14 +1,15 @@
 import { useEffect } from 'react';
 import { Graphics } from 'pixi.js';
-import { useMapStore } from '@/systems/map/store/mapStore';
+import { isGm2dEditorInteraction, useMapStore } from '@/systems/map/store/mapStore';
 import { useItemStore } from '../store/itemStore';
 import { useSessionStore } from '@/store/sessionStore';
-import { sceneRefs, clientToWorld, getMapInteractionEl } from '../sceneRefs';
+import { sceneRefs, getMapInteractionEl } from '../sceneRefs';
 import { sceneCameraRef } from '@/systems/map3d/sceneCameraRef';
 import { getPickCanvasRect } from '@/systems/map3d/pickCamera';
 import { worldXZToClientScreen } from '@/systems/map3d/perspectiveCameraSync';
 import { snapAngle, snapSize } from '../snap';
 import { emitItemUpdate } from '../sceneSync';
+import { emitPropTransformLive } from '../propTransformLiveSync';
 import { emitTokenRotate } from '../token/tokenSync';
 import { getItemContainer, getWallContainer } from '../render/useItemRenderer';
 import { scaledMapGeometry } from '@/systems/map/wallUtils';
@@ -32,6 +33,9 @@ function placeWallOverlay(map: MapItem, cx: number, cy: number, width: number, h
 import type { TokenGizmoLayout, GizmoHandle } from '../token/tokenGizmoLayout';
 import { formatResizeFeetLabel, hideResizeSizeLabel, showResizeSizeLabel } from './resizeSizeLabel';
 import { playerCanRotateToken } from '../token/clientTokenVisibility';
+import { useFirstPersonStore } from '@/systems/map3d/firstPersonStore';
+import { pointerToMapWorld } from '@/systems/map3d/screenToGround';
+import { groundHeightAt } from '@/systems/map3d/mapGroundRaycast';
 
 // ─── Handle registry (shared with selection tool) ──────────────────────────────
 
@@ -81,7 +85,7 @@ export function pickHandle(clientX: number, clientY: number): HandleDesc | null 
   const items = useItemStore.getState().items;
   const liveById = useLiveTransformStore.getState().byId;
   const item = registry.itemId ? items[registry.itemId] : undefined;
-  const { x: wx, y: wy } = clientToWorld(clientX, clientY);
+  const { x: wx, y: wy } = pointerToMapWorld(clientX, clientY);
 
   if (registry.mode === 'group') {
     for (const id of useItemStore.getState().selectedIds) {
@@ -97,23 +101,28 @@ export function pickHandle(clientX: number, clientY: number): HandleDesc | null 
     const b = resolveItemBounds(item, live);
     if (item.type === 'token' && isTokenMoveClick(clientX, clientY, b)) return null;
     const onInterior = isInteriorClickBounds(b.x, b.y, b.width, b.height, b.rotation, wx, wy);
-    if (viewMode !== '3d' && onInterior) return null;
+    // Body drag owns the interior in 2D and in the GM 2D editor pane.
+    if ((viewMode !== '3d' || isGm2dEditorInteraction()) && onInterior) return null;
   }
 
   const scale = sceneRefs.world.current?.scale.x ?? 1;
   const minDim = item ? Math.min(item.width, item.height) : 64;
   const isToken = item?.type === 'token';
-  const tol = viewMode === '3d'
-    ? (isToken ? Math.max(16, Math.min(minDim * 0.12, 34)) : Math.max(20, Math.min(minDim * 0.18, 50)))
+  const rect = getPickCanvasRect();
+  const useScreen =
+    viewMode === '3d'
+    && !isGm2dEditorInteraction()
+    && rect
+    && sceneCameraRef.liveCamera;
+  // 3D handle hit-tests are in CSS pixels (projected), so keep a size-independent grab radius.
+  const tol = useScreen
+    ? (isToken ? 18 : 22)
     : (isToken ? Math.max(14 / scale, Math.min(minDim * 0.12, 26)) : Math.max(18 / scale, Math.min(minDim * 0.16, 34)));
   // The rotate knob is a single point that's easy to miss, so give it a more
   // generous grab radius than the resize corners.
-  const rotTol = viewMode === '3d'
-    ? Math.max(22, Math.min(minDim * 0.18, 44))
+  const rotTol = useScreen
+    ? 26
     : Math.max(22 / scale, Math.min(minDim * 0.18, 38));
-
-  const rect = getPickCanvasRect();
-  const useScreen = viewMode === '3d' && rect && sceneCameraRef.liveCamera;
 
   let best: HandleDesc | null = null;
   let bestD = Infinity;
@@ -166,6 +175,7 @@ export function useTransformControls(appReady: boolean) {
   const selectedIds = useItemStore((s) => s.selectedIds);
   const items       = useItemStore((s) => s.items);
   const activeTool  = useMapStore((s) => s.activeTool);
+  const gm2dEditorOpen = useMapStore((s) => s.gm2dEditorOpen);
   const myRole      = useSessionStore((s) => s.myRole);
 
   useEffect(() => {
@@ -224,6 +234,8 @@ export function useTransformControls(appReady: boolean) {
       anchorWX?: number; anchorWY?: number;
       cx0?: number; cy0?: number;
       w0?: number; h0?: number; rot0?: number;
+      /** Locked ground height for 3D pointer rays during this drag. */
+      planeY?: number;
       // group
       groupMinX?: number; groupMinY?: number; groupMaxX?: number; groupMaxY?: number;
       groupAnchorX?: number; groupAnchorY?: number;
@@ -231,11 +243,24 @@ export function useTransformControls(appReady: boolean) {
     }
     let drag: DragState | null = null;
 
+    function dragPointerWorld(clientX: number, clientY: number, planeY?: number) {
+      return pointerToMapWorld(clientX, clientY, planeY);
+    }
+
+    function lockPlaneY(wx: number, wy: number): number | undefined {
+      if (useMapStore.getState().viewMode !== '3d' || isGm2dEditorInteraction()) return undefined;
+      return groundHeightAt(wx, wy, 0);
+    }
+
     function onDown(e: PointerEvent) {
       if (e.button !== 0) return;
+      // First-person: no gizmo move/resize/rotate on tokens (WASD + mouse look only).
+      if (useFirstPersonStore.getState().enabled) return;
       const h = pickHandle(e.clientX, e.clientY);
       if (!h) return; // not on a handle — selection tool handles it
-      e.stopPropagation();
+      // Capture-phase: block selection's same-element listener from starting a move.
+      e.preventDefault();
+      e.stopImmediatePropagation();
       // Players only get the rotate handle on a single token.
       if (!gm && h.id !== 'rotate') return;
       if (!gm && registry.mode !== 'single') return;
@@ -247,14 +272,16 @@ export function useTransformControls(appReady: boolean) {
         const b = resolveItemBounds(it, live);
         const cx0 = b.cx;
         const cy0 = b.cz;
+        const planeY = lockPlaneY(cx0, cy0);
         if (it.type === 'map') {
-          drag = { handle: h, item: it, cx0, cy0, w0: b.width, h0: b.height, rot0: b.rotation };
+          drag = { handle: h, item: it, cx0, cy0, w0: b.width, h0: b.height, rot0: b.rotation, ...(planeY != null ? { planeY } : {}) };
         } else {
           const aLocal = { x: -h.sx * (b.width / 2), y: -h.sy * (b.height / 2) };
           const aRot = rot(aLocal.x, aLocal.y, b.rotation);
           drag = {
             handle: h,
             item: it,
+            ...(planeY != null ? { planeY } : {}),
             anchorWX: cx0 + aRot.x,
             anchorWY: cy0 + aRot.y,
             cx0,
@@ -279,14 +306,25 @@ export function useTransformControls(appReady: boolean) {
         // Anchor = opposite corner
         const anchorX = h.sx > 0 ? minX : maxX;
         const anchorY = h.sy > 0 ? minY : maxY;
-        drag = { handle: h, groupMinX: minX, groupMinY: minY, groupMaxX: maxX, groupMaxY: maxY, groupAnchorX: anchorX, groupAnchorY: anchorY, origins };
+        const planeY = lockPlaneY((minX + maxX) * 0.5, (minY + maxY) * 0.5);
+        drag = {
+          handle: h,
+          groupMinX: minX,
+          groupMinY: minY,
+          groupMaxX: maxX,
+          groupMaxY: maxY,
+          groupAnchorX: anchorX,
+          groupAnchorY: anchorY,
+          origins,
+          ...(planeY != null ? { planeY } : {}),
+        };
       }
       canvas.setPointerCapture(e.pointerId);
     }
 
     function onMove(e: PointerEvent) {
       if (!drag) return;
-      const { x: wx, y: wy } = clientToWorld(e.clientX, e.clientY);
+      const { x: wx, y: wy } = dragPointerWorld(e.clientX, e.clientY, drag.planeY);
       const snap = useItemStore.getState().snapToGrid;
       const layer = sceneRefs.items.current;
 
@@ -300,6 +338,7 @@ export function useTransformControls(appReady: boolean) {
           if (c) c.rotation = (deg * Math.PI) / 180;
           (drag as DragState & { _deg?: number })._deg = deg;
           useLiveTransformStore.getState().setLive(it.id, { rotation: deg }, { bumpTick: false });
+          emitPropTransformLive([{ id: it.id, patch: { rotation: deg } }]);
           // Track the vision cone live as the token turns.
           if (it.type === 'token') scheduleFogRepaintDuringDrag();
           return;
@@ -371,6 +410,7 @@ export function useTransformControls(appReady: boolean) {
           }
         }
         useLiveTransformStore.getState().setLive(it.id, { x: nx, y: ny, width: newW, height: newH }, { bumpTick: false });
+        emitPropTransformLive([{ id: it.id, patch: { x: nx, y: ny, width: newW, height: newH } }]);
         if (it.type === 'token') scheduleFogRepaintDuringDrag();
         const feetLabel = formatResizeFeetLabel(it, newW, newH, drag.w0);
         if (feetLabel) showResizeSizeLabel(e.clientX, e.clientY, feetLabel);
@@ -402,6 +442,7 @@ export function useTransformControls(appReady: boolean) {
           if (it?.type === 'map') placeWallOverlay(it, nx + nw / 2, ny + nh / 2, nw, nh, it.rotation);
         }
         useLiveTransformStore.getState().setLiveMany(liveEntries, { bumpTick: false });
+        emitPropTransformLive(liveEntries);
       }
     }
 
@@ -499,5 +540,5 @@ export function useTransformControls(appReady: boolean) {
       canvas.removeEventListener('pointerup', onUp);
       canvas.removeEventListener('pointercancel', onUp);
     };
-  }, [appReady, selectedIds, items, activeTool, myRole]);
+  }, [appReady, selectedIds, items, activeTool, gm2dEditorOpen, myRole]);
 }

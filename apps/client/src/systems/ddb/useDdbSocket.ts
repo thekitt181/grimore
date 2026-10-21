@@ -11,6 +11,7 @@ import { useDdbStore } from './ddbStore';
 import { bindDdbRollSocket } from './bindDdbRollSocket';
 import { fetchDdbRollPoll } from './ddbApi';
 import { isApiAuthError } from '@/lib/axios';
+import { ingestDdbPropRoll } from '@/systems/map/props/ingestDdbPropRoll';
 
 const POLL_MS = 2500;
 const POLL_MS_CONNECTED = 12_000;
@@ -52,6 +53,7 @@ export function useDdbSocket(): void {
           if (pollCancelled) return;
           console.info('[DDB] roll received (poll):', roll.characterName, roll.label, roll.total);
           useDiceStore.getState().addDdbRollEntry(roll);
+          ingestDdbPropRoll(roll);
         }
       } catch (err) {
         if (isApiAuthError(err)) {

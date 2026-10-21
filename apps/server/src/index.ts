@@ -185,7 +185,6 @@ app.use('/api/art', artRoutes);
 app.use('/api/scenes', sceneRoutes);
 app.use('/api/handouts', handoutRoutes);
 app.use('/api/support', supportRoutes);
-
 mountClientSpa(app);
 
 // ─── Socket.io ────────────────────────────────────────────────────────────────

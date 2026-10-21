@@ -10,6 +10,11 @@ import { useDrawingTool } from './hooks/useDrawingTool';
 import { useCalibrateGrid } from './hooks/useCalibrateGrid';
 import { useMapStore } from './store/mapStore';
 import { useItemStore, getActiveMap } from '@/systems/scene/store/itemStore';
+import { useLiveTransformStore } from '@/systems/scene/store/liveTransformStore';
+import { bindPoseRelay } from '@/systems/scene/token/poseRelay';
+import { bindWalkLiveIngress, ingestWalkLive } from '@/systems/scene/token/walkLiveIngress';
+import { getSocket } from '@/lib/socket';
+import { useFirstPersonStore } from '@/systems/map3d/firstPersonStore';
 import { useItemRenderer } from '@/systems/scene/render/useItemRenderer';
 import { useSelectionTool } from '@/systems/scene/interaction/useSelectionTool';
 import { useAttackTargetPick } from '@/systems/combat/useAttackTargetPick';
@@ -25,6 +30,7 @@ import { applyFogData, emitFogSync, flushFogScene, hydrateFogFromServer, parseFo
 import { mergeFogIntoCells } from '@/systems/scene/fogMerge';
 import type { FogUpdatePayload } from '@grimoire/shared';
 import { bindFogActiveSocket, syncFogActiveToSession } from '@/systems/scene/fogActiveSync';
+import { bindWallExtrudeSocket, syncWallExtrudeToSession } from '@/systems/map/wallExtrudeSync';
 import { bindFogRepaintSubscriptions } from '@/systems/map/fogRepaintBridge';
 import { bindMapFocusSocket, flushPendingMapFocus, focusSessionMap, syncMapFocusToSession } from '@/systems/map/mapFocusSync';
 import { useParams } from 'react-router-dom';
@@ -44,6 +50,7 @@ import { isExternalFileDrag, isExternalUrlDrag } from '@/lib/fileDrag';
 import { useWallTool } from './hooks/useWallTool';
 import { useEraserTool } from './hooks/useEraserTool';
 import { useDeleteKey } from './hooks/useDeleteKey';
+import { usePropTriggerKey } from './hooks/usePropTriggerKey';
 import { useMap3DPixiMode } from './hooks/useMap3DPixiMode';
 import { useMap3DOrbit } from './hooks/useMap3DOrbit';
 import { useMap2DMiniOrbit } from './hooks/useMap2DMiniOrbit';
@@ -53,16 +60,18 @@ import { TokenTypeChoicePopup } from './TokenTypeChoicePopup';
 import { MapCameraControls } from './MapCameraControls';
 import { Map3DMobileOrbitControls } from './Map3DMobileOrbitControls';
 import { useTokenSocket } from '@/systems/scene/token/useTokenSocket';
+import { useLiveTokenPixiSync } from '@/systems/scene/token/useLiveTokenPixiSync';
 import { emitTokenPlace } from '@/systems/scene/token/tokenSync';
 import { tokenBoundsFromGrid, worldToGridColRow } from '@/systems/scene/token/tokenGrid';
 import { snapPoint } from '@/systems/scene/snap';
 import { useSessionStore } from '@/store/sessionStore';
-import { getSocket } from '@/lib/socket';
 import { MapAtmosphereLayer } from '@/systems/scene/media/MapAtmosphereLayer';
 import { MapSceneCanvas } from '@/systems/map3d/Map3DCanvas';
 import { useModelAssetSync } from '@/systems/map3d/useModelAssetSync';
 import { SpellVfxLayer } from '@/systems/spells/SpellVfxLayer';
 import { SpellScreenVfxOverlay } from '@/systems/spells/SpellScreenVfxOverlay';
+import { Gm2dEditorMapUnderlay } from './Gm2dEditorMapUnderlay';
+import { GM_2D_EDITOR_PANE_WIDTH } from './gm2dEditorLayout';
 
 // Back-compat alias — some modules still import mapLayerRefs.
 export const mapLayerRefs = sceneRefs;
@@ -98,6 +107,9 @@ export function MapCanvas() {
   const storeSessionId = useSessionStore((s) => s.sessionId);
   const sessionId = storeSessionId ?? routeSessionId ?? null;
   const viewMode = useMapStore((s) => s.viewMode);
+  const gm2dEditorOpen = useMapStore((s) => s.gm2dEditorOpen);
+  const splitGm2d = viewMode === '3d' && gm2dEditorOpen;
+  const firstPerson = useFirstPersonStore((s) => s.enabled) && viewMode === '3d';
   const items = useItemStore((s) => s.items);
   const activeMapId = useItemStore((s) => s.activeMapId);
   const myRole = useSessionStore((s) => s.myRole);
@@ -108,6 +120,17 @@ export function MapCanvas() {
   const gmScenePushedRef = useRef(false);
   const fogSyncedRef = useRef(false);
   const viewportInitializedRef = useRef(false);
+
+  useEffect(() => {
+    const socket = getSocket();
+    bindPoseRelay(socket);
+    bindWalkLiveIngress(socket);
+  }, []);
+
+  // Split / unsplit changes Pixi + Three pane sizes — force both canvases to remeasure.
+  useEffect(() => {
+    window.dispatchEvent(new Event('resize'));
+  }, [splitGm2d]);
 
   useEffect(() => {
     bindFogRepaintSubscriptions();
@@ -152,12 +175,14 @@ export function MapCanvas() {
   useEffect(() => {
     if (!sessionId || myRole !== 'GM' || gmScenePushedRef.current) return;
     const timer = setTimeout(() => {
+      const items = Object.values(useItemStore.getState().items) as Item[];
+      if (items.length === 0) return; // wait for local restore; userJoined / Sync scene still push later
       gmScenePushedRef.current = true;
-      emitItemsSync(Object.values(useItemStore.getState().items) as Item[]);
+      emitItemsSync(items);
       syncMapFocusToSession({ force: true });
     }, 800);
     return () => clearTimeout(timer);
-  }, [sessionId, myRole]);
+  }, [sessionId, myRole, itemList.length]);
 
   // Flush fog to storage + server before the page unloads.
   useEffect(() => {
@@ -264,8 +289,79 @@ export function MapCanvas() {
     const onUpdate = forSession((payload: {
       sessionId?: string;
       patches: Array<{ id: string; patch: Partial<Item> }>;
+      live?: boolean;
     }) => {
-      useItemStore.getState().updateItems(payload.patches);
+      const fp = useFirstPersonStore.getState();
+      // Don't let remote live poses overwrite the token we are driving in FP.
+      const patches = fp.enabled && fp.tokenId
+        ? payload.patches.filter((p) => p.id !== fp.tokenId)
+        : payload.patches;
+      if (!patches.length) return;
+
+      const livePatch = (id: string, patch: Partial<Item>, bumpTick = false) => {
+        if (
+          patch.x == null
+          && patch.y == null
+          && patch.rotation == null
+          && patch.width == null
+          && patch.height == null
+        ) return;
+        useLiveTransformStore.getState().setLive(
+          id,
+          {
+            ...(patch.x != null ? { x: patch.x } : {}),
+            ...(patch.y != null ? { y: patch.y } : {}),
+            ...(patch.rotation != null ? { rotation: patch.rotation } : {}),
+            ...(patch.width != null ? { width: patch.width } : {}),
+            ...(patch.height != null ? { height: patch.height } : {}),
+          },
+          { bumpTick },
+        );
+      };
+
+      // Mid-drag / FP walk stream.
+      // Token live poses are owned by bindWalkLiveIngress (item:update live) — don't double-apply.
+      if (payload.live) {
+        for (const { id, patch } of patches) {
+          const item = useItemStore.getState().items[id];
+          if (item?.type === 'token' && patch.x != null && patch.y != null) continue;
+          livePatch(id, patch);
+        }
+        return;
+      }
+
+      // Pose-only commit: tokens → walk ingest; props → item store.
+      const poseOnly = patches.every((p) => {
+        const keys = Object.keys(p.patch);
+        return keys.every((k) => k === 'x' || k === 'y' || k === 'rotation' || k === 'gridCol' || k === 'gridRow');
+      });
+      if (poseOnly) {
+        const propPatches: Array<{ id: string; patch: Partial<Item> }> = [];
+        for (const { id, patch } of patches) {
+          const item = useItemStore.getState().items[id];
+          if (item?.type === 'token') {
+            if (patch.x != null && patch.y != null) {
+              ingestWalkLive({
+                sessionId: payload.sessionId ?? sessionId,
+                tokenId: id,
+                x: patch.x,
+                y: patch.y,
+                ...(patch.rotation != null ? { rotation: patch.rotation } : {}),
+              });
+            }
+          } else {
+            propPatches.push({ id, patch });
+          }
+        }
+        if (propPatches.length) {
+          useItemStore.getState().updateItems(propPatches);
+          useLiveTransformStore.getState().clear(propPatches.map((p) => p.id));
+          persistLocal();
+        }
+        return;
+      }
+      useItemStore.getState().updateItems(patches);
+      useLiveTransformStore.getState().clear(patches.map((p) => p.id));
       persistLocal();
     });
     const onRemove = forSession((payload: { sessionId?: string; ids: string[] }) => {
@@ -285,6 +381,15 @@ export function MapCanvas() {
 
       if (!isGM) {
         const current = useItemStore.getState().items;
+        const currentCount = Object.keys(current).length;
+        // Empty hydrate after a live GM push (stale DB scene / race) must not wipe the table.
+        if (serverItems.length === 0 && currentCount > 0) {
+          if (payload.activeMapId && payload.activeMapId !== useItemStore.getState().activeMapId) {
+            useItemStore.getState().setActiveMap(payload.activeMapId);
+          }
+          flushPendingMapFocus();
+          return;
+        }
         if (!sameSceneItemSnapshot(serverItems, current)) {
           useItemStore.getState().setItems(serverItems, payload.activeMapId);
         } else if (payload.activeMapId && payload.activeMapId !== useItemStore.getState().activeMapId) {
@@ -368,6 +473,7 @@ export function MapCanvas() {
         emitItemsSync(Object.values(useItemStore.getState().items) as Item[]);
         emitFogSync();
         syncFogActiveToSession();
+        syncWallExtrudeToSession();
         syncMapFocusToSession({ force: true });
       }, 600);
     });
@@ -389,6 +495,7 @@ export function MapCanvas() {
       socket.on('fog:sync', onFogSync as any);
       socket.on('session:userJoined', onUserJoined as any);
       bindFogActiveSocket();
+      bindWallExtrudeSocket();
       bindMapFocusSocket();
       requestSceneHydrate();
     }
@@ -451,10 +558,12 @@ export function MapCanvas() {
   useWallTool(appReady, interactionReady);
   useEraserTool(appReady, interactionReady);
   useDeleteKey(appReady);
+  usePropTriggerKey(appReady);
   useMap3DPixiMode(appReady, viewMode);
   useMap3DOrbit(appReady, viewMode, interactionReady);
   useMap2DMiniOrbit(appReady, viewMode, interactionReady);
   useTokenSocket(sessionId);
+  useLiveTokenPixiSync(appReady);
 
   // ── Fix maps that still use 96px after an image changed their dimensions ─
   const gridFixed = useRef(false);
@@ -652,30 +761,109 @@ export function MapCanvas() {
   const showTokenTypeChoice = pendingDrop?.category != null
     && pendingDrop.category !== 'map';
 
+  // Layering:
+  // - Full 3D: Three above Pixi.
+  // - Split editor: right Pixi+underlay, left Three.
+  // - 2D + GLB map: Pixi above (transparent map body) so grid/fog sit on the GLB.
+  // - 2D + image map + model tokens: Three above so GLB minis aren't buried under opaque Pixi art.
+  const activeMap = items[activeMapId ?? '']?.type === 'map'
+    ? (items[activeMapId!] as MapItem)
+    : getActiveMap();
+  const hasModelMap = Boolean(activeMap?.modelUrl);
+  const hasModelTokens = itemList.some(
+    (i) => i.type === 'token' && Boolean((i as TokenItem).modelUrl),
+  );
+  const threeAbovePixi2d = viewMode === '2d' && hasModelTokens && !hasModelMap;
+
+  const editorPaneStyle = splitGm2d
+    ? {
+        position: 'absolute' as const,
+        top: 0,
+        bottom: 0,
+        right: 0,
+        width: GM_2D_EDITOR_PANE_WIDTH,
+        zIndex: 2,
+        borderLeft: '1px solid var(--color-border-gold)',
+        background: '#0a0a0f',
+      }
+    : {
+        position: 'absolute' as const,
+        inset: 0,
+        zIndex: viewMode === '2d' ? (threeAbovePixi2d ? 1 : 2) : 0,
+      };
+
+  const threePaneStyle = splitGm2d
+    ? {
+        position: 'absolute' as const,
+        top: 0,
+        bottom: 0,
+        left: 0,
+        right: GM_2D_EDITOR_PANE_WIDTH,
+        zIndex: 1,
+      }
+    : {
+        position: 'absolute' as const,
+        inset: 0,
+        zIndex: viewMode === '2d' ? (threeAbovePixi2d ? 2 : 1) : 2,
+      };
+
   return (
     <div
       ref={dropZoneRef}
       className="w-full h-full min-h-0 relative select-none"
       style={{ background: '#0a0a0f' }}
+      data-grimoire-map-drop
     >
+      {/* 3D scene — full bleed normally; left of the live 2D editor when open. */}
       <div
-        ref={containerRef}
-        className="absolute inset-0 w-full h-full min-h-0 z-0"
-        style={{ pointerEvents: 'none' }}
-      />
-
-      <div className="absolute inset-0 z-[1] min-h-0 w-full h-full pointer-events-none [&_*]:pointer-events-none">
-        <MapSceneCanvas />
+        className={
+          splitGm2d
+            ? 'min-h-0'
+            : 'min-h-0 pointer-events-none [&_*]:pointer-events-none'
+        }
+        style={threePaneStyle}
+      >
+        <div className="absolute inset-0 pointer-events-none [&_*]:pointer-events-none">
+          <MapSceneCanvas />
+        </div>
+        {splitGm2d && (
+          <div
+            ref={(el) => {
+              sceneRefs.orbitInteraction.current = el;
+            }}
+            className="absolute inset-0 z-[2]"
+            style={{ touchAction: 'none', pointerEvents: 'auto' }}
+            aria-hidden
+          />
+        )}
       </div>
 
-      {/* Above Three.js — all map pointer/wheel input goes here in 2D/3D. */}
+      {/* Pixi map — full screen in 2D / normal 3D; right pane when GM 2D editor is open. */}
+      <div style={editorPaneStyle}>
+        {splitGm2d && <Gm2dEditorMapUnderlay />}
+        {/* Above Three when in 2D / split editor so flat tokens sit on the GLB map. */}
+        <div
+          ref={containerRef}
+          className="absolute inset-0 w-full h-full min-h-0"
+          style={{ pointerEvents: 'none', zIndex: 1 }}
+        />
+      </div>
+
+      {/* Map tools / select / pan — matches Pixi bounds (right pane when split). */}
       <div
         ref={(el) => {
           sceneRefs.interactionRoot.current = el;
+          if (!splitGm2d && !firstPerson) sceneRefs.orbitInteraction.current = null;
           setInteractionReady((prev) => (prev === !!el ? prev : !!el));
         }}
-        className="absolute inset-0 z-[2]"
-        style={{ touchAction: 'none', pointerEvents: 'auto' }}
+        style={{
+          ...editorPaneStyle,
+          zIndex: 3,
+          background: 'transparent',
+          borderLeft: splitGm2d ? '1px solid transparent' : undefined,
+          touchAction: 'none',
+          pointerEvents: firstPerson ? 'none' : 'auto',
+        }}
         aria-hidden
       />
 

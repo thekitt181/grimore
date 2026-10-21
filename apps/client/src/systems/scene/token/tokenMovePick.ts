@@ -2,7 +2,7 @@ import { useMapStore } from '@/systems/map/store/mapStore';
 import { getPickCanvasRect } from '@/systems/map3d/pickCamera';
 import { sceneCameraRef } from '@/systems/map3d/sceneCameraRef';
 import { worldXZToClientScreen } from '@/systems/map3d/perspectiveCameraSync';
-import { clientToWorld } from '@/systems/scene/sceneRefs';
+import { pointerToMapWorld } from '@/systems/map3d/screenToGround';
 import { isInteriorClickBounds } from '@/systems/scene/hitTest';
 import type { SceneItemBounds } from '@/systems/map3d/sceneItemBounds';
 
@@ -36,7 +36,7 @@ export function isTokenMoveClick(
   bounds: SceneItemBounds,
 ): boolean {
   const viewMode = useMapStore.getState().viewMode;
-  const { x: wx, y: wy } = clientToWorld(clientX, clientY);
+  const { x: wx, y: wy } = pointerToMapWorld(clientX, clientY);
 
   if (viewMode === '3d') {
     const rect = getPickCanvasRect();
@@ -78,8 +78,9 @@ export function isTokenMoveClick(
     const maxX = Math.max(...xs);
     const minY = Math.min(...ys);
     const maxY = Math.max(...ys);
+    // Cap inset so tiny/far tokens keep a usable interior hit, large/near ones don't lose corners.
     const screenMin = Math.min(maxX - minX, maxY - minY);
-    const inset = Math.max(14, screenMin * 0.24);
+    const inset = Math.min(22, Math.max(6, screenMin * 0.18));
     return isInsideScreenRect(clientX, clientY, minX, minY, maxX, maxY, inset);
   }
 

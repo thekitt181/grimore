@@ -3,7 +3,7 @@ import { useItemStore } from './store/itemStore';
 import { useSessionStore } from '@/store/sessionStore';
 import { emitItemUpdate } from './sceneSync';
 import { syncGridToMap } from './syncGridToMap';
-import type { Item, MapItem, TokenItem, TextItem, DrawItem } from './types';
+import type { ImageItem, Item, MapItem, TokenItem, TextItem, DrawItem } from './types';
 import { isHpHiddenFromPlayers } from './types';
 import { visionFeet, visionRadiusFromFeet } from '@/systems/map/fogLos';
 import { VisionFtInput } from '@/systems/map/VisionFtInput';
@@ -12,6 +12,20 @@ import { applyDamage, applyHeal, readTempHp } from '@/systems/initiative/hpUtils
 import { deleteCurrentSelection } from './deleteSelection';
 import { playerCanRotateToken } from './token/clientTokenVisibility';
 import { useTokenStore } from './store/tokenStore';
+import {
+  armPropForDdbRoll,
+  canTriggerProp,
+  propActivateCheckLabel,
+  propNextCheckKind,
+  propRevealCheckLabel,
+  resolvePropId,
+  tokenNearProp,
+  triggerDungeonPropAsync,
+  triggerablePropUnderToken,
+  triggerPropUnderToken,
+} from '@/systems/map/props/dungeonProps';
+import { PropCheckSelect } from '@/systems/map/props/PropCheckSelect';
+import { resolveTokenModelUrl } from '@/systems/map3d/defaultTokenModel';
 
 function numHex(n: number): string { return '#' + n.toString(16).padStart(6, '0'); }
 function hexNum(s: string): number { return parseInt(s.replace('#', ''), 16); }
@@ -75,6 +89,10 @@ export function ItemInspector() {
             }
           }}
         />
+      )}
+      {single?.type === 'token' && isGM && <TokenPropUnderControls token={single as TokenItem} />}
+      {single?.type === 'image' && isGM && (
+        <PropControls image={single as ImageItem} update={(p) => update(single.id, p)} />
       )}
       {single?.type === 'text' && <TextControls t={single as TextItem} update={(p) => update(single.id, p)} />}
       {single?.type === 'drawing' && <DrawControls d={single as DrawItem} update={(p) => update(single.id, p)} />}
@@ -162,6 +180,7 @@ function TokenControls({
   const isMonster = Boolean(token.monsterId);
   const canRotate = playerCanRotateToken(token, myUserId);
   const showResetRotation = (isGM || canRotate) && !token.locked;
+  const modelUrl = resolveTokenModelUrl(token);
 
   if (!isGM && isMonster) {
     return (
@@ -267,6 +286,174 @@ function DrawControls({ d, update }: { d: DrawItem; update: (p: Partial<DrawItem
       <Field label="Col">
         <input type="color" value={d.color} onChange={(e) => update({ color: e.target.value })} className="w-6 h-6 rounded cursor-pointer border-0 p-0" />
       </Field>
+    </>
+  );
+}
+
+function PropControls({
+  image,
+  update,
+}: {
+  image: ImageItem;
+  update: (p: Partial<ImageItem>) => void;
+}) {
+  const propId = resolvePropId(image);
+  if (!propId || !canTriggerProp(propId)) return null;
+
+  const revealDc = image.propRevealDc ?? 0;
+  const revealCheck = image.propRevealCheck ?? '';
+  const revealNotation = image.propRevealNotation ?? '1d20';
+  const activateDc = image.propActivateDc ?? 0;
+  const activateCheck = image.propActivateCheck ?? '';
+  const activateNotation = image.propActivateNotation ?? '1d20';
+  const next = propNextCheckKind(image);
+  const nextLabel =
+    next === 'reveal'
+      ? propRevealCheckLabel(image)
+      : next === 'activate'
+        ? propActivateCheckLabel(image)
+        : undefined;
+  const nextDc = next === 'reveal' ? revealDc : next === 'activate' ? activateDc : 0;
+  const actor = tokenNearProp(image);
+  const canArmDdb =
+    Boolean(next)
+    && Boolean(next === 'reveal' ? revealCheck : activateCheck)
+    && Boolean(actor);
+
+  return (
+    <>
+      <button
+        type="button"
+        title={
+          next
+            ? `Roll ${nextLabel ?? 'check'} to ${next} (DC ${nextDc})`
+            : 'Open / close / fire this prop'
+        }
+        className="btn-primary text-xs px-2 py-0.5 whitespace-nowrap"
+        onClick={() => void triggerDungeonPropAsync(image, { actor })}
+      >
+        {next === 'reveal'
+          ? `👁 Reveal DC ${revealDc}`
+          : next === 'activate'
+            ? `🎲 Open DC ${activateDc}`
+            : image.visible === false
+              ? '👁 Reveal'
+              : '🗝 Use'}
+      </button>
+      {canArmDdb && (
+        <button
+          type="button"
+          title={`Wait for ${nextLabel} on D&D Beyond (${next})`}
+          className="btn-ghost text-xs px-2 py-0.5 whitespace-nowrap"
+          onClick={() => armPropForDdbRoll(image, actor)}
+        >
+          ⏳ DDB
+        </button>
+      )}
+
+      <span className="font-ui text-[10px] uppercase tracking-wide px-1" style={{ color: 'var(--color-accent-gold)' }}>
+        Reveal
+      </span>
+      <Field label="Check">
+        <PropCheckSelect
+          value={revealCheck}
+          title="Search check to reveal a hidden prop (e.g. Perception)"
+          onChange={(v) => update(v ? { propRevealCheck: v } : { propRevealCheck: '' })}
+        />
+      </Field>
+      <Field label="DC">
+        <input
+          type="number"
+          className="input-stat"
+          min={0}
+          title="0 = no search roll. Hidden props stay GM-only until this check succeeds."
+          value={revealDc}
+          onChange={(e) => update({ propRevealDc: Math.max(0, Number(e.target.value) || 0) })}
+        />
+      </Field>
+      {!revealCheck && revealDc > 0 && (
+        <Field label="Dice">
+          <input
+            className="input-dark text-xs py-0.5 w-16"
+            value={revealNotation}
+            onChange={(e) => update({ propRevealNotation: e.target.value.trim() || '1d20' })}
+          />
+        </Field>
+      )}
+
+      <span className="font-ui text-[10px] uppercase tracking-wide px-1" style={{ color: 'var(--color-accent-gold)' }}>
+        Open
+      </span>
+      <Field label="Check">
+        <PropCheckSelect
+          value={activateCheck}
+          title="Check to open / fire (e.g. Athletics, Strength)"
+          onChange={(v) => update(v ? { propActivateCheck: v } : { propActivateCheck: '' })}
+        />
+      </Field>
+      <Field label="DC">
+        <input
+          type="number"
+          className="input-stat"
+          min={0}
+          title="0 = free to open once revealed. Closing skips the roll."
+          value={activateDc}
+          onChange={(e) => update({ propActivateDc: Math.max(0, Number(e.target.value) || 0) })}
+        />
+      </Field>
+      {!activateCheck && activateDc > 0 && (
+        <Field label="Dice">
+          <input
+            className="input-dark text-xs py-0.5 w-16"
+            value={activateNotation}
+            onChange={(e) => update({ propActivateNotation: e.target.value.trim() || '1d20' })}
+          />
+        </Field>
+      )}
+    </>
+  );
+}
+
+function TokenPropUnderControls({ token }: { token: TokenItem }) {
+  const prop = triggerablePropUnderToken(token, true);
+  if (!prop) return null;
+  const next = propNextCheckKind(prop);
+  const checkLabel =
+    next === 'reveal' ? propRevealCheckLabel(prop) : propActivateCheckLabel(prop);
+  const dc =
+    next === 'reveal' ? prop.propRevealDc : next === 'activate' ? prop.propActivateDc : 0;
+  const linked =
+    next === 'reveal' ? prop.propRevealCheck : next === 'activate' ? prop.propActivateCheck : undefined;
+  return (
+    <>
+      <button
+        type="button"
+        title={
+          next
+            ? `Roll ${checkLabel ?? 'check'} to ${next} ${prop.name}`
+            : `Use ${prop.name} under this token`
+        }
+        className="btn-primary text-xs px-2 py-0.5 whitespace-nowrap"
+        onClick={() => void triggerPropUnderToken(token)}
+      >
+        {next === 'reveal'
+          ? `👁 Reveal DC ${dc}`
+          : next === 'activate'
+            ? `🎲 Open DC ${dc}`
+            : prop.visible === false
+              ? `👁 Reveal ${prop.name}`
+              : `🗝 ${prop.name}`}
+      </button>
+      {next && linked && (
+        <button
+          type="button"
+          title={`Wait for ${checkLabel} on D&D Beyond`}
+          className="btn-ghost text-xs px-2 py-0.5 whitespace-nowrap"
+          onClick={() => void triggerPropUnderToken(token, { waitForDdb: true })}
+        >
+          ⏳ DDB
+        </button>
+      )}
     </>
   );
 }

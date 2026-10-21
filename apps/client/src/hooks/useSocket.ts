@@ -11,6 +11,7 @@ import {
 import { useSessionStore } from '@/store/sessionStore';
 import { useChatStore } from '@/store/chatStore';
 import { applySessionFogActive, bindFogActiveSocket, syncFogActiveToSession } from '@/systems/scene/fogActiveSync';
+import { bindWallExtrudeSocket, syncWallExtrudeToSession } from '@/systems/map/wallExtrudeSync';
 import { bindDdbRollSocket } from '@/systems/ddb/bindDdbRollSocket';
 import type { ChatMessagePayload } from '@grimoire/shared';
 import type { SessionUser } from '@grimoire/shared';
@@ -108,8 +109,10 @@ export function useSocket(
       clearConnectionError();
       joinRoom();
       bindFogActiveSocket();
+      bindWallExtrudeSocket();
       bindDdbRollSocket(true);
       syncFogActiveToSession();
+      syncWallExtrudeToSession();
     }
 
     async function scheduleJoinRetry(forceFreshAuth = false) {
@@ -230,6 +233,7 @@ export function useSocket(
       socket.io.on('reconnect_failed', h.onReconnectFailed);
 
       bindFogActiveSocket();
+      bindWallExtrudeSocket();
       bindDdbRollSocket(true);
     }
 

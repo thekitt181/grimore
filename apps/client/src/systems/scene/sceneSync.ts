@@ -15,7 +15,10 @@ function snapshotItems(): Item[] {
 
 function emitIfConnected(event: string, payload: Record<string, unknown>): boolean {
   const socket = getSocket();
-  if (!socket.connected) return false;
+  if (!socket.connected) {
+    console.warn(`[SceneSync] skipped ${event} — socket not connected`);
+    return false;
+  }
   (socket as { emit: (event: string, payload: unknown) => void }).emit(event, payload);
   return true;
 }
@@ -47,6 +50,16 @@ export function emitItemUpdate(patches: Array<{ id: string; patch: Partial<Item>
   if (!s || !patches.length) return;
   emitIfConnected('item:update', { sessionId: s, patches });
   persistScene();
+}
+
+/**
+ * High-rate pose sync (FP walk) — same socket path as normal edits so remotes
+ * move in realtime, but skips localStorage persist on every tick.
+ */
+export function emitItemUpdateLive(patches: Array<{ id: string; patch: Partial<Item> }>) {
+  const s = sid();
+  if (!s || !patches.length) return;
+  emitIfConnected('item:update', { sessionId: s, patches, live: true });
 }
 
 export function emitItemRemove(ids: string[]) {

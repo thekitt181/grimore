@@ -15,6 +15,8 @@ import { Map3DScannedScene } from './Map3DScannedScene';
 import { Map3DWalls } from './Map3DWalls';
 import { Map3DTokens } from './Map3DTokens';
 import { Map3DDrawings } from './Map3DDrawings';
+import { Map3DSurfaceDecals } from './Map3DSurfaceDecals';
+import { WallDebrisBurst } from './WallDebrisBurst';
 import { Map3DImageLayer } from './Map3DImages';
 import { Map3DMapModel } from './Map3DMapModel';
 import { Map3DFogOfWar } from './Map3DFogOfWar';
@@ -26,9 +28,13 @@ import { MapPickVolume } from './MapPickVolume';
 import { SceneItemTransformGroup } from './TokenTransformGroup';
 import { pixiRenderResolution } from './pixiCanvasMetrics';
 import { bindWebGLContextRecovery } from './threeWebGLContext';
-import { is3dToken, tokenUsesModelMesh } from '@/systems/scene/token/tokenRenderType';
 import { markThreeFrameRendered, registerThreeRenderer, resetThreeCanvasHealth, notifyThreeCanvasUnhealthy } from './threeCanvasHealth';
 import { applyPixiViewMode } from '@/systems/map/applyPixiViewMode';
+import { FirstPersonCamera } from './FirstPersonCamera';
+import { useFirstPersonStore } from './firstPersonStore';
+import { useFirstPersonControls } from './useFirstPersonControls';
+import { FpPaintSampler } from './FpPaintSampler';
+import { FirstPersonVisionFog } from './FirstPersonVisionFog';
 
 /** Stable defaults — position/zoom owned by SyncedPixiOrthographicCamera (never reset on re-render). */
 function useStableOrthoCameraDefaults() {
@@ -55,18 +61,14 @@ function Map2DModelFogContent({ map, showGizmo = false }: { map: MapItem; showGi
   );
 }
 
-/** 2D view: model mesh in Three; selection gizmo matches the Three overlay (not Pixi). */
+/** 2D view: every token with a GLB/STL draws as a 3D mini (not flat Pixi art). */
 function TokenModelOverlayLayer() {
   const { tokens, activeTurnItemId } = useVisibleSceneTokens({ modelOnly: true });
-  const modelTokens = useMemo(
-    () => tokens.filter((t) => tokenUsesModelMesh(t, '2d') || is3dToken(t)),
-    [tokens],
-  );
-  if (modelTokens.length === 0) return null;
+  if (tokens.length === 0) return null;
 
   return (
     <Map3DTokens
-      tokens={modelTokens}
+      tokens={tokens}
       {...(activeTurnItemId ? { activeTurnItemId } : {})}
     />
   );
@@ -116,6 +118,10 @@ function Map3DSceneContent() {
   const autoExtrudeWalls = useMapStore((s) => s.autoExtrudeWalls);
   const scanImageWalls = useMapStore((s) => s.scanImageWalls);
   const wallHeightCells = useMapStore((s) => s.wallHeightCells);
+  const firstPerson = useFirstPersonStore((s) => s.enabled);
+  /** Authored/scanned walls in 3D for DM and players (auto-extrude still toggles image scans). */
+  const showExtrudedWallsFor = (map: MapItem) =>
+    autoExtrudeWalls || firstPerson || map.walls.length > 0;
 
   const maps = useMemo(
     () => sceneMapsForClient(items, gm),
@@ -138,21 +144,26 @@ function Map3DSceneContent() {
       {maps.map((map) => (
         <group key={map.id}>
           <Map3DGround map={map} clayMode={scanImageWalls} skipFloor={Boolean(map.modelUrl)} />
-          {autoExtrudeWalls && scanImageWalls && (
+          {showExtrudedWallsFor(map) && scanImageWalls && (
             <Map3DScannedScene map={map} wallHeight={wallHeight} />
           )}
-          {autoExtrudeWalls && !scanImageWalls && map.walls.length > 0 && (
+          {showExtrudedWallsFor(map) && !scanImageWalls && map.walls.length > 0 && (
             <Map3DWalls map={map} wallHeight={wallHeight} wallThickness={wallThickness} />
           )}
           <Map3DMapModel map={map} showGizmo={map.id === gizmoMapId && Boolean(map.modelUrl)} />
-          <Map3DFogOfWar map={map} />
+          {/* Ground-plane FoW is top-down only; FP uses FirstPersonVisionFog (torch/DV). */}
+          {!firstPerson && <Map3DFogOfWar map={map} />}
           {!map.modelUrl && <MapPickGroup map={map} />}
         </group>
       ))}
 
       <TokenLayer />
       <Map3DDrawings drawings={drawings} labels={labels} />
+      <Map3DSurfaceDecals />
+      <WallDebrisBurst />
+      <FpPaintSampler />
       <Map3DImageLayer />
+      {firstPerson && <FirstPersonVisionFog wallHeight={wallHeight} />}
     </>
   );
 }
@@ -175,7 +186,7 @@ const canvasStyle = {
 };
 
 function onThreeCanvasCreated(state: RootState): void {
-  const { gl } = state;
+  const { gl, scene } = state;
   gl.setClearColor(0x000000, 0);
   gl.domElement.style.pointerEvents = 'none';
   gl.domElement.style.width = '100%';
@@ -183,6 +194,9 @@ function onThreeCanvasCreated(state: RootState): void {
   gl.domElement.style.display = 'block';
   sceneRefs.threeCanvas.current = gl.domElement;
   registerThreeRenderer(gl);
+  void import('@/systems/scene/token/remotePoseApply').then(({ registerThreeScene }) => {
+    registerThreeScene(scene);
+  });
 
   if (state.camera instanceof THREE.OrthographicCamera) {
     applyOrthographicCameraFromViewport(state.camera, state.size.width, state.size.height);
@@ -203,11 +217,10 @@ function ThreeReadyNotifier() {
   return null;
 }
 
-/** Opaque scene background on desktop 3D only — mobile stays transparent so Pixi map underlay shows through. */
+/** Opaque scene background in 3D/FP so the Pixi map image cannot show through as a fake floor. */
 function SceneBackground() {
-  const mobile = isMobileClient();
   const is3d = useMapStore((s) => s.viewMode === '3d');
-  if (!is3d || mobile) return null;
+  if (!is3d) return null;
   return <color attach="background" args={['#1e1e22']} />;
 }
 
@@ -229,7 +242,16 @@ function CanvasResizeSync() {
 export function MapSceneCanvas() {
   const viewMode = useMapStore((s) => s.viewMode);
   const is3d = viewMode === '3d';
+  const firstPerson = useFirstPersonStore((s) => s.enabled) && is3d;
+  useFirstPersonControls();
   const [glKey, setGlKey] = useState(0);
+
+  useEffect(() => {
+    if (viewMode !== '3d' && useFirstPersonStore.getState().enabled) {
+      useFirstPersonStore.getState().setEnabled(false);
+    }
+  }, [viewMode]);
+
   const onContextLost = useCallback(() => {
     sceneRefs.threeCanvas.current = null;
     sceneCameraRef.liveCamera = null;
@@ -247,15 +269,16 @@ export function MapSceneCanvas() {
   }, [items, activeMapId]);
 
   const { tokens: modelCandidates } = useVisibleSceneTokens({ modelOnly: true });
-  const hasModelTokens = useMemo(
-    () => modelCandidates.some((t) => tokenUsesModelMesh(t, viewMode) || is3dToken(t)),
-    [modelCandidates, viewMode],
-  );
+  const hasModelTokens = modelCandidates.length > 0;
 
   const hasModelMap = Boolean(overlayMap?.modelUrl);
   const needsThreeOverlay = is3d || hasModelTokens || hasModelMap;
 
   const orthoDefaults = useStableOrthoCameraDefaults();
+  const fpPerspectiveCamera = useMemo(
+    () => ({ fov: 72, near: 0.12, far: 8000, position: [0, 120, 0] as [number, number, number] }),
+    [],
+  );
 
   const mobile = isMobileClient();
   const glProps = {
@@ -264,8 +287,9 @@ export function MapSceneCanvas() {
     powerPreference: (mobile ? 'default' : 'high-performance') as WebGLPowerPreference,
     failIfMajorPerformanceCaveat: false,
   };
-  const dpr = pixiRenderResolution();
-  const useShadows = !mobile && is3d;
+  // FP on dense GLB maps: match dungeon responsiveness — lower pixel load, no shadows.
+  const dpr = firstPerson ? Math.min(1, pixiRenderResolution()) : pixiRenderResolution();
+  const useShadows = !firstPerson && !mobile && (is3d || hasModelTokens);
 
   useEffect(() => () => {
     sceneRefs.threeCanvas.current = null;
@@ -297,11 +321,17 @@ export function MapSceneCanvas() {
 
   return (
     <Canvas
-      key={glKey}
-      orthographic
+      key={`${glKey}-${firstPerson ? 'fp' : 'orb'}`}
+      orthographic={!firstPerson}
       shadows={useShadows}
       frameloop="always"
-      camera={is3d ? orthoDefaults : { position: [1280, 1500, 960], zoom: 1, near: -4500, far: 4500 }}
+      camera={
+        firstPerson
+          ? fpPerspectiveCamera
+          : is3d
+            ? orthoDefaults
+            : { position: [1280, 1500, 960], zoom: 1, near: -4500, far: 4500 }
+      }
       style={canvasStyle}
       gl={glProps}
       dpr={dpr}
@@ -311,13 +341,13 @@ export function MapSceneCanvas() {
       <WebGLContextGuard onContextLost={onContextLost} />
       <ThreeReadyNotifier />
       <CanvasResizeSync />
-      <SyncedPixiOrthographicCamera />
+      {firstPerson ? <FirstPersonCamera /> : <SyncedPixiOrthographicCamera />}
       <SceneBackground />
       <Suspense fallback={null}>
         {is3d ? (
           <>
             <Map3DSceneContent />
-            <Map3DTokenGizmo />
+            {!firstPerson && <Map3DTokenGizmo />}
           </>
         ) : (
           <TokenOverlay2DContent map={overlayMap} />

@@ -24,8 +24,10 @@ import { tokenRendersInThree } from '../token/tokenRenderType';
 import { sceneRefs } from '../sceneRefs';
 import { emitItemUpdate } from '../sceneSync';
 import { dungeonWallStretch, scaledMapGeometry } from '@/systems/map/wallUtils';
+import { displayWalls, doorWallsSignature } from '@/systems/map/props/doorCollision';
 import { clientVisibleTokenIdSet } from '../sceneMapsForClient';
 import { resolveItemBounds } from '@/systems/map3d/sceneItemBounds';
+import { registerPixiToken } from '@/systems/scene/token/remotePoseApply';
 import { hasDragLivePositions } from '../interaction/dragLivePositions';
 import { isItemDragActive } from '../interaction/selectionDragState';
 
@@ -56,11 +58,14 @@ export function useItemRenderer(
   const selectedIds = useItemStore((s) => s.selectedIds);
   const activeMapId = useItemStore((s) => s.activeMapId);
   const selectedWallIndices = useItemStore((s) => s.selectedWallIndices);
+  /** Bumps when FP walk / prop live transforms stream — keep Pixi feet in sync. */
+  const liveTick = useLiveTransformStore((s) => s.tick);
   const myRole  = useSessionStore((s) => s.myRole);
   const activeTurnItemId = useInitiativeStore((s) =>
     s.isActive && s.combatants[s.currentIndex] ? s.combatants[s.currentIndex]!.tokenId : undefined
   );
   const viewMode = useMapStore((s) => s.viewMode);
+  const gm2dEditorOpen = useMapStore((s) => s.gm2dEditorOpen);
   const activeTool = useMapStore((s) => s.activeTool);
   const fogRevision = useMapStore((s) => s.fogRevision);
   const myUserId = useSessionStore((s) => s.myUserId);
@@ -105,12 +110,14 @@ export function useItemRenderer(
     if (tokenLayer) tokenLayer.sortableChildren = true;
     const mobileMapUnderlay = viewMode === '3d' && isMobileClient();
     const pixiTokenFallback = viewMode === '3d' && isMobileClient() && !isThreeCanvasHealthy();
+    const gm2dEditor = viewMode === '3d' && gm2dEditorOpen && myRole === 'GM';
     const gm: boolean = myRole === 'GM';
     const ctx: RenderContext = {
       gm,
       viewMode,
       selectedIds,
       pixiTokenFallback,
+      gm2dEditor,
       ...(activeTurnItemId ? { activeTurnItemId } : {}),
     };
     const activeMap = getActiveMap();
@@ -124,6 +131,7 @@ export function useItemRenderer(
     // Remove containers for deleted items
     for (const [id, c] of containers.current) {
       if (!liveIds.has(id)) {
+        registerPixiToken(id, null);
         c.destroy({ children: true });
         containers.current.delete(id);
         signatures.current.delete(id);
@@ -139,14 +147,16 @@ export function useItemRenderer(
     }
 
     for (const item of Object.values(items) as Item[]) {
-      // 3D view: token bodies in Three.js. 2D model tokens: invisible Pixi bounds + Three mesh.
+      // 3D view: token bodies in Three.js — except the GM live 2D editor, which needs full Pixi tokens.
       const threeBodyOnly =
         item.type === 'token' &&
         viewMode === '3d' &&
+        !gm2dEditor &&
         (Boolean(item.modelUrl) || (tokenRendersInThree(item, viewMode) && !pixiTokenFallback));
       if (threeBodyOnly) {
         const stale = containers.current.get(item.id);
         if (stale) {
+          registerPixiToken(item.id, null);
           stale.destroy({ children: true });
           containers.current.delete(item.id);
           signatures.current.delete(item.id);
@@ -167,6 +177,7 @@ export function useItemRenderer(
         c.parent?.removeChild(c);
         parent.addChild(c);
       }
+      if (item.type === 'token') registerPixiToken(item.id, c);
 
       // Rebuild children only when visual data changed.
       const sig = itemVisualSignature(item, ctx);
@@ -186,11 +197,20 @@ export function useItemRenderer(
       }
 
       // Transform — merge live drag offsets (drag ref + live store).
+      // Mid-walk: mesh apply owns x/y — do not snap back to item store.
       const b = resolveItemBounds(item, liveById[item.id]);
       c.pivot.set(item.width / 2, item.height / 2);
       c.scale.set(b.width / item.width, b.height / item.height);
-      c.position.set(b.cx, b.cz);
-      c.rotation = (b.rotation * Math.PI) / 180;
+      const walkStamp = (c as { __fpWalk?: { at: number } }).__fpWalk;
+      const walkOwned = Boolean(
+        item.type === 'token'
+        && walkStamp
+        && performance.now() - walkStamp.at < 2000,
+      );
+      if (!walkOwned) {
+        c.position.set(b.cx, b.cz);
+        c.rotation = (b.rotation * Math.PI) / 180;
+      }
       c.zIndex = itemDisplayZIndex(item);
 
       // Visibility — hidden items are GM-only ghosts. Respect the cached fog set
@@ -201,7 +221,19 @@ export function useItemRenderer(
       const alpha = item.visible !== false || !gm ? 1 : 0.35;
 
       if (viewMode === '3d') {
-        if (item.type === 'map' && mobileMapUnderlay) {
+        if (gm2dEditor) {
+          // Live 2D editor: Pixi sits above the Three underlay (z-index). Flat tokens
+          // stay in Pixi so they aren't depth-buried by the GLB map; GLB minis stay
+          // hidden here and draw lifted in the underlay.
+          if (item.type === 'token') {
+            const showPixiToken = !item.modelUrl;
+            c.visible = show && showPixiToken;
+            c.alpha = show && showPixiToken ? alpha : 0;
+          } else {
+            c.visible = show;
+            c.alpha = show ? alpha : 0;
+          }
+        } else if (item.type === 'map' && mobileMapUnderlay) {
           c.visible = show;
           c.alpha = show ? alpha : 0;
         } else if (item.type === 'token') {
@@ -216,8 +248,14 @@ export function useItemRenderer(
           c.alpha = 0;
         }
       } else {
-        c.visible = show;
-        c.alpha = show ? alpha : 0;
+        if (item.type === 'map' && (item as MapItem).modelUrl) {
+          // 2D: Three.js draws the GLB — hide the grey Pixi map chrome (grid/border box).
+          c.visible = false;
+          c.alpha = 0;
+        } else {
+          c.visible = show;
+          c.alpha = show ? alpha : 0;
+        }
       }
 
       // Wall overlay — always above map background/grid, below tokens
@@ -233,9 +271,19 @@ export function useItemRenderer(
         }
         const isActiveMap = activeMap?.id === map.id;
         const wallSel = isActiveMap ? selectedWallIndices : [];
-        const wallSig = wallVisualSignature(map.id, map.walls ?? [], wallSel);
+        // Open doors cut a gap in the red line; closed restores it (display only).
+        const wallsDraw = displayWalls(map, items);
+        const wallSig =
+          wallVisualSignature(map.id, wallsDraw, wallSel)
+          + `|doors:${doorWallsSignature(map, items)}`;
         if (wallSignatures.current.get(map.id) !== wallSig) {
-          renderMapWalls(wc, map.walls ?? [], new Set(wallSel));
+          // Selection indices refer to authored map.walls — only highlight when lists match.
+          const authored = map.walls ?? [];
+          const selSet =
+            wallsDraw.length === authored.length
+              ? new Set(wallSel)
+              : new Set<number>();
+          renderMapWalls(wc, wallsDraw, selSet);
           wallSignatures.current.set(map.id, wallSig);
         }
         const wallBounds = resolveItemBounds(map, liveById[map.id]);
@@ -247,8 +295,11 @@ export function useItemRenderer(
         wc.position.set(wallBounds.cx, wallBounds.cz);
         wc.rotation = (wallBounds.rotation * Math.PI) / 180;
         wc.zIndex = wallDisplayZIndex(map.zIndex);
-        // LOS walls affect everyone; only the GM sees the wall overlay.
-        if (gm && (viewMode !== '3d' || activeTool === 'wall')) {
+        // 2D: wall lines for DM and players. 3D: extruded meshes; Pixi walls only while GM edits.
+        const showWallOverlay =
+          viewMode !== '3d'
+          || (gm && (activeTool === 'wall' || gm2dEditor));
+        if (showWallOverlay) {
           wc.visible = true;
           wc.alpha = map.visible ? 1 : 0.35;
         } else {
@@ -261,12 +312,14 @@ export function useItemRenderer(
     tokenLayer?.sortChildren();
   }, [
     items,
+    liveTick,
     selectedIds,
     activeMapId,
     selectedWallIndices,
     myRole,
     activeTurnItemId,
     viewMode,
+    gm2dEditorOpen,
     activeTool,
     threeHealthTick,
     myUserId,
@@ -283,8 +336,8 @@ export function useItemRenderer(
     const gm: boolean = myRole === 'GM';
     const fogVisibleTokenIds = clientVisibleTokenIdSet(items, gm);
     fogVisibleIdsRef.current = fogVisibleTokenIds;
-    const mobileMapUnderlay = viewMode === '3d' && isMobileClient();
     const pixiTokenFallback = viewMode === '3d' && isMobileClient() && !isThreeCanvasHealthy();
+    const gm2dEditor = viewMode === '3d' && gm2dEditorOpen && gm;
 
     for (const item of Object.values(items) as Item[]) {
       if (item.type !== 'token') continue;
@@ -296,7 +349,10 @@ export function useItemRenderer(
       const alpha = item.visible !== false || !gm ? 1 : 0.35;
 
       if (viewMode === '3d') {
-        const showPixiToken = pixiTokenFallback && !item.modelUrl;
+        // Live 2D editor: flat tokens in Pixi (above underlay). Else mobile Three fallback.
+        const showPixiToken = gm2dEditor
+          ? !item.modelUrl
+          : (pixiTokenFallback && !item.modelUrl);
         c.visible = show && showPixiToken;
         c.alpha = show && showPixiToken ? alpha : 0;
       } else {
@@ -312,6 +368,7 @@ export function useItemRenderer(
     selectedIds,
     activeMapId,
     viewMode,
+    gm2dEditorOpen,
     threeHealthTick,
     appReady,
   ]);

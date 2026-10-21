@@ -20,11 +20,18 @@ export const sceneRefs = {
   threeCanvas:{ current: null as HTMLCanvasElement | null },
   /** Transparent layer above Three.js — receives pan/select/zoom in 3D view. */
   interactionRoot: { current: null as HTMLDivElement | null },
+  /** When the GM 2D editor is open beside 3D, orbit listens on this pane only. */
+  orbitInteraction: { current: null as HTMLDivElement | null },
 };
 
 /** DOM target for map pointer/wheel handlers (falls back to Pixi canvas). */
 export function getMapInteractionEl(): HTMLElement | null {
   return sceneRefs.interactionRoot.current ?? sceneRefs.app.current?.canvas ?? null;
+}
+
+/** Right-drag orbit target — the 3D pane when split, otherwise the main interaction layer. */
+export function getOrbitInteractionEl(): HTMLElement | null {
+  return sceneRefs.orbitInteraction.current ?? getMapInteractionEl();
 }
 
 export function getSceneCanvasRect(): DOMRect | null {

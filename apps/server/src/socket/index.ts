@@ -35,6 +35,7 @@ import {
   FogUpdatePayload,
   FogSyncPayload,
   FogActivePayload,
+  WallExtrudePayload,
   MapMovePayload,
   MapResizePayload,
   MapLockPayload,
@@ -161,6 +162,8 @@ function mergePlayerQuestTicks(previous: QuestBoard, incoming: QuestEntry[]): Qu
 }
 /** Per-session fog active flag (GM toggles off during prep). */
 const sessionFogActive = new Map<string, boolean>();
+/** Per-session 3D wall extrude settings (so players see the same walls as the GM). */
+const sessionWallExtrude = new Map<string, Omit<WallExtrudePayload, 'sessionId'>>();
 /** Last GM map focus (active map + viewport) for joining players. */
 const sessionMapFocus = new Map<string, MapFocusPayload>();
 
@@ -231,16 +234,27 @@ async function hydrateSessionFromCache(socket: Socket, sessionId: string): Promi
     if (mapFocus) socket.emit('map:focus', mapFocus);
   };
 
+  let cachedItems: unknown[] | null = null;
+  if (cachedItemsRaw) {
+    try {
+      const parsed = JSON.parse(cachedItemsRaw) as unknown;
+      if (Array.isArray(parsed)) cachedItems = parsed;
+    } catch { /* ignore corrupt cache */ }
+  }
+
+  const sceneList = Array.isArray(sceneItems) ? sceneItems : null;
+  const sceneLen = sceneList?.length ?? 0;
+  const cacheLen = cachedItems?.length ?? 0;
+  // Live GM sync lands in memory/Redis before (or instead of) slow DB scene writes.
+  // Never prefer an empty DB scene over a non-empty cache — that blanked players.
+  const items: unknown[] =
+    cacheLen > 0 && cacheLen >= sceneLen
+      ? cachedItems!
+      : sceneLen > 0
+        ? sceneList!
+        : (cachedItems ?? sceneList ?? []);
+
   const activeMapId = sceneActiveMapId ?? mapFocus?.mapId ?? null;
-  const items = sceneItems ?? (() => {
-    if (cachedItemsRaw) {
-      try {
-        const parsed = JSON.parse(cachedItemsRaw) as unknown;
-        if (Array.isArray(parsed)) return parsed;
-      } catch { /* */ }
-    }
-    return [];
-  })();
 
   socket.emit('items:sync', { sessionId, items, activeMapId });
   emitMapFocus();
@@ -374,10 +388,14 @@ export function initSocket(httpServer: HttpServer): Server {
         socket.data['role'] = role;
 
         const fogActive = sessionFogActive.get(sessionId) ?? false;
+        const wallExtrude = sessionWallExtrude.get(sessionId);
 
         // Fast ack — client shows Live before slower roster / DDB work.
         socket.emit('session:roomState', { users: [sessionUser], fogActive });
         socket.emit('fog:active', { sessionId, active: fogActive });
+        if (wallExtrude) {
+          socket.emit('map:wallExtrude', { sessionId, ...wallExtrude });
+        }
         void hydrateSessionFromCache(socket, sessionId);
 
         void getRoomUsers(sessionId)
@@ -504,8 +522,19 @@ export function initSocket(httpServer: HttpServer): Server {
     });
     socket.on('item:update', async (payload: ItemUpdatePayload) => {
       if (!isJoinedSession(socket, payload.sessionId)) return;
-      void cacheItemUpdate(payload);
+      // Live FP / prop streams: relay only — never touch Redis (was starving the room).
       socket.to(payload.sessionId).emit('item:update', payload);
+      if (payload.live) return;
+      void cacheItemUpdate(payload);
+      const isLiveWalkPose = payload.patches.every(({ patch }) => {
+        const p = patch as Record<string, unknown>;
+        const keys = Object.keys(p);
+        const hasPos = keys.includes('x') || keys.includes('y');
+        return hasPos && keys.every((k) =>
+          k === 'x' || k === 'y' || k === 'rotation' || k === 'gridCol' || k === 'gridRow'
+        );
+      });
+      if (isLiveWalkPose) return;
 
       // Save to active scene if it exists
       try {
@@ -621,9 +650,34 @@ export function initSocket(httpServer: HttpServer): Server {
       });
       socket.to(payload.sessionId).emit('token:move', payload);
     });
+    // High-rate FP / drag pose — relay only (no scene cache / DB write).
+    socket.on('token:live', (payload: {
+      sessionId: string;
+      tokenId: string;
+      x: number;
+      y: number;
+      rotation: number;
+    }) => {
+      if (!isJoinedSession(socket, payload.sessionId)) return;
+      socket.to(payload.sessionId).emit('token:live', payload);
+    });
+    // Dedicated FP walk channel — relay only (look-around-class realtime for feet).
+    relayToken<{
+      sessionId: string;
+      tokenId: string;
+      x: number;
+      y: number;
+      rotation: number;
+      gridCol: number;
+      gridRow: number;
+    }>('fp:pose');
     relayToken<TokenHpPayload>('token:hp');
     relayToken<TokenTypePayload>('token:type');
-    relayToken<TokenRotatePayload>('token:rotate');
+    // Look-around + FP walk (optional x/y on same event).
+    socket.on('token:rotate', (payload: TokenRotatePayload) => {
+      if (!isJoinedSession(socket, payload.sessionId)) return;
+      socket.to(payload.sessionId).emit('token:rotate', payload);
+    });
     relayToken<TokenHidePayload>('token:hide');
     relayToken<TokenDeletePayload>('token:delete');
     relayToken<TokenConditionPayload>('token:condition');
@@ -688,6 +742,18 @@ export function initSocket(httpServer: HttpServer): Server {
       sessionFogActive.set(payload.sessionId, payload.active);
       socket.to(payload.sessionId).emit('fog:active', payload);
       socket.emit('fog:active', payload);
+    });
+
+    socket.on('map:wallExtrude', (payload: WallExtrudePayload) => {
+      if (socket.data['role'] !== 'GM') return;
+      if (!isJoinedSession(socket, payload.sessionId)) return;
+      sessionWallExtrude.set(payload.sessionId, {
+        autoExtrudeWalls: Boolean(payload.autoExtrudeWalls),
+        wallHeightCells: typeof payload.wallHeightCells === 'number' ? payload.wallHeightCells : 1.8,
+        scanImageWalls: Boolean(payload.scanImageWalls),
+      });
+      socket.to(payload.sessionId).emit('map:wallExtrude', payload);
+      socket.emit('map:wallExtrude', payload);
     });
 
     socket.on('map:gridUpdate', (payload) => {

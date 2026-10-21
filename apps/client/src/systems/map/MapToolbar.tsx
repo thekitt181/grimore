@@ -6,9 +6,15 @@ import { resetSessionMapView, syncMapFocusToSession } from '@/systems/map/mapFoc
 import { emitItemUpdate, emitItemRemove, emitItemsSync } from '@/systems/scene/sceneSync';
 import { clsx } from 'clsx';
 import { setFogVisibleForSession } from '@/systems/scene/fogActiveSync';
+import { emitWallExtrudeToSession } from '@/systems/map/wallExtrudeSync';
 import { DRAW_COLOR_PRESETS, DEFAULT_TEXT_FONT_SIZE, MAX_TEXT_FONT_SIZE, MIN_TEXT_FONT_SIZE } from './drawColors';
 import { MapViewModeToggle } from './MapViewModeToggle';
 import { useImageWallScan } from '@/systems/map3d/useImageWallScan';
+import { MAP_SURFACE_STYLE_OPTIONS } from '@/systems/map3d/mapSurfaceStyles';
+
+function pushWallExtrudeSoon() {
+  setTimeout(() => emitWallExtrudeToSession(), 0);
+}
 
 type ToolDef = { id: MapTool; label: string; icon: string; title: string };
 
@@ -61,8 +67,12 @@ export function MapToolbar() {
   const fogOverlayOn = fogEnabled || sessionFogActive;
   const autoExtrudeWalls = useMapStore((s) => s.autoExtrudeWalls);
   const wallHeightCells = useMapStore((s) => s.wallHeightCells);
+  const wallStyleId = useMapStore((s) => s.wallStyleId);
+  const floorStyleId = useMapStore((s) => s.floorStyleId);
   const setAutoExtrudeWalls = useMapStore((s) => s.setAutoExtrudeWalls);
   const setWallHeightCells = useMapStore((s) => s.setWallHeightCells);
+  const setWallStyleId = useMapStore((s) => s.setWallStyleId);
+  const setFloorStyleId = useMapStore((s) => s.setFloorStyleId);
   const scanImageWalls = useMapStore((s) => s.scanImageWalls);
   const wallScanThreshold = useMapStore((s) => s.wallScanThreshold);
   const setScanImageWalls = useMapStore((s) => s.setScanImageWalls);
@@ -319,7 +329,10 @@ export function MapToolbar() {
             <input
               type="checkbox"
               checked={scanImageWalls}
-              onChange={(e) => setScanImageWalls(e.target.checked)}
+              onChange={(e) => {
+                setScanImageWalls(e.target.checked);
+                pushWallExtrudeSoon();
+              }}
               className="accent-[#c9a84c]"
             />
             Auto-scan map for 3D
@@ -368,7 +381,10 @@ export function MapToolbar() {
             <input
               type="checkbox"
               checked={autoExtrudeWalls}
-              onChange={(e) => setAutoExtrudeWalls(e.target.checked)}
+              onChange={(e) => {
+                setAutoExtrudeWalls(e.target.checked);
+                pushWallExtrudeSoon();
+              }}
               className="accent-[#c9a84c]"
             />
             Extrude walls
@@ -381,11 +397,50 @@ export function MapToolbar() {
               max={6}
               step={0.5}
               value={wallHeightCells}
-              onChange={(e) => setWallHeightCells(Number(e.target.value))}
+              onChange={(e) => {
+                setWallHeightCells(Number(e.target.value));
+                pushWallExtrudeSoon();
+              }}
               className="w-full accent-[#c9a84c] mt-1"
               disabled={!autoExtrudeWalls}
             />
           </label>
+          <label className="font-ui text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
+            Wall art
+            <select
+              value={wallStyleId}
+              onChange={(e) => {
+                setWallStyleId(e.target.value);
+                pushWallExtrudeSoon();
+              }}
+              className="mt-1 w-full rounded px-1 py-0.5 font-ui text-[10px] bg-[#12121a] border border-[#2a2a38] text-[#e8e0d0]"
+              disabled={!autoExtrudeWalls}
+              title="Detailed stone / brick on extruded walls"
+            >
+              {MAP_SURFACE_STYLE_OPTIONS.filter((o) => o.id !== 'map').map((opt) => (
+                <option key={opt.id} value={opt.id}>{opt.label}</option>
+              ))}
+            </select>
+          </label>
+          <label className="font-ui text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
+            Floor art
+            <select
+              value={floorStyleId}
+              onChange={(e) => {
+                setFloorStyleId(e.target.value);
+                pushWallExtrudeSoon();
+              }}
+              className="mt-1 w-full rounded px-1 py-0.5 font-ui text-[10px] bg-[#12121a] border border-[#2a2a38] text-[#e8e0d0]"
+              title="Overrides the map image in 3D / first person with tiled stone art"
+            >
+              {MAP_SURFACE_STYLE_OPTIONS.map((opt) => (
+                <option key={opt.id} value={opt.id}>{opt.label}</option>
+              ))}
+            </select>
+          </label>
+          <span className="font-ui text-[9px] leading-snug" style={{ color: 'var(--color-text-secondary)' }}>
+            Floor art replaces the map picture in 3D/FP. Pick “Map image” to keep it.
+          </span>
           <span className="font-ui text-[9px] leading-snug" style={{ color: 'var(--color-text-secondary)' }}>
             Drag to orbit · scroll to zoom
           </span>

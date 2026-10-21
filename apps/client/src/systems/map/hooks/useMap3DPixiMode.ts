@@ -7,17 +7,18 @@ import { THREE_READY_EVENT, THREE_UNHEALTHY_EVENT } from '@/systems/map3d/threeC
 export function useMap3DPixiMode(appReady: boolean, viewMode: MapViewMode) {
   const is3d = viewMode === '3d';
   const activeTool = useMapStore((s) => s.activeTool);
+  const gm2dEditorOpen = useMapStore((s) => s.gm2dEditorOpen);
 
   // Hide Pixi tokens before paint when entering 3D — prevents one frame of 2D zoom then a jump.
   useLayoutEffect(() => {
     if (!appReady) return;
     applyPixiViewMode(is3d);
-  }, [appReady, is3d, activeTool]);
+  }, [appReady, is3d, activeTool, gm2dEditorOpen]);
 
   useEffect(() => {
     if (!appReady) return;
     applyPixiViewMode(is3d);
-  }, [appReady, is3d, activeTool]);
+  }, [appReady, is3d, activeTool, gm2dEditorOpen]);
 
   useEffect(() => {
     if (!appReady) return;

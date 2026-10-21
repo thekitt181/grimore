@@ -30,6 +30,7 @@
     "react-router-dom": "^6.23.1",
     "socket.io-client": "^4.7.5",
     "three": "^0.170.0",
+    "three-mesh-bvh": "^0.9.16",
     "uuid": "^10.0.0",
     "zustand": "^4.5.2"
   },

@@ -1,18 +1,30 @@
 import { useMemo, useEffect, useLayoutEffect, Suspense } from 'react';
 import { useLoader } from '@react-three/fiber';
-import { useGLTF } from '@react-three/drei';
+import { useFBX, useGLTF } from '@react-three/drei';
 import * as THREE from 'three';
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
+import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { modelFormatFromUrl } from '@/lib/modelFormats';
 import { useResolvedModelUrl } from './useResolvedModelUrl';
 import { registerMapRaycastRoot } from './mapGroundRaycast';
 import { applyModelNormalization, applyFallbackModelNormalization } from './normalizeModelRoot';
+import { alignTokenSoleOnce } from './tokenFootPlant';
+import { useTokenGroundedLocomotion } from './useTokenGroundedLocomotion';
+import {
+  SHARED_MIXAMO_WALK_URL,
+  retargetMixamoClipToSkeleton,
+} from './retargetMixamoWalk';
+import { rootHasSkinnedMesh } from './tokenSmartRig';
+// Warm the Mixamo walk pack so token Suspense rarely stalls on first place.
+useFBX.preload(SHARED_MIXAMO_WALK_URL);
 
 function configureMapMesh(mesh: THREE.Mesh): void {
   mesh.frustumCulled = false;
   const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
   for (const mat of mats) {
     mat.side = THREE.DoubleSide;
+    // Keep depthWrite on — shared GLTF materials must not stay softened from an underlay.
+    mat.depthWrite = true;
   }
 }
 
@@ -45,23 +57,92 @@ function useNormalizedModel(
   targetSize: number,
   groundAlign: boolean,
   footprint?: { width: number; height: number },
+  /** Tokens only: one-shot sole align after normalize (not per-frame plant). */
+  soleAlign = false,
+  tokenUpright = false,
 ) {
   useLayoutEffect(() => {
-    if (applyModelNormalization(root, targetSize, groundAlign, footprint)) return;
+    const normKey = `${targetSize}|${footprint?.width ?? ''}|${footprint?.height ?? ''}|${groundAlign ? 1 : 0}|up2|grnd1|${tokenUpright ? 1 : 0}`;
+    // Skip destructive re-normalize when this root is already fitted (e.g. after a drag re-render).
+    if (root.userData.__grimoireNormKey === normKey) {
+      root.visible = true;
+      return;
+    }
 
-    let attempts = 0;
+    // Hide tokens until sized. Maps/props stay visible so wall raycasts and dungeon
+    // props work as soon as the mesh is parented (hiding maps made meshBlocksMove miss).
+    if (soleAlign) root.visible = false;
+
+    let normTries = 0;
+    let soleTries = 0;
     let frameId = 0;
-    const retry = () => {
-      if (applyModelNormalization(root, targetSize, groundAlign, footprint)) return;
-      if (attempts++ >= 8) {
-        applyFallbackModelNormalization(root, targetSize, groundAlign);
-        return;
-      }
-      frameId = requestAnimationFrame(retry);
+    let cancelled = false;
+    let normalized = false;
+    const maxNormTries = footprint ? 120 : 24;
+
+    const reveal = () => {
+      root.visible = true;
+      root.userData.__grimoireNormKey = normKey;
     };
-    frameId = requestAnimationFrame(retry);
-    return () => cancelAnimationFrame(frameId);
-  }, [root, targetSize, groundAlign, footprint?.width, footprint?.height]);
+
+    const tick = () => {
+      if (cancelled) return;
+
+      if (!normalized) {
+        // Bounds are wrong until the primitive is parented into the scene.
+        if (!root.parent) {
+          if (normTries++ > 180) {
+            // Don't leave tokenRender props/minis stuck invisible forever.
+            applyFallbackModelNormalization(root, targetSize, groundAlign);
+            normalized = true;
+            reveal();
+            return;
+          }
+          frameId = requestAnimationFrame(tick);
+          return;
+        }
+
+        if (applyModelNormalization(root, targetSize, groundAlign, footprint, tokenUpright)) {
+          normalized = true;
+          reveal();
+        } else if (normTries++ < maxNormTries) {
+          frameId = requestAnimationFrame(tick);
+          return;
+        } else if (footprint) {
+          // Maps: keep retrying (CAD-scale fallback nests a mini copy). Props/tokens:
+          // eventually fall back so they don't stay hidden after tokenRender hide.
+          if (normTries < maxNormTries + 90) {
+            frameId = requestAnimationFrame(tick);
+            return;
+          }
+          if (soleAlign) {
+            applyFallbackModelNormalization(root, targetSize, groundAlign);
+            normalized = true;
+            reveal();
+          }
+          return;
+        } else {
+          applyFallbackModelNormalization(root, targetSize, groundAlign);
+          normalized = true;
+          reveal();
+        }
+      }
+
+      // One-shot sole align only — do not re-run normalize (that would undo the shift).
+      if (soleAlign) {
+        if (alignTokenSoleOnce(root)) return;
+        if (soleTries++ < 16) {
+          frameId = requestAnimationFrame(tick);
+        }
+      }
+    };
+
+    tick();
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(frameId);
+    };
+  }, [root, targetSize, groundAlign, footprint?.width, footprint?.height, soleAlign, tokenUpright]);
 }
 
 function GltfModel({
@@ -72,6 +153,8 @@ function GltfModel({
   tokenRender,
   tokenRender2d,
   footprint,
+  itemId,
+  collisionMap,
 }: {
   url: string;
   targetSize: number;
@@ -80,10 +163,25 @@ function GltfModel({
   tokenRender?: boolean;
   tokenRender2d?: boolean;
   footprint?: { width: number; height: number };
+  itemId?: string;
+  collisionMap?: import('@/systems/scene/types').MapItem;
 }) {
-  const { scene } = useGLTF(url);
+  const { scene, animations } = useGLTF(url);
+  // Sole align + locomotion only for real tokens (itemId). Props use tokenRender for materials only.
+  const isTokenMini = !!tokenRender && !!itemId;
   const clone = useMemo(() => {
-    const root = scene.clone(true);
+    // Skinned GLBs need SkeletonUtils.clone or walk/idle clips bind to the wrong bones.
+    const hasSkinned = animations.length > 0 || (() => {
+      let skinned = false;
+      scene.traverse((o) => {
+        if ((o as THREE.SkinnedMesh).isSkinnedMesh) skinned = true;
+      });
+      return skinned;
+    })();
+    const root = (hasSkinned ? cloneSkinned(scene) : scene.clone(true)) as THREE.Object3D;
+    // Hide only token minis until sole-align. Props share tokenRender materials but must
+    // stay visible — they have no itemId, so soleAlign never reveals them otherwise.
+    if (isTokenMini) root.visible = false;
     root.traverse((child) => {
       if ((child as THREE.Mesh).isMesh) {
         const mesh = child as THREE.Mesh;
@@ -99,28 +197,71 @@ function GltfModel({
     });
     if (tokenRender) brightenMeshMaterials(root, tokenRender2d, true);
     return root;
-  }, [scene, tokenRender, tokenRender2d]);
+  }, [scene, animations.length, tokenRender, tokenRender2d, isTokenMini]);
 
-  useNormalizedModel(clone, targetSize, groundAlign, footprint);
+  useNormalizedModel(clone, targetSize, groundAlign, footprint, isTokenMini, isTokenMini);
 
   useEffect(() => {
     if (!registerRaycast || tokenRender) return;
-    return registerMapRaycastRoot(clone);
-  }, [clone, registerRaycast, tokenRender]);
+    return registerMapRaycastRoot(clone, collisionMap);
+  }, [clone, registerRaycast, tokenRender, collisionMap]);
 
+  // Detach on unmount so Strict Mode / 2D↔3D remounts cannot leave an orphan nest.
+  // Never dispose clone geometry/materials — shared with useGLTF cache (wipes maps/tokens).
   useEffect(() => () => {
-    clone.traverse((child) => {
-      if ((child as THREE.Mesh).isMesh) {
-        const mesh = child as THREE.Mesh;
-        mesh.geometry?.dispose();
-        const mat = mesh.material;
-        if (Array.isArray(mat)) mat.forEach((m) => m.dispose());
-        else mat?.dispose();
-      }
-    });
+    clone.removeFromParent();
   }, [clone]);
 
-  return <primitive object={clone} />;
+  return (
+    <>
+      <primitive object={clone} />
+      {isTokenMini ? (
+        <Suspense fallback={null}>
+          <TokenMixamoWalkDriver root={clone} embedded={animations} itemId={itemId} />
+        </Suspense>
+      ) : null}
+    </>
+  );
+}
+
+/** Loads shared Mixamo walk FBX and retargets onto this token's skeleton. */
+function TokenMixamoWalkDriver({
+  root,
+  embedded,
+  itemId,
+}: {
+  root: THREE.Object3D;
+  embedded: THREE.AnimationClip[];
+  itemId?: string;
+}) {
+  const fbx = useFBX(SHARED_MIXAMO_WALK_URL);
+
+  const clips = useMemo(() => {
+    // Motion / Meshy GLBs: never override authored clips with shared Mixamo retarget.
+    if (embedded.length > 0) return embedded;
+
+    const src = fbx.animations[0];
+    if (!src) return embedded;
+
+    // Legacy auto-rig exports (Mixamo names, no clips) deform badly with retargeted walk.
+    let mixamorigOnly = true;
+    let boneCount = 0;
+    root.traverse((o) => {
+      if (!(o as THREE.Bone).isBone) return;
+      boneCount += 1;
+      if (!/^mixamorig/i.test(o.name)) mixamorigOnly = false;
+    });
+    if (boneCount >= 8 && mixamorigOnly && rootHasSkinnedMesh(root)) {
+      return [];
+    }
+
+    const retargeted = retargetMixamoClipToSkeleton(src, root);
+    if (retargeted) return [retargeted];
+    return embedded;
+  }, [fbx.animations, root, embedded]);
+
+  useTokenGroundedLocomotion(root, clips, true, itemId);
+  return null;
 }
 
 function StlModel({
@@ -131,6 +272,7 @@ function StlModel({
   tokenRender,
   tokenRender2d,
   footprint,
+  collisionMap,
 }: {
   url: string;
   targetSize: number;
@@ -139,6 +281,7 @@ function StlModel({
   tokenRender?: boolean;
   tokenRender2d?: boolean;
   footprint?: { width: number; height: number };
+  collisionMap?: import('@/systems/scene/types').MapItem;
 }) {
   const geometry = useLoader(STLLoader, url);
   const mesh = useMemo(() => {
@@ -169,8 +312,12 @@ function StlModel({
 
   useEffect(() => {
     if (!registerRaycast || tokenRender) return;
-    return registerMapRaycastRoot(mesh);
-  }, [mesh, registerRaycast, tokenRender]);
+    return registerMapRaycastRoot(mesh, collisionMap);
+  }, [mesh, registerRaycast, tokenRender, collisionMap]);
+
+  useEffect(() => () => {
+    mesh.removeFromParent();
+  }, [mesh]);
 
   return <primitive object={mesh} />;
 }
@@ -201,6 +348,8 @@ export function SceneModel({
   tokenRender = false,
   tokenRender2d = false,
   footprint,
+  itemId,
+  collisionMap,
 }: {
   url: string;
   targetSize: number;
@@ -213,6 +362,10 @@ export function SceneModel({
   tokenRender2d?: boolean;
   /** Token footprint in local space (XZ) before transform-group scale. */
   footprint?: { width: number; height: number };
+  /** Token id — enables grounded idle/walk (hip Y stripped). Maps omit this. */
+  itemId?: string;
+  /** When set with registerRaycast — bake O(1) FP collision grid from this map. */
+  collisionMap?: import('@/systems/scene/types').MapItem;
 }) {
   const { resolved, status } = useResolvedModelUrl(url);
   const format = modelFormatFromUrl(url);
@@ -245,6 +398,7 @@ export function SceneModel({
           tokenRender={tokenRender}
           tokenRender2d={tokenRender2d}
           {...(footprint ? { footprint } : {})}
+          {...(collisionMap ? { collisionMap } : {})}
         />
       </Suspense>
     );
@@ -258,7 +412,9 @@ export function SceneModel({
         registerRaycast={registerRaycast}
         tokenRender={tokenRender}
         tokenRender2d={tokenRender2d}
+        {...(itemId ? { itemId } : {})}
         {...(footprint ? { footprint } : {})}
+        {...(collisionMap ? { collisionMap } : {})}
       />
     </Suspense>
   );

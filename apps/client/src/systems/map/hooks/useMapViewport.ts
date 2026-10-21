@@ -18,6 +18,7 @@ import { isItemDragActive } from '@/systems/scene/interaction/selectionDragState
 import { isAoePlacementActive } from '@/systems/combat/aoePlacementUtils';
 import { isSpellTargetPicking } from '@/systems/spells/pickSpellTargets';
 import { sceneRefs, getMapInteractionEl } from '@/systems/scene/sceneRefs';
+import { useFirstPersonStore } from '@/systems/map3d/firstPersonStore';
 import { getActiveMap } from '@/systems/scene/store/itemStore';
 import type { MapItem } from '@/systems/scene/types';
 
@@ -131,6 +132,8 @@ export function useMapViewport(
   const pointers = useRef(new Map<number, { x: number; y: number }>());
   const pinchStart = useRef<{ dist: number; scale: number } | null>(null);
 
+  const gm2dEditorOpen = useMapStore((s) => s.gm2dEditorOpen);
+
   useEffect(() => {
     const app = appRef.current;
     const world = worldContainerRef.current;
@@ -202,15 +205,18 @@ export function useMapViewport(
 
     function onWheel(e: WheelEvent) {
       if (!isOverMapArea(e.clientX, e.clientY)) return;
+      const ms = useMapStore.getState();
+      if (ms.viewMode === '3d' && ms.mapFrozen) return;
       e.preventDefault();
       e.stopImmediatePropagation();
-      const zoomSpeed = useMapStore.getState().viewMode === '3d' ? ZOOM_SPEED_3D : ZOOM_SPEED;
+      const zoomSpeed = ms.viewMode === '3d' ? ZOOM_SPEED_3D : ZOOM_SPEED;
       const delta = -e.deltaY * zoomSpeed;
       const oldScale = w.scale.x;
       zoomAtClient(e.clientX, e.clientY, oldScale + delta * oldScale);
     }
 
     function onPointerDown(e: PointerEvent) {
+      if (useFirstPersonStore.getState().enabled && useMapStore.getState().viewMode === '3d') return;
       if (!isOverMapArea(e.clientX, e.clientY)) return;
       if (isAoePlacementActive()) return;
       if (isSpellTargetPicking()) return;
@@ -226,11 +232,17 @@ export function useMapViewport(
       }
 
       const mode = useMapStore.getState().viewMode;
+      if (mode === '3d' && useMapStore.getState().mapFrozen) return;
       const tool = activeToolRef.current;
       if (!shouldStartMapPan(e, spaceDown.current, tool, mode)) return;
       if (pickHandle(e.clientX, e.clientY)) return;
 
-      const deferForSelect = mode === '3d' && tool === 'select' && !spaceDown.current && !e.shiftKey;
+      const deferForSelect =
+        mode === '3d'
+        && !useMapStore.getState().gm2dEditorOpen
+        && tool === 'select'
+        && !spaceDown.current
+        && !e.shiftKey;
       if (deferForSelect) {
         if (pointerTargetsToken(e.clientX, e.clientY) || isItemDragActive()) return;
         pendingPan.current = {
@@ -256,6 +268,7 @@ export function useMapViewport(
     }
 
     function onPointerMove(e: PointerEvent) {
+      if (useFirstPersonStore.getState().enabled && useMapStore.getState().viewMode === '3d') return;
       if (isSpellTargetPicking()) return;
       if (isAoePlacementActive()) return;
 
@@ -312,8 +325,9 @@ export function useMapViewport(
       const rawDx = e.clientX - panStart.current.x;
       const rawDy = e.clientY - panStart.current.y;
       const { x: screenDx, y: screenDy } = clientDeltaToScreen(rawDx, rawDy);
-      const { viewMode: mode, view3dOrbit } = useMapStore.getState();
-      const vp = mode === '3d'
+      const { viewMode: mode, view3dOrbit, gm2dEditorOpen } = useMapStore.getState();
+      // Live 2D editor pane pans like pure 2D (Pixi axes), not orbit-relative 3D pan.
+      const vp = mode === '3d' && !gm2dEditorOpen
         ? apply3dScreenPan(
             w,
             pixiApp,
@@ -379,5 +393,5 @@ export function useMapViewport(
       isPanning.current = false;
       pendingPan.current = null;
     };
-  }, [appRef, worldContainerRef, appReady, interactionReady, setViewport]);
+  }, [appRef, worldContainerRef, appReady, interactionReady, gm2dEditorOpen, setViewport]);
 }

@@ -17,15 +17,19 @@ export function is3dToken(token: TokenItem): boolean {
   return getTokenRenderType(token) === '3d';
 }
 
-/** In 3D view, GLB/STL on a token always renders in Three.js (even if renderType is 2d). */
-export function tokenUsesModelMesh(token: TokenItem, viewMode: MapViewMode): boolean {
-  return viewMode === '3d' && Boolean(token.modelUrl);
+/**
+ * Token has a GLB/STL that should render as a Three.js mini.
+ * True in both 2D and 3D views (even when renderType is "2d").
+ */
+export function tokenUsesModelMesh(token: TokenItem, _viewMode?: MapViewMode): boolean {
+  return Boolean(token.modelUrl);
 }
 
-/** Token body is rendered in the Three.js overlay (2D model preview or full 3D view). */
+/** Token body is rendered in the Three.js overlay (2D model mini or full 3D view). */
 export function tokenRendersInThree(token: TokenItem, viewMode: MapViewMode): boolean {
-  if (viewMode === '3d') return true;
-  return is3dToken(token) && Boolean(token.modelUrl);
+  if (token.modelUrl) return true;
+  // Flat tokens still get Three meshes in 3D view (Token2DFlat / Token3DMesh).
+  return viewMode === '3d';
 }
 
 /** Selection gizmo for this token is drawn in Three.js — not the Pixi overlay. */
@@ -34,8 +38,9 @@ export function tokenSelectionGizmoRendersInThree(
   viewMode: MapViewMode,
 ): boolean {
   if (item.type !== 'token') return false;
+  if (tokenUsesModelMesh(item as TokenItem)) return true;
   if (viewMode === '3d') return true;
-  return tokenRendersInThree(item, viewMode);
+  return false;
 }
 
 /** Selection gizmo for a GLB map is drawn in Three.js — not the Pixi overlay. */
@@ -55,12 +60,15 @@ export function tokenHidesPixiBody(
   token: TokenItem,
   viewMode: MapViewMode,
   pixiTokenFallback: boolean,
+  gm2dEditor = false,
 ): boolean {
+  // Live 2D editor: Pixi is above the underlay — flat tokens stay in Pixi; GLB minis in Three.
+  if (gm2dEditor) return Boolean(token.modelUrl);
+  // GLB/STL minis always render in Three — hide flat Pixi art in 2D and 3D.
+  if (token.modelUrl) return true;
   if (viewMode === '3d') {
-    // GLB tokens always render in Three — never bleed flat Pixi art through the transparent overlay.
-    if (token.modelUrl) return true;
     if (pixiTokenFallback) return false;
     return is3dToken(token);
   }
-  return is3dToken(token) && Boolean(token.modelUrl);
+  return false;
 }

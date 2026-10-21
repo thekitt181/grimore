@@ -1,42 +1,49 @@
 import { useRef } from 'react';
 import type { Group } from 'three';
 import type { MapItem } from '@/systems/scene/types';
-import { useMapStore } from '@/systems/map/store/mapStore';
 import { SceneModel } from './SceneModel';
 import { SceneItemTransformGroup } from './TokenTransformGroup';
 import { MapPickVolume } from './MapPickVolume';
 import { TokenSelectionGizmo } from './Map3DTokenGizmo';
-import { TABLE_MINI_VIEW_AZIMUTH_OFFSET } from './orthographicCameraSync';
-
-/** Match token import yaw so the map mesh sits inside the selection rect in 2D. */
-const MAP_2D_IMPORT_YAW = Math.PI + TABLE_MINI_VIEW_AZIMUTH_OFFSET;
+import { MAP_MODEL_YAW } from './mapModelYaw';
 
 export function Map3DMapModel({
   map,
   showGizmo = false,
+  /** Preview underlay — no pick volumes / pose registration. */
+  displayOnly = false,
 }: {
   map: MapItem;
   showGizmo?: boolean;
+  displayOnly?: boolean;
 }) {
-  if (!map.modelUrl) return null;
-  const viewMode = useMapStore((s) => s.viewMode);
-  const view2d = viewMode === '2d';
-  const targetSize = Math.max(map.width, map.height);
   const modelRootRef = useRef<Group>(null);
 
+  if (!map.modelUrl) return null;
+  const targetSize = Math.max(map.width, map.height);
+
   return (
-    <SceneItemTransformGroup itemId={map.id} surfaceY={0} baseWidth={map.width} baseHeight={map.height}>
-      <group ref={modelRootRef} rotation={[0, view2d ? MAP_2D_IMPORT_YAW : 0, 0]}>
+    <SceneItemTransformGroup
+      itemId={map.id}
+      surfaceY={0}
+      baseWidth={map.width}
+      baseHeight={map.height}
+      displayOnly={displayOnly}
+    >
+      {/* Same yaw in 2D, 3D, and the side editor — keeps mesh locked to the grid. */}
+      <group ref={modelRootRef} rotation={[0, MAP_MODEL_YAW, 0]}>
         <SceneModel
+          key={`${map.id}:${map.modelUrl}`}
           url={map.modelUrl}
           targetSize={targetSize}
           footprint={{ width: map.width, height: map.height }}
           groundAlign
-          registerRaycast
+          registerRaycast={!displayOnly}
+          {...(!displayOnly ? { collisionMap: map } : {})}
         />
       </group>
-      <MapPickVolume map={map} modelRootRef={modelRootRef} />
-      {showGizmo && (
+      {!displayOnly && <MapPickVolume map={map} modelRootRef={modelRootRef} />}
+      {showGizmo && !displayOnly && (
         <TokenSelectionGizmo
           itemId={map.id}
           meshBaseWidth={map.width}

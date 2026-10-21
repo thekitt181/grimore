@@ -13,8 +13,9 @@ function canEraseItem(
   isGM: boolean,
   myUserId: string | null,
 ): boolean {
-  if (item.type !== 'drawing' && item.type !== 'text') return false;
+  if (item.type !== 'drawing' && item.type !== 'text' && item.type !== 'surfaceDecal') return false;
   if (isGM) return true;
+  // Surface decals: GM clears; players only erase their own strokes.
   return Boolean(myUserId && item.ownerId === myUserId);
 }
 
@@ -46,10 +47,12 @@ export function useEraserTool(appReady = false, interactionReady = false) {
       const items = Object.values(useItemStore.getState().items);
 
       const drawable = items.filter(
-        (i) => (i.type === 'drawing' || i.type === 'text') && canEraseItem(i, isGM, myUserId),
+        (i) =>
+          (i.type === 'drawing' || i.type === 'text' || i.type === 'surfaceDecal')
+          && canEraseItem(i, isGM, myUserId),
       );
       const hit = hitTest(drawable, wp.x, wp.y, { includeLocked: true });
-      if (hit && (hit.type === 'drawing' || hit.type === 'text')) {
+      if (hit && (hit.type === 'drawing' || hit.type === 'text' || hit.type === 'surfaceDecal')) {
         useItemStore.getState().removeItems([hit.id]);
         emitItemRemove([hit.id]);
         return;

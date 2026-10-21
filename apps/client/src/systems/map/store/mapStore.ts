@@ -88,6 +88,16 @@ interface SceneState extends ActiveGrid {
 
   /** 2D Pixi canvas vs 3D orbit view (React Three Fiber). */
   viewMode: MapViewMode;
+  /** GM only: live 2D map editor beside the 3D view (same scene, real-time). */
+  gm2dEditorOpen: boolean;
+  /**
+   * Frozen look-at for the left 3D pane while the GM 2D editor is open.
+   * Independent of Pixi pan/zoom on the right so adding tokens / editing 2D
+   * never moves the 3D camera.
+   */
+  view3dPaneFocus: { cx: number; cz: number; scale: number } | null;
+  /** GM only in 3D: lock map select/move/pan/orbit — tokens stay pickable for FP. */
+  mapFrozen: boolean;
   /** 3D camera orbit (right-drag or Alt+drag in 3D view). */
   view3dOrbit: View3DOrbit;
   /** 2D GLB mini view orbit (right-drag when a model token is selected). */
@@ -100,6 +110,10 @@ interface SceneState extends ActiveGrid {
   autoExtrudeWalls: boolean;
   /** Wall height in grid cells (~5 ft per cell). */
   wallHeightCells: number;
+  /** Extruded / scanned wall surface style (3D + FP). */
+  wallStyleId: string;
+  /** Blank floor surface style when map has no image (3D + FP). */
+  floorStyleId: string;
 
   // Fog
   revealedCells: Set<string>;
@@ -147,6 +161,12 @@ interface SceneState extends ActiveGrid {
 
   setViewMode: (mode: MapViewMode) => void;
   toggleViewMode: () => void;
+  setGm2dEditorOpen: (open: boolean) => void;
+  toggleGm2dEditor: () => void;
+  setView3dPaneFocus: (focus: { cx: number; cz: number; scale: number } | null) => void;
+  adjustView3dPaneFocusScale: (factor: number) => void;
+  setMapFrozen: (frozen: boolean) => void;
+  toggleMapFrozen: () => void;
   adjustView3dOrbit: (deltaAzimuth: number, deltaPolar: number, tokenId?: string) => void;
   setView3dOrbit: (orbit: View3DOrbit) => void;
   saveMiniOrbit3dForToken: (tokenId: string, orbit: View3DOrbit) => void;
@@ -161,6 +181,8 @@ interface SceneState extends ActiveGrid {
   resetTokenViewAngle: (tokenId: string) => void;
   setAutoExtrudeWalls: (enabled: boolean) => void;
   setWallHeightCells: (cells: number) => void;
+  setWallStyleId: (id: string) => void;
+  setFloorStyleId: (id: string) => void;
   setScanImageWalls: (enabled: boolean) => void;
   setWallScanThreshold: (threshold: number) => void;
 
@@ -207,12 +229,18 @@ export const useMapStore = create<SceneState>((set, get) => ({
   wallMode:     'freehand',
   viewport:     { x: 0, y: 0, scale: 1 },
   viewMode:     '2d',
+  gm2dEditorOpen: false,
+  view3dPaneFocus: null,
+  mapFrozen: false,
   view3dOrbit:    { ...DEFAULT_VIEW3D_ORBIT },
   view2dMiniOrbit: { ...DEFAULT_VIEW2D_MINI_ORBIT },
   miniOrbitByTokenId: {},
   miniOrbit3dByTokenId: {},
   autoExtrudeWalls: false,
   wallHeightCells: 1.8,
+  wallStyleId: 'mixed',
+  /** Tiled stone art in 3D/FP (use "map" to keep the painted map image). */
+  floorStyleId: 'mixed',
   scanImageWalls: false,
   wallScanThreshold: 64,
   revealedCells: new Set<string>(),
@@ -255,19 +283,58 @@ export const useMapStore = create<SceneState>((set, get) => ({
   setDrawStroke:  (drawStroke) => set({ drawStroke }),
   setTextFontSize:(textFontSize) => set({ textFontSize }),
 
-  setViewMode: (viewMode) => set({ viewMode }),
+  setViewMode: (viewMode) => set({
+    viewMode,
+    ...(viewMode === '2d'
+      ? { gm2dEditorOpen: false, mapFrozen: false, view3dPaneFocus: null }
+      : {}),
+  }),
   toggleViewMode: () =>
-    set((s) => ({ viewMode: s.viewMode === '2d' ? '3d' : '2d' })),
+    set((s) => {
+      const viewMode = s.viewMode === '2d' ? '3d' : '2d';
+      return {
+        viewMode,
+        ...(viewMode === '2d'
+          ? { gm2dEditorOpen: false, mapFrozen: false, view3dPaneFocus: null }
+          : {}),
+      };
+    }),
+  setGm2dEditorOpen: (gm2dEditorOpen) =>
+    set((s) => ({
+      gm2dEditorOpen,
+      view3dPaneFocus: gm2dEditorOpen ? s.view3dPaneFocus : null,
+    })),
+  toggleGm2dEditor: () =>
+    set((s) => {
+      const gm2dEditorOpen = !s.gm2dEditorOpen;
+      return {
+        gm2dEditorOpen,
+        // Cleared on close; snapshotted by Gm2dEditorToggle on open (needs live Pixi size).
+        view3dPaneFocus: gm2dEditorOpen ? s.view3dPaneFocus : null,
+      };
+    }),
+  setView3dPaneFocus: (view3dPaneFocus) => set({ view3dPaneFocus }),
+  adjustView3dPaneFocusScale: (factor) =>
+    set((s) => {
+      if (!s.view3dPaneFocus) return s;
+      const scale = Math.max(0.05, Math.min(8, s.view3dPaneFocus.scale * factor));
+      return { view3dPaneFocus: { ...s.view3dPaneFocus, scale } };
+    }),
+  setMapFrozen: (mapFrozen) => set({ mapFrozen }),
+  toggleMapFrozen: () => set((s) => ({ mapFrozen: !s.mapFrozen })),
   adjustView3dOrbit: (deltaAzimuth, deltaPolar, tokenId) =>
     set((s) => {
       const orbit = clampView3dOrbit({
         azimuth: s.view3dOrbit.azimuth + deltaAzimuth,
         polar: s.view3dOrbit.polar + deltaPolar,
       });
+      // While the side editor is open, keep one global left-pane orbit — don't
+      // retarget per selected token (that jumped the 3D view on every place/select).
+      const bindToken = tokenId && !s.gm2dEditorOpen ? tokenId : undefined;
       return {
         view3dOrbit: orbit,
-        ...(tokenId
-          ? { miniOrbit3dByTokenId: { ...s.miniOrbit3dByTokenId, [tokenId]: orbit } }
+        ...(bindToken
+          ? { miniOrbit3dByTokenId: { ...s.miniOrbit3dByTokenId, [bindToken]: orbit } }
           : {}),
       };
     }),
@@ -318,6 +385,8 @@ export const useMapStore = create<SceneState>((set, get) => ({
   setAutoExtrudeWalls: (autoExtrudeWalls) => set({ autoExtrudeWalls }),
   setWallHeightCells: (wallHeightCells) =>
     set({ wallHeightCells: Math.max(0.5, Math.min(8, wallHeightCells)) }),
+  setWallStyleId: (wallStyleId) => set({ wallStyleId }),
+  setFloorStyleId: (floorStyleId) => set({ floorStyleId }),
   setScanImageWalls: (scanImageWalls) => set({ scanImageWalls }),
   setWallScanThreshold: (wallScanThreshold) =>
     set({ wallScanThreshold: Math.max(50, Math.min(180, wallScanThreshold)) }),
@@ -393,12 +462,17 @@ export const useMapStore = create<SceneState>((set, get) => ({
       wallMode: 'freehand',
       viewport: { x: 0, y: 0, scale: 1 },
       viewMode: '2d',
+      gm2dEditorOpen: false,
+      view3dPaneFocus: null,
+      mapFrozen: false,
       view3dOrbit: { ...DEFAULT_VIEW3D_ORBIT },
       view2dMiniOrbit: { ...DEFAULT_VIEW2D_MINI_ORBIT },
       miniOrbitByTokenId: {},
       miniOrbit3dByTokenId: {},
       autoExtrudeWalls: false,
       wallHeightCells: 1.8,
+      wallStyleId: 'mixed',
+      floorStyleId: 'mixed',
       scanImageWalls: false,
       wallScanThreshold: 64,
       revealedCells: new Set<string>(),
@@ -410,3 +484,9 @@ export const useMapStore = create<SceneState>((set, get) => ({
       playersCanMoveTokens: true,
     }),
 }));
+
+/** GM live 2D editor beside 3D — pointer tools must use Pixi/2D semantics on that pane. */
+export function isGm2dEditorInteraction(): boolean {
+  const s = useMapStore.getState();
+  return s.viewMode === '3d' && s.gm2dEditorOpen;
+}

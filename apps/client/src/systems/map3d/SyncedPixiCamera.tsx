@@ -8,10 +8,33 @@ import { applyPerspectiveCameraFromViewport } from './syncPerspectiveCameraFromV
 /** Orthographic camera synced to Pixi pan/zoom. Top-down in 2D; orbit in 3D. */
 export function SyncedPixiOrthographicCamera() {
   const { camera, size } = useThree();
+  const gm2dEditorOpen = useMapStore((s) => s.gm2dEditorOpen);
 
   useFrame(() => {
     if (!(camera instanceof THREE.OrthographicCamera)) return;
-    applyOrthographicCameraFromViewport(camera, size.width, size.height);
+    // Split pane: Pixi is only the right editor — use this canvas size for the 3D frustum.
+    applyOrthographicCameraFromViewport(camera, size.width, size.height, {
+      useLocalSize: gm2dEditorOpen,
+    });
+  }, -100);
+
+  return null;
+}
+
+/**
+ * Top-down camera for the GM 2D editor underlay — follows Pixi pan/zoom but never
+ * steals the live pick camera used by the main 3D pane.
+ */
+export function SyncedPixiTopDownDisplayCamera() {
+  const { camera, size } = useThree();
+
+  useFrame(() => {
+    if (!(camera instanceof THREE.OrthographicCamera)) return;
+    applyOrthographicCameraFromViewport(camera, size.width, size.height, {
+      projection: 'topdown',
+      bindSceneCamera: false,
+      useLocalSize: true,
+    });
   }, -100);
 
   return null;

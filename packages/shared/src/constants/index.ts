@@ -1,6 +1,7 @@
 export const SOCKET_EVENTS = {
   // Map
   MAP_TOKEN_MOVE: 'map:tokenMove',
+  TOKEN_LIVE: 'token:live',
   MAP_FOG_UPDATE: 'map:fogUpdate',
   FOG_SYNC: 'fog:sync',
   // Combat

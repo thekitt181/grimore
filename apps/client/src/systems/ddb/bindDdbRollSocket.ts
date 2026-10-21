@@ -2,6 +2,7 @@ import type { DdbRollBridgePayload } from '@grimoire/shared';
 import { getSocket } from '@/lib/socket';
 import { useSessionStore } from '@/store/sessionStore';
 import { useDiceStore } from '@/systems/dice/diceStore';
+import { ingestDdbPropRoll } from '@/systems/map/props/ingestDdbPropRoll';
 
 let ddbRollHandler: ((payload: DdbRollBridgePayload) => void) | null = null;
 let boundSocketId: string | null = null;
@@ -20,6 +21,7 @@ export function bindDdbRollSocket(force = false): void {
     if (!sessionId || payload.sessionId !== sessionId) return;
     console.info('[DDB] roll received:', payload.characterName, payload.label, payload.total);
     useDiceStore.getState().addDdbRollEntry(payload);
+    ingestDdbPropRoll(payload);
   };
 
   socket.on('ddb:roll', ddbRollHandler);

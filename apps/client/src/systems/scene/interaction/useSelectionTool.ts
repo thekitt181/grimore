@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { Graphics } from 'pixi.js';
-import { useMapStore } from '@/systems/map/store/mapStore';
+import { isGm2dEditorInteraction, useMapStore } from '@/systems/map/store/mapStore';
 import { isPlayerCharacterToken } from '@/systems/scene/token/clientTokenVisibility';
 import { pickInteractableTokenAt } from '@/systems/scene/token/pickInteractableToken';
 import { setItemDragActive } from './selectionDragState';
@@ -10,30 +10,44 @@ import { useTokenDragMeasureStore } from './tokenDragMeasureStore';
 import { useItemStore, getActiveMap } from '../store/itemStore';
 import { useSessionStore } from '@/store/sessionStore';
 import { itemsWithLiveTransforms } from '../store/liveTransformStore';
-import { sceneRefs, clientToWorld, pickSceneItem, getMapInteractionEl } from '../sceneRefs';
-import { screenDeltaToWorldDelta } from '@/systems/map3d/coords';
+import { sceneRefs, pickSceneItem, getMapInteractionEl } from '../sceneRefs';
 import { resolveItemBounds } from '@/systems/map3d/sceneItemBounds';
+import { pointerToMapWorld } from '@/systems/map3d/screenToGround';
+import { groundHeightAt } from '@/systems/map3d/mapGroundRaycast';
 import { worldToGridColRow, tokenBoundsFromGrid } from '@/systems/scene/token/tokenGrid';
 import { emitTokenMove } from '@/systems/scene/token/tokenSync';
 import { hitTest, hitTestMap, itemIntersectsRect } from '../hitTest';
 import { isTokenMoveClick } from '../token/tokenMovePick';
 import { snapPoint } from '../snap';
 import { emitItemUpdate } from '../sceneSync';
+import { emitPropTransformLive } from '../propTransformLiveSync';
+import { emitTokenPoseLive } from '@/systems/scene/token/tokenPoseLiveSync';
 import { focusSessionMap } from '@/systems/map/mapFocusSync';
 import { getItemContainer } from '../render/useItemRenderer';
 import { useLiveTransformStore } from '../store/liveTransformStore';
 import { pickHandle } from './useTransformControls';
-import type { Item, HandoutItem, MapItem } from '../types';
+import type { Item, HandoutItem, ImageItem, MapItem } from '../types';
 import { useHandoutViewerStore } from '@/systems/compendium/handoutViewerStore';
 import { isMobileClient } from '@/lib/socket';
 import { isDdbPcToken } from '@/systems/ddb/ddbTokenUtils';
 import { useDdbStore } from '@/systems/ddb/ddbStore';
 import { isAoePlacementActive } from '@/systems/combat/aoePlacementUtils';
 import { worldDeltaToFeet } from '@/systems/combat/attackRange';
+import { clampDragToMoveBudget, recordDragFeet } from '@/systems/map3d/firstPersonMove';
+import { clampTokenFeetAgainstWalls } from '@/systems/map3d/firstPersonController';
+import { clampTokenFeetToMap } from '@/systems/map/fogLos';
+import { useFirstPersonStore } from '@/systems/map3d/firstPersonStore';
 import { isSpellTargetPicking } from '@/systems/spells/pickSpellTargets';
 import { nearestWallIndex, wallIndicesInWorldRect, wallHandleWorldPoints, pickWallHandle, translateWallIndices, moveWallEndpoint, wallsChanged, worldToMapLocal, mapLocalToWorld, WALL_PICK_RADIUS } from '@/systems/map/wallUtils';
 import { followDungeonStair, stairIndexAt } from '@/systems/map/dungeon/placeGeneratedDungeon';
-import { canTriggerProp, resolvePropId, triggerablePropAt, triggerDungeonProp } from '@/systems/map/props/dungeonProps';
+import { fitDoorOrGateItem } from '@/systems/map/props/doorFit';
+import {
+  canTriggerProp,
+  resolvePropId,
+  triggerablePropAt,
+  triggerDungeonPropAsync,
+  triggerPropUnderToken,
+} from '@/systems/map/props/dungeonProps';
 import type { WallEndpoint } from '@/systems/map/wallUtils';
 import type { TokenItem, WallSegment } from '../types';
 
@@ -43,6 +57,8 @@ interface MoveState {
   startWorldY: number;
   startScreenX: number;
   startScreenY: number;
+  /** Locked ground height for 3D raycasts — keeps the grab point under the cursor at any orbit. */
+  planeY?: number;
   origins: Map<string, { x: number; y: number }>;
 }
 
@@ -59,6 +75,9 @@ interface WallMoveState {
   indices: number[];
   startScreenX: number;
   startScreenY: number;
+  startWorldX: number;
+  startWorldY: number;
+  planeY?: number;
   originWalls: WallSegment[];
 }
 
@@ -79,6 +98,7 @@ interface WallEndpointDrag {
  */
 export function useSelectionTool(appReady: boolean, interactionReady = false) {
   const activeTool = useMapStore((s) => s.activeTool);
+  const gm2dEditorOpen = useMapStore((s) => s.gm2dEditorOpen);
   const myRole     = useSessionStore((s) => s.myRole);
 
   useEffect(() => {
@@ -97,6 +117,8 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
 
     function canDragToken(item: Item): item is TokenItem {
       if (item.type !== 'token' || item.locked) return false;
+      // First-person: walk with WASD only — no click-drag repositioning.
+      if (useFirstPersonStore.getState().enabled) return false;
       // GM can reposition tokens hidden from players; players cannot.
       if (item.visible === false && !isGm()) return false;
       return true;
@@ -126,6 +148,8 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
     let wallEndpoint: WallEndpointDrag | null = null;
     let stairPress: { mapId: string; index: number; sx: number; sy: number } | null = null;
     let propClickId: string | null = null;
+    /** Token id — Alt+click uses the prop under this token on pointer-up click. */
+    let propUnderTokenClickId: string | null = null;
     let marquee: MarqueeState | null = null;
     let marqueeGfx: Graphics | null = null;
     let wallHandleGfx: Graphics | null = null;
@@ -173,28 +197,19 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
       return isGm();
     }
 
-    function dragWorldDelta(e: PointerEvent, startScreenX: number, startScreenY: number) {
-      const scale = sceneRefs.world.current?.scale.x ?? 1;
-      const { viewMode, view3dOrbit } = useMapStore.getState();
-      const azimuth = viewMode === '3d' ? view3dOrbit.azimuth : 0;
-      return screenDeltaToWorldDelta(
-        e.clientX - startScreenX,
-        e.clientY - startScreenY,
-        scale,
-        azimuth,
-      );
+    /** Pointer delta on the ground plane — correct at any zoom, orbit angle, or token size. */
+    function pointerWorldDelta(
+      e: PointerEvent,
+      startWorldX: number,
+      startWorldY: number,
+      planeY?: number,
+    ): { dx: number; dy: number } {
+      const cur = pointerToMapWorld(e.clientX, e.clientY, planeY);
+      return { dx: cur.x - startWorldX, dy: cur.y - startWorldY };
     }
 
     function moveDragDelta(m: MoveState, e: PointerEvent): { dx: number; dy: number } {
-      const scale = sceneRefs.world.current?.scale.x ?? 1;
-      const { viewMode, view3dOrbit } = useMapStore.getState();
-      const azimuth = viewMode === '3d' ? view3dOrbit.azimuth : 0;
-      return screenDeltaToWorldDelta(
-        e.clientX - m.startScreenX,
-        e.clientY - m.startScreenY,
-        scale,
-        azimuth,
-      );
+      return pointerWorldDelta(e, m.startWorldX, m.startWorldY, m.planeY);
     }
 
     function applyTokenMoveDrag(e: PointerEvent) {
@@ -212,15 +227,37 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
         dy = snapped.y - o.y;
       }
 
+      if (tokenOnly && move.ids.length === 1) {
+        const gridSize = getActiveMap()?.gridSize ?? 70;
+        ({ dx, dy } = clampDragToMoveBudget(move.ids[0]!, dx, dy, gridSize));
+      }
+
       const layer = sceneRefs.items.current;
+      const activeMap = getActiveMap();
       const dragEntries: Array<{ id: string; x: number; y: number }> = [];
       const liveEntries: Array<{ id: string; patch: { x: number; y: number } }> = [];
       for (const id of move.ids) {
         const o = move.origins.get(id)!;
         const it = useItemStore.getState().items[id];
         if (!it) continue;
-        const nx = o.x + dx;
-        const ny = o.y + dy;
+        let nx = o.x + dx;
+        let ny = o.y + dy;
+        // 2D (and GM 2D editor): allow tokens off the map artwork.
+        // 3D/FP walk still clamps via firstPersonController.
+        if (it.type === 'token' && activeMap) {
+          const o = move.origins.get(id)!;
+          const walled = clampTokenFeetAgainstWalls(it, activeMap, o.x, o.y, nx, ny);
+          nx = walled.x;
+          ny = walled.y;
+          if (
+            useMapStore.getState().viewMode === '3d'
+            && !isGm2dEditorInteraction()
+          ) {
+            const clamped = clampTokenFeetToMap(activeMap, nx, ny, it.width, it.height);
+            nx = clamped.x;
+            ny = clamped.y;
+          }
+        }
         const live = useLiveTransformStore.getState().byId[id];
         const drawW = live?.width ?? it.width;
         const drawH = live?.height ?? it.height;
@@ -235,9 +272,12 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
       if (dragEntries.length) {
         setDragLivePositions(dragEntries);
         scheduleFogRepaintDuringDrag();
+        // Stream mid-drag so remotes see tokens move live (same path as FP walk).
+        emitTokenPoseLive(dragEntries.map((d) => ({ id: d.id, x: d.x, y: d.y })));
       }
       if (liveEntries.length) {
         useLiveTransformStore.getState().setLiveMany(liveEntries, { bumpTick: false });
+        emitPropTransformLive(liveEntries);
       }
 
       if (tokenOnly) {
@@ -250,26 +290,48 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
       return ids.length > 0 && ids.every((id) => useItemStore.getState().items[id]?.type === 'token');
     }
 
+    function mapIsFrozen(): boolean {
+      const s = useMapStore.getState();
+      // Freeze only locks the 3D pane — the side 2D editor must still move the map.
+      if (s.gm2dEditorOpen) return false;
+      return s.viewMode === '3d' && s.mapFrozen;
+    }
+
     function beginMove(ids: string[], e: PointerEvent) {
+      // Frozen map: never drag the map (or mixed selections that include it).
+      let moveIds = mapIsFrozen()
+        ? ids.filter((id) => useItemStore.getState().items[id]?.type !== 'map')
+        : ids;
+      // First-person: never drag tokens (WASD walk only).
+      if (useFirstPersonStore.getState().enabled) {
+        moveIds = moveIds.filter((id) => useItemStore.getState().items[id]?.type !== 'token');
+      }
+      if (!moveIds.length) return;
+
       setItemDragActive(true);
-      const { x: startWorldX, y: startWorldY } = clientToWorld(e.clientX, e.clientY);
+      const start = pointerToMapWorld(e.clientX, e.clientY);
+      const planeY =
+        useMapStore.getState().viewMode === '3d' && !isGm2dEditorInteraction()
+          ? groundHeightAt(start.x, start.y, 0)
+          : undefined;
       const liveById = useLiveTransformStore.getState().byId;
       const origins = new Map<string, { x: number; y: number }>();
-      for (const id of ids) {
+      for (const id of moveIds) {
         const it = useItemStore.getState().items[id];
         if (!it) continue;
         const b = resolveItemBounds(it, liveById[id]);
         origins.set(id, { x: b.x, y: b.y });
       }
       move = {
-        ids,
-        startWorldX,
-        startWorldY,
+        ids: moveIds,
+        startWorldX: start.x,
+        startWorldY: start.y,
         startScreenX: e.clientX,
         startScreenY: e.clientY,
+        ...(planeY != null ? { planeY } : {}),
         origins,
       };
-      if (moveIncludesOnlyTokens(ids)) {
+      if (moveIncludesOnlyTokens(moveIds)) {
         useTokenDragMeasureStore.getState().setMeasure(0, e.clientX, e.clientY);
       } else {
         useTokenDragMeasureStore.getState().clear();
@@ -300,11 +362,19 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
     }
 
     function beginWallMove(map: MapItem, indices: number[], e: PointerEvent) {
+      const start = pointerToMapWorld(e.clientX, e.clientY);
+      const planeY =
+        useMapStore.getState().viewMode === '3d' && !isGm2dEditorInteraction()
+          ? groundHeightAt(start.x, start.y, 0)
+          : undefined;
       wallMove = {
         mapId: map.id,
         indices: [...indices],
         startScreenX: e.clientX,
         startScreenY: e.clientY,
+        startWorldX: start.x,
+        startWorldY: start.y,
+        ...(planeY != null ? { planeY } : {}),
         originWalls: (map.walls ?? []).map((w) => ({ a: { ...w.a }, b: { ...w.b } })),
       };
       interactionEl.setPointerCapture(e.pointerId);
@@ -321,11 +391,176 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
     function onDown(e: PointerEvent) {
       stairPress = null;
       propClickId = null;
+      propUnderTokenClickId = null;
       if (e.button !== 0) return;
       if (isAoePlacementActive()) return;
       if (isSpellTargetPicking()) return;
       // Space+drag, middle-mouse, and 3D map drag pan via useMapViewport (capture phase).
       if (e.getModifierState('Space')) return;
+
+      // ── Pure 2D map + GM live 2D editor: same Pixi pick/move (props, drawings, maps).
+      const pure2dMap = useMapStore.getState().viewMode === '2d';
+      if (pure2dMap || isGm2dEditorInteraction()) {
+        if (isGm() && pickHandle(e.clientX, e.clientY)) return;
+
+        const { x: wx, y: wy } = pointerToMapWorld(e.clientX, e.clientY);
+        const store = useItemStore.getState();
+        const liveById = useLiveTransformStore.getState().byId;
+        const selectable = selectableItems();
+
+        // Alt+click: use prop under the pointer (pierces tokens) or under the token.
+        if (e.altKey && !e.shiftKey) {
+          const under = triggerablePropAt(wx, wy, isGm());
+          if (under) {
+            store.select([under.id], 'set');
+            store.clearWallSelection();
+            propClickId = under.id;
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            beginMove([under.id], e);
+            return;
+          }
+          const tokenPickAlt = pickInteractableTokenAt(e.clientX, e.clientY);
+          if (tokenPickAlt) {
+            store.select([tokenPickAlt.id], 'set');
+            store.clearWallSelection();
+            propUnderTokenClickId = tokenPickAlt.id;
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            beginTokenDrag(tokenPickAlt.id, e);
+            return;
+          }
+        }
+
+        // Tokens first (same priority as pure 2D).
+        const tokenPick = pickInteractableTokenAt(e.clientX, e.clientY);
+        if (tokenPick && canDragToken(tokenPick)) {
+          const additive = e.shiftKey;
+          const alreadySelected = store.selectedIds.includes(tokenPick.id);
+          if (additive) store.select([tokenPick.id], 'toggle');
+          else if (!alreadySelected) {
+            store.select([tokenPick.id], 'set');
+            store.clearWallSelection();
+          }
+          const b = resolveItemBounds(tokenPick, liveById[tokenPick.id]);
+          if (isTokenMoveClick(e.clientX, e.clientY, b) || !pickHandle(e.clientX, e.clientY)) {
+            beginTokenDrag(tokenPick.id, e);
+          }
+          return;
+        }
+
+        // Props / handouts / drawings above the map so they stay editable in both views.
+        const editables = selectable.filter(
+          (i) => i.type === 'image' || i.type === 'handout' || i.type === 'drawing' || i.type === 'text',
+        );
+        const hit =
+          hitTest(editables, wx, wy, { includeLocked: true })
+          ?? hitTest(selectable.filter((i) => i.type !== 'token'), wx, wy, { includeLocked: true })
+          ?? hitTestMap(selectable, wx, wy)
+          ?? undefined;
+
+        if (hit) {
+          if (hit.locked && !isGm()) return;
+          const additive = e.shiftKey;
+          const alreadySelected = store.selectedIds.includes(hit.id);
+          if (additive) store.select([hit.id], 'toggle');
+          else if (!alreadySelected) {
+            store.select([hit.id], 'set');
+            store.clearWallSelection();
+          }
+
+          const freshIds = useItemStore.getState().selectedIds.filter((id) => {
+            const it = useItemStore.getState().items[id];
+            return it && canManipulate(it);
+          });
+          if (freshIds.length) {
+            const propId = hit.type === 'image' ? resolvePropId(hit) : undefined;
+            if (alreadySelected && !additive && propId && canTriggerProp(propId)) {
+              propClickId = hit.id;
+            }
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            beginMove(freshIds, e);
+          }
+          return;
+        }
+
+        if (isGm()) {
+          const map = getActiveMap();
+          if (map) {
+            const scale = sceneRefs.world.current?.scale.x ?? 1;
+            const handles = wallHandleWorldPoints(map, store.selectedWallIndices);
+            const handleHit = pickWallHandle(wx, wy, handles, scale);
+            if (handleHit && store.selectedWallIndices.includes(handleHit.wallIndex)) {
+              wallEndpoint = {
+                mapId: map.id,
+                wallIndex: handleHit.wallIndex,
+                end: handleHit.end,
+                selectedIndices: [...store.selectedWallIndices],
+                originWalls: (map.walls ?? []).map((w) => ({ a: { ...w.a }, b: { ...w.b } })),
+              };
+              interactionEl.setPointerCapture(e.pointerId);
+              return;
+            }
+            const local = worldToMapLocal(wx, wy, map);
+            const wallIdx = nearestWallIndex(local.x, local.y, map.walls ?? [], WALL_PICK_RADIUS);
+            if (wallIdx >= 0) {
+              if (e.shiftKey) {
+                store.selectWalls([wallIdx], 'toggle');
+                redrawWallHandles();
+                return;
+              }
+              if (!store.selectedWallIndices.includes(wallIdx)) {
+                store.selectWalls([wallIdx], 'set');
+                store.select([], 'set');
+                redrawWallHandles();
+              }
+              const indices = useItemStore.getState().selectedWallIndices;
+              if (indices.length > 0) {
+                e.preventDefault();
+                e.stopImmediatePropagation();
+                beginWallMove(map, indices, e);
+              }
+              return;
+            }
+          }
+        }
+
+        if (!e.shiftKey) store.clearSelection();
+        marquee = { startWX: wx, startWY: wy };
+        if (!marqueeGfx) {
+          marqueeGfx = new Graphics();
+          marqueeGfx.label = 'marquee';
+          overlay!.addChild(marqueeGfx);
+        }
+        interactionEl.setPointerCapture(e.pointerId);
+        return;
+      }
+
+      const { x: wx, y: wy } = pointerToMapWorld(e.clientX, e.clientY);
+      const store = useItemStore.getState();
+
+      // Alt+click: use prop under pointer (pierces tokens) or under the token.
+      if (e.altKey && !e.shiftKey) {
+        const under = triggerablePropAt(wx, wy, isGm());
+        if (under) {
+          store.select([under.id], 'set');
+          store.clearWallSelection();
+          propClickId = under.id;
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          beginMove([under.id], e);
+          return;
+        }
+        const tokenPickAlt = pickInteractableTokenAt(e.clientX, e.clientY);
+        if (tokenPickAlt) {
+          store.select([tokenPickAlt.id], 'set');
+          store.clearWallSelection();
+          propUnderTokenClickId = tokenPickAlt.id;
+          beginTokenDrag(tokenPickAlt.id, e);
+          return;
+        }
+      }
 
       const tokenPick = pickInteractableTokenAt(e.clientX, e.clientY);
       if (tokenPick && canDragToken(tokenPick)) {
@@ -336,19 +571,20 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
           return;
         }
       }
-
-      const { x: wx, y: wy } = clientToWorld(e.clientX, e.clientY);
-      const store = useItemStore.getState();
       const merged = itemsWithLiveTransforms(
         store.items,
         useLiveTransformStore.getState().byId,
       );
       const viewMode = useMapStore.getState().viewMode;
-      const is3dNavigate = viewMode === '3d' && !e.shiftKey;
+      // Side 2D editor keeps viewMode 3d but must select/drag like pure 2D.
+      const is3dNavigate = viewMode === '3d' && !e.shiftKey && !isGm2dEditorInteraction();
 
       const selectable = selectableItems();
       const selectableIds = new Set(selectable.map((i) => i.id));
       const pick2dPool = selectable.filter((i) => i.type !== 'token');
+      const propPool = selectable.filter(
+        (i) => i.type === 'image' || i.type === 'handout' || i.type === 'drawing' || i.type === 'text',
+      );
       const liveById = useLiveTransformStore.getState().byId;
 
       let hit: Item | undefined;
@@ -356,16 +592,35 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
         hit = merged[tokenPick.id] as Item;
       }
 
-      const pickId = pickSceneItem(e.clientX, e.clientY);
-      const rayHit = pickId ? merged[pickId] : undefined;
-      if (!hit && rayHit?.type === 'token' && selectableIds.has(rayHit.id)) {
-        hit = rayHit;
-      } else if (!hit && rayHit && (!is3dNavigate || rayHit.type === 'map') && selectableIds.has(rayHit.id)) {
-        hit = rayHit;
+      // Props always win via world hit — including in 3D orbit (not only the side editor).
+      if (!hit && !useFirstPersonStore.getState().enabled) {
+        hit = hitTest(propPool, wx, wy, { includeLocked: true }) ?? undefined;
       }
+
+      // In 2D (and Shift+click in 3D), Pixi hit-tests must win over Three map pick volumes.
       if (!hit && !is3dNavigate) {
         hit = hitTest(pick2dPool, wx, wy, { includeLocked: true }) ?? undefined;
       }
+      if (!hit) {
+        const pickId = pickSceneItem(e.clientX, e.clientY);
+        const rayHit = pickId ? merged[pickId] : undefined;
+        if (rayHit?.type === 'token' && selectableIds.has(rayHit.id)) {
+          hit = rayHit;
+        } else if (
+          rayHit
+          && (!is3dNavigate || rayHit.type === 'map')
+          && selectableIds.has(rayHit.id)
+          && !(rayHit.type === 'map' && mapIsFrozen())
+        ) {
+          hit = rayHit;
+        }
+      }
+
+      const hitIsEditableProp =
+        hit?.type === 'image'
+        || hit?.type === 'handout'
+        || hit?.type === 'drawing'
+        || hit?.type === 'text';
 
       function beginWallEndpoint(map: MapItem, hit: { wallIndex: number; end: WallEndpoint }, indices: number[]) {
         wallEndpoint = {
@@ -379,6 +634,12 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
       }
 
       if (hit) {
+        // Freeze: ignore map clicks for select/move (tokens still pickable for FP).
+        if (hit.type === 'map' && mapIsFrozen()) {
+          if (!e.shiftKey) store.clearSelection();
+          return;
+        }
+
         const additive = e.shiftKey;
         const alreadySelected = store.selectedIds.includes(hit.id);
         if (additive) store.select([hit.id], 'toggle');
@@ -408,7 +669,7 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
             if (isGm()) {
               if (pickHandle(e.clientX, e.clientY)) handleConsumed = true;
             }
-            if (!handleConsumed && !is3dNavigate) {
+            if (!handleConsumed && (!is3dNavigate || hitIsEditableProp)) {
               const propId = hit.type === 'image' ? resolvePropId(hit) : undefined;
               if (alreadySelected && !additive && propId && canTriggerProp(propId)) {
                 propClickId = hit.id;
@@ -460,7 +721,7 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
       }
 
       // GM: 3D map pick volume or ground hit selects the map (2D / Shift+drag only).
-      if (!hit && isGm() && !is3dNavigate) {
+      if (!hit && isGm() && !is3dNavigate && !mapIsFrozen()) {
         const pickId = pickSceneItem(e.clientX, e.clientY);
         const pickedItem = pickId ? merged[pickId] : undefined;
         const mapHit = pickedItem?.type === 'map'
@@ -488,6 +749,10 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
 
       // GM: click map in 3D to select it (resize via gizmo; drag-to-pan uses threshold in useMapViewport).
       if (!hit && isGm() && is3dNavigate) {
+        if (mapIsFrozen()) {
+          if (!e.shiftKey) store.clearSelection();
+          return;
+        }
         const pickId3d = pickSceneItem(e.clientX, e.clientY);
         const pickedItem = pickId3d ? merged[pickId3d] : undefined;
         const mapHit = pickedItem?.type === 'map'
@@ -530,12 +795,17 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
         return;
       }
 
-      const { x: wx, y: wy } = clientToWorld(e.clientX, e.clientY);
+      const { x: wx, y: wy } = pointerToMapWorld(e.clientX, e.clientY);
 
       if (wallMove) {
         const map = useItemStore.getState().items[wallMove.mapId] as MapItem | undefined;
         if (!map) return;
-        let { dx, dy } = dragWorldDelta(e, wallMove.startScreenX, wallMove.startScreenY);
+        let { dx, dy } = pointerWorldDelta(
+          e,
+          wallMove.startWorldX,
+          wallMove.startWorldY,
+          wallMove.planeY,
+        );
         if (useItemStore.getState().snapToGrid && wallMove.indices.length > 0) {
           const leadIdx = wallMove.indices[0]!;
           const o = wallMove.originWalls[leadIdx]?.a;
@@ -604,7 +874,7 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
         const stairMap = useItemStore.getState().items[stairClick.mapId];
         if (stairMap?.type === 'map') followDungeonStair(stairMap, stairClick.index);
       } else if (!press && !move && !wallMove && !wallEndpoint && isGm() && e.button === 0) {
-        const { x: sx, y: sy } = clientToWorld(e.clientX, e.clientY);
+        const { x: sx, y: sy } = pointerToMapWorld(e.clientX, e.clientY);
         const under = hitTestMap(selectableItems(), sx, sy);
         if (under?.type === 'map') {
           const local = worldToMapLocal(sx, sy, under);
@@ -621,7 +891,7 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
       } else {
         setItemDragActive(false);
       }
-      const { x: wx, y: wy } = clientToWorld(e.clientX, e.clientY);
+      const { x: wx, y: wy } = pointerToMapWorld(e.clientX, e.clientY);
 
       if (wallMove) {
         const wm = wallMove;
@@ -650,9 +920,13 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
         const isClick = screenTravel < CLICK_MOVE_THRESHOLD_PX;
         if (isClick && propClickId) {
           const propItem = useItemStore.getState().items[propClickId];
-          if (propItem?.type === 'image') triggerDungeonProp(propItem);
+          if (propItem?.type === 'image') void triggerDungeonPropAsync(propItem);
+        } else if (isClick && propUnderTokenClickId) {
+          const tok = useItemStore.getState().items[propUnderTokenClickId];
+          if (tok?.type === 'token') void triggerPropUnderToken(tok);
         }
         propClickId = null;
+        propUnderTokenClickId = null;
         let { dx, dy } = moveDragDelta(m, e);
         if (!isClick && snap && m.ids.length) {
           const lead = m.ids[0]!;
@@ -661,12 +935,27 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
           dx = snapped.x - o.x;
           dy = snapped.y - o.y;
         }
+        if (!isClick && moveIncludesOnlyTokens(m.ids) && m.ids.length === 1) {
+          const gridSize = getActiveMap()?.gridSize ?? 70;
+          ({ dx, dy } = clampDragToMoveBudget(m.ids[0]!, dx, dy, gridSize));
+        }
         const patches = m.ids.map((id) => {
           const o = m.origins.get(id)!;
-          const nx = o.x + dx;
-          const ny = o.y + dy;
+          let nx = o.x + dx;
+          let ny = o.y + dy;
           const it = useItemStore.getState().items[id];
           if (it?.type === 'token') {
+            const map = getActiveMap();
+            if (map) {
+              const walled = clampTokenFeetAgainstWalls(it, map, o.x, o.y, nx, ny);
+              nx = walled.x;
+              ny = walled.y;
+              if (useMapStore.getState().viewMode === '3d' && !isGm2dEditorInteraction()) {
+                const clamped = clampTokenFeetToMap(map, nx, ny, it.width, it.height);
+                nx = clamped.x;
+                ny = clamped.y;
+              }
+            }
             const { gridCol, gridRow } = worldToGridColRow(nx + it.width / 2, ny + it.height / 2, it.sizeCells);
             return { id, kind: 'token' as const, gridCol, gridRow, x: nx, y: ny };
           }
@@ -695,11 +984,31 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
               } else {
                 emitTokenMove(p.id, p.gridCol, p.gridRow, p.x, p.y);
               }
+              recordDragFeet(p.id, worldDeltaToFeet(dx, dy));
             }
           }
+          const mapForDoors = getActiveMap();
           const itemPatches = patches
             .filter((p): p is { id: string; kind: 'item'; patch: Partial<Item> } => p.kind === 'item')
-            .map(({ id, patch }) => ({ id, patch }));
+            .map(({ id, patch }) => {
+              if (!mapForDoors) return { id, patch };
+              const it = useItemStore.getState().items[id];
+              if (it?.type !== 'image') return { id, patch };
+              const trial = { ...it, ...patch } as ImageItem;
+              const fit = fitDoorOrGateItem(trial, mapForDoors);
+              if (!fit) return { id, patch };
+              return {
+                id,
+                patch: {
+                  ...patch,
+                  x: fit.x,
+                  y: fit.y,
+                  width: fit.width,
+                  height: fit.height,
+                  rotation: fit.rotation,
+                },
+              };
+            });
           if (itemPatches.length) {
             useItemStore.getState().updateItems(itemPatches);
             emitItemUpdate(itemPatches);
@@ -744,7 +1053,7 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
     /** Double-click empty map space to select the map for move / resize (GM).
      *  Double-click a handout to view its item card. */
     function onDblClick(e: MouseEvent) {
-      const { x: wx, y: wy } = clientToWorld(e.clientX, e.clientY);
+      const { x: wx, y: wy } = pointerToMapWorld(e.clientX, e.clientY);
       const clickable = selectableItems().filter((i) => i.type !== 'map');
       const onTop = hitTest(clickable, wx, wy, { includeLocked: true });
 
@@ -804,5 +1113,5 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
       wallHandleGfx = null;
       cleanupHandleSub?.();
     };
-  }, [appReady, interactionReady, activeTool, myRole]);
+  }, [appReady, interactionReady, activeTool, gm2dEditorOpen, myRole]);
 }

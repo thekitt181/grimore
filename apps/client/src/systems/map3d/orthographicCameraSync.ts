@@ -18,9 +18,12 @@ function orthographicDepthSlab(halfW: number, halfH: number): { near: number; fa
   return { near: -slab, far: slab };
 }
 
-/** Fixed oblique view for 3D minis on the 2D map — like sitting at the table. */
-export const TABLE_MINI_VIEW_POLAR = 0.55;
-/** ~7° clockwise — mini front sits just right of camera center at 0° facing. */
+/**
+ * True top-down in 2D — must match Pixi projection so 3D tokens + selection box stay locked
+ * to the grid (any tilt skews Three vs Pixi and desyncs the gizmo).
+ */
+export const TABLE_MINI_VIEW_POLAR = 0.001;
+/** Kept for token import yaw helpers; 2D camera azimuth is unused when polar ≈ 0. */
 export const TABLE_MINI_VIEW_AZIMUTH_OFFSET = 0.12;
 export const TABLE_MINI_VIEW_AZIMUTH = Math.PI / 4.2 + TABLE_MINI_VIEW_AZIMUTH_OFFSET;
 
@@ -43,14 +46,35 @@ export function syncOrthographicCamera(state: OrthographicCameraState): THREE.Or
   return orthoCam;
 }
 
+export type OrthoViewportProjection = 'auto' | 'topdown' | 'orbit';
+
+export interface ApplyOrthoViewportOptions {
+  /** Override viewMode-based projection. `topdown` = tabletop (2D / GM 2D editor). */
+  projection?: OrthoViewportProjection;
+  /** When false, do not overwrite the live pick camera (secondary display canvases). */
+  bindSceneCamera?: boolean;
+  /** Prefer this canvas size over Pixi screen (split-pane underlays). */
+  useLocalSize?: boolean;
+}
+
 /** Apply live Pixi pan/zoom to an orthographic camera. Orbit only in 3D view. */
 export function applyOrthographicCameraFromViewport(
   camera: OrthographicCamera,
   fallbackW: number,
   fallbackH: number,
+  opts?: ApplyOrthoViewportOptions,
 ): void {
-  const { w, h } = syncedCanvasSize(fallbackW, fallbackH);
+  const { w, h } = opts?.useLocalSize
+    ? { w: fallbackW, h: fallbackH }
+    : syncedCanvasSize(fallbackW, fallbackH);
   const { viewport, view3dOrbit, viewMode } = useMapStore.getState();
+
+  const projection = opts?.projection ?? 'auto';
+  const useOrbit =
+    projection === 'orbit' || (projection === 'auto' && viewMode === '3d');
+
+  // Always follow Pixi pan/zoom so the left 3D pane and right 2D editor stay aligned.
+  // (Per-token orbit swaps are disabled separately while the editor is open.)
   const { cx, cz, scale: s } = viewportGroundCenter(viewport, w, h);
   const halfW = w / (2 * s);
   const halfH = h / (2 * s);
@@ -59,7 +83,7 @@ export function applyOrthographicCameraFromViewport(
   let camY: number;
   let camZ: number;
 
-  if (viewMode === '3d') {
+  if (useOrbit) {
     const sinP = Math.sin(view3dOrbit.polar);
     const cosP = Math.cos(view3dOrbit.polar);
     const sinA = Math.sin(view3dOrbit.azimuth);
@@ -68,7 +92,7 @@ export function applyOrthographicCameraFromViewport(
     camY = ORBIT_RADIUS * cosP;
     camZ = cz + ORBIT_RADIUS * sinP * cosA;
   } else {
-    // 2D map: tabletop view + manual mini orbit (right-drag when selected).
+    // 2D map / GM 2D editor: tabletop view + manual mini orbit (right-drag when selected).
     const { view2dMiniOrbit } = useMapStore.getState();
     const azimuth = TABLE_MINI_VIEW_AZIMUTH + view2dMiniOrbit.azimuth;
     const sinP = Math.sin(TABLE_MINI_VIEW_POLAR);
@@ -92,6 +116,8 @@ export function applyOrthographicCameraFromViewport(
   camera.up.set(0, 0, -1);
   camera.lookAt(cx, 0, cz);
   camera.updateProjectionMatrix();
+
+  if (opts?.bindSceneCamera === false) return;
 
   sceneCameraRef.liveCamera = camera;
   sceneCameraRef.current = {

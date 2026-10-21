@@ -16,6 +16,7 @@ export function useVisibleSceneTokens(opts?: { modelOnly?: boolean }): {
   activeTurnItemId?: string;
 } {
   const items = useItemStore((s) => s.items);
+  const liveTick = useLiveTransformStore((s) => s.tick);
   const gm = useSessionStore((s) => s.myRole === 'GM');
   const selectedIds = useItemStore((s) => s.selectedIds);
   const myUserId = useSessionStore((s) => s.myUserId);
@@ -29,7 +30,7 @@ export function useVisibleSceneTokens(opts?: { modelOnly?: boolean }): {
     const visible = sceneTokensForClient(Object.values(merged), gm);
     if (!opts?.modelOnly) return visible;
     return visible.filter((t) => Boolean(t.modelUrl));
-  }, [items, gm, fogRevision, selectedIds, myUserId, opts?.modelOnly]);
+  }, [items, liveTick, gm, fogRevision, selectedIds, myUserId, opts?.modelOnly]);
 
   return {
     tokens,

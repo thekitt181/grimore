@@ -12,6 +12,35 @@ export const DEFAULT_VISION_CELLS = 12;
 export const DEFAULT_VISION_FT = DEFAULT_VISION_CELLS * 5;
 /** Total vision cone width in degrees (centered on token facing). */
 export const DEFAULT_VISION_ARC_DEG = 90;
+/** 5e torch bright radius (20 ft) when the token has no darkvision. */
+export const TORCH_VISION_CELLS = 4;
+export const TORCH_VISION_FT = TORCH_VISION_CELLS * 5;
+
+/** Explicit darkvision / special sight (visionRadius > 0). */
+export function hasDarkvision(token: TokenItem): boolean {
+  return (token.visionRadius ?? 0) > 0;
+}
+
+/**
+ * First-person light/LOS radius in grid cells.
+ * Darkvision uses the token’s visionRadius (e.g. 6 cells = 30 ft);
+ * otherwise torch (20 ft / 4 cells).
+ */
+export function fpVisionCells(token: TokenItem): number {
+  if (hasDarkvision(token)) return Math.max(1, token.visionRadius ?? DEFAULT_VISION_CELLS);
+  return TORCH_VISION_CELLS;
+}
+
+/** Sight range in feet — 30 ft darkvision → 30, torch → 20. */
+export function fpVisionFeet(token: TokenItem): number {
+  return fpVisionCells(token) * 5;
+}
+
+/** Exact map-pixel radius for FP full-light / pitch-black cutoff. */
+export function fpVisionRadiusPx(token: TokenItem, gridSize: number): number {
+  const grid = Math.max(1, gridSize || 96);
+  return fpVisionCells(token) * grid;
+}
 
 /** Ignore hits closer than this so a token standing against a wall is not blinded. */
 const WALL_HIT_EPSILON = 1.25;
@@ -19,6 +48,8 @@ const WALL_HIT_EPSILON = 1.25;
 export interface LosOptions {
   /** When true, vision is a forward arc based on token rotation (players). */
   directional?: boolean;
+  /** Override wall list (e.g. visionWalls with gate openings punched). */
+  walls?: LosWall[];
 }
 
 export function visionArcRad(token: TokenItem): number {
@@ -53,14 +84,8 @@ export function mapBoundaryWalls(width: number, height: number): WallSegment[] {
   ];
 }
 
-export function allMapWalls(map: MapItem): WallSegment[] {
-  return [...(map.walls ?? []), ...mapBoundaryWalls(map.width, map.height)];
-}
-
-/** Token center in map-local pixels (accounts for map rotation). */
-export function tokenMapOrigin(token: TokenItem, map: MapItem): Point {
-  const wx = token.x + token.width / 2;
-  const wy = token.y + token.height / 2;
+/** World center → map-local pixels (accounts for map rotation). */
+export function worldToMapLocal(wx: number, wy: number, map: MapItem): Point {
   const cx = map.x + map.width / 2;
   const cy = map.y + map.height / 2;
   const rad = (-map.rotation * Math.PI) / 180;
@@ -70,6 +95,61 @@ export function tokenMapOrigin(token: TokenItem, map: MapItem): Point {
     x: dx * Math.cos(rad) - dy * Math.sin(rad) + map.width / 2,
     y: dx * Math.sin(rad) + dy * Math.cos(rad) + map.height / 2,
   };
+}
+
+/** Map-local center → world pixels. */
+export function mapLocalToWorld(localX: number, localY: number, map: MapItem): Point {
+  const cx = map.x + map.width / 2;
+  const cy = map.y + map.height / 2;
+  const rad = (map.rotation * Math.PI) / 180;
+  const lx = localX - map.width / 2;
+  const ly = localY - map.height / 2;
+  return {
+    x: lx * Math.cos(rad) - ly * Math.sin(rad) + cx,
+    y: lx * Math.sin(rad) + ly * Math.cos(rad) + cy,
+  };
+}
+
+/**
+ * Keep a token's footprint on the map IMAGE (artwork = map.width×height).
+ * Grid offset only shifts drawn lines — this never uses grid cells as the rim.
+ * `feetX/Y` are world top-left; returns clamped top-left.
+ */
+export function clampTokenFeetToMap(
+  map: MapItem,
+  feetX: number,
+  feetY: number,
+  tokenW: number,
+  tokenH: number,
+  inset = 0,
+): { x: number; y: number } {
+  const halfW = Math.max(1, tokenW / 2);
+  const halfH = Math.max(1, tokenH / 2);
+  const pad = Math.max(0, inset);
+  const local = worldToMapLocal(feetX + halfW, feetY + halfH, map);
+  // Image rect in map-local pixels (0,0)–(width,height).
+  const imgW = map.width;
+  const imgH = map.height;
+  const minX = halfW + pad;
+  const maxX = imgW - halfW - pad;
+  const minY = halfH + pad;
+  const maxY = imgH - halfH - pad;
+  const cx = maxX < minX ? imgW / 2 : Math.min(maxX, Math.max(minX, local.x));
+  const cy = maxY < minY ? imgH / 2 : Math.min(maxY, Math.max(minY, local.y));
+  if (Math.abs(cx - local.x) < 1e-4 && Math.abs(cy - local.y) < 1e-4) {
+    return { x: feetX, y: feetY };
+  }
+  const world = mapLocalToWorld(cx, cy, map);
+  return { x: world.x - halfW, y: world.y - halfH };
+}
+
+export function allMapWalls(map: MapItem): WallSegment[] {
+  return [...(map.walls ?? []), ...mapBoundaryWalls(map.width, map.height)];
+}
+
+/** Token center in map-local pixels (accounts for map rotation). */
+export function tokenMapOrigin(token: TokenItem, map: MapItem): Point {
+  return worldToMapLocal(token.x + token.width / 2, token.y + token.height / 2, map);
 }
 
 export function tokenOnMap(token: TokenItem, map: MapItem): boolean {
@@ -108,7 +188,7 @@ function extendWall(wall: WallSegment, pad: number): WallSegment {
   };
 }
 
-function losWalls(map: MapItem): LosWall[] {
+export function losWalls(map: MapItem): LosWall[] {
   const drawn = map.dungeon
     ? (map.walls ?? []).map((wall) => extendWall(wall, 2))
     : (map.walls ?? []);
@@ -133,11 +213,12 @@ export function revealedCellsPastDungeonWalls(
   revealedCells: Set<string>,
   tokens: TokenItem[],
   gridSize: number,
+  wallsOverride?: LosWall[],
 ): Set<string> {
   if (!map.dungeon || tokens.length === 0 || revealedCells.size === 0 || gridSize <= 0) {
     return revealedCells;
   }
-  const walls = losWalls(map);
+  const walls = wallsOverride ?? losWalls(map);
   const origins = tokens.map((token) => tokenMapOrigin(token, map));
   const kept = new Set<string>();
   for (const key of revealedCells) {
@@ -151,7 +232,7 @@ export function revealedCellsPastDungeonWalls(
 }
 
 /** True when a drawn wall (or the map edge) sits between the origin and the point. */
-function wallBlocksPoint(origin: Point, px: number, py: number, walls: LosWall[]): boolean {
+export function wallBlocksPoint(origin: Point, px: number, py: number, walls: LosWall[]): boolean {
   const dx = px - origin.x;
   const dy = py - origin.y;
   const dist = Math.hypot(dx, dy);
@@ -162,6 +243,64 @@ function wallBlocksPoint(origin: Point, px: number, py: number, walls: LosWall[]
     const t = rayHitSegment(origin, dirX, dirY, wall);
     if (t !== null && t > WALL_HIT_EPSILON && t < dist - 0.5) return true;
   }
+  return false;
+}
+
+/** Distance from point to a finite wall segment. */
+export function distPointToWallSegment(p: Point, wall: LosWall): number {
+  const abx = wall.b.x - wall.a.x;
+  const aby = wall.b.y - wall.a.y;
+  const len2 = abx * abx + aby * aby;
+  if (len2 < 1e-8) return Math.hypot(p.x - wall.a.x, p.y - wall.a.y);
+  let t = ((p.x - wall.a.x) * abx + (p.y - wall.a.y) * aby) / len2;
+  t = Math.max(0, Math.min(1, t));
+  return Math.hypot(p.x - (wall.a.x + t * abx), p.y - (wall.a.y + t * aby));
+}
+
+/**
+ * FP capsule vs red walls / closed doors.
+ * Sized like a Medium creature (~¼ cell) so Large+ tokens still fit 5 ft corridors,
+ * while centerline hits still stop clipping through solid walls and shut doors.
+ */
+export function fpWallBodyRadius(map: MapItem): number {
+  const cell = Math.max(8, map.gridSize || 96);
+  // Keep under half a cell so a 1-square corridor stays walkable at the centerline.
+  return Math.min(cell * 0.22, 20) + Math.max(2, cell * 0.04);
+}
+
+/**
+ * Solid FP / movement collision against red walls (and map edges).
+ * Unlike wallBlocksPoint (LOS), this uses a body radius and no large near-hit epsilon,
+ * so you cannot slip through on small steps while hugging a wall.
+ */
+export function wallBlocksMovement(
+  from: Point,
+  to: Point,
+  walls: LosWall[],
+  radius: number,
+): boolean {
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const dist = Math.hypot(dx, dy);
+  const r = Math.max(0, radius);
+
+  // Crossing the wall centerline (tiny epsilon only — LOS epsilon lets FP clip through).
+  if (dist > 1e-6) {
+    const dirX = dx / dist;
+    const dirY = dy / dist;
+    for (const wall of walls) {
+      const t = rayHitSegment(from, dirX, dirY, wall);
+      if (t !== null && t >= 0.02 && t <= dist - 0.02) return true;
+    }
+  }
+
+  // Body radius: block when the destination presses deeper into a wall than the start.
+  for (const wall of walls) {
+    const d0 = distPointToWallSegment(from, wall);
+    const d1 = distPointToWallSegment(to, wall);
+    if (d1 < r && d1 < d0 - 0.05) return true;
+  }
+
   return false;
 }
 
@@ -211,7 +350,7 @@ export function losPolygons(
 ): Point[][] {
   if (tokens.length === 0) return [];
   const directional = options.directional ?? false;
-  const walls = losWalls(map);
+  const walls = options.walls ?? losWalls(map);
 
   return tokens.map((token) => {
     const origin = tokenMapOrigin(token, map);
@@ -287,7 +426,7 @@ function computeLosVisibleCellKeys(
   const cols = Math.ceil(map.width / gridSize);
   const rows = Math.ceil(map.height / gridSize);
   const directional = options.directional ?? false;
-  const walls = losWalls(map);
+  const walls = options.walls ?? losWalls(map);
 
   for (const token of tokens) {
     const origin = tokenMapOrigin(token, map);

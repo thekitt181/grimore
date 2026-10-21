@@ -9,7 +9,7 @@ import { emitItemAdd, emitItemUpdate } from './sceneSync';
 import { deleteCurrentSelection } from './deleteSelection';
 import { syncGridToMap } from './syncGridToMap';
 import type { HandoutInventoryTarget, SessionUser } from '@grimoire/shared';
-import type { Item, MapItem, TokenItem, HandoutItem } from './types';
+import type { ImageItem, Item, MapItem, TokenItem, HandoutItem } from './types';
 import { isHpHiddenFromPlayers } from './types';
 import { visionFeet, visionRadiusFromFeet } from '@/systems/map/fogLos';
 import { applyTokenHpToCombatants, applyTokenConditionsToCombatants } from '@/systems/initiative/initiativeTokenSync';
@@ -38,6 +38,18 @@ import { emitSessionTimeOfDay, emitSessionWeather } from './media/useSceneMedia'
 import { extractApiError } from '@/lib/apiError';
 import { useTokenStore } from './store/tokenStore';
 import { playerCanRotateToken, playerOwnsToken } from './token/clientTokenVisibility';
+import {
+  armPropForDdbRoll,
+  canTriggerProp,
+  canUsePropUnderToken,
+  propActivateCheckLabel,
+  propNextCheckKind,
+  propRevealCheckLabel,
+  resolvePropId,
+  triggerDungeonPropAsync,
+  triggerablePropUnderToken,
+  triggerPropUnderToken,
+} from '@/systems/map/props/dungeonProps';
 
 const CONDITIONS = [
   'Blinded', 'Charmed', 'Deafened', 'Frightened', 'Grappled', 'Incapacitated',
@@ -496,6 +508,34 @@ export function ItemContextMenu() {
       single?.type === 'token' && playerCanRotateToken(single as TokenItem, myUserId)
         ? (single as TokenItem)
         : null;
+    const propUnder =
+      single?.type === 'token' && canUsePropUnderToken(single as TokenItem)
+        ? triggerablePropUnderToken(single as TokenItem, false)
+        : null;
+    const underNext = propUnder ? propNextCheckKind(propUnder) : null;
+    const underCheck = propUnder
+      ? underNext === 'reveal'
+        ? propRevealCheckLabel(propUnder)
+        : propActivateCheckLabel(propUnder)
+      : undefined;
+    const underDc =
+      underNext === 'reveal'
+        ? propUnder?.propRevealDc
+        : underNext === 'activate'
+          ? propUnder?.propActivateDc
+          : undefined;
+    const usePropLabel = propUnder
+      ? underNext === 'reveal'
+        ? `👁 Reveal ${propUnder.name} (DC ${underDc})`
+        : underNext === 'activate'
+          ? `🎲 Open ${propUnder.name} (DC ${underDc})`
+          : `🗝 Use ${propUnder.name}`
+      : null;
+    const canArmUnderDdb = Boolean(
+      propUnder
+      && underNext
+      && (underNext === 'reveal' ? propUnder.propRevealCheck : propUnder.propActivateCheck),
+    );
 
     return (
       <div
@@ -541,6 +581,24 @@ export function ItemContextMenu() {
               }}
             />
           </>
+        )}
+        {usePropLabel && single?.type === 'token' && (
+          <Btn
+            label={usePropLabel}
+            onClick={() => {
+              void triggerPropUnderToken(single as TokenItem);
+              close();
+            }}
+          />
+        )}
+        {canArmUnderDdb && single?.type === 'token' && (
+          <Btn
+            label={`⏳ Wait for D&D Beyond ${underCheck}`}
+            onClick={() => {
+              void triggerPropUnderToken(single as TokenItem, { waitForDdb: true });
+              close();
+            }}
+          />
         )}
         {single?.type === 'handout' && (
           <Btn label="📖 View item" onClick={() => {
@@ -637,6 +695,83 @@ export function ItemContextMenu() {
       <Btn label="⧉ Duplicate" onClick={duplicate} />
       <Btn label="📋 Copy" onClick={copy} />
       <Btn label="📌 Paste" onClick={paste} />
+
+      {single?.type === 'image' && (() => {
+        const img = single as ImageItem;
+        const propId = resolvePropId(img);
+        if (!propId || !canTriggerProp(propId)) return null;
+        const next = propNextCheckKind(img);
+        const check = next === 'reveal' ? propRevealCheckLabel(img) : propActivateCheckLabel(img);
+        const dc = next === 'reveal' ? img.propRevealDc : img.propActivateDc;
+        const linked = next === 'reveal' ? img.propRevealCheck : img.propActivateCheck;
+        const label =
+          next === 'reveal'
+            ? `👁 Reveal ${img.name} (DC ${dc})`
+            : next === 'activate'
+              ? `🎲 Open ${img.name} (DC ${dc})`
+              : img.visible === false
+                ? `👁 Reveal ${img.name}`
+                : `🗝 Use ${img.name}`;
+        return (
+          <>
+            <div className="gold-divider my-1" />
+            <Btn
+              label={label}
+              onClick={() => {
+                void triggerDungeonPropAsync(img);
+                close();
+              }}
+            />
+            {next && linked && (
+              <Btn
+                label={`⏳ Wait for D&D Beyond ${check}`}
+                onClick={() => {
+                  armPropForDdbRoll(img);
+                  close();
+                }}
+              />
+            )}
+          </>
+        );
+      })()}
+
+      {single?.type === 'token' && (() => {
+        const prop = triggerablePropUnderToken(single as TokenItem, true);
+        if (!prop) return null;
+        const next = propNextCheckKind(prop);
+        const check = next === 'reveal' ? propRevealCheckLabel(prop) : propActivateCheckLabel(prop);
+        const dc = next === 'reveal' ? prop.propRevealDc : prop.propActivateDc;
+        const linked = next === 'reveal' ? prop.propRevealCheck : prop.propActivateCheck;
+        const label =
+          next === 'reveal'
+            ? `👁 Reveal ${prop.name} under token (DC ${dc})`
+            : next === 'activate'
+              ? `🎲 Open ${prop.name} under token (DC ${dc})`
+              : prop.visible === false
+                ? `👁 Reveal ${prop.name} under token`
+                : `🗝 Use ${prop.name} under token`;
+        return (
+          <>
+            <div className="gold-divider my-1" />
+            <Btn
+              label={label}
+              onClick={() => {
+                void triggerPropUnderToken(single as TokenItem);
+                close();
+              }}
+            />
+            {next && linked && (
+              <Btn
+                label={`⏳ Wait for D&D Beyond ${check}`}
+                onClick={() => {
+                  void triggerPropUnderToken(single as TokenItem, { waitForDdb: true });
+                  close();
+                }}
+              />
+            )}
+          </>
+        );
+      })()}
 
       <div className="gold-divider my-1" />
       <Btn label="⤒ Bring to Front" onClick={() => zorder('front')} />
