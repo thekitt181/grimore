@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { DUNGEON_PROPS, placeDungeonProp } from './dungeonProps';
+import { listDungeonProps, placeDungeonProp } from './dungeonProps';
 import { ToolSection } from '@/systems/map/ToolSection';
 
 export function DungeonPropsPanel() {
@@ -16,7 +16,7 @@ export function DungeonPropsPanel() {
         Place hidden
       </label>
       <div className="grid grid-cols-3 gap-1">
-        {DUNGEON_PROPS.map((prop) => (
+        {listDungeonProps().map((prop) => (
           <button
             key={prop.id}
             type="button"
@@ -39,7 +39,7 @@ export function DungeonPropsPanel() {
         ))}
       </div>
       <p className="font-ui text-xs leading-snug" style={{ color: 'var(--color-text-secondary)' }}>
-        Click a prop to drop it on the active map, then drag it into place. Doors and gates snap to wall openings. Within 15 ft: set Reveal (e.g. Perception DC) to find hidden props, and Open (e.g. Athletics DC) to open them — two separate rolls. Use / U / VTT or D&D Beyond checks apply to the nearest matching step.
+        Click a prop to drop it on the active map, then drag it into place. Doors and gates snap to wall openings. Select a prop for Angle / Mount (Floor or Wall) / Snap wall — torches and murals sit on walls in 3D. Within 15 ft: set Reveal (e.g. Perception DC) to find hidden props, and Open (e.g. Athletics DC) to open them. Use / U / VTT or D&D Beyond checks apply to the nearest matching step.
       </p>
     </ToolSection>
   );

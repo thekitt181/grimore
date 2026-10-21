@@ -11,6 +11,7 @@ import {
 } from '@/systems/map/hooks/useMapViewport';
 import type { MapFocusPayload } from '@grimoire/shared';
 import type { MapItem } from '@/systems/scene/types';
+import { ensureDungeonMapProps } from '@/systems/map/dungeon/ensureDungeonMapProps';
 
 let mapFocusHandler: ((payload: MapFocusPayload) => void) | null = null;
 let pendingMapFocus: MapFocusPayload | null = null;
@@ -140,6 +141,7 @@ export function focusSessionMap(
 
   useItemStore.getState().setActiveMap(mapId);
   syncMapGridFromItem(map);
+  ensureDungeonMapProps(mapId);
   if (opts.select !== false) {
     useItemStore.getState().select([mapId], 'set');
   }

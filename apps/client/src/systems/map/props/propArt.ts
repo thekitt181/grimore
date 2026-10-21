@@ -47,11 +47,15 @@ export const PROP_ART: PropArt[] = [
   { id: 'skull', name: 'Skull', short: 'Skull', motion: 'none', play: 'still', rest: '/props/skull.png' },
   { id: 'corpse', name: 'Corpse', short: 'Corpse', motion: 'none', play: 'still', rest: '/props/corpse.png' },
   { id: 'crate', name: 'Crate', short: 'Crate', motion: 'none', play: 'still', rest: '/props/crate.png' },
+  { id: 'barrel', name: 'Barrel', short: 'Barrel', motion: 'none', play: 'still', rest: '/props/crate.png' },
+  { id: 'keg', name: 'Keg', short: 'Keg', motion: 'none', play: 'still', rest: '/props/crate.png' },
+  { id: 'key', name: 'Key', short: 'Key', motion: 'none', play: 'still', rest: '/props/ring.png' },
   { id: 'boulder', name: 'Boulder', short: 'Rock', motion: 'none', play: 'still', rest: '/props/boulder.png' },
   { id: 'column', name: 'Column', short: 'Pillar', motion: 'none', play: 'still', rest: '/props/column.png' },
   { id: 'statue', name: 'Statue', short: 'Statue', motion: 'toggle', play: 'swap', rest: '/props/statue.png', open: '/props/stump.png' },
   { id: 'altar', name: 'Altar', short: 'Altar', motion: 'toggle', play: 'ignite', rest: '/props/altar.png', frames: flame },
   { id: 'torch', name: 'Torch', short: 'Torch', motion: 'loop', play: 'flicker', rest: torch[0]!, frames: torch },
+  { id: 'candle', name: 'Candle', short: 'Candle', motion: 'loop', play: 'flicker', rest: flame[0]!, frames: flame },
   { id: 'campfire', name: 'Campfire', short: 'Fire', motion: 'loop', play: 'flicker', rest: flame[0]!, frames: flame },
   { id: 'door', name: 'Door', short: 'Door', motion: 'toggle', play: 'swing', rest: '/props/door-closed.png', open: '/props/door-open.png' },
   { id: 'hatch', name: 'Trap door', short: 'Hatch', motion: 'toggle', play: 'split', rest: '/props/hatch.png', open: '/props/shaft.png' },
@@ -87,6 +91,48 @@ export const PROP_ART: PropArt[] = [
   { id: 'scroll', name: 'Scroll', short: 'Scroll', motion: 'none', play: 'still', rest: '/props/scroll.png' },
   { id: 'potion', name: 'Potion', short: 'Potion', motion: 'none', play: 'still', rest: '/props/potion.png' },
   { id: 'sword', name: 'Sword', short: 'Sword', motion: 'none', play: 'still', rest: '/props/sword.png' },
+  {
+    id: 'weapon-rack',
+    name: 'Weapon rack',
+    short: 'Rack',
+    motion: 'none',
+    play: 'still',
+    rest: '/props/weapon-rack.svg',
+  },
+  { id: 'cage', name: 'Empty cage', short: 'Cage', motion: 'none', play: 'still', rest: '/props/cage.svg' },
+  { id: 'mural', name: 'Faded mural', short: 'Mural', motion: 'none', play: 'still', rest: '/props/mural.svg' },
+  {
+    id: 'art-object',
+    name: 'Art object',
+    short: 'Art',
+    motion: 'none',
+    play: 'still',
+    rest: '/props/art-object.svg',
+  },
+  {
+    id: 'swarm',
+    name: 'Swarm overhead',
+    short: 'Swarm',
+    motion: 'loop',
+    play: 'breathe',
+    rest: '/props/swarm.svg',
+  },
+  {
+    id: 'floor-glyph',
+    name: 'Floor glyph',
+    short: 'Glyph',
+    motion: 'loop',
+    play: 'pulse',
+    rest: '/props/floor-glyph.svg',
+  },
+  {
+    id: 'tripwire',
+    name: 'Tripwire',
+    short: 'Wire',
+    motion: 'toggle',
+    play: 'snap',
+    rest: '/props/tripwire.svg',
+  },
   { id: 'ring', name: 'Ring', short: 'Ring', motion: 'none', play: 'still', rest: '/props/ring.png' },
   { id: 'orb', name: 'Orb', short: 'Orb', motion: 'none', play: 'still', rest: '/props/orb.png' },
   { id: 'rune', name: 'Rune', short: 'Rune', motion: 'none', play: 'still', rest: '/props/rune.png' },
@@ -96,20 +142,34 @@ export const PROP_ART: PropArt[] = [
 const ALIAS: Record<string, string> = {
   'locked-chest': 'sarcophagus',
   bones: 'skeleton',
-  barrel: 'crate',
   rubble: 'boulder',
   pillar: 'column',
   trapdoor: 'hatch',
   spikes: 'spear',
   'bear-trap': 'blade',
   portcullis: 'gate',
+  empty_cage: 'cage',
+  'empty-cage': 'cage',
+  weapon_rack: 'weapon-rack',
+  dry_fountain: 'dry-fountain',
+  art_object: 'art-object',
+  floor_glyph: 'floor-glyph',
+  'swarm-vermin': 'swarm',
 };
 
 export function canonicalPropId(id: string): string {
   return ALIAS[id] ?? id;
 }
 
-export function propArtById(id: string): PropArt | undefined {
+/** Base catalog lookup (runtime extras live in propCatalog). */
+export function propArtByIdBase(id: string): PropArt | undefined {
   const key = canonicalPropId(id);
   return PROP_ART.find((art) => art.id === key);
 }
+
+export {
+  allPropArtEntries,
+  ensurePropCatalogEntry,
+  propArtById,
+  propIdsFromNoteText,
+} from './propCatalog';

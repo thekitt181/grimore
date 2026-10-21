@@ -8,7 +8,7 @@ import { sceneCameraRef } from './sceneCameraRef';
 import { pixiToThreeX, pixiToThreeZ } from './coords';
 import { firstPersonLook } from './firstPersonLook';
 import { firstPersonPose, seedFirstPersonPose, syncFirstPersonPoseFromItem } from './firstPersonPose';
-import { useFirstPersonStore, DEFAULT_WALK_SPEED_FT } from './firstPersonStore';
+import { useFirstPersonStore } from './firstPersonStore';
 import { resolveFirstPersonToken } from './resolveFirstPersonToken';
 import {
   initiativeMoveLimitFt,
@@ -17,21 +17,21 @@ import {
   yawForwardWorld,
 } from './firstPersonMove';
 import { controlFirstPersonMove } from './firstPersonController';
-import { damp, firstPersonMotion } from './firstPersonMotion';
+import { damp, firstPersonMotion, FP_SIM_STEP } from './firstPersonMotion';
 import { startFpPosePublisher, stopFpPosePublisher, tickFpPoseNetwork } from './fpPoseSync';
 import { setMapRaycastPaused } from './mapGroundRaycast';
 import { bakedGroundHeightSmooth, getMapCollisionGrid } from './mapCollisionGrid';
 import { useTokenDragMeasureStore } from '@/systems/scene/interaction/tokenDragMeasureStore';
 
 const EYE_CELLS = 1.1;
-/** How fast eye height catches stair treads. */
-const EYE_FOLLOW = 18;
+/** Eye height eases only on stair jumps; flat floor snaps. */
+const EYE_FOLLOW = 32;
+const EYE_SNAP_DELTA = 0.35;
 const WALK_CELLS_PER_SEC = 3.25;
 const MEASURE_MS = 280;
 const STAIR_MS = 400;
-/** Fixed walk step — keeps speed dungeon-like even when GLB frames hitch. */
-const WALK_STEP = 1 / 60;
-const WALK_MAX_STEPS = 5;
+const MAX_FRAME_DT = 0.05;
+const MAX_WALK_SUBSTEPS = 10;
 
 function integrateWalk(token: TokenItem, dt: number): void {
   const keys = firstPersonMotion.held;
@@ -85,6 +85,7 @@ export function FirstPersonCamera() {
   const camera = useMemo(() => {
     const cam = new THREE.PerspectiveCamera(72, 1, 0.12, 8000);
     cam.up.set(0, 1, 0);
+    cam.rotation.order = 'YXZ';
     return cam;
   }, []);
 
@@ -125,15 +126,17 @@ export function FirstPersonCamera() {
     const grid = map?.gridSize ?? 96;
     const now = performance.now();
 
-    // Catch up with fixed steps so a slow GLB frame doesn't crawl the walk.
-    firstPersonMotion.accum += Math.min(0.1, Math.max(0, dt));
-    let steps = 0;
-    while (firstPersonMotion.accum >= WALK_STEP && steps < WALK_MAX_STEPS) {
-      integrateWalk(token, WALK_STEP);
-      firstPersonMotion.accum -= WALK_STEP;
-      steps += 1;
+    // Variable frame dt split into small slices — smooth on 120/144 Hz, capped on hitches.
+    const frameDt = Math.min(MAX_FRAME_DT, Math.max(0, dt));
+    const subSteps = Math.min(
+      MAX_WALK_SUBSTEPS,
+      Math.max(1, Math.ceil(frameDt / FP_SIM_STEP)),
+    );
+    const subDt = frameDt / subSteps;
+    for (let i = 0; i < subSteps; i += 1) {
+      integrateWalk(token, subDt);
     }
-    if (steps >= WALK_MAX_STEPS) firstPersonMotion.accum = 0;
+    firstPersonMotion.accum = 0;
 
     const keys = firstPersonMotion.held;
     const keysDown = keys.has('w') || keys.has('a') || keys.has('s') || keys.has('d')
@@ -187,13 +190,10 @@ export function FirstPersonCamera() {
     const targetEye = groundY + eyeOffset;
     if (!Number.isFinite(firstPersonMotion.eyeY)) {
       firstPersonMotion.eyeY = targetEye;
+    } else if (Math.abs(targetEye - firstPersonMotion.eyeY) < EYE_SNAP_DELTA) {
+      firstPersonMotion.eyeY = targetEye;
     } else {
-      firstPersonMotion.eyeY = damp(
-        firstPersonMotion.eyeY,
-        targetEye,
-        EYE_FOLLOW,
-        Math.min(0.05, Math.max(0, dt)),
-      );
+      firstPersonMotion.eyeY = damp(firstPersonMotion.eyeY, targetEye, EYE_FOLLOW, frameDt);
     }
     const eyeY = firstPersonMotion.eyeY;
 
@@ -207,11 +207,15 @@ export function FirstPersonCamera() {
     }
 
     camera.position.set(cx, eyeY, cz);
+    camera.rotation.y = -((yaw * Math.PI) / 180);
+    camera.rotation.x = pitch;
+    camera.rotation.z = 0;
 
     const lookDist = grid * 4;
     const lookY = eyeY + Math.sin(pitch) * lookDist;
     const flat = Math.cos(pitch) * lookDist;
-    camera.lookAt(cx + fx * flat, lookY, cz + fz * flat);
+    const targetX = cx + fx * flat;
+    const targetZ = cz + fz * flat;
 
     sceneCameraRef.liveCamera = camera;
     const ref = sceneCameraRef.current;
@@ -219,9 +223,9 @@ export function FirstPersonCamera() {
       ref.position.x = camera.position.x;
       ref.position.y = camera.position.y;
       ref.position.z = camera.position.z;
-      ref.target.x = cx + fx * flat;
+      ref.target.x = targetX;
       ref.target.y = lookY;
-      ref.target.z = cz + fz * flat;
+      ref.target.z = targetZ;
       ref.fov = camera.fov;
       ref.near = camera.near;
       ref.far = camera.far;
@@ -229,7 +233,7 @@ export function FirstPersonCamera() {
       sceneCameraRef.current = {
         type: 'perspective',
         position: { x: camera.position.x, y: camera.position.y, z: camera.position.z },
-        target: { x: cx + fx * flat, y: lookY, z: cz + fz * flat },
+        target: { x: targetX, y: lookY, z: targetZ },
         fov: camera.fov,
         near: camera.near,
         far: camera.far,

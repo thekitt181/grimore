@@ -33,6 +33,8 @@ import { bindFogActiveSocket, syncFogActiveToSession } from '@/systems/scene/fog
 import { bindWallExtrudeSocket, syncWallExtrudeToSession } from '@/systems/map/wallExtrudeSync';
 import { bindFogRepaintSubscriptions } from '@/systems/map/fogRepaintBridge';
 import { bindMapFocusSocket, flushPendingMapFocus, focusSessionMap, syncMapFocusToSession } from '@/systems/map/mapFocusSync';
+import { ensureDungeonMapPropsForActiveMap } from '@/systems/map/dungeon/ensureDungeonMapProps';
+import { stopAllPropAnimations } from '@/systems/map/props/propAnimation';
 import { useParams } from 'react-router-dom';
 import {
   addDeletedIds,
@@ -51,6 +53,7 @@ import { useWallTool } from './hooks/useWallTool';
 import { useEraserTool } from './hooks/useEraserTool';
 import { useDeleteKey } from './hooks/useDeleteKey';
 import { usePropTriggerKey } from './hooks/usePropTriggerKey';
+import { bindPropInteractSync } from './props/propInteractSync';
 import { useMap3DPixiMode } from './hooks/useMap3DPixiMode';
 import { useMap3DOrbit } from './hooks/useMap3DOrbit';
 import { useMap2DMiniOrbit } from './hooks/useMap2DMiniOrbit';
@@ -109,7 +112,9 @@ export function MapCanvas() {
   const viewMode = useMapStore((s) => s.viewMode);
   const gm2dEditorOpen = useMapStore((s) => s.gm2dEditorOpen);
   const splitGm2d = viewMode === '3d' && gm2dEditorOpen;
-  const firstPerson = useFirstPersonStore((s) => s.enabled) && viewMode === '3d';
+  const fpEnabled = useFirstPersonStore((s) => s.enabled) && viewMode === '3d';
+  const fpLookCapture = useFirstPersonStore((s) => s.lookCaptureActive);
+  const firstPerson = fpEnabled;
   const items = useItemStore((s) => s.items);
   const activeMapId = useItemStore((s) => s.activeMapId);
   const myRole = useSessionStore((s) => s.myRole);
@@ -246,6 +251,7 @@ export function MapCanvas() {
     setAppReady(true);
 
     return () => {
+      stopAllPropAnimations();
       setAppReady(false);
       sceneRefs.app.current = null;
       sceneRefs.world.current = null;
@@ -417,8 +423,11 @@ export function MapCanvas() {
           : localItems.filter((i) => !deletedIds.has(i.id));
         const current = useItemStore.getState().items;
         if (!sameSceneItemSnapshot(merged, current)) {
-          useItemStore.getState().setItems(merged);
+          useItemStore.getState().setItems(merged, payload.activeMapId ?? undefined);
+        } else if (payload.activeMapId) {
+          useItemStore.getState().setActiveMap(payload.activeMapId);
         }
+        ensureDungeonMapPropsForActiveMap();
         if (sessionId) persistItemsLocal(sessionId, merged);
         if (
           serverItems.length === 0 &&
@@ -497,7 +506,7 @@ export function MapCanvas() {
       bindFogActiveSocket();
       bindWallExtrudeSocket();
       bindMapFocusSocket();
-      requestSceneHydrate();
+      bindPropInteractSync(socket);
     }
 
     attachSceneListeners();
@@ -862,7 +871,7 @@ export function MapCanvas() {
           background: 'transparent',
           borderLeft: splitGm2d ? '1px solid transparent' : undefined,
           touchAction: 'none',
-          pointerEvents: firstPerson ? 'none' : 'auto',
+          pointerEvents: fpEnabled && fpLookCapture ? 'none' : 'auto',
         }}
         aria-hidden
       />

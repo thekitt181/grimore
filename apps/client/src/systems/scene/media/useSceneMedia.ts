@@ -18,6 +18,7 @@ import {
 } from './audioEngine';
 import { useSceneMediaStore, normalizeWeatherOverlay } from './sceneMediaStore';
 import { hydrateSceneMap } from '../manager/hydrateSceneMap';
+import { ensureDungeonMapPropsForActiveMap } from '@/systems/map/dungeon/ensureDungeonMapProps';
 import { useItemStore } from '../store/itemStore';
 import { useMapStore } from '@/systems/map/store/mapStore';
 import { applyFogData } from '../fogSync';
@@ -205,6 +206,7 @@ export function applySceneBundle(scene: SceneRecord, transition: SceneChangePayl
   if (!isEphemeralLiveScene(scene)) {
     if (Array.isArray(scene.items)) {
       useItemStore.getState().setItems(scene.items as any[], scene.activeMapId);
+      ensureDungeonMapPropsForActiveMap();
     }
     if (scene.fogData) {
       const fogJson = typeof scene.fogData === 'string'

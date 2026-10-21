@@ -4,7 +4,8 @@ import { emitItemAdd, emitItemUpdate } from '@/systems/scene/sceneSync';
 import { pointInItem } from '@/systems/scene/hitTest';
 import type { ImageItem, MapItem, TokenItem } from '@/systems/scene/types';
 import { itemCenter } from '@/systems/scene/types';
-import { PROP_ART, propArtById, type PropMotion } from './propArt';
+import { allPropArtEntries, canonicalPropId, propArtById, type PropMotion } from './propArt';
+import { propArtByName } from './propCatalog';
 import { isDoorPropId } from './doorCollision';
 import { fitDoorOrGateOnMap } from './doorFit';
 import type { DdbRollBridgePayload, GrimoireCharacter } from '@grimoire/shared';
@@ -72,22 +73,37 @@ export function canTriggerProp(id: string): boolean {
 }
 
 export function resolvePropId(item: ImageItem): string | undefined {
-  if (item.propId) return item.propId;
+  if (item.propId) return canonicalPropId(item.propId);
   if (item.imageUrl.startsWith('/props/')) {
-    return DUNGEON_PROPS.find((prop) => prop.imageUrl === item.imageUrl)?.id;
+    const exact = DUNGEON_PROPS.find((prop) => prop.imageUrl === item.imageUrl)?.id;
+    if (exact) return exact;
+    const slug = item.imageUrl
+      .replace(/^\/props\//, '')
+      .replace(/\.(svg|png|webp|jpe?g)(\?.*)?$/i, '');
+    if (slug) {
+      const art = propArtById(slug);
+      if (art) return art.id;
+    }
   }
   if (item.imageUrl.startsWith('data:image/svg')) {
     return DUNGEON_PROPS.find((prop) => prop.name === item.name)?.id ?? LEGACY_NAMES[item.name];
   }
+  const byName = propArtByName(item.name);
+  if (byName) return byName.id;
   return undefined;
 }
 
-export const DUNGEON_PROPS: DungeonProp[] = PROP_ART.map((art) => ({
-  id: art.id,
-  name: art.name,
-  short: art.short,
-  imageUrl: art.rest,
-}));
+export function listDungeonProps(): DungeonProp[] {
+  return allPropArtEntries().map((art) => ({
+    id: art.id,
+    name: art.name,
+    short: art.short,
+    imageUrl: art.rest,
+  }));
+}
+
+/** @deprecated Use listDungeonProps() so runtime-discovered props appear in the panel. */
+export const DUNGEON_PROPS: DungeonProp[] = listDungeonProps();
 
 function cellCenter(map: MapItem, col: number, row: number): { x: number; y: number } {
   const g = map.gridSize;
@@ -579,7 +595,14 @@ export function triggerDungeonProp(
 
   const preferred = opts?.actor !== undefined ? opts.actor : null;
   const actor = tokenNearProp(item, preferred);
-  if (!opts?.skipRoll && !actor) return 'noop';
+  const gm = useSessionStore.getState().myRole === 'GM';
+  if (!opts?.skipRoll && !actor) {
+    if (!gm) return 'noop';
+    const rollKind = propNextCheckKind(item);
+    if (rollKind) return 'noop';
+    applyPropTrigger(item, id, 'toggle');
+    return 'ok';
+  }
 
   const nextKind = !opts?.skipRoll ? propNextCheckKind(item) : null;
   if (nextKind) {
@@ -626,7 +649,8 @@ export async function triggerDungeonPropAsync(
   opts?: { skipRoll?: boolean; actor?: TokenItem | null; waitForDdb?: boolean },
 ): Promise<TriggerPropResult> {
   const actor = tokenNearProp(item, opts?.actor !== undefined ? opts.actor : null);
-  if (!opts?.skipRoll && !actor) return 'noop';
+  const gm = useSessionStore.getState().myRole === 'GM';
+  if (!opts?.skipRoll && !actor && !gm) return 'noop';
   const next = propNextCheckKind(item);
   const checkLinked =
     next === 'reveal' ? item.propRevealCheck : next === 'activate' ? item.propActivateCheck : undefined;

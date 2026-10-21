@@ -3,11 +3,12 @@ import { useSessionStore } from '@/store/sessionStore';
 import { emitItemUpdateLive } from '@/systems/scene/sceneSync';
 import { useItemStore } from '@/systems/scene/store/itemStore';
 import { worldToGridColRow } from '@/systems/scene/token/tokenGrid';
+import { applyWalkPoseVisual } from '@/systems/scene/token/remotePoseApply';
 import { setWalkPose } from '@/systems/scene/token/walkPoseBus';
 import { broadcastWalkLiveLocal } from '@/systems/scene/token/walkLiveIngress';
 
-/** ~30 Hz — smooth for remotes without flooding the socket. */
-const INTERVAL_MS = 33;
+/** ~60 Hz — smoother remote drag / orbit follow without flooding the socket. */
+const INTERVAL_MS = 16;
 let lastEmitAt = 0;
 
 /**
@@ -21,10 +22,6 @@ export function emitTokenPoseLive(
   const sessionId = useSessionStore.getState().sessionId;
   if (!sessionId) return;
 
-  const now = performance.now();
-  if (now - lastEmitAt < INTERVAL_MS) return;
-  lastEmitAt = now;
-
   const items = useItemStore.getState().items;
   const livePatches: Array<{ id: string; patch: Record<string, number> }> = [];
 
@@ -33,7 +30,9 @@ export function emitTokenPoseLive(
     if (!token || token.type !== 'token') continue;
 
     const rotation = p.rotation ?? token.rotation ?? 0;
+    // Local visuals every pointer move — Three/Pixi must not wait on the ~30 Hz socket throttle.
     setWalkPose(p.id, p.x, p.y, rotation);
+    applyWalkPoseVisual(p.id, p.x, p.y, rotation);
 
     const cx = p.x + token.width / 2;
     const cy = p.y + token.height / 2;
@@ -43,15 +42,22 @@ export function emitTokenPoseLive(
       id: p.id,
       patch: { x: p.x, y: p.y, rotation, gridCol, gridRow },
     });
+  }
 
+  const now = performance.now();
+  if (now - lastEmitAt < INTERVAL_MS) return;
+  lastEmitAt = now;
+
+  for (const p of livePatches) {
+    const patch = p.patch;
     const pose = {
       sessionId,
       tokenId: p.id,
-      x: p.x,
-      y: p.y,
-      rotation,
-      gridCol,
-      gridRow,
+      x: patch.x,
+      y: patch.y,
+      rotation: patch.rotation ?? 0,
+      gridCol: patch.gridCol,
+      gridRow: patch.gridRow,
     };
     broadcastWalkLiveLocal(pose);
 

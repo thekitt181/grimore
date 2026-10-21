@@ -4,6 +4,11 @@ import { sceneRefs } from '@/systems/scene/sceneRefs';
 import { loadTexture } from '@/lib/textureLoader';
 import { resolvePropId } from './dungeonProps';
 import { propArtById, type PropArt } from './propArt';
+import { getPropCanvasTexture } from './propCanvasArt';
+import { isDoorPropId } from './doorCollision';
+import { useMapStore } from '@/systems/map/store/mapStore';
+import { resolveDoorSurfaceStyle, type DoorSurfaceStyle } from '@/systems/map3d/doorSurfaceStyles';
+import { resolveMapSurfaceStyle } from '@/systems/map3d/mapSurfaceStyles';
 
 const propTicks = new Map<Container, (ticker: Ticker) => void>();
 
@@ -11,12 +16,26 @@ function stopPropAnimation(c: Container) {
   const tick = propTicks.get(c);
   if (!tick) return;
   propTicks.delete(c);
-  sceneRefs.app.current?.ticker.remove(tick);
+  sceneRefs.app.current?.ticker?.remove(tick);
 }
 
-async function nearestTexture(url: string): Promise<Texture> {
+/** Pixi teardown — stop ticks before Application.destroy nulls the ticker. */
+export function stopAllPropAnimations(): void {
+  for (const c of [...propTicks.keys()]) {
+    stopPropAnimation(c);
+  }
+}
+
+async function restTexture(propId: string | undefined, url: string): Promise<Texture> {
+  if (propId) {
+    const canvasTex = getPropCanvasTexture(propId);
+    if (canvasTex) {
+      canvasTex.source.scaleMode = 'linear';
+      return canvasTex;
+    }
+  }
   const tex = await loadTexture(url);
-  tex.source.scaleMode = 'nearest';
+  tex.source.scaleMode = url.endsWith('.svg') ? 'linear' : 'nearest';
   return tex;
 }
 
@@ -65,6 +84,89 @@ function cellMask(x: number, y: number, w: number, h: number): Graphics {
   mask.rect(x, y, w, h);
   mask.fill({ color: 0xffffff });
   return mask;
+}
+
+function cssHex(color: string): number {
+  return Number.parseInt(color.replace('#', ''), 16);
+}
+
+function mountThemedDoor(c: Container, item: ImageItem, art: PropArt, theme: DoorSurfaceStyle): boolean {
+  stopPropAnimation(c);
+  const root = new Container();
+  root.label = 'prop-door-themed';
+  const s = Math.min(item.width, item.height) / 64;
+  root.scale.set(s);
+  root.position.set((item.width - 64 * s) / 2, (item.height - 64 * s) / 2);
+  c.addChildAt(root, 0);
+
+  const concealed = art.id === 'secret-door' && item.visible === false;
+  const open = (item.propState ?? 0) > 0;
+
+  const redraw = () => {
+    root.removeChildren();
+    const g = new Graphics();
+    if (concealed) {
+      const wall = resolveMapSurfaceStyle(useMapStore.getState().wallStyleId);
+      g.rect(0, 0, 64, 64);
+      g.fill({ color: cssHex(wall.wall), alpha: 0.92 });
+      root.addChild(g);
+      return;
+    }
+
+    if (art.id === 'gate') {
+      const bars = [-22, -11, 0, 11, 22];
+      for (const x of bars) {
+        g.rect(30 + x, 4, 4, 56);
+        g.fill({ color: cssHex(theme.gate) });
+      }
+      g.rect(6, 12, 52, 4);
+      g.fill({ color: cssHex(theme.gateDark) });
+      g.rect(6, 30, 52, 4);
+      g.fill({ color: cssHex(theme.gateDark) });
+      g.rect(6, 48, 52, 4);
+      g.fill({ color: cssHex(theme.gateDark) });
+      root.addChild(g);
+      return;
+    }
+
+    const swing = art.play === 'swing' ? pose(item, 0.45) : 0;
+    const panel = g;
+    panel.roundRect(8, 4, 48, 56, 2);
+    panel.fill({ color: cssHex(art.id === 'runed-door' ? theme.panelDark : theme.panel) });
+    panel.stroke({ color: cssHex(theme.trim), width: 2 });
+    if (open && art.open) {
+      panel.rect(8, 4, 48, 56);
+      panel.fill({ color: cssHex(theme.panelDark), alpha: 0.35 + swing * 0.4 });
+    }
+    const showHandles = art.id !== 'secret-door' || item.visible !== false;
+    if (showHandles && !open) {
+      panel.circle(48, 32, art.id === 'secret-door' ? 2.5 : 4);
+      panel.fill({ color: cssHex(theme.handle) });
+    }
+    if (art.id === 'runed-door') {
+      panel.circle(32, 28, 8);
+      panel.stroke({ color: cssHex(theme.rune), width: 2 });
+    }
+    root.addChild(panel);
+    root.rotation = swing * 0.35;
+  };
+
+  redraw();
+  if (art.play === 'swing') {
+    const tick = () => {
+      if (c.destroyed || !root.parent) {
+        stopPropAnimation(c);
+        return;
+      }
+      redraw();
+    };
+    const ticker = sceneRefs.app.current?.ticker;
+    if (ticker) {
+      ticker.add(tick);
+      propTicks.set(c, tick);
+    }
+  }
+  return true;
 }
 
 function build(root: Container, art: PropArt, tex: Map<string, Texture>, item: ImageItem) {
@@ -359,6 +461,11 @@ export function mountPropAnimation(c: Container, item: ImageItem): boolean {
   const art = id ? propArtById(id) : undefined;
   if (!art) return false;
 
+  if (id && isDoorPropId(id)) {
+    const theme = resolveDoorSurfaceStyle(item.propDoorTheme || useMapStore.getState().doorStyleId);
+    return mountThemedDoor(c, item, art, theme);
+  }
+
   stopPropAnimation(c);
   const root = new Container();
   root.label = 'prop-anim';
@@ -368,9 +475,13 @@ export function mountPropAnimation(c: Container, item: ImageItem): boolean {
   c.addChildAt(root, 0);
 
   const urls = [art.rest, art.open, art.projectile, ...(art.frames ?? [])].filter((url): url is string => !!url);
-  void Promise.all(urls.map(async (url) => [url, await nearestTexture(url)] as const)).then((pairs) => {
+  void Promise.all(urls.map(async (url) => [url, await restTexture(id, url)] as const)).then((pairs) => {
     if (c.destroyed || !root.parent) return;
     const tex = new Map(pairs);
+    if (!tex.get(art.rest)) {
+      root.destroy({ children: true });
+      return;
+    }
     const update = build(root, art, tex, item);
     const tick = () => {
       if (c.destroyed || !root.parent) {
@@ -379,13 +490,26 @@ export function mountPropAnimation(c: Container, item: ImageItem): boolean {
       }
       update(performance.now());
     };
-    const app = sceneRefs.app.current;
-    if (app && art.play !== 'still') {
-      app.ticker.add(tick);
+    const ticker = sceneRefs.app.current?.ticker;
+    if (ticker && art.play !== 'still') {
+      ticker.add(tick);
       propTicks.set(c, tick);
     }
     tick();
-  }).catch(() => {});
+  }).catch(() => {
+    if (c.destroyed) return;
+    root.destroy({ children: true });
+    void restTexture(id, art.rest).then((tex) => {
+      if (c.destroyed) return;
+      const sprite = new Sprite(tex);
+      sprite.label = 'prop-fallback';
+      const s = Math.min(item.width, item.height) / Math.max(tex.width, 64);
+      sprite.scale.set(s);
+      sprite.x = (item.width - tex.width * s) / 2;
+      sprite.y = (item.height - tex.height * s) / 2;
+      c.addChildAt(sprite, 0);
+    }).catch(() => {});
+  });
 
   return true;
 }

@@ -37,10 +37,17 @@ import { clampDragToMoveBudget, recordDragFeet } from '@/systems/map3d/firstPers
 import { clampTokenFeetAgainstWalls } from '@/systems/map3d/firstPersonController';
 import { clampTokenFeetToMap } from '@/systems/map/fogLos';
 import { useFirstPersonStore } from '@/systems/map3d/firstPersonStore';
+import { resolveFirstPersonToken } from '@/systems/map3d/resolveFirstPersonToken';
 import { isSpellTargetPicking } from '@/systems/spells/pickSpellTargets';
 import { nearestWallIndex, wallIndicesInWorldRect, wallHandleWorldPoints, pickWallHandle, translateWallIndices, moveWallEndpoint, wallsChanged, worldToMapLocal, mapLocalToWorld, WALL_PICK_RADIUS } from '@/systems/map/wallUtils';
 import { followDungeonStair, stairIndexAt } from '@/systems/map/dungeon/placeGeneratedDungeon';
 import { fitDoorOrGateItem } from '@/systems/map/props/doorFit';
+import { fitPropOnWallItem, wallMountPatchForItem } from '@/systems/map/props/wallPropFit';
+import {
+  isMapBoundProp,
+  mapBoundPropPatches,
+  mapLocalPatchAfterPropMove,
+} from '@/systems/map/props/mapBoundProps';
 import {
   canTriggerProp,
   resolvePropId,
@@ -64,6 +71,44 @@ interface MoveState {
 
 /** Pointer travel (screen px) below which a press counts as a click, not a drag. */
 const CLICK_MOVE_THRESHOLD_PX = 4;
+
+/** GM may drag off-map art and through walls in 2D / GM 2D editor / 3D orbit; players stay clamped. */
+function resolveTokenDragPosition(
+  token: TokenItem,
+  map: MapItem,
+  fromX: number,
+  fromY: number,
+  nx: number,
+  ny: number,
+): { x: number; y: number } {
+  const view = useMapStore.getState();
+  const isGm = useSessionStore.getState().myRole === 'GM';
+  const gmFreeMove =
+    isGm
+    && (view.viewMode === '2d' || isGm2dEditorInteraction() || view.viewMode === '3d');
+  if (!gmFreeMove) {
+    const walled = clampTokenFeetAgainstWalls(token, map, fromX, fromY, nx, ny);
+    nx = walled.x;
+    ny = walled.y;
+  }
+  if (!isGm && view.viewMode === '3d' && !isGm2dEditorInteraction()) {
+    const clamped = clampTokenFeetToMap(map, nx, ny, token.width, token.height);
+    nx = clamped.x;
+    ny = clamped.y;
+  }
+  return { x: nx, y: ny };
+}
+
+function tokenFeetOutsideMapArt(
+  map: MapItem,
+  feetX: number,
+  feetY: number,
+  tokenW: number,
+  tokenH: number,
+): boolean {
+  const local = worldToMapLocal(feetX + tokenW / 2, feetY + tokenH / 2, map);
+  return local.x < 0 || local.y < 0 || local.x > map.width || local.y > map.height;
+}
 
 interface MarqueeState {
   startWX: number;
@@ -234,8 +279,10 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
 
       const layer = sceneRefs.items.current;
       const activeMap = getActiveMap();
+      const storeItems = useItemStore.getState().items;
       const dragEntries: Array<{ id: string; x: number; y: number }> = [];
-      const liveEntries: Array<{ id: string; patch: { x: number; y: number } }> = [];
+      const liveEntries: Array<{ id: string; patch: { x: number; y: number; rotation?: number } }> = [];
+      const mapPoses = new Map<string, MapItem>();
       for (const id of move.ids) {
         const o = move.origins.get(id)!;
         const it = useItemStore.getState().items[id];
@@ -246,17 +293,14 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
         // 3D/FP walk still clamps via firstPersonController.
         if (it.type === 'token' && activeMap) {
           const o = move.origins.get(id)!;
-          const walled = clampTokenFeetAgainstWalls(it, activeMap, o.x, o.y, nx, ny);
-          nx = walled.x;
-          ny = walled.y;
-          if (
-            useMapStore.getState().viewMode === '3d'
-            && !isGm2dEditorInteraction()
-          ) {
-            const clamped = clampTokenFeetToMap(activeMap, nx, ny, it.width, it.height);
-            nx = clamped.x;
-            ny = clamped.y;
-          }
+          ({ x: nx, y: ny } = resolveTokenDragPosition(
+            it as TokenItem,
+            activeMap,
+            o.x,
+            o.y,
+            nx,
+            ny,
+          ));
         }
         const live = useLiveTransformStore.getState().byId[id];
         const drawW = live?.width ?? it.width;
@@ -267,6 +311,29 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
           dragEntries.push({ id, x: nx, y: ny });
         } else {
           liveEntries.push({ id, patch: { x: nx, y: ny } });
+        }
+        if (it.type === 'map') {
+          mapPoses.set(id, {
+            ...(it as MapItem),
+            x: nx,
+            y: ny,
+            width: drawW,
+            height: drawH,
+            rotation: live?.rotation ?? it.rotation,
+          });
+        }
+      }
+      for (const map of mapPoses.values()) {
+        for (const bound of mapBoundPropPatches(map, storeItems)) {
+          const prop = storeItems[bound.id];
+          if (prop?.type !== 'image') continue;
+          const px = bound.patch.x ?? prop.x;
+          const py = bound.patch.y ?? prop.y;
+          const prot = bound.patch.rotation ?? prop.rotation;
+          const c = getItemContainer(layer, bound.id);
+          if (c) c.position.set(px + prop.width / 2, py + prop.height / 2);
+          if (prot !== prop.rotation && c) c.rotation = (prot * Math.PI) / 180;
+          liveEntries.push({ id: bound.id, patch: { x: px, y: py, rotation: prot } });
         }
       }
       if (dragEntries.length) {
@@ -475,7 +542,7 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
           });
           if (freshIds.length) {
             const propId = hit.type === 'image' ? resolvePropId(hit) : undefined;
-            if (alreadySelected && !additive && propId && canTriggerProp(propId)) {
+            if (!additive && propId && canTriggerProp(propId)) {
               propClickId = hit.id;
             }
             e.preventDefault();
@@ -592,8 +659,8 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
         hit = merged[tokenPick.id] as Item;
       }
 
-      // Props always win via world hit — including in 3D orbit (not only the side editor).
-      if (!hit && !useFirstPersonStore.getState().enabled) {
+      // Props always win via world hit — 3D orbit, first person (after Esc), and 2D.
+      if (!hit) {
         hit = hitTest(propPool, wx, wy, { includeLocked: true }) ?? undefined;
       }
 
@@ -606,13 +673,15 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
         const rayHit = pickId ? merged[pickId] : undefined;
         if (rayHit?.type === 'token' && selectableIds.has(rayHit.id)) {
           hit = rayHit;
-        } else if (
-          rayHit
-          && (!is3dNavigate || rayHit.type === 'map')
-          && selectableIds.has(rayHit.id)
-          && !(rayHit.type === 'map' && mapIsFrozen())
-        ) {
-          hit = rayHit;
+        } else if (rayHit && selectableIds.has(rayHit.id) && !(rayHit.type === 'map' && mapIsFrozen())) {
+          const editableProp =
+            rayHit.type === 'image'
+            || rayHit.type === 'handout'
+            || rayHit.type === 'drawing'
+            || rayHit.type === 'text';
+          if (!is3dNavigate || rayHit.type === 'map' || editableProp) {
+            hit = rayHit;
+          }
         }
       }
 
@@ -671,7 +740,7 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
             }
             if (!handleConsumed && (!is3dNavigate || hitIsEditableProp)) {
               const propId = hit.type === 'image' ? resolvePropId(hit) : undefined;
-              if (alreadySelected && !additive && propId && canTriggerProp(propId)) {
+              if (!additive && propId && canTriggerProp(propId)) {
                 propClickId = hit.id;
               }
               e.preventDefault();
@@ -918,12 +987,16 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
         // A click (negligible pointer travel) should only select — never snap/move.
         const screenTravel = Math.hypot(e.clientX - m.startScreenX, e.clientY - m.startScreenY);
         const isClick = screenTravel < CLICK_MOVE_THRESHOLD_PX;
-        if (isClick && propClickId) {
-          const propItem = useItemStore.getState().items[propClickId];
-          if (propItem?.type === 'image') void triggerDungeonPropAsync(propItem);
-        } else if (isClick && propUnderTokenClickId) {
-          const tok = useItemStore.getState().items[propUnderTokenClickId];
-          if (tok?.type === 'token') void triggerPropUnderToken(tok);
+        if (!useFirstPersonStore.getState().enabled) {
+          if (isClick && propClickId) {
+            const propItem = useItemStore.getState().items[propClickId];
+            if (propItem?.type === 'image') {
+              void triggerDungeonPropAsync(propItem, undefined);
+            }
+          } else if (isClick && propUnderTokenClickId) {
+            const tok = useItemStore.getState().items[propUnderTokenClickId];
+            if (tok?.type === 'token') void triggerPropUnderToken(tok);
+          }
         }
         propClickId = null;
         propUnderTokenClickId = null;
@@ -947,14 +1020,14 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
           if (it?.type === 'token') {
             const map = getActiveMap();
             if (map) {
-              const walled = clampTokenFeetAgainstWalls(it, map, o.x, o.y, nx, ny);
-              nx = walled.x;
-              ny = walled.y;
-              if (useMapStore.getState().viewMode === '3d' && !isGm2dEditorInteraction()) {
-                const clamped = clampTokenFeetToMap(map, nx, ny, it.width, it.height);
-                nx = clamped.x;
-                ny = clamped.y;
-              }
+              ({ x: nx, y: ny } = resolveTokenDragPosition(
+                it as TokenItem,
+                map,
+                o.x,
+                o.y,
+                nx,
+                ny,
+              ));
             }
             const { gridCol, gridRow } = worldToGridColRow(nx + it.width / 2, ny + it.height / 2, it.sizeCells);
             return { id, kind: 'token' as const, gridCol, gridRow, x: nx, y: ny };
@@ -973,13 +1046,22 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
                 emitItemUpdate([{ id: p.id, patch: { ownerId: myUserId, isPc: true } }]);
               }
               if (snap) {
-                const bounds = tokenBoundsFromGrid(it, p.gridCol, p.gridRow);
-                emitTokenMove(p.id, bounds.gridCol, bounds.gridRow, bounds.x, bounds.y);
-                // Keep the footprint exactly sizeCells × gridSize so the token
-                // stays centered in its square(s) even if its stored size is stale.
-                if (Math.abs(it.width - bounds.width) > 0.5 || Math.abs(it.height - bounds.height) > 0.5) {
-                  useItemStore.getState().updateItem(p.id, { width: bounds.width, height: bounds.height });
-                  emitItemUpdate([{ id: p.id, patch: { width: bounds.width, height: bounds.height } }]);
+                const map = getActiveMap();
+                const offArt =
+                  isGm()
+                  && map
+                  && tokenFeetOutsideMapArt(map, p.x, p.y, it.width, it.height);
+                if (offArt) {
+                  emitTokenMove(p.id, p.gridCol, p.gridRow, p.x, p.y);
+                } else {
+                  const bounds = tokenBoundsFromGrid(it, p.gridCol, p.gridRow);
+                  emitTokenMove(p.id, bounds.gridCol, bounds.gridRow, bounds.x, bounds.y);
+                  // Keep the footprint exactly sizeCells × gridSize so the token
+                  // stays centered in its square(s) even if its stored size is stale.
+                  if (Math.abs(it.width - bounds.width) > 0.5 || Math.abs(it.height - bounds.height) > 0.5) {
+                    useItemStore.getState().updateItem(p.id, { width: bounds.width, height: bounds.height });
+                    emitItemUpdate([{ id: p.id, patch: { width: bounds.width, height: bounds.height } }]);
+                  }
                 }
               } else {
                 emitTokenMove(p.id, p.gridCol, p.gridRow, p.x, p.y);
@@ -987,31 +1069,93 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
               recordDragFeet(p.id, worldDeltaToFeet(dx, dy));
             }
           }
+          const storeSnap = useItemStore.getState();
           const mapForDoors = getActiveMap();
           const itemPatches = patches
             .filter((p): p is { id: string; kind: 'item'; patch: Partial<Item> } => p.kind === 'item')
             .map(({ id, patch }) => {
-              if (!mapForDoors) return { id, patch };
-              const it = useItemStore.getState().items[id];
-              if (it?.type !== 'image') return { id, patch };
-              const trial = { ...it, ...patch } as ImageItem;
-              const fit = fitDoorOrGateItem(trial, mapForDoors);
-              if (!fit) return { id, patch };
-              return {
-                id,
-                patch: {
-                  ...patch,
-                  x: fit.x,
-                  y: fit.y,
-                  width: fit.width,
-                  height: fit.height,
-                  rotation: fit.rotation,
-                },
-              };
+              const it = storeSnap.items[id];
+              if (it?.type === 'map') return { id, patch };
+              const boundMap =
+                it?.type === 'image' && it.dungeonPropForMapId
+                  ? (storeSnap.items[it.dungeonPropForMapId] as MapItem | undefined)
+                  : undefined;
+              const mapCtx = boundMap ?? mapForDoors;
+              if (!mapCtx || it?.type !== 'image') return { id, patch };
+              let trial = { ...it, ...patch } as ImageItem;
+              if (isMapBoundProp(it)) {
+                trial = {
+                  ...trial,
+                  ...mapLocalPatchAfterPropMove(
+                    trial,
+                    mapCtx,
+                    trial.x,
+                    trial.y,
+                    trial.rotation,
+                  ),
+                };
+              }
+              const doorFit = fitDoorOrGateItem(trial, mapCtx);
+              if (doorFit) {
+                return {
+                  id,
+                  patch: {
+                    ...patch,
+                    x: doorFit.x,
+                    y: doorFit.y,
+                    width: doorFit.width,
+                    height: doorFit.height,
+                    rotation: doorFit.rotation,
+                    ...(isMapBoundProp(it)
+                      ? mapLocalPatchAfterPropMove(
+                          { ...trial, ...doorFit },
+                          mapCtx,
+                          doorFit.x,
+                          doorFit.y,
+                          doorFit.rotation,
+                        )
+                      : {}),
+                  },
+                };
+              }
+              if (trial.propMount === 'wall') {
+                const wallFit = fitPropOnWallItem(trial, mapCtx, {
+                  merge: trial.propWallMerge === true,
+                });
+                if (wallFit) {
+                  return {
+                    id,
+                    patch: {
+                      ...patch,
+                      ...wallMountPatchForItem(trial, wallFit, mapCtx, {
+                        propWallMerge: trial.propWallMerge === true,
+                      }),
+                    },
+                  };
+                }
+              }
+              return { id, patch: { ...patch, ...(isMapBoundProp(it) ? trial : {}) } };
             });
           if (itemPatches.length) {
-            useItemStore.getState().updateItems(itemPatches);
+            storeSnap.updateItems(itemPatches);
             emitItemUpdate(itemPatches);
+          }
+          const mapIdsMoved = m.ids.filter((id) => storeSnap.items[id]?.type === 'map');
+          if (mapIdsMoved.length) {
+            const boundAll: Array<{ id: string; patch: Partial<Item> }> = [];
+            for (const mapId of mapIdsMoved) {
+              const base = storeSnap.items[mapId] as MapItem | undefined;
+              if (!base) continue;
+              const lead = patches.find((p) => p.id === mapId && p.kind === 'item');
+              const map = lead
+                ? ({ ...base, ...lead.patch } as MapItem)
+                : ({ ...base, x: base.x + dx, y: base.y + dy } as MapItem);
+              boundAll.push(...mapBoundPropPatches(map, storeSnap.items));
+            }
+            if (boundAll.length) {
+              storeSnap.updateItems(boundAll);
+              emitItemUpdate(boundAll);
+            }
           }
         }
         clearDragLivePositions(m.ids);

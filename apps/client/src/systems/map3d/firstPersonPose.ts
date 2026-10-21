@@ -35,10 +35,15 @@ export function seedFirstPersonPose(token: TokenItem): void {
   firstPersonPose.prevY = y;
 }
 
-/** Call once at the start of each physics step. */
+/** Call once at the start of each render frame (before integrating movement). */
 export function snapshotFirstPersonPose(): void {
   firstPersonPose.prevX = firstPersonPose.x;
   firstPersonPose.prevY = firstPersonPose.y;
+}
+
+/** Feet for render + token mini (after full frame integration). */
+export function firstPersonFeetForRender(): { x: number; y: number } {
+  return { x: firstPersonPose.x, y: firstPersonPose.y };
 }
 
 /** Render feet position between physics ticks. */

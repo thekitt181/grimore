@@ -150,6 +150,20 @@ export interface DungeonFloorLink {
   stairs: DungeonStairRef[];
   /** Planned depth of this delve. The last floor has no stairs going deeper. */
   floorCount?: number;
+  /** Room titles + notes (for prop spawn / GM key). */
+  rooms?: Array<{
+    id: number;
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+    title: string;
+    notes: string[];
+  }>;
+  /** Auto prop pass from room notes (see DUNGEON_PROPS_SPAWN_REVISION). */
+  propsSpawnRevision?: number;
+  /** Auto door/gate pass from door map + notes (see DUNGEON_DOORS_SPAWN_REVISION). */
+  doorsSpawnRevision?: number;
 }
 
 export interface TokenItem extends BaseItem {
@@ -234,6 +248,33 @@ export interface ImageItem extends BaseItem {
    * can also satisfy an armed check.
    */
   propActivateCheck?: string;
+  /** Set on props auto-placed from dungeon room notes for this map id. */
+  dungeonPropForMapId?: string;
+  /** Map-local top-left — prop moves and rotates with `dungeonPropForMapId`. */
+  propMapLocalX?: number;
+  propMapLocalY?: number;
+  /** Rotation in degrees relative to the bound map (added to map.rotation for world pose). */
+  propMapLocalRotation?: number;
+  /** Override session door palette (see doorSurfaceStyles). */
+  propDoorTheme?: string;
+  /**
+   * Floor = sit on ground (default). Wall = raised on nearest wall face
+   * (torches, murals, racks) — use with propWallHeightCells.
+   */
+  propMount?: 'floor' | 'wall';
+  /** Height above floor in grid cells when propMount is `wall` (default ~1.15). */
+  propWallHeightCells?: number;
+  /**
+   * Sink into the mount surface: wall thickness when wall-mounted, or into the
+   * floor when floor-mounted (flush / recessed instead of sitting proud).
+   */
+  propWallMerge?: boolean;
+  /**
+   * 3D tilt (degrees). Pitch tips top toward/away from camera yaw;
+   * roll tips top sideways. Applied in Three.js on top of map `rotation` (yaw).
+   */
+  propPitch?: number;
+  propRoll?: number;
 }
 
 export interface HandoutItem extends BaseItem {

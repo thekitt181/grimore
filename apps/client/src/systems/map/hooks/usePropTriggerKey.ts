@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { triggerSelectedOrUnderToken } from '@/systems/map/props/dungeonProps';
+import { useFirstPersonStore } from '@/systems/map3d/firstPersonStore';
 
 /** Press U to use a selected prop, or the prop under a selected token. */
 export function usePropTriggerKey(appReady: boolean) {
@@ -7,6 +8,7 @@ export function usePropTriggerKey(appReady: boolean) {
     if (!appReady) return;
 
     function onKeyDown(e: KeyboardEvent) {
+      if (useFirstPersonStore.getState().enabled) return;
       if (e.key !== 'u' && e.key !== 'U') return;
       if (e.ctrlKey || e.metaKey || e.altKey) return;
       const target = e.target as HTMLElement | null;

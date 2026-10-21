@@ -13,12 +13,12 @@ interface StonePalette {
 }
 
 const STONE: Record<DungeonMotif, StonePalette> = {
-  mixed: { earth: '#14110e', floor: [168, 154, 132], rough: [132, 118, 98], mortar: 'rgba(42,34,26,0.55)', lit: '#8d8478', mid: '#5a534b', shade: '#2c2823', wood: '#6d4a30', woodDark: '#3d2918' },
-  crypt: { earth: '#101311', floor: [138, 146, 138], rough: [108, 116, 110], mortar: 'rgba(28,36,32,0.55)', lit: '#7e8a84', mid: '#4c5652', shade: '#232826', wood: '#5c4636', woodDark: '#2e241c' },
-  temple: { earth: '#16130e', floor: [188, 176, 150], rough: [154, 140, 116], mortar: 'rgba(62,52,36,0.5)', lit: '#a39884', mid: '#6a604e', shade: '#332e24', wood: '#7a5434', woodDark: '#463018' },
-  fortress: { earth: '#121214', floor: [150, 150, 146], rough: [118, 118, 114], mortar: 'rgba(32,32,34,0.55)', lit: '#8a8a86', mid: '#555554', shade: '#2a2a2c', wood: '#644832', woodDark: '#342418' },
-  mine: { earth: '#100e0c', floor: [118, 108, 96], rough: [96, 86, 74], mortar: 'rgba(24,20,16,0.6)', lit: '#6e665c', mid: '#433e38', shade: '#221e1a', wood: '#5a4030', woodDark: '#2c1e14' },
-  ruin: { earth: '#16100c', floor: [164, 136, 108], rough: [132, 104, 78], mortar: 'rgba(52,36,24,0.55)', lit: '#8a7460', mid: '#5c4a3a', shade: '#2e241c', wood: '#6a4630', woodDark: '#3a2418' },
+  mixed: { earth: '#14110e', floor: [176, 160, 138], rough: [138, 122, 102], mortar: 'rgba(42,34,26,0.55)', lit: '#9a9084', mid: '#5c554c', shade: '#2a2620', wood: '#6d4a30', woodDark: '#3d2918' },
+  crypt: { earth: '#101311', floor: [146, 154, 146], rough: [116, 124, 118], mortar: 'rgba(28,36,32,0.55)', lit: '#889490', mid: '#4e5854', shade: '#222826', wood: '#5c4636', woodDark: '#2e241c' },
+  temple: { earth: '#16130e', floor: [196, 184, 158], rough: [162, 148, 124], mortar: 'rgba(62,52,36,0.5)', lit: '#ada494', mid: '#6e6452', shade: '#353024', wood: '#7a5434', woodDark: '#463018' },
+  fortress: { earth: '#121214', floor: [158, 158, 154], rough: [126, 126, 122], mortar: 'rgba(32,32,34,0.55)', lit: '#929290', mid: '#585856', shade: '#28282a', wood: '#644832', woodDark: '#342418' },
+  mine: { earth: '#12100e', floor: [148, 140, 128], rough: [122, 112, 100], mortar: 'rgba(36,32,28,0.52)', lit: '#8a8278', mid: '#5a544c', shade: '#2c2824', wood: '#5a4030', woodDark: '#2c1e14' },
+  ruin: { earth: '#16100c', floor: [176, 146, 116], rough: [142, 112, 84], mortar: 'rgba(52,36,24,0.55)', lit: '#947e68', mid: '#625040', shade: '#322820', wood: '#6a4630', woodDark: '#3a2418' },
 };
 
 export interface DungeonPaintJob {
@@ -70,7 +70,7 @@ export function dungeonToPaintJob(dungeon: GeneratedDungeon): DungeonPaintJob {
 
 export async function paintDungeonBlob(job: DungeonPaintJob): Promise<Blob> {
   const canvas = paintDungeonCanvas(job);
-  const blob = await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.8 });
+  const blob = await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.92 });
   if (!blob) throw new Error('Could not encode dungeon map');
   return blob;
 }
@@ -201,16 +201,51 @@ function doorAt(doors: Map<string, DoorKind>, x: number, y: number, nx: number, 
 }
 
 function rockTile(palette: StonePalette): OffscreenCanvas {
-  const tile = makeCanvas(96, 96);
+  const tile = makeCanvas(128, 128);
   const g = ctx2d(tile);
   if (!g) return tile;
   g.fillStyle = palette.earth;
-  g.fillRect(0, 0, 96, 96);
-  for (let i = 0; i < 8; i++) {
-    g.fillStyle = rgb(palette.rough, (hash(i, 4) - 0.5) * 28 - 6);
-    g.fillRect(hash(i, 1) * 80, hash(i, 2) * 80, 28, 22);
+  g.fillRect(0, 0, 128, 128);
+  const img = g.createImageData(128, 128);
+  for (let y = 0; y < 128; y++) {
+    for (let x = 0; x < 128; x++) {
+      const n =
+        (hash(x >> 1, y >> 1, 1) * 0.4 + hash(x >> 2, y >> 2, 2) * 0.35 + hash(x >> 3, y >> 3, 3) * 0.25 - 0.5) * 38;
+      const i = (y * 128 + x) * 4;
+      img.data[i] = Math.max(0, Math.min(255, palette.rough[0] + n));
+      img.data[i + 1] = Math.max(0, Math.min(255, palette.rough[1] + n * 0.9));
+      img.data[i + 2] = Math.max(0, Math.min(255, palette.rough[2] + n * 0.82));
+      img.data[i + 3] = 255;
+    }
   }
+  g.putImageData(img, 0, 0);
+  for (let i = 0; i < 14; i++) {
+    g.fillStyle = rgb(palette.rough, (hash(i, 4) - 0.5) * 24 - 8);
+    const w = 18 + hash(i, 5) * 36;
+    const h = 14 + hash(i, 6) * 28;
+    g.fillRect(hash(i, 1) * (128 - w), hash(i, 2) * (128 - h), w, h);
+  }
+  paintFractureHints(g, palette);
   return tile;
+}
+
+function paintFractureHints(g: OffscreenCanvasRenderingContext2D, palette: StonePalette): void {
+  g.strokeStyle = palette.mortar;
+  g.lineWidth = 1;
+  g.globalAlpha = 0.45;
+  for (let i = 0; i < 6; i++) {
+    let x = hash(i, 7) * 128;
+    let y = hash(i, 8) * 128;
+    g.beginPath();
+    g.moveTo(x, y);
+    for (let s = 0; s < 4; s++) {
+      x += (hash(i, s, 9) - 0.5) * 28;
+      y += (hash(i, s, 10) - 0.5) * 28;
+      g.lineTo(x, y);
+    }
+    g.stroke();
+  }
+  g.globalAlpha = 1;
 }
 
 function shadeStamp(length: number, depth: number, vertical: boolean, fromStart: boolean): OffscreenCanvas {

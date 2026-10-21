@@ -15,6 +15,7 @@ import {
   retargetMixamoClipToSkeleton,
 } from './retargetMixamoWalk';
 import { rootHasSkinnedMesh } from './tokenSmartRig';
+import { enhancePropMaterials } from './propMaterialEnhance';
 // Warm the Mixamo walk pack so token Suspense rarely stalls on first place.
 useFBX.preload(SHARED_MIXAMO_WALK_URL);
 
@@ -115,11 +116,9 @@ function useNormalizedModel(
             frameId = requestAnimationFrame(tick);
             return;
           }
-          if (soleAlign) {
-            applyFallbackModelNormalization(root, targetSize, groundAlign);
-            normalized = true;
-            reveal();
-          }
+          applyFallbackModelNormalization(root, targetSize, groundAlign);
+          normalized = true;
+          reveal();
           return;
         } else {
           applyFallbackModelNormalization(root, targetSize, groundAlign);
@@ -151,6 +150,7 @@ function GltfModel({
   groundAlign,
   registerRaycast,
   tokenRender,
+  propRender = false,
   tokenRender2d,
   footprint,
   itemId,
@@ -161,6 +161,7 @@ function GltfModel({
   groundAlign: boolean;
   registerRaycast?: boolean;
   tokenRender?: boolean;
+  propRender?: boolean;
   tokenRender2d?: boolean;
   footprint?: { width: number; height: number };
   itemId?: string;
@@ -186,18 +187,19 @@ function GltfModel({
       if ((child as THREE.Mesh).isMesh) {
         const mesh = child as THREE.Mesh;
         mesh.castShadow = true;
-        mesh.receiveShadow = !tokenRender;
-        if (tokenRender) {
-          mesh.renderOrder = 12;
+        mesh.receiveShadow = propRender || !tokenRender;
+        if (tokenRender || propRender) {
+          mesh.renderOrder = propRender ? 11 : 12;
           mesh.frustumCulled = false;
         } else {
           configureMapMesh(mesh);
         }
       }
     });
-    if (tokenRender) brightenMeshMaterials(root, tokenRender2d, true);
+    if (propRender) enhancePropMaterials(root);
+    else if (tokenRender) brightenMeshMaterials(root, tokenRender2d, true);
     return root;
-  }, [scene, animations.length, tokenRender, tokenRender2d, isTokenMini]);
+  }, [scene, animations.length, tokenRender, propRender, tokenRender2d, isTokenMini]);
 
   useNormalizedModel(clone, targetSize, groundAlign, footprint, isTokenMini, isTokenMini);
 
@@ -349,6 +351,7 @@ export function SceneModel({
   tokenRender2d = false,
   footprint,
   itemId,
+  propRender = false,
   collisionMap,
 }: {
   url: string;
@@ -358,9 +361,8 @@ export function SceneModel({
   registerRaycast?: boolean;
   /** Brighter materials + render on top of map geometry (tokens). */
   tokenRender?: boolean;
-  /** Extra contrast for GLB/STL minis on the 2D map overlay. */
-  tokenRender2d?: boolean;
-  /** Token footprint in local space (XZ) before transform-group scale. */
+  /** Textured dungeon props (KayKit GLB). */
+  propRender?: boolean;
   footprint?: { width: number; height: number };
   /** Token id — enables grounded idle/walk (hip Y stripped). Maps omit this. */
   itemId?: string;
@@ -414,6 +416,7 @@ export function SceneModel({
         tokenRender2d={tokenRender2d}
         {...(itemId ? { itemId } : {})}
         {...(footprint ? { footprint } : {})}
+        propRender={propRender}
         {...(collisionMap ? { collisionMap } : {})}
       />
     </Suspense>

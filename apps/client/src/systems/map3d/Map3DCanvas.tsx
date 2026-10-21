@@ -35,6 +35,10 @@ import { useFirstPersonStore } from './firstPersonStore';
 import { useFirstPersonControls } from './useFirstPersonControls';
 import { FpPaintSampler } from './FpPaintSampler';
 import { FirstPersonVisionFog } from './FirstPersonVisionFog';
+import { FpTrapImpactSparks } from './FpTrapImpact';
+import { Environment } from '@react-three/drei';
+import { warmMap3DAssets } from './warmMap3DAssets';
+import { preloadPropModels3D } from './PropModel3D';
 
 /** Stable defaults — position/zoom owned by SyncedPixiOrthographicCamera (never reset on re-render). */
 function useStableOrthoCameraDefaults() {
@@ -140,7 +144,12 @@ function Map3DSceneContent() {
       <directionalLight position={[800, 1400, 500]} intensity={1.35} castShadow={!mobile} />
       <directionalLight position={[-400, 900, -400]} intensity={0.65} />
       <hemisphereLight args={['#f0ece4', '#2a2520', 0.55]} />
-
+      <Suspense fallback={null}>
+        <Environment
+          preset="warehouse"
+          environmentIntensity={firstPerson ? 0.34 : 0.44}
+        />
+      </Suspense>
       {maps.map((map) => (
         <group key={map.id}>
           <Map3DGround map={map} clayMode={scanImageWalls} skipFloor={Boolean(map.modelUrl)} />
@@ -164,6 +173,7 @@ function Map3DSceneContent() {
       <FpPaintSampler />
       <Map3DImageLayer />
       {firstPerson && <FirstPersonVisionFog wallHeight={wallHeight} />}
+      {firstPerson && <FpTrapImpactSparks />}
     </>
   );
 }
@@ -238,6 +248,24 @@ function CanvasResizeSync() {
   return null;
 }
 
+/** FP toggles DPR/shadows without remounting the Canvas (remount = full texture + prop reload). */
+function FpCanvasTuning() {
+  const viewMode = useMapStore((s) => s.viewMode);
+  const firstPerson = useFirstPersonStore((s) => s.enabled) && viewMode === '3d';
+  const gl = useThree((s) => s.gl);
+  const mobile = isMobileClient();
+
+  useEffect(() => {
+    const dpr = firstPerson
+      ? Math.min(mobile ? 1 : 1.25, pixiRenderResolution())
+      : pixiRenderResolution();
+    gl.setPixelRatio(dpr);
+    gl.shadowMap.enabled = !firstPerson && !mobile;
+  }, [firstPerson, gl, mobile]);
+
+  return null;
+}
+
 /** Three.js overlay: full scene in 3D view; model tokens only in 2D view. */
 export function MapSceneCanvas() {
   const viewMode = useMapStore((s) => s.viewMode);
@@ -252,6 +280,19 @@ export function MapSceneCanvas() {
     }
   }, [viewMode]);
 
+  useEffect(() => {
+    if (!is3d) return;
+    preloadPropModels3D();
+    void warmMap3DAssets();
+  }, [is3d]);
+
+  const wallStyleId = useMapStore((s) => s.wallStyleId);
+  const floorStyleId = useMapStore((s) => s.floorStyleId);
+  useEffect(() => {
+    if (!is3d) return;
+    void warmMap3DAssets();
+  }, [is3d, wallStyleId, floorStyleId]);
+
   const onContextLost = useCallback(() => {
     sceneRefs.threeCanvas.current = null;
     sceneCameraRef.liveCamera = null;
@@ -260,6 +301,7 @@ export function MapSceneCanvas() {
     applyPixiViewMode(useMapStore.getState().viewMode === '3d');
     setGlKey((k) => k + 1);
   }, []);
+
   const items = useItemStore(selectSortedItems);
   const activeMapId = useItemStore((s) => s.activeMapId);
   const overlayMap = useMemo(() => {
@@ -288,7 +330,9 @@ export function MapSceneCanvas() {
     failIfMajorPerformanceCaveat: false,
   };
   // FP on dense GLB maps: match dungeon responsiveness — lower pixel load, no shadows.
-  const dpr = firstPerson ? Math.min(1, pixiRenderResolution()) : pixiRenderResolution();
+  const dpr = firstPerson
+    ? Math.min(mobile ? 1 : 1.25, pixiRenderResolution())
+    : pixiRenderResolution();
   const useShadows = !firstPerson && !mobile && (is3d || hasModelTokens);
 
   useEffect(() => () => {
@@ -321,8 +365,8 @@ export function MapSceneCanvas() {
 
   return (
     <Canvas
-      key={`${glKey}-${firstPerson ? 'fp' : 'orb'}`}
-      orthographic={!firstPerson}
+      key={glKey}
+      orthographic={is3d && !firstPerson}
       shadows={useShadows}
       frameloop="always"
       camera={
@@ -341,6 +385,7 @@ export function MapSceneCanvas() {
       <WebGLContextGuard onContextLost={onContextLost} />
       <ThreeReadyNotifier />
       <CanvasResizeSync />
+      <FpCanvasTuning />
       {firstPerson ? <FirstPersonCamera /> : <SyncedPixiOrthographicCamera />}
       <SceneBackground />
       <Suspense fallback={null}>

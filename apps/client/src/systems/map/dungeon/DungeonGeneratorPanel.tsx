@@ -222,7 +222,7 @@ export function DungeonGeneratorPanel() {
         />
       </label>
       <button type="button" className="btn-primary w-full text-xs py-1.5" onClick={() => { void generate(); }} disabled={busy}>
-        {busy ? 'Generating…' : floors > 1 ? `Generate ${floors} floors` : 'Generate map'}
+        {busy ? 'Generating…' : 'Generate map'}
       </button>
       {lastSeed != null && (
         <button

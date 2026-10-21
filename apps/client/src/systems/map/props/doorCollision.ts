@@ -3,6 +3,7 @@ import type { ImageItem, Item, MapItem, WallSegment } from '@/systems/scene/type
 import { losWalls, mapBoundaryWalls } from '@/systems/map/fogLos';
 import { resolvePropId } from './dungeonProps';
 import { canonicalPropId } from './propArt';
+import { propObstacleSignature, propObstacleWalls } from './propMovementCollision';
 
 /** Props that seal a wall when closed and open a passage when open. */
 const DOOR_PROP_IDS = new Set(['door', 'runed-door', 'secret-door', 'gate']);
@@ -310,8 +311,8 @@ export function displayWalls(
   items: Record<string, Item> | Item[],
 ): WallSegment[] {
   const doors = doorPropsOnMap(items, map);
-  const toPunch = doors.filter((d) => isDoorPropOpen(d) || isGateProp(d));
-  return applyDoorGaps(map, toPunch, [...(map.walls ?? [])]);
+  // Punch every door/gate opening — closed doors too, or extruded wall sticks past the panel.
+  return applyDoorGaps(map, doors, [...(map.walls ?? [])]);
 }
 
 /**

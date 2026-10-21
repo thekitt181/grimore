@@ -22,6 +22,8 @@ import { DiceRoller } from '@/systems/dice/DiceRoller';
 import { RollModeBar } from '@/systems/dice/RollModeBar';
 import { RollToast } from '@/systems/dice/RollToast';
 import { PropDdbArmBanner } from '@/systems/map/props/PropDdbArmBanner';
+import { PropInteractApprovalModal } from '@/systems/map/props/PropInteractApprovalModal';
+import { FpInteractHint } from '@/systems/map/props/FpInteractHint';
 import { DiceTrayOverlay } from '@/systems/dice/DiceTrayOverlay';
 import { AttackTargetPicker } from '@/systems/combat/AttackTargetPicker';
 import { AttackTargetHint } from '@/systems/combat/AttackTargetHint';
@@ -74,6 +76,7 @@ import { BackgroundVideoLayer } from '@/systems/scene/media/BackgroundVideoLayer
 import { EmbedAudioLayer } from '@/systems/scene/media/EmbedAudioLayer';
 import { SceneTransitionOverlay } from '@/systems/scene/media/SceneAtmosphere';
 import { FpLookLayer } from '@/systems/map3d/FpLookLayer';
+import { FpTrapImpactHud } from '@/systems/map3d/FpTrapImpact';
 import { SessionMediaBar } from '@/systems/scene/media/SessionMediaBar';
 import { MobileAudioUnlockBanner } from '@/systems/scene/media/MobileAudioUnlockBanner';
 import { GameClockWidget } from '@/systems/scene/media/GameClockWidget';
@@ -373,7 +376,10 @@ export function SessionPage() {
       {/* ── Main layout ──────────────────────────────────────────────────────── */}
       <div className="flex-1 flex min-h-0 overflow-hidden">
         {/* Toolbar */}
-        <div className="p-2 flex flex-col items-start shrink-0 z-10 h-full min-h-0 overflow-y-auto">
+        <div
+          data-grimoire-map-toolbar
+          className="p-2 flex flex-col items-start shrink-0 z-10 h-full min-h-0 overflow-y-auto"
+        >
           <MapToolbar />
         </div>
 
@@ -381,6 +387,9 @@ export function SessionPage() {
         <div className="flex-1 min-h-0 relative overflow-hidden">
           <MapCanvas />
           <FpLookLayer />
+          <FpTrapImpactHud />
+          <FpInteractHint />
+          <PropInteractApprovalModal />
           <SceneTransitionOverlay />
           <MobileDdbTokenBar />
 
@@ -486,7 +495,10 @@ export function SessionPage() {
           />
 
           {/* Bottom dock — inspector (center) + tool panels (right); hidden on mobile (use MobileSessionDock). */}
-          <div className="absolute bottom-0 inset-x-0 z-30 hidden md:flex items-end gap-3 px-4 pb-4 pointer-events-none">
+          <div
+            data-grimoire-session-dock
+            className="absolute bottom-0 inset-x-0 z-30 hidden md:flex items-end gap-3 px-4 pb-4 pointer-events-none"
+          >
             <div className="flex-1 min-w-0 flex justify-center pointer-events-none">
               <div className="pointer-events-auto max-w-full">
                 <ItemInspector />

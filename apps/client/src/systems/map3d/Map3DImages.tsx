@@ -1,4 +1,4 @@
-import { Suspense, useRef, type ReactNode } from 'react';
+import { Component, Suspense, useRef, type ReactNode } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { getActiveMap, useItemStore } from '@/systems/scene/store/itemStore';
@@ -7,14 +7,16 @@ import { useSessionStore } from '@/store/sessionStore';
 import { isSceneItemOnTable } from '@/systems/scene/sceneMapsForClient';
 import type { ImageItem } from '@/systems/scene/types';
 import { resolvePropId } from '@/systems/map/props/dungeonProps';
+import { hasPropCanvasArt } from '@/systems/map/props/propCanvasArt';
 import { isDoorPropId } from '@/systems/map/props/doorCollision';
-import { useThreeTexture } from './useThreeTexture';
+import { usePropDisplayTexture } from './usePropDisplayTexture';
 import { SceneItemTransformGroup } from './TokenTransformGroup';
 import { TokenNameLabel } from './TokenNameLabel';
 import { TokenPickVolume } from './TokenPickVolume';
 import { PropMesh3D, hasPropMesh3D } from './propMeshes3d';
 import { PropModel3D, hasPropModel3D, PropModelsPreload, propModelLight } from './PropModel3D';
 import { PropAnim3D, useLivePropAmount } from './propAnim3d';
+import { resolveDoorSurfaceStyle } from './doorSurfaceStyles';
 
 const _world = new THREE.Vector3();
 
@@ -37,14 +39,31 @@ function YawBillboard({ children }: { children: ReactNode }) {
   return <group ref={ref}>{children}</group>;
 }
 
-function GenericImageBillboard({
+class PropGlbErrorBoundary extends Component<
+  { fallback: ReactNode; children: ReactNode },
+  { failed: boolean }
+> {
+  state = { failed: false };
+
+  static getDerivedStateFromError(): { failed: boolean } {
+    return { failed: true };
+  }
+
+  render() {
+    return this.state.failed ? this.props.fallback : this.props.children;
+  }
+}
+
+function PropArtBillboard({
   item,
+  propId,
   displayOnly = false,
 }: {
   item: ImageItem;
+  propId: string;
   displayOnly?: boolean;
 }) {
-  const { texture } = useThreeTexture(item.imageUrl);
+  const { texture, status } = usePropDisplayTexture(item, propId);
   const footprint = Math.min(item.width, item.height);
   const img = texture?.image as { width?: number; height?: number } | undefined;
   const aspect =
@@ -55,23 +74,91 @@ function GenericImageBillboard({
   const planeH = Math.max(footprint * 0.85, footprint / Math.max(aspect, 0.35));
   const opacity = item.visible === false ? 0.35 : 1;
 
+  if (!texture || status === 'error') {
+    // Always try procedural mesh — canvas-art props have meshes too.
+    return <MeshProp item={item} propId={propId} footprint={footprint} />;
+  }
+
+  const lockFacing =
+    item.propMount === 'wall'
+    || Math.abs(item.propPitch ?? 0) > 0.5
+    || Math.abs(item.propRoll ?? 0) > 0.5;
+  const plane = (
+    <mesh position={[0, planeH / 2, 0]} renderOrder={14}>
+      <planeGeometry args={[planeW, planeH]} />
+      <meshStandardMaterial
+        map={texture}
+        color="#ffffff"
+        transparent
+        opacity={opacity}
+        roughness={0.48}
+        metalness={0.04}
+        envMapIntensity={1.15}
+        side={THREE.DoubleSide}
+        alphaTest={0.08}
+        depthWrite={opacity >= 0.99}
+      />
+    </mesh>
+  );
+
   return (
     <>
-      <YawBillboard>
-        <mesh position={[0, planeH / 2, 0]} renderOrder={14}>
-          <planeGeometry args={[planeW, planeH]} />
-          <meshStandardMaterial
-            {...(texture ? { map: texture } : {})}
-            color={texture ? '#ffffff' : '#1c1c28'}
-            transparent
-            opacity={opacity}
-            roughness={0.62}
-            side={THREE.DoubleSide}
-            alphaTest={0.08}
-            depthWrite={opacity >= 0.99}
-          />
-        </mesh>
-      </YawBillboard>
+      {lockFacing ? plane : <YawBillboard>{plane}</YawBillboard>}
+      {!displayOnly && (
+        <TokenPickVolume itemId={item.id} radius={footprint * 0.52} height={planeH} y={0} />
+      )}
+    </>
+  );
+}
+
+function GenericImageBillboard({
+  item,
+  displayOnly = false,
+}: {
+  item: ImageItem;
+  displayOnly?: boolean;
+}) {
+  const fallbackPropId = resolvePropId(item);
+  const { texture, status } = usePropDisplayTexture(item, fallbackPropId);
+  const footprint = Math.min(item.width, item.height);
+  const img = texture?.image as { width?: number; height?: number } | undefined;
+  const aspect =
+    img && typeof img.width === 'number' && typeof img.height === 'number' && img.height > 0
+      ? img.width / img.height
+      : 1;
+  const planeW = footprint;
+  const planeH = Math.max(footprint * 0.85, footprint / Math.max(aspect, 0.35));
+  const opacity = item.visible === false ? 0.35 : 1;
+
+  if (fallbackPropId && (hasPropMesh3D(fallbackPropId) || !texture || status === 'error')) {
+    return <MeshProp item={item} propId={fallbackPropId} footprint={footprint} />;
+  }
+
+  const lockFacing =
+    item.propMount === 'wall'
+    || Math.abs(item.propPitch ?? 0) > 0.5
+    || Math.abs(item.propRoll ?? 0) > 0.5;
+  const plane = (
+    <mesh position={[0, planeH / 2, 0]} renderOrder={14}>
+      <planeGeometry args={[planeW, planeH]} />
+      <meshStandardMaterial
+        {...(texture ? { map: texture } : {})}
+        color={texture ? '#ffffff' : '#1c1c28'}
+        transparent
+        opacity={opacity}
+        roughness={0.48}
+        metalness={0.04}
+        envMapIntensity={1.15}
+        side={THREE.DoubleSide}
+        alphaTest={0.08}
+        depthWrite={opacity >= 0.99}
+      />
+    </mesh>
+  );
+
+  return (
+    <>
+      {lockFacing ? plane : <YawBillboard>{plane}</YawBillboard>}
       {!displayOnly && (
         <TokenPickVolume itemId={item.id} radius={footprint * 0.52} height={planeH} y={0} />
       )}
@@ -82,15 +169,24 @@ function GenericImageBillboard({
 function GlbProp({ item, propId, footprint }: { item: ImageItem; propId: string; footprint: number }) {
   const open = (item.propState ?? 0) > 0;
   const light = propModelLight(propId);
+  const fallback = hasPropMesh3D(propId) ? (
+    <MeshProp item={item} propId={propId} footprint={footprint} />
+  ) : hasPropCanvasArt(propId) ? (
+    <PropArtBillboard item={item} propId={propId} />
+  ) : (
+    <MeshProp item={item} propId={propId} footprint={footprint} />
+  );
   return (
-    <PropAnim3D
-      item={item}
-      size={footprint}
-      {...(light ? { light } : {})}
-      driveGroup
-    >
-      <PropModel3D propId={propId} open={open} size={footprint} />
-    </PropAnim3D>
+    <PropGlbErrorBoundary fallback={fallback}>
+      <PropAnim3D
+        item={item}
+        size={footprint}
+        {...(light ? { light } : {})}
+        driveGroup
+      >
+        <PropModel3D propId={propId} open={open} size={footprint} />
+      </PropAnim3D>
+    </PropGlbErrorBoundary>
   );
 }
 
@@ -106,13 +202,20 @@ function MeshProp({
   wallHeight?: number;
 }) {
   const amount = useLivePropAmount(item);
+  const doorStyleId = useMapStore((s) => s.doorStyleId);
+  const doorTheme = resolveDoorSurfaceStyle(item.propDoorTheme || doorStyleId);
+  const secretConcealed = propId === 'secret-door' && item.visible === false;
+  const doorLongAxisX = isDoorPropId(propId) ? item.width >= item.height : undefined;
   return (
     <PropAnim3D item={item} size={footprint} driveGroup={false}>
       <PropMesh3D
         propId={propId}
         amount={amount}
         size={footprint}
+        doorTheme={doorTheme}
+        secretConcealed={secretConcealed}
         {...(wallHeight != null ? { height: wallHeight } : {})}
+        {...(doorLongAxisX != null ? { doorLongAxisX } : {})}
       />
     </PropAnim3D>
   );
@@ -127,36 +230,71 @@ function MapImageMesh({ item, displayOnly = false }: { item: ImageItem; displayO
     return getActiveMap()?.gridSize ?? 96;
   });
   const isDoor = isDoorPropId(propId);
-  // Doors/gates are wide+thin after wall-fit — scale 3D from the opening span, not the hairline depth.
   const footprint = isDoor
     ? Math.max(item.width, item.height)
     : Math.min(item.width, item.height);
   const wallHeight = isDoor ? gridSize * wallHeightCells : undefined;
-  const useGlb = hasPropModel3D(propId);
-  const useMesh = !useGlb && hasPropMesh3D(propId);
+  // Prefer real 3D (GLB → procedural mesh) over flat canvas billboards.
+  const useGlb = Boolean(propId && hasPropModel3D(propId));
+  const useMesh = Boolean(propId && !useGlb && hasPropMesh3D(propId));
+  const useCanvasBillboard = Boolean(
+    propId && !useGlb && !useMesh && hasPropCanvasArt(propId),
+  );
 
   const meshBase = useRef({ w: item.width, h: item.height });
   if (meshBase.current.w !== item.width || meshBase.current.h !== item.height) {
     meshBase.current = { w: item.width, h: item.height };
   }
 
+  const wallLift =
+    item.propMount === 'wall'
+      ? Math.max(8, (item.propWallHeightCells ?? 1.15) * gridSize)
+      : item.propWallMerge === true
+        // Floor merge: bury past surface pad so chests / rugs sit flush in the floor.
+        ? -Math.max(12, footprint * 0.34)
+        : 0;
   const pickH = wallHeight
-    ?? (useGlb ? Math.max(footprint * 1.45, 32) : Math.max(footprint * 1.15, 28));
+    ?? Math.max(
+      useGlb ? footprint * 1.45 : footprint * 1.15,
+      28,
+      wallLift + footprint * 0.6,
+    );
 
   return (
     <SceneItemTransformGroup
       itemId={item.id}
       surfaceY="ground"
+      wallLift={wallLift}
       baseWidth={meshBase.current.w}
       baseHeight={meshBase.current.h}
       displayOnly={displayOnly}
     >
       {propId && useGlb ? (
         <>
-          {/* Nested Suspense so one slow prop GLB cannot blank the whole 3D scene. */}
-          <Suspense fallback={null}>
+          <Suspense
+            fallback={
+              <MeshProp
+                item={item}
+                propId={propId}
+                footprint={footprint}
+                {...(wallHeight != null ? { wallHeight } : {})}
+              />
+            }
+          >
             <GlbProp item={item} propId={propId} footprint={footprint} />
           </Suspense>
+          {!displayOnly && (
+            <TokenPickVolume
+              itemId={item.id}
+              radius={Math.max(item.width, item.height) * 0.52}
+              height={pickH}
+              y={0}
+            />
+          )}
+        </>
+      ) : propId && useCanvasBillboard ? (
+        <>
+          <PropArtBillboard item={item} propId={propId} displayOnly={displayOnly} />
           {!displayOnly && (
             <TokenPickVolume
               itemId={item.id}

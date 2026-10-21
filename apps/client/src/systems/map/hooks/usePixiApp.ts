@@ -62,10 +62,11 @@ export function usePixiApp(
         cleanupRef.current();
       }
       if (appRef.current) {
-        // Remove canvas first to avoid flash (canvas may already be detached).
-        appRef.current.canvas?.remove();
-        appRef.current.destroy(true, { children: true });
+        const app = appRef.current;
         appRef.current = null;
+        // Remove canvas first to avoid flash (canvas may already be detached).
+        app.canvas?.remove();
+        app.destroy(true, { children: true });
       }
     };
     // onReady is intentionally excluded — it's a stable callback passed once

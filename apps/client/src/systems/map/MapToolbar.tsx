@@ -11,6 +11,8 @@ import { DRAW_COLOR_PRESETS, DEFAULT_TEXT_FONT_SIZE, MAX_TEXT_FONT_SIZE, MIN_TEX
 import { MapViewModeToggle } from './MapViewModeToggle';
 import { useImageWallScan } from '@/systems/map3d/useImageWallScan';
 import { MAP_SURFACE_STYLE_OPTIONS } from '@/systems/map3d/mapSurfaceStyles';
+import { DOOR_STYLE_GROUPS, DOOR_SURFACE_STYLES } from '@/systems/map3d/doorSurfaceStyles';
+import { resumeFirstPersonMoveAfterMapFocus } from '@/systems/map3d/useFirstPersonControls';
 
 function pushWallExtrudeSoon() {
   setTimeout(() => emitWallExtrudeToSession(), 0);
@@ -69,10 +71,12 @@ export function MapToolbar() {
   const wallHeightCells = useMapStore((s) => s.wallHeightCells);
   const wallStyleId = useMapStore((s) => s.wallStyleId);
   const floorStyleId = useMapStore((s) => s.floorStyleId);
+  const doorStyleId = useMapStore((s) => s.doorStyleId);
   const setAutoExtrudeWalls = useMapStore((s) => s.setAutoExtrudeWalls);
   const setWallHeightCells = useMapStore((s) => s.setWallHeightCells);
   const setWallStyleId = useMapStore((s) => s.setWallStyleId);
   const setFloorStyleId = useMapStore((s) => s.setFloorStyleId);
+  const setDoorStyleId = useMapStore((s) => s.setDoorStyleId);
   const scanImageWalls = useMapStore((s) => s.scanImageWalls);
   const wallScanThreshold = useMapStore((s) => s.wallScanThreshold);
   const setScanImageWalls = useMapStore((s) => s.setScanImageWalls);
@@ -98,6 +102,8 @@ export function MapToolbar() {
   const activeMap = getActiveMap();
   const showGrid = activeMap?.showGrid ?? true;
   const wallCount = activeMap?.walls.length ?? 0;
+  /** Walls can render in 3D/FP from authored segments even when Extrude is off. */
+  const canPickWallArt = autoExtrudeWalls || scanImageWalls || wallCount > 0;
   const { result: scanResult, status: scanStatus, scanMethod, rescan } = useImageWallScan(
     viewMode === '3d' ? activeMap ?? null : null,
   );
@@ -412,10 +418,15 @@ export function MapToolbar() {
               onChange={(e) => {
                 setWallStyleId(e.target.value);
                 pushWallExtrudeSoon();
+                resumeFirstPersonMoveAfterMapFocus();
               }}
               className="mt-1 w-full rounded px-1 py-0.5 font-ui text-[10px] bg-[#12121a] border border-[#2a2a38] text-[#e8e0d0]"
-              disabled={!autoExtrudeWalls}
-              title="Detailed stone / brick on extruded walls"
+              disabled={!canPickWallArt}
+              title={
+                canPickWallArt
+                  ? 'Stone / brick on 3D extruded & authored walls'
+                  : 'Add walls (wall tool) or enable Extrude walls / Auto-scan'
+              }
             >
               {MAP_SURFACE_STYLE_OPTIONS.filter((o) => o.id !== 'map').map((opt) => (
                 <option key={opt.id} value={opt.id}>{opt.label}</option>
@@ -435,6 +446,26 @@ export function MapToolbar() {
             >
               {MAP_SURFACE_STYLE_OPTIONS.map((opt) => (
                 <option key={opt.id} value={opt.id}>{opt.label}</option>
+              ))}
+            </select>
+          </label>
+          <label className="font-ui text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
+            Door art
+            <select
+              value={doorStyleId}
+              onChange={(e) => {
+                setDoorStyleId(e.target.value);
+                pushWallExtrudeSoon();
+              }}
+              className="mt-1 w-full rounded px-1 py-0.5 font-ui text-[10px] bg-[#12121a] border border-[#2a2a38] text-[#e8e0d0]"
+              title="HQ wood / metal / stone / barred door textures (3D + 2D trim)"
+            >
+              {DOOR_STYLE_GROUPS.map((grp) => (
+                <optgroup key={grp.label} label={grp.label}>
+                  {grp.ids.map((id) => (
+                    <option key={id} value={id}>{DOOR_SURFACE_STYLES[id].label}</option>
+                  ))}
+                </optgroup>
               ))}
             </select>
           </label>

@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" shape-rendering="crispEdges">
+  <rect width="64" height="64" fill="none"/>
+  <!-- back board -->
+  <rect x="8" y="10" width="48" height="44" fill="#4a3520" stroke="#2a1810" stroke-width="2"/>
+  <!-- shelves -->
+  <rect x="10" y="22" width="44" height="4" fill="#6b4423"/>
+  <rect x="10" y="38" width="44" height="4" fill="#6b4423"/>
+  <!-- pegs / weapons (simplified) -->
+  <rect x="16" y="12" width="3" height="18" fill="#9aa4b0"/>
+  <rect x="26" y="12" width="3" height="20" fill="#b8c0cc"/>
+  <rect x="36" y="12" width="3" height="17" fill="#9aa4b0"/>
+  <rect x="46" y="12" width="3" height="19" fill="#b8c0cc"/>
+  <rect x="18" y="26" width="3" height="14" fill="#c9a84c"/>
+  <rect x="30" y="26" width="3" height="16" fill="#9aa4b0"/>
+  <rect x="42" y="26" width="3" height="13" fill="#c9a84c"/>
+  <!-- base -->
+  <rect x="6" y="52" width="52" height="6" fill="#3d2412"/>
+</svg>

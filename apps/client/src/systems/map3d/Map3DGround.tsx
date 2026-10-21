@@ -9,7 +9,15 @@ import {
   tileSurfaceTexture,
   usesArtFloor,
 } from './mapSurfaceTextures';
+import { pbrAssetForStyle } from './pbrSurfaceAssets';
+import {
+  disposePbrSurfaceMaps,
+  tilePbrSurfaceMaps,
+  usePbrSurfaceMaps,
+} from './pbrSurfaceLoader';
 import { SceneItemTransformGroup } from './TokenTransformGroup';
+
+const FLOOR_NORMAL_SCALE = new THREE.Vector2(1.22, 1.22);
 
 function FloorPlane({
   map,
@@ -22,27 +30,51 @@ function FloorPlane({
   const floorStyleId = useMapStore((s) => s.floorStyleId);
   const floorStyle = resolveMapSurfaceStyle(floorStyleId);
   const artFloor = usesArtFloor(floorStyleId);
+  const floorTileWorld = Math.max(80, (map.gridSize || 96) * 2.8);
+  const pbrAssetId = artFloor ? pbrAssetForStyle(floorStyle.id, 'floor') : null;
+  const { maps: pbrBase } = usePbrSurfaceMaps(pbrAssetId);
   // Only load map image when we actually need it (avoids covering art).
   const { texture: mapTex, status } = useThreeTexture(artFloor ? null : map.backgroundUrl);
 
+  const artPbr = useMemo(() => {
+    if (!artFloor || !pbrBase) return null;
+    return tilePbrSurfaceMaps(pbrBase, map.width, map.height, floorTileWorld);
+  }, [artFloor, pbrBase, map.width, map.height, floorTileWorld]);
+
   const artMap = useMemo(() => {
-    if (!artFloor) return null;
+    if (!artFloor || pbrBase) return null;
     const base = getMapSurfaceTexture(floorStyleId, 'floor');
     if (!base) return null;
-    const tiled = tileSurfaceTexture(base, map.width, map.height, Math.max(48, (map.gridSize || 96) * 0.75));
+    const tiled = tileSurfaceTexture(base, map.width, map.height, floorTileWorld);
     tiled.needsUpdate = true;
     return tiled;
-  }, [artFloor, floorStyleId, map.width, map.height, map.gridSize]);
+  }, [artFloor, pbrBase, floorStyleId, map.width, map.height, floorTileWorld]);
 
   useEffect(() => () => {
     artMap?.dispose();
-  }, [artMap]);
+    disposePbrSurfaceMaps(artPbr);
+  }, [artMap, artPbr]);
 
   // R3F often keeps the previous `map` when swapping textures — force it.
   useLayoutEffect(() => {
     const mat = matRef.current;
     if (!mat) return;
-    if (artMap) {
+    if (artPbr) {
+      mat.map = artPbr.map;
+      mat.normalMap = artPbr.normalMap;
+      mat.roughnessMap = artPbr.roughnessMap;
+      mat.aoMap = artPbr.aoMap;
+      mat.aoMapIntensity = 1.45;
+      mat.normalScale.copy(FLOOR_NORMAL_SCALE);
+      mat.color.set('#ffffff');
+      mat.emissive.set('#000000');
+      mat.emissiveIntensity = 0;
+      mat.roughness = 1;
+      mat.metalness = 0.03;
+    } else if (artMap) {
+      mat.normalMap = null;
+      mat.roughnessMap = null;
+      mat.aoMap = null;
       mat.map = artMap;
       mat.color.set('#ffffff');
       mat.emissive.set('#000000');
@@ -50,6 +82,9 @@ function FloorPlane({
       mat.roughness = floorStyle.floorRoughness;
       mat.metalness = 0.04;
     } else if (mapTex) {
+      mat.normalMap = null;
+      mat.roughnessMap = null;
+      mat.aoMap = null;
       mat.map = mapTex;
       mat.color.set('#ffffff');
       mat.emissive.set(clayMode ? '#000000' : '#ffffff');
@@ -57,6 +92,9 @@ function FloorPlane({
       mat.roughness = clayMode ? 0.94 : 0.88;
       mat.metalness = clayMode ? 0.01 : 0.02;
     } else {
+      mat.normalMap = null;
+      mat.roughnessMap = null;
+      mat.aoMap = null;
       mat.map = null;
       mat.color.set(status === 'error' ? '#3d2020' : floorStyle.floor);
       mat.emissive.set('#000000');
@@ -65,7 +103,7 @@ function FloorPlane({
       mat.metalness = 0.02;
     }
     mat.needsUpdate = true;
-  }, [artMap, mapTex, clayMode, floorStyle, status]);
+  }, [artPbr, artMap, mapTex, clayMode, floorStyle, status]);
 
   return (
     <mesh

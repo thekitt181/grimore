@@ -6,6 +6,7 @@ import type { Socket } from 'socket.io-client';
 import { useSessionStore } from '@/store/sessionStore';
 import { useFirstPersonStore } from '@/systems/map3d/firstPersonStore';
 import { applyRemoteWalkPose } from '@/systems/scene/token/remotePoseApply';
+import { isStaleLiveAfterLocalCommit } from '@/systems/scene/token/tokenMoveCommitGuard';
 
 let boundSocket: Socket | null = null;
 
@@ -26,6 +27,7 @@ function applyPose(payload: {
   if (payload.tokenId == null) return;
   if (typeof payload.x !== 'number' || typeof payload.y !== 'number') return;
   if (ignoreLocalDriver(payload.tokenId)) return;
+  if (isStaleLiveAfterLocalCommit(payload.tokenId, payload.x, payload.y)) return;
   applyRemoteWalkPose(
     payload.tokenId,
     payload.x,

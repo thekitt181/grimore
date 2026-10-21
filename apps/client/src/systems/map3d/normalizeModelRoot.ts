@@ -99,7 +99,7 @@ export function applyModelNormalization(
   const prevScale = root.scale.clone();
 
   // Detach so setFromObject ignores parent move/rotate/scale (re-normalize after drag).
-  if (prevParent) prevParent.remove(root);
+  prevParent?.remove(root);
 
   root.position.set(0, 0, 0);
   root.rotation.set(0, 0, 0);

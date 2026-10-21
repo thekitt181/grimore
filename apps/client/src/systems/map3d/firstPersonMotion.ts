@@ -26,7 +26,15 @@ export function resetFirstPersonMotion(): void {
   m.accum = 0;
 }
 
+/** Fixed physics step (seconds) — shared by camera + pose interpolation. */
+export const FP_SIM_STEP = 1 / 120;
+
 /** Exponential approach — frame-rate independent. */
 export function damp(current: number, target: number, lambda: number, dt: number): number {
   return current + (target - current) * (1 - Math.exp(-lambda * Math.max(0, dt)));
+}
+
+export function dampAngleDeg(current: number, target: number, lambda: number, dt: number): number {
+  let delta = ((target - current + 180) % 360 + 360) % 360 - 180;
+  return current + delta * (1 - Math.exp(-lambda * Math.max(0, dt)));
 }

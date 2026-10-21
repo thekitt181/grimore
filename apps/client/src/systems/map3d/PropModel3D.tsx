@@ -29,7 +29,7 @@ export function PropModel3D({
       url={spec.resolvedUrl}
       targetSize={targetSize}
       groundAlign
-      tokenRender
+      propRender
       footprint={{ width: footprint, height: footprint }}
     />
   );

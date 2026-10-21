@@ -1,6 +1,12 @@
 import { useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
+import { canonicalPropId } from '@/systems/map/props/propArt';
+import { useMapStore } from '@/systems/map/store/mapStore';
+import { resolveDoorSurfaceStyle, type DoorSurfaceStyle } from './doorSurfaceStyles';
+import { DoorPanelSurface } from './DoorPanelSurface';
+import { doorStyleIsBarred } from './doorPbrAssets';
+import { propMaterialProps } from './propMaterialEnhance';
 
 const WOOD = '#6b4423';
 const WOOD_DARK = '#3d2412';
@@ -33,10 +39,12 @@ function Mat({
 }) {
   return (
     <meshStandardMaterial
-      color={color}
-      roughness={roughness}
-      metalness={metalness}
-      {...(emissive ? { emissive, emissiveIntensity } : {})}
+      {...propMaterialProps({
+        color,
+        ...(roughness != null ? { roughness } : {}),
+        ...(metalness != null ? { metalness } : {}),
+        ...(emissive ? { emissive, emissiveIntensity } : {}),
+      })}
     />
   );
 }
@@ -142,6 +150,9 @@ export function PropMesh3D({
   size = 1,
   /** World-unit height (doors/gates match extruded wall height). */
   height,
+  doorTheme,
+  secretConcealed = false,
+  doorLongAxisX = true,
 }: {
   propId: string;
   open?: boolean;
@@ -150,29 +161,64 @@ export function PropMesh3D({
   /** Footprint scale (world units ≈ map cell). */
   size?: number;
   height?: number;
+  doorTheme?: DoorSurfaceStyle;
+  /** Hidden secret door — flush wall (GM ghost), no handle. */
+  secretConcealed?: boolean;
+  /** Long edge of the door footprint along map X (matches doorCollision alongW). */
+  doorLongAxisX?: boolean;
 }) {
   const sx = Math.max(size, 8);
   const sy = height != null ? Math.max(height, 8) : sx;
   const a = amount ?? (open ? 1 : 0);
+  const theme = doorTheme ?? resolveDoorSurfaceStyle('mixed');
 
   return (
     <group scale={[sx, sy, sx]}>
-      <PropBody id={propId} amount={a} />
+      <PropBody
+        id={propId}
+        amount={a}
+        doorTheme={theme}
+        secretConcealed={secretConcealed}
+        worldScaleX={sx}
+        worldScaleY={sy}
+        doorLongAxisX={doorLongAxisX}
+      />
     </group>
   );
 }
 
-function PropBody({ id, amount }: { id: string; amount: number }) {
+function PropBody({
+  id,
+  amount,
+  doorTheme,
+  secretConcealed,
+  worldScaleX,
+  worldScaleY,
+  doorLongAxisX,
+}: {
+  id: string;
+  amount: number;
+  doorTheme: DoorSurfaceStyle;
+  secretConcealed: boolean;
+  worldScaleX: number;
+  worldScaleY: number;
+  doorLongAxisX: boolean;
+}) {
   switch (id) {
     case 'chest':
     case 'sarcophagus':
       return <Chest amount={amount} fancy={id === 'sarcophagus'} />;
     case 'crate':
       return <Crate />;
+    case 'barrel':
+    case 'keg':
+      return <Barrel tall={id === 'keg'} />;
     case 'column':
       return <Column />;
     case 'torch':
       return <Torch />;
+    case 'candle':
+      return <Candle />;
     case 'campfire':
       return <Campfire />;
     case 'altar':
@@ -181,6 +227,8 @@ function PropBody({ id, amount }: { id: string; amount: number }) {
       return <Boulder />;
     case 'pedestal':
       return <Pedestal />;
+    case 'key':
+      return <KeyMesh />;
     case 'statue':
     case 'idol':
     case 'angel':
@@ -188,9 +236,21 @@ function PropBody({ id, amount }: { id: string; amount: number }) {
     case 'door':
     case 'runed-door':
     case 'secret-door':
-      return <Door amount={amount} runed={id === 'runed-door'} />;
+      return (
+        <Door
+          amount={amount}
+          runed={id === 'runed-door'}
+          theme={doorTheme}
+          concealed={secretConcealed}
+          subtleHandle={id === 'secret-door' && !secretConcealed}
+          longAxisX={doorLongAxisX}
+          faceWorldW={worldScaleX * 0.88}
+          faceWorldH={worldScaleY * 0.98}
+          doorStyleId={doorTheme.id}
+        />
+      );
     case 'gate':
-      return <Gate amount={amount} />;
+      return <Gate amount={amount} theme={doorTheme} />;
     case 'plate':
       return <Plate amount={amount} />;
     case 'hatch':
@@ -228,13 +288,27 @@ function PropBody({ id, amount }: { id: string; amount: number }) {
     case 'arrows':
     case 'dart':
     case 'bolt':
-      return <ArrowTrap />;
+      return <ArrowTrap amount={amount} />;
     case 'book':
       return <Book amount={amount} />;
     case 'potion':
       return <Potion />;
     case 'sword':
       return <Sword />;
+    case 'weapon-rack':
+      return <WeaponRack />;
+    case 'cage':
+      return <Cage />;
+    case 'mural':
+      return <Mural />;
+    case 'art-object':
+      return <ArtObject />;
+    case 'swarm':
+      return <SwarmOverhead />;
+    case 'floor-glyph':
+      return <FloorGlyph />;
+    case 'tripwire':
+      return <Tripwire amount={amount} />;
     case 'orb':
       return <Orb />;
     case 'mushroom':
@@ -289,6 +363,41 @@ function Crate() {
       <Box args={[0.82, 0.08, 0.82]} position={[0, 0.74, 0]} color={WOOD_DARK} />
       <Box args={[0.06, 0.72, 0.82]} position={[-0.36, 0.36, 0]} color={WOOD_DARK} />
       <Box args={[0.06, 0.72, 0.82]} position={[0.36, 0.36, 0]} color={WOOD_DARK} />
+    </group>
+  );
+}
+
+function Barrel({ tall }: { tall?: boolean }) {
+  const h = tall ? 0.95 : 0.78;
+  const r = tall ? 0.28 : 0.34;
+  return (
+    <group>
+      <Cyl args={[r * 0.92, r, h, 12]} position={[0, h / 2, 0]} color={WOOD} roughness={0.72} />
+      <Cyl args={[r * 1.02, r * 1.02, 0.06, 12]} position={[0, h * 0.22, 0]} color={IRON} metalness={0.55} roughness={0.4} />
+      <Cyl args={[r * 1.02, r * 1.02, 0.06, 12]} position={[0, h * 0.78, 0]} color={IRON} metalness={0.55} roughness={0.4} />
+      <Cyl args={[r * 0.88, r * 0.88, 0.05, 12]} position={[0, h + 0.02, 0]} color={WOOD_DARK} />
+    </group>
+  );
+}
+
+function Candle() {
+  return (
+    <group>
+      <Cyl args={[0.07, 0.08, 0.42, 10]} position={[0, 0.28, 0]} color="#e8e0d0" roughness={0.55} />
+      <Cyl args={[0.09, 0.1, 0.08, 10]} position={[0, 0.05, 0]} color={IRON_DARK} metalness={0.4} />
+      <FlameFlicker y={0.55} scale={0.55} />
+      <pointLight position={[0, 0.62, 0]} color={FLAME} intensity={1.4} distance={3.2} decay={2} />
+    </group>
+  );
+}
+
+function KeyMesh() {
+  return (
+    <group rotation={[0, 0, -0.35]}>
+      <Cyl args={[0.1, 0.1, 0.04, 14]} position={[0, 0.22, 0]} rotation={[Math.PI / 2, 0, 0]} color={GOLD} metalness={0.7} roughness={0.28} />
+      <Box args={[0.05, 0.42, 0.05]} position={[0, 0.02, 0]} color={GOLD} metalness={0.65} roughness={0.32} />
+      <Box args={[0.14, 0.05, 0.05]} position={[0.05, -0.14, 0]} color={GOLD} metalness={0.65} roughness={0.32} />
+      <Box args={[0.1, 0.05, 0.05]} position={[0.03, -0.22, 0]} color={GOLD} metalness={0.65} roughness={0.32} />
     </group>
   );
 }
@@ -382,30 +491,143 @@ function Statue({ broken }: { broken: number }) {
   );
 }
 
-function Door({ amount, runed }: { amount: number; runed: boolean }) {
+function Door({
+  amount,
+  runed,
+  theme,
+  concealed,
+  subtleHandle,
+  longAxisX,
+  faceWorldW,
+  faceWorldH,
+  doorStyleId,
+}: {
+  amount: number;
+  runed: boolean;
+  theme: DoorSurfaceStyle;
+  concealed: boolean;
+  subtleHandle: boolean;
+  /** False when item.height > item.width — panel needs an extra quarter-turn. */
+  longAxisX: boolean;
+  faceWorldW: number;
+  faceWorldH: number;
+  doorStyleId: string;
+}) {
   // Unit cube: Y 0→1 matches wall height after PropMesh3D Y scale.
-  // Base +90° so the panel spans X at prop rotation 0 — matches 2D door art.
+  // Panel plane defaults to +Z; one Y-turn aligns with map X when width is the long edge.
+  // Hidden secrets: no 3D panel — extruded wall + invisible pick only (slab was edge-on / fin glitch).
+  if (concealed) {
+    return null;
+  }
+
+  const handleColor = theme.handle;
+  const handleScale = subtleHandle ? 0.55 : 1;
+  const gridSize = useMapStore((s) => s.gridSize);
+  const tileWorld = Math.max(72, (gridSize || 96) * 3.2);
+  const barred = doorStyleIsBarred(doorStyleId);
+  // Footprint width → map X, height → depth (Z). Swing on hinge edge so panel + handles stay glued.
+  const halfW = 0.44;
+  const openAngle = amount * (Math.PI / 2);
+  const hinge: [number, number, number] = longAxisX
+    ? [-halfW, 0.5, 0.04]
+    : [0.04, 0.5, -halfW];
+  const panelCenterOffset: [number, number, number] = longAxisX
+    ? [halfW, 0, 0]
+    : [0, 0, halfW];
+  const panelRotY = longAxisX ? 0 : Math.PI / 2;
+  // Panel-local: plane XY, faces ±Z — one handle per side, latch stile at +X.
+  const latchX = 0.34;
+  const latchY = -0.02;
+  const faceZ = subtleHandle ? 0.042 : 0.048;
+
   return (
-    <group rotation={[0, Math.PI / 2, 0]}>
-      <group rotation={[0, amount * 1.2, 0]} position={[amount * 0.35, 0, 0]}>
-        <Box args={[0.1, 0.98, 0.88]} position={[0, 0.5, 0]} color={runed ? '#4a3a5a' : WOOD} />
-        <Box args={[0.04, 0.07, 0.07]} position={[0.07, 0.48, -0.32]} color={GOLD} metalness={0.5} />
-        <Box args={[0.04, 0.07, 0.07]} position={[-0.07, 0.48, -0.32]} color={GOLD} metalness={0.5} />
-        {runed && (
-          <Box
-            args={[0.02, 0.3, 0.3]}
-            position={[0.06, 0.62, 0]}
-            color={GOLD}
-            emissive={GOLD}
-            emissiveIntensity={0.35}
-          />
-        )}
+    <group>
+      <group position={hinge}>
+        <group rotation={[0, openAngle, 0]}>
+          <group position={panelCenterOffset} rotation={[0, panelRotY, 0]}>
+          <mesh castShadow receiveShadow renderOrder={4}>
+            <DoorPanelSurface
+              doorStyleId={doorStyleId}
+              faceUnitW={0.88}
+              faceUnitH={0.98}
+              faceWorldW={faceWorldW}
+              faceWorldH={faceWorldH}
+              tileWorld={tileWorld}
+            />
+          </mesh>
+          {barred && <BarredDoorOverlay theme={theme} longAxisX={longAxisX} />}
+          {!subtleHandle && (
+            <>
+              <Box
+                args={[0.04 * handleScale, 0.07 * handleScale, 0.07 * handleScale]}
+                position={[latchX, latchY, faceZ]}
+                color={handleColor}
+                metalness={0.5}
+              />
+              <Box
+                args={[0.04 * handleScale, 0.07 * handleScale, 0.07 * handleScale]}
+                position={[latchX, latchY, -faceZ]}
+                color={handleColor}
+                metalness={0.5}
+              />
+            </>
+          )}
+          {subtleHandle && (
+            <>
+              <Box
+                args={[0.025, 0.05, 0.05]}
+                position={[latchX, latchY - 0.02, faceZ]}
+                color={handleColor}
+                metalness={0.45}
+              />
+              <Box
+                args={[0.025, 0.05, 0.05]}
+                position={[latchX, latchY - 0.02, -faceZ]}
+                color={handleColor}
+                metalness={0.45}
+              />
+            </>
+          )}
+          {runed && (
+            <Box
+              args={[0.02, 0.3, 0.3]}
+              position={[latchX - 0.28, 0.12, 0]}
+              color={theme.rune}
+              emissive={theme.rune}
+              emissiveIntensity={0.4}
+            />
+          )}
+          </group>
+        </group>
       </group>
     </group>
   );
 }
 
-function Gate({ amount }: { amount: number }) {
+function BarredDoorOverlay({ theme, longAxisX }: { theme: DoorSurfaceStyle; longAxisX: boolean }) {
+  const bars = [-0.34, -0.17, 0, 0.17, 0.34];
+  return (
+    <group
+      position={longAxisX ? [0.058, 0, 0] : [0, 0, 0.058]}
+      rotation={[0, longAxisX ? Math.PI / 2 : 0, 0]}
+    >
+      {bars.map((z) => (
+        <Box
+          key={z}
+          args={[0.045, 0.9, 0.045]}
+          position={[0, 0, z]}
+          color={theme.trim}
+          metalness={0.55}
+          roughness={0.38}
+        />
+      ))}
+      <Box args={[0.04, 0.08, 0.82]} position={[0, 0.42, 0]} color={theme.gateDark} metalness={0.45} />
+      <Box args={[0.04, 0.08, 0.82]} position={[0, -0.42, 0]} color={theme.gateDark} metalness={0.45} />
+    </group>
+  );
+}
+
+function Gate({ amount, theme }: { amount: number; theme: DoorSurfaceStyle }) {
   // Bars only — gaps are empty air (see-through). Y 0→1 matches wall height.
   // Open lifts the grate into the arch so the passage is clear, but keep the
   // mesh so players still see the raised portcullis (never unmount when open).
@@ -418,14 +640,14 @@ function Gate({ amount }: { amount: number }) {
           key={x}
           args={[0.055, 0.98, 0.055]}
           position={[x, 0.5, 0]}
-          color={IRON}
+          color={theme.gate}
           metalness={0.55}
           roughness={0.4}
         />
       ))}
-      <Box args={[0.86, 0.05, 0.05]} position={[0, 0.22, 0]} color={IRON_DARK} metalness={0.5} />
-      <Box args={[0.86, 0.05, 0.05]} position={[0, 0.5, 0]} color={IRON_DARK} metalness={0.5} />
-      <Box args={[0.86, 0.05, 0.05]} position={[0, 0.78, 0]} color={IRON_DARK} metalness={0.5} />
+      <Box args={[0.86, 0.05, 0.05]} position={[0, 0.22, 0]} color={theme.gateDark} metalness={0.5} />
+      <Box args={[0.86, 0.05, 0.05]} position={[0, 0.5, 0]} color={theme.gateDark} metalness={0.5} />
+      <Box args={[0.86, 0.05, 0.05]} position={[0, 0.78, 0]} color={theme.gateDark} metalness={0.5} />
       {/* Spikes along the bottom edge */}
       {bars.map((x) => (
         <Box
@@ -623,44 +845,78 @@ function Shop({ closed }: { closed: number }) {
 }
 
 function SpearTrap({ amount }: { amount: number }) {
-  const h = 0.2 + amount * 0.5;
+  const h = 0.18 + amount * 1.05;
   return (
     <group>
-      <Box args={[0.7, 0.06, 0.7]} position={[0, 0.03, 0]} color={STONE_DARK} />
-      {[-0.15, 0, 0.15].map((x) => (
-        <Cyl
-          key={x}
-          args={[0.03, 0.02, h, 6]}
-          position={[x, h / 2 + 0.02, 0]}
-          color={IRON}
-          metalness={0.55}
-        />
+      <Box args={[0.78, 0.07, 0.78]} position={[0, 0.035, 0]} color={STONE_DARK} />
+      {[-0.22, -0.07, 0.07, 0.22].map((x) => (
+        <group key={x}>
+          <Cyl
+            args={[0.035, 0.022, h, 7]}
+            position={[x, h / 2 + 0.02, 0]}
+            color={IRON}
+            metalness={0.62}
+            roughness={0.28}
+          />
+          <mesh position={[x, h + 0.04, 0]}>
+            <coneGeometry args={[0.045, 0.12, 7]} />
+            <Mat color={IRON} metalness={0.7} roughness={0.22} emissive={amount > 0.2 ? GOLD : undefined} emissiveIntensity={amount > 0.2 ? 0.25 : 0} />
+          </mesh>
+        </group>
       ))}
     </group>
   );
 }
 
 function BladeTrap({ amount }: { amount: number }) {
+  const swing = amount * 1.15;
   return (
     <group>
-      <Box args={[0.65, 0.08, 0.65]} position={[0, 0.04, 0]} color={IRON_DARK} metalness={0.4} />
-      <Box
-        args={[0.55, 0.04, 0.12]}
-        position={[0, 0.12 + amount * 0.23, 0]}
-        rotation={[0, 0, amount * 0.4]}
-        color={IRON}
-        metalness={0.65}
-        roughness={0.3}
-      />
+      <Box args={[0.7, 0.09, 0.7]} position={[0, 0.045, 0]} color={IRON_DARK} metalness={0.45} />
+      <group position={[0, 0.1, 0]} rotation={[0, 0, -0.15 + swing * 1.35]}>
+        <Box
+          args={[0.72, 0.045, 0.1]}
+          position={[0.2 * swing, 0.08 + swing * 0.15, 0]}
+          color={IRON}
+          metalness={0.72}
+          roughness={0.22}
+        />
+        <Box
+          args={[0.12, 0.08, 0.12]}
+          position={[-0.28, 0.06, 0]}
+          color={GOLD}
+          metalness={0.55}
+          roughness={0.35}
+        />
+      </group>
     </group>
   );
 }
 
-function ArrowTrap() {
+function ArrowTrap({ amount }: { amount: number }) {
+  const primed = amount > 0.02;
   return (
     <group>
-      <Box args={[0.55, 0.35, 0.35]} position={[0, 0.2, 0]} color={STONE} />
-      <Cyl args={[0.06, 0.06, 0.25, 8]} position={[0, 0.22, 0.25]} rotation={[Math.PI / 2, 0, 0]} color={IRON_DARK} metalness={0.5} />
+      <Box args={[0.58, 0.38, 0.4]} position={[0, 0.2, 0]} color={STONE} />
+      <Box args={[0.5, 0.28, 0.08]} position={[0, 0.22, 0.18]} color={STONE_DARK} />
+      {[-0.14, 0, 0.14].map((x) => (
+        <Cyl
+          key={x}
+          args={[0.045, 0.045, 0.32, 8]}
+          position={[x, 0.22, 0.28]}
+          rotation={[Math.PI / 2, 0, 0]}
+          color={IRON_DARK}
+          metalness={0.55}
+        />
+      ))}
+      {primed
+        ? [-0.14, 0, 0.14].map((x) => (
+            <mesh key={`tip${x}`} position={[x, 0.22, 0.42]} rotation={[Math.PI / 2, 0, 0]}>
+              <coneGeometry args={[0.03, 0.14, 6]} />
+              <Mat color={IRON} metalness={0.7} roughness={0.25} emissive={GOLD} emissiveIntensity={0.35} />
+            </mesh>
+          ))
+        : null}
     </group>
   );
 }
@@ -707,6 +963,163 @@ function Sword() {
       <Box args={[0.06, 0.55, 0.02]} position={[0, 0.35, 0]} color={IRON} metalness={0.7} roughness={0.25} />
       <Box args={[0.18, 0.04, 0.04]} position={[0, 0.12, 0]} color={GOLD} metalness={0.5} />
       <Box args={[0.05, 0.14, 0.05]} position={[0, 0.04, 0]} color={WOOD_DARK} />
+    </group>
+  );
+}
+
+function Cage() {
+  const bars = [-0.28, -0.14, 0, 0.14, 0.28];
+  return (
+    <group>
+      <Box args={[0.62, 0.05, 0.62]} position={[0, 0.025, 0]} color={WOOD_DARK} />
+      {bars.map((x) => (
+        <Box key={`bx${x}`} args={[0.04, 0.52, 0.04]} position={[x, 0.29, 0.26]} color={IRON} metalness={0.55} />
+      ))}
+      {bars.map((z) => (
+        <Box key={`bz${z}`} args={[0.04, 0.52, 0.04]} position={[0.28, 0.29, z]} color={IRON} metalness={0.55} />
+      ))}
+      <Box args={[0.04, 0.52, 0.58]} position={[-0.28, 0.29, 0]} color={IRON_DARK} metalness={0.5} />
+      <Box args={[0.58, 0.04, 0.04]} position={[0, 0.52, 0.28]} color={IRON_DARK} metalness={0.5} />
+    </group>
+  );
+}
+
+function Mural() {
+  return (
+    <group rotation={[0, Math.PI / 2, 0]}>
+      <Box args={[0.06, 0.72, 0.82]} position={[0, 0.38, 0]} color={WOOD_DARK} />
+      <mesh position={[0.04, 0.4, 0]} castShadow>
+        <planeGeometry args={[0.72, 0.62]} />
+        <Mat color={STONE_LIGHT} roughness={0.92} />
+      </mesh>
+      <mesh position={[0.045, 0.44, 0.02]}>
+        <planeGeometry args={[0.5, 0.38]} />
+        <Mat color="#8a8075" roughness={0.95} />
+      </mesh>
+      <mesh position={[0.046, 0.48, 0.03]}>
+        <ringGeometry args={[0.08, 0.14, 12]} />
+        <Mat color={GOLD} emissive={GOLD} emissiveIntensity={0.12} roughness={0.55} metalness={0.35} />
+      </mesh>
+    </group>
+  );
+}
+
+function ArtObject() {
+  return (
+    <group>
+      <Box args={[0.22, 0.08, 0.22]} position={[0, 0.04, 0]} color={WOOD_DARK} />
+      <Box args={[0.16, 0.06, 0.16]} position={[0, 0.1, 0]} color={STONE_DARK} />
+      <mesh position={[0, 0.28, 0]} castShadow>
+        <sphereGeometry args={[0.12, 14, 10]} />
+        <Mat color={GOLD} emissive={FLAME_CORE} emissiveIntensity={0.18} metalness={0.55} roughness={0.32} />
+      </mesh>
+    </group>
+  );
+}
+
+function SwarmOverhead() {
+  const g = useRef<THREE.Group>(null);
+  const bugs = useRef(
+    Array.from({ length: 9 }, (_, i) => ({
+      phase: i * 0.7,
+      base: [
+        [-0.22, 0.72, 0.08],
+        [0.1, 0.78, -0.06],
+        [0.24, 0.7, 0.12],
+        [-0.08, 0.68, -0.14],
+        [0.18, 0.74, 0.02],
+        [-0.28, 0.76, -0.04],
+        [0.02, 0.8, 0.16],
+        [-0.16, 0.69, 0.18],
+        [0.28, 0.73, -0.1],
+      ][i]!,
+    })),
+  );
+  useFrame(({ clock }) => {
+    const root = g.current;
+    if (!root) return;
+    const t = clock.elapsedTime;
+    root.children.forEach((child, i) => {
+      const b = bugs.current[i];
+      if (!b) return;
+      const flutter = Math.sin(t * 8 + b.phase) * 0.04;
+      child.position.set(b.base[0]! + flutter, b.base[1]! + Math.sin(t * 5 + b.phase) * 0.03, b.base[2]!);
+      child.rotation.y = t * 2 + b.phase;
+    });
+  });
+  return (
+    <group ref={g}>
+      {bugs.current.map((b, i) => (
+        <mesh key={i} position={b.base as [number, number, number]} scale={[1.2, 0.35, 1.6]}>
+          <sphereGeometry args={[0.05, 6, 4]} />
+          <Mat color="#1a1814" emissive="#2a2520" emissiveIntensity={0.15} roughness={0.85} />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
+function FloorGlyph() {
+  const ring = useRef<THREE.Mesh>(null);
+  const star = useRef<THREE.Mesh>(null);
+  useFrame(({ clock }) => {
+    const t = clock.elapsedTime;
+    const pulse = 0.35 + Math.sin(t * 2.4) * 0.22;
+    if (ring.current?.material && 'emissiveIntensity' in ring.current.material) {
+      (ring.current.material as THREE.MeshStandardMaterial).emissiveIntensity = pulse;
+    }
+    if (star.current) {
+      star.current.rotation.z = t * 0.35;
+    }
+  });
+  return (
+    <group>
+      <mesh ref={ring} position={[0, 0.02, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <ringGeometry args={[0.22, 0.38, 24]} />
+        <Mat color="#6b4cff" emissive="#9b7dff" emissiveIntensity={0.45} roughness={0.42} />
+      </mesh>
+      <mesh ref={star} position={[0, 0.025, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <circleGeometry args={[0.18, 8]} />
+        <Mat color="#4a38cc" emissive="#6b4cff" emissiveIntensity={0.35} roughness={0.5} />
+      </mesh>
+    </group>
+  );
+}
+
+function Tripwire({ amount }: { amount: number }) {
+  const slack = amount * 0.08;
+  return (
+    <group>
+      <Box args={[0.06, 0.12, 0.06]} position={[-0.32, 0.06, 0.22]} color={STONE_DARK} />
+      <Box args={[0.06, 0.12, 0.06]} position={[0.32, 0.06, -0.22]} color={STONE_DARK} />
+      <mesh position={[0, 0.08 - slack, 0]} rotation={[0.35 + amount * 0.2, 0, 0]}>
+        <cylinderGeometry args={[0.008, 0.008, 0.78, 6]} />
+        <Mat color="#8a8075" roughness={0.9} />
+      </mesh>
+    </group>
+  );
+}
+
+function WeaponRack() {
+  const blades: Array<[number, number, number]> = [
+    [-0.22, 0.42, 0.05],
+    [0, 0.48, -0.02],
+    [0.22, 0.4, 0.04],
+    [-0.12, 0.28, -0.06],
+    [0.14, 0.3, 0.08],
+  ];
+  return (
+    <group>
+      <Box args={[0.82, 0.06, 0.28]} position={[0, 0.03, 0]} color={WOOD_DARK} />
+      <Box args={[0.78, 0.52, 0.06]} position={[0, 0.32, -0.08]} color={WOOD} roughness={0.82} />
+      <Box args={[0.78, 0.04, 0.08]} position={[0, 0.22, -0.05]} color={WOOD_LIGHT} />
+      <Box args={[0.78, 0.04, 0.08]} position={[0, 0.38, -0.05]} color={WOOD_LIGHT} />
+      {blades.map(([x, y, z], i) => (
+        <group key={i} position={[x, y, z]} rotation={[0, 0, 0.15 + i * 0.08]}>
+          <Box args={[0.04, 0.32, 0.015]} position={[0, 0, 0]} color={IRON} metalness={0.65} roughness={0.28} />
+          <Box args={[0.1, 0.025, 0.025]} position={[0, -0.14, 0]} color={GOLD} metalness={0.45} />
+        </group>
+      ))}
     </group>
   );
 }
@@ -769,8 +1182,75 @@ function FloorSigil({ color }: { color: string }) {
   );
 }
 
-/** True when we have a dedicated procedural mesh for this prop id. */
+/** Procedural mesh catalog — must match `PropBody` switch cases. */
+const PROCEDURAL_MESH_PROP_IDS = new Set<string>([
+  'chest',
+  'sarcophagus',
+  'crate',
+  'barrel',
+  'keg',
+  'column',
+  'torch',
+  'candle',
+  'campfire',
+  'altar',
+  'boulder',
+  'pedestal',
+  'key',
+  'statue',
+  'idol',
+  'angel',
+  'door',
+  'runed-door',
+  'secret-door',
+  'gate',
+  'plate',
+  'hatch',
+  'grate',
+  'coins',
+  'skull',
+  'bone',
+  'skeleton',
+  'corpse',
+  'fountain',
+  'blood-fountain',
+  'dry-fountain',
+  'portal',
+  'arch',
+  'ladder',
+  'stairs-up',
+  'stairs-down',
+  'shop',
+  'spear',
+  'blade',
+  'axe',
+  'arrows',
+  'dart',
+  'bolt',
+  'book',
+  'potion',
+  'sword',
+  'weapon-rack',
+  'cage',
+  'mural',
+  'art-object',
+  'swarm',
+  'floor-glyph',
+  'tripwire',
+  'orb',
+  'mushroom',
+  'mold',
+  'ring',
+  'scroll',
+  'bread',
+  'rune',
+  'teleport',
+  'net',
+  'alarm',
+]);
+
+/** True when we have a dedicated procedural mesh for this prop id (incl. canvas-art props). */
 export function hasPropMesh3D(propId: string | undefined): boolean {
   if (!propId) return false;
-  return propId.length > 0;
+  return PROCEDURAL_MESH_PROP_IDS.has(canonicalPropId(propId));
 }

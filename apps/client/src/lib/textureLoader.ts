@@ -52,6 +52,32 @@ function loadImageElement(src: string, crossOrigin: boolean): Promise<HTMLImageE
   });
 }
 
+const SVG_RASTER_PX = 256;
+
+/** Pixi / WebGL often upload SVG textures as empty black — rasterize to PNG first. */
+async function loadSvgRasterized(url: string): Promise<HTMLImageElement> {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Failed to load SVG: ${url} (${res.status})`);
+  const svgText = await res.text();
+  const blobUrl = URL.createObjectURL(new Blob([svgText], { type: 'image/svg+xml' }));
+  try {
+    const svgImg = await loadImageElement(blobUrl, false);
+    const w = svgImg.naturalWidth > 0 ? svgImg.naturalWidth : SVG_RASTER_PX;
+    const h = svgImg.naturalHeight > 0 ? svgImg.naturalHeight : SVG_RASTER_PX;
+    const scale = SVG_RASTER_PX / Math.max(w, h, 1);
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(w * scale));
+    canvas.height = Math.max(1, Math.round(h * scale));
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('Canvas 2D unavailable');
+    ctx.drawImage(svgImg, 0, 0, canvas.width, canvas.height);
+    const dataUrl = canvas.toDataURL('image/png');
+    return loadImageElement(dataUrl, false);
+  } finally {
+    URL.revokeObjectURL(blobUrl);
+  }
+}
+
 /** Blob URLs are never tainted — avoids WebGL SecurityError from DDB CDN images. */
 async function loadViaBlob(url: string): Promise<HTMLImageElement> {
   const res = await fetch(url);
@@ -86,6 +112,11 @@ export async function loadImageUrl(url: string): Promise<HTMLImageElement> {
   if (cached && !cached.destroyed) {
     const resource = cached.source?.resource;
     if (resource instanceof HTMLImageElement) return resource;
+  }
+
+  const path = resolved.split('?')[0]?.toLowerCase() ?? '';
+  if (path.endsWith('.svg')) {
+    return loadSvgRasterized(resolved);
   }
 
   const useBlob =

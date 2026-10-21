@@ -5,7 +5,7 @@
 import { Container } from 'pixi.js';
 import type { Object3D, Scene } from 'three';
 import { useItemStore } from '@/systems/scene/store/itemStore';
-import { setWalkPose } from '@/systems/scene/token/walkPoseBus';
+import { clearWalkPose, setWalkPose } from '@/systems/scene/token/walkPoseBus';
 import { fpGlobal, type FpWalkStamp, type RemoteThreeGroup } from '@/systems/map3d/fpGlobals';
 import { feetObjectName } from '@/systems/map3d/fpFeetName';
 import { sceneRefs } from '@/systems/scene/sceneRefs';
@@ -105,16 +105,7 @@ export function applyWalkPoseVisual(
   const c = resolvePixiContainer(tokenId);
   if (c) c.__fpWalk = stamp;
 
-  applyLog += 1;
-  if (applyLog === 1 || applyLog % 40 === 0) {
-    console.info(
-      '[FP walk] target',
-      applyLog,
-      `xy=${x.toFixed(0)},${y.toFixed(0)}`,
-      `three=${g ? 'Y' : 'N'}`,
-      `pixi=${c ? 'Y' : 'N'}`,
-    );
-  }
+  void applyLog;
 }
 
 export function applyRemoteWalkPose(
@@ -124,4 +115,30 @@ export function applyRemoteWalkPose(
   rotation?: number,
 ): void {
   applyWalkPoseVisual(tokenId, x, y, rotation);
+}
+
+/** After authoritative move commit — stop walk bus / stamps from overriding item store. */
+export function clearWalkVisualCommit(tokenId: string): void {
+  clearWalkPose(tokenId);
+
+  const g = fpGlobal.threeGroups.get(tokenId);
+  if (g?.userData) delete g.userData[STAMP_KEY];
+
+  const item = useItemStore.getState().items[tokenId];
+  const snapPixi = (c: PixiTok | null) => {
+    if (!c) return;
+    delete c.__fpWalk;
+    if (item?.type === 'token') {
+      c.position.set(item.x + item.width / 2, item.y + item.height / 2);
+      c.rotation = ((item.rotation ?? 0) * Math.PI) / 180;
+    }
+  };
+
+  snapPixi(fpGlobal.pixiById.get(tokenId) ?? null);
+
+  const label = `item_${tokenId}`;
+  for (const layer of [sceneRefs.tokens.current, sceneRefs.items.current]) {
+    if (!layer) continue;
+    snapPixi((layer.getChildByLabel(label) as PixiTok | null) ?? null);
+  }
 }

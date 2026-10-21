@@ -9,6 +9,7 @@ import { getPickCanvasRect } from '@/systems/map3d/pickCamera';
 import { worldXZToClientScreen } from '@/systems/map3d/perspectiveCameraSync';
 import { snapAngle, snapSize } from '../snap';
 import { emitItemUpdate } from '../sceneSync';
+import { mapBoundPropPatches } from '@/systems/map/props/mapBoundProps';
 import { emitPropTransformLive } from '../propTransformLiveSync';
 import { emitTokenRotate } from '../token/tokenSync';
 import { getItemContainer, getWallContainer } from '../render/useItemRenderer';
@@ -460,7 +461,18 @@ export function useTransformControls(appReady: boolean) {
             emitTokenRotate(it.id, deg);
           } else {
             useItemStore.getState().updateItem(it.id, { rotation: deg });
-            emitItemUpdate([{ id: it.id, patch: { rotation: deg } }]);
+            const emitted: Array<{ id: string; patch: Partial<Item> }> = [
+              { id: it.id, patch: { rotation: deg } },
+            ];
+            if (it.type === 'map') {
+              const map = { ...it, rotation: deg } as MapItem;
+              const bound = mapBoundPropPatches(map, useItemStore.getState().items);
+              if (bound.length) {
+                useItemStore.getState().updateItems(bound);
+                emitted.push(...bound);
+              }
+            }
+            emitItemUpdate(emitted);
           }
           clearedIds.push(it.id);
         } else if ((drag as DragState & { _w?: number })._w) {
@@ -495,7 +507,16 @@ export function useTransformControls(appReady: boolean) {
             if (it.type === 'map') getWallContainer(layer, it.id)?.scale.set(1, 1);
           }
           useItemStore.getState().updateItem(it.id, patch);
-          emitItemUpdate([{ id: it.id, patch }]);
+          const emitted: Array<{ id: string; patch: Partial<Item> }> = [{ id: it.id, patch }];
+          if (it.type === 'map') {
+            const map = { ...it, ...patch } as MapItem;
+            const bound = mapBoundPropPatches(map, useItemStore.getState().items);
+            if (bound.length) {
+              useItemStore.getState().updateItems(bound);
+              emitted.push(...bound);
+            }
+          }
+          emitItemUpdate(emitted);
           clearedIds.push(it.id);
         }
       } else if (registry.mode === 'group' && drag.origins) {
@@ -521,7 +542,18 @@ export function useTransformControls(appReady: boolean) {
           clearedIds.push(id);
         }
         useItemStore.getState().updateItems(patches);
-        emitItemUpdate(patches);
+        const emitted = [...patches];
+        for (const { id, patch } of patches) {
+          const it = useItemStore.getState().items[id];
+          if (it?.type !== 'map') continue;
+          const map = { ...it, ...patch } as MapItem;
+          const bound = mapBoundPropPatches(map, useItemStore.getState().items);
+          if (bound.length) {
+            useItemStore.getState().updateItems(bound);
+            emitted.push(...bound);
+          }
+        }
+        emitItemUpdate(emitted);
       }
       if (clearedIds.length) liveStore.clear(clearedIds);
       hideResizeSizeLabel();

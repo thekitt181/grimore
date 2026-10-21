@@ -53,7 +53,7 @@ export function itemVisualSignature(item: Item, ctx: RenderContext): string {
     case 'handout':
       return `${base}|${item.name}|${item.imageUrl}|${item.compendiumItemId}`;
     case 'image':
-      return `${base}|${item.name}|${item.imageUrl}|${item.propId ?? ''}|${item.propState ?? 0}|${item.propAt ?? 0}`;
+      return `${base}|${item.name}|${item.imageUrl}|${item.propId ?? ''}|${item.propState ?? 0}|${item.propAt ?? 0}|${item.propDoorTheme ?? ''}|${item.visible === false ? 0 : 1}`;
   }
 }
 

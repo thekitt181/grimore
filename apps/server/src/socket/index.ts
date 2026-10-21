@@ -67,6 +67,8 @@ import {
   ChatMessagePayload,
   SpellEffectSyncPayload,
   SpellEffectReminderPayload,
+  PropInteractRequestPayload,
+  PropInteractResolvePayload,
 } from '@grimoire/shared';
 import { setCompendiumSocketServer } from '../services/compendiumBroadcast';
 import { startRollBridge, stopRollBridge, isRollBridgeActive, resolveRollBridgeUserId } from '../services/ddb/ddbRollBridge';
@@ -681,6 +683,17 @@ export function initSocket(httpServer: HttpServer): Server {
     relayToken<TokenHidePayload>('token:hide');
     relayToken<TokenDeletePayload>('token:delete');
     relayToken<TokenConditionPayload>('token:condition');
+
+    socket.on('prop:interactRequest', (payload: PropInteractRequestPayload) => {
+      if (!isJoinedSession(socket, payload.sessionId)) return;
+      socket.to(payload.sessionId).emit('prop:interactRequest', payload);
+    });
+
+    socket.on('prop:interactResolve', (payload: PropInteractResolvePayload) => {
+      if (!isJoinedSession(socket, payload.sessionId)) return;
+      if (!isSessionGM(socket)) return;
+      socket.to(payload.sessionId).emit('prop:interactResolve', payload);
+    });
 
     // ── Map ──────────────────────────────────────────────────────────────────
     socket.on('map:tokenMove', (payload: TokenMovePayload) => {

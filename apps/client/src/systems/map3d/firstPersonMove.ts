@@ -23,7 +23,12 @@ import {
   useFirstPersonStore,
 } from './firstPersonStore';
 import { adjustFirstPersonLook, firstPersonLook } from './firstPersonLook';
-import { firstPersonPose, poseForToken, seedFirstPersonPose } from './firstPersonPose';
+import {
+  firstPersonFeetForRender,
+  firstPersonPose,
+  poseForToken,
+  seedFirstPersonPose,
+} from './firstPersonPose';
 import { bakedMeshBlocksFeet, syncOpenDoorPunches } from './mapCollisionGrid';
 
 export type MoveDir = 'forward' | 'back' | 'left' | 'right';
@@ -186,7 +191,8 @@ export function probeFirstPersonStairs(token: TokenItem): void {
 /** Local feet — bus only (avoid setLive every frame; that re-renders byId subscribers). */
 export function publishFirstPersonLiveLocal(token: TokenItem): void {
   if (!firstPersonPose.active || firstPersonPose.tokenId !== token.id) return;
-  applyWalkPoseVisual(token.id, firstPersonPose.x, firstPersonPose.y, firstPersonLook.yaw);
+  const feet = firstPersonFeetForRender();
+  applyWalkPoseVisual(token.id, feet.x, feet.y, firstPersonLook.yaw);
 }
 
 /** High-rate ephemeral broadcast so other clients see walk as it happens. */

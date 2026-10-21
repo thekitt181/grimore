@@ -31,7 +31,7 @@ export function FpHud() {
         color: 'var(--color-accent-gold)',
       }}
     >
-      First person — click + drag map to look · WASD move · yaw {yaw}°
+      First person — click map to look · Esc frees cursor · WASD move · yaw {yaw}°
     </div>
   );
 }

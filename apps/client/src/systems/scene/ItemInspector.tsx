@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useItemStore } from './store/itemStore';
+import { getActiveMap, useItemStore } from './store/itemStore';
 import { useSessionStore } from '@/store/sessionStore';
 import { emitItemUpdate } from './sceneSync';
 import { syncGridToMap } from './syncGridToMap';
@@ -12,6 +12,8 @@ import { applyDamage, applyHeal, readTempHp } from '@/systems/initiative/hpUtils
 import { deleteCurrentSelection } from './deleteSelection';
 import { playerCanRotateToken } from './token/clientTokenVisibility';
 import { useTokenStore } from './store/tokenStore';
+import { isDoorPropId } from '@/systems/map/props/doorCollision';
+import { DOOR_STYLE_GROUPS, DOOR_SURFACE_STYLES } from '@/systems/map3d/doorSurfaceStyles';
 import {
   armPropForDdbRoll,
   canTriggerProp,
@@ -25,6 +27,11 @@ import {
   triggerPropUnderToken,
 } from '@/systems/map/props/dungeonProps';
 import { PropCheckSelect } from '@/systems/map/props/PropCheckSelect';
+import {
+  DEFAULT_WALL_PROP_HEIGHT_CELLS,
+  fitPropOnWallItem,
+  wallMountPatchForItem,
+} from '@/systems/map/props/wallPropFit';
 import { resolveTokenModelUrl } from '@/systems/map3d/defaultTokenModel';
 
 function numHex(n: number): string { return '#' + n.toString(16).padStart(6, '0'); }
@@ -91,6 +98,9 @@ export function ItemInspector() {
         />
       )}
       {single?.type === 'token' && isGM && <TokenPropUnderControls token={single as TokenItem} />}
+      {single?.type === 'image' && isGM && (
+        <ImagePropPoseControls image={single as ImageItem} update={(p) => update(single.id, p)} />
+      )}
       {single?.type === 'image' && isGM && (
         <PropControls image={single as ImageItem} update={(p) => update(single.id, p)} />
       )}
@@ -290,6 +300,268 @@ function DrawControls({ d, update }: { d: DrawItem; update: (p: Partial<DrawItem
   );
 }
 
+function normDeg(d: number): number {
+  return ((d % 360) + 360) % 360;
+}
+
+/** Pitch / roll in −180…180 for readable tilt controls. */
+function normSignedDeg(d: number): number {
+  let x = ((d % 360) + 360) % 360;
+  if (x > 180) x -= 360;
+  return Math.round(x);
+}
+
+/** Angle + wall mount for any map image / dungeon prop. */
+function ImagePropPoseControls({
+  image,
+  update,
+}: {
+  image: ImageItem;
+  update: (p: Partial<ImageItem>) => void;
+}) {
+  const mount = image.propMount === 'wall' ? 'wall' : 'floor';
+  const merged = image.propWallMerge === true;
+  const heightCells = image.propWallHeightCells ?? DEFAULT_WALL_PROP_HEIGHT_CELLS;
+  const angle = Math.round(normDeg(image.rotation));
+  const pitch = normSignedDeg(image.propPitch ?? 0);
+  const roll = normSignedDeg(image.propRoll ?? 0);
+
+  function setAngle(deg: number) {
+    const rotation = normDeg(deg);
+    const map = getActiveMap();
+    if (map && image.dungeonPropForMapId === map.id) {
+      update({
+        rotation,
+        propMapLocalRotation: rotation - map.rotation,
+      });
+    } else {
+      update({ rotation });
+    }
+  }
+
+  function setPitch(deg: number) {
+    update({ propPitch: normSignedDeg(deg) });
+  }
+
+  function setRoll(deg: number) {
+    update({ propRoll: normSignedDeg(deg) });
+  }
+
+  function setMount(next: 'floor' | 'wall') {
+    if (next === 'floor') {
+      update({ propMount: 'floor' });
+      return;
+    }
+    const map = getActiveMap();
+    const pose = fitPropOnWallItem(image, map, { merge: merged });
+    if (pose) {
+      update(
+        wallMountPatchForItem(image, pose, map, {
+          propWallHeightCells: heightCells,
+          propWallMerge: merged,
+        }),
+      );
+    } else {
+      update({
+        propMount: 'wall',
+        propWallHeightCells: heightCells,
+        propWallMerge: merged,
+      });
+    }
+  }
+
+  function setMerge(next: boolean) {
+    if (mount === 'floor') {
+      update({ propWallMerge: next });
+      return;
+    }
+    const map = getActiveMap();
+    const trial = { ...image, propMount: 'wall' as const, propWallMerge: next };
+    const pose = fitPropOnWallItem(trial, map, { merge: next });
+    if (pose) {
+      update(
+        wallMountPatchForItem(image, pose, map, {
+          propMount: 'wall',
+          propWallMerge: next,
+          propWallHeightCells: heightCells,
+        }),
+      );
+    } else {
+      update({
+        propMount: 'wall',
+        propWallMerge: next,
+        propWallHeightCells: heightCells,
+      });
+    }
+  }
+
+  function snapWall() {
+    const map = getActiveMap();
+    const pose = fitPropOnWallItem(image, map, { merge: merged });
+    if (!pose) {
+      window.alert('No wall nearby — draw a wall or move the prop closer.');
+      return;
+    }
+    update(
+      wallMountPatchForItem(image, pose, map, {
+        propWallHeightCells: heightCells,
+        propWallMerge: merged,
+      }),
+    );
+  }
+
+  return (
+    <>
+      <span className="font-ui text-[10px] uppercase tracking-wide px-1" style={{ color: 'var(--color-accent-gold)' }}>
+        Pose
+      </span>
+      <Field label="Yaw">
+        <input
+          type="number"
+          className="input-stat w-14"
+          min={0}
+          max={359}
+          step={1}
+          title="Top-down facing (0–359°). Also use the gold rotate handle on the map."
+          value={angle}
+          onChange={(e) => setAngle(Number(e.target.value) || 0)}
+        />
+      </Field>
+      <button type="button" className="btn-ghost text-xs px-1.5 py-0.5" title="-15° yaw" onClick={() => setAngle(angle - 15)}>
+        −15°
+      </button>
+      <button type="button" className="btn-ghost text-xs px-1.5 py-0.5" title="+15° yaw" onClick={() => setAngle(angle + 15)}>
+        +15°
+      </button>
+      <button type="button" className="btn-ghost text-xs px-1.5 py-0.5" title="+90° yaw" onClick={() => setAngle(angle + 90)}>
+        ⟳90°
+      </button>
+      <Field label="Pitch">
+        <input
+          type="number"
+          className="input-stat w-14"
+          min={-180}
+          max={180}
+          step={1}
+          title="Tip top forward/back (−180…180). 90° = top faces sideways along the wall."
+          value={pitch}
+          onChange={(e) => setPitch(Number(e.target.value) || 0)}
+        />
+      </Field>
+      <button type="button" className="btn-ghost text-xs px-1.5 py-0.5" title="Pitch −15°" onClick={() => setPitch(pitch - 15)}>
+        P−
+      </button>
+      <button type="button" className="btn-ghost text-xs px-1.5 py-0.5" title="Pitch +15°" onClick={() => setPitch(pitch + 15)}>
+        P+
+      </button>
+      <Field label="Roll">
+        <input
+          type="number"
+          className="input-stat w-14"
+          min={-180}
+          max={180}
+          step={1}
+          title="Tip top left/right (−180…180). ±90° = top faces sideways."
+          value={roll}
+          onChange={(e) => setRoll(Number(e.target.value) || 0)}
+        />
+      </Field>
+      <button type="button" className="btn-ghost text-xs px-1.5 py-0.5" title="Roll −15°" onClick={() => setRoll(roll - 15)}>
+        R−
+      </button>
+      <button type="button" className="btn-ghost text-xs px-1.5 py-0.5" title="Roll +15°" onClick={() => setRoll(roll + 15)}>
+        R+
+      </button>
+      <button
+        type="button"
+        className="btn-ghost text-xs px-1.5 py-0.5"
+        title="Upright (pitch & roll 0)"
+        onClick={() => update({ propPitch: 0, propRoll: 0 })}
+      >
+        ↑ Up
+      </button>
+      <button
+        type="button"
+        className="btn-ghost text-xs px-1.5 py-0.5"
+        title="Top faces sideways (roll 90°)"
+        onClick={() => update({ propPitch: 0, propRoll: 90 })}
+      >
+        → Side
+      </button>
+      <button
+        type="button"
+        className="btn-ghost text-xs px-1.5 py-0.5"
+        title="Top faces other side (roll −90°)"
+        onClick={() => update({ propPitch: 0, propRoll: -90 })}
+      >
+        ← Side
+      </button>
+      <button
+        type="button"
+        className="btn-ghost text-xs px-1.5 py-0.5"
+        title="Flat against wall (pitch 90°)"
+        onClick={() => update({ propPitch: 90, propRoll: 0 })}
+      >
+        ▭ Flat
+      </button>
+      <Field label="Mount">
+        <select
+          className="input-dark text-xs py-0.5 max-w-[5.5rem]"
+          value={mount}
+          title="Floor sits on the ground. Wall raises the prop and snaps to the nearest wall."
+          onChange={(e) => setMount(e.target.value === 'wall' ? 'wall' : 'floor')}
+        >
+          <option value="floor">Floor</option>
+          <option value="wall">Wall</option>
+        </select>
+      </Field>
+      {mount === 'wall' && (
+        <Field label="Height">
+          <input
+            type="number"
+            className="input-stat w-14"
+            min={0.25}
+            max={6}
+            step={0.25}
+            title="Height above the floor in grid cells (torch ≈ 1.15)"
+            value={heightCells}
+            onChange={(e) =>
+              update({
+                propWallHeightCells: Math.max(0.25, Math.min(6, Number(e.target.value) || DEFAULT_WALL_PROP_HEIGHT_CELLS)),
+              })
+            }
+          />
+        </Field>
+      )}
+      <label
+        className="flex items-center gap-1.5 font-ui text-[10px] cursor-pointer px-1"
+        style={{ color: 'var(--color-text-secondary)' }}
+        title={
+          mount === 'wall'
+            ? 'Sink the prop into the wall thickness (flush / recessed). Use ▭ Flat for murals.'
+            : 'Sink the prop into the floor (flush / recessed).'
+        }
+      >
+        <input
+          type="checkbox"
+          className="accent-[#c9a84c]"
+          checked={merged}
+          onChange={(e) => setMerge(e.target.checked)}
+        />
+        {mount === 'wall' ? 'Merge into wall' : 'Merge into floor'}
+      </label>
+      <button
+        type="button"
+        className="btn-ghost text-xs px-2 py-0.5 whitespace-nowrap"
+        title="Snap to nearest wall and face into the room (keeps pitch/roll; respects Merge)"
+        onClick={snapWall}
+      >
+        🧱 Snap wall
+      </button>
+    </>
+  );
+}
+
 function PropControls({
   image,
   update,
@@ -320,8 +592,29 @@ function PropControls({
     && Boolean(next === 'reveal' ? revealCheck : activateCheck)
     && Boolean(actor);
 
+  const doorTheme = image.propDoorTheme ?? '';
+
   return (
     <>
+      {isDoorPropId(propId) && (
+        <Field label="Door art">
+          <select
+            className="input-dark text-xs py-0.5 max-w-[7.5rem]"
+            value={doorTheme}
+            title="Override session door theme for this door"
+            onChange={(e) => update({ propDoorTheme: e.target.value })}
+          >
+            <option value="">Session default</option>
+            {DOOR_STYLE_GROUPS.map((grp) => (
+              <optgroup key={grp.label} label={grp.label}>
+                {grp.ids.map((id) => (
+                  <option key={id} value={id}>{DOOR_SURFACE_STYLES[id].label}</option>
+                ))}
+              </optgroup>
+            ))}
+          </select>
+        </Field>
+      )}
       <button
         type="button"
         title={

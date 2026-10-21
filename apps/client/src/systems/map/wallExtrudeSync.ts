@@ -2,6 +2,7 @@ import { getSocket } from '@/lib/socket';
 import { useMapStore } from '@/systems/map/store/mapStore';
 import { useSessionStore } from '@/store/sessionStore';
 import { isMapSurfaceStyleId } from '@/systems/map3d/mapSurfaceStyles';
+import { isDoorStyleId } from '@/systems/map3d/doorSurfaceStyles';
 import type { WallExtrudePayload } from '@grimoire/shared';
 
 let wallExtrudeHandler: ((payload: WallExtrudePayload) => void) | null = null;
@@ -15,6 +16,7 @@ function currentPayload(sessionId: string): WallExtrudePayload {
     scanImageWalls: s.scanImageWalls,
     wallStyleId: s.wallStyleId,
     floorStyleId: s.floorStyleId,
+    doorStyleId: s.doorStyleId,
   };
 }
 
@@ -38,6 +40,9 @@ export function applyWallExtrudeFromSession(payload: WallExtrudePayload): void {
   }
   if (isMapSurfaceStyleId(payload.floorStyleId)) {
     store.setFloorStyleId(payload.floorStyleId);
+  }
+  if (isDoorStyleId(payload.doorStyleId)) {
+    store.setDoorStyleId(payload.doorStyleId);
   }
 }
 

@@ -4,7 +4,8 @@ import { useItemStore, getActiveMap } from '../store/itemStore';
 import { useLiveTransformStore } from '../store/liveTransformStore';
 import { emitItemAdd, emitItemRemove, emitItemUpdate } from '../sceneSync';
 import { clearWalkPose, getWalkPose, setWalkPose } from '@/systems/scene/token/walkPoseBus';
-import { applyRemoteWalkPose } from '@/systems/scene/token/remotePoseApply';
+import { applyRemoteWalkPose, clearWalkVisualCommit } from '@/systems/scene/token/remotePoseApply';
+import { noteLocalTokenMoveCommit } from '@/systems/scene/token/tokenMoveCommitGuard';
 import { ingestWalkLive } from '@/systems/scene/token/walkLiveIngress';
 import { DEFAULT_MAP_GRID_SIZE } from '../types';
 import type { TokenItem } from '../types';
@@ -81,6 +82,7 @@ export function emitTokenMove(
   }
   // Local commit only; remotes get token:move (debounced updateItem there).
   useItemStore.getState().updateItem(tokenId, patch);
+  noteLocalTokenMoveCommit(tokenId);
   getSocket().emit('token:move', { sessionId: s, tokenId, gridCol, gridRow, x, y });
 }
 

@@ -53,6 +53,7 @@ export function PropAnim3D({
 }) {
   const rootRef = useRef<THREE.Group>(null);
   const lightRef = useRef<THREE.PointLight>(null);
+  const muzzleRef = useRef<THREE.PointLight>(null);
   const projectileRefs = useRef<(THREE.Mesh | null)[]>([]);
   const burstRef = useRef<THREE.Mesh>(null);
 
@@ -60,6 +61,9 @@ export function PropAnim3D({
   const art = propId ? propArtById(propId) : undefined;
   const play: PropPlay = art?.play ?? 'still';
   const s = Math.max(size, 8);
+  /** How far bolts travel in local +Z (into the room when wall-mounted). */
+  const shootRange = s * 6.5;
+  const shootCount = play === 'shoot' ? 5 : 0;
 
   const lightBase = useMemo(() => {
     if (light === 'campfire') return { y: s * 0.38, intensity: 3.4, distance: s * 7 };
@@ -103,8 +107,8 @@ export function PropAnim3D({
           }
           break;
         case 'swing':
-          root.rotation.y = p * 1.35;
-          root.position.x = p * s * 0.28;
+          root.rotation.y = p * (Math.PI / 2);
+          root.position.x = p * s * 0.42;
           break;
         case 'split':
           root.scale.x = 1 - p * 0.88;
@@ -151,33 +155,52 @@ export function PropAnim3D({
     if (play === 'burst') {
       const ring = burstRef.current;
       if (ring) {
-        if (shot < 0 || shot > 0.7) {
+        if (shot < 0 || shot > 0.85) {
           ring.visible = false;
         } else {
-          const t = shot / 0.7;
+          const t = shot / 0.85;
           ring.visible = true;
-          ring.scale.setScalar(0.7 + t * 0.55);
+          ring.scale.setScalar(0.6 + t * 1.4);
           const mat = ring.material as THREE.MeshStandardMaterial;
-          mat.opacity = t < 0.2 ? t / 0.2 : 1 - (t - 0.2) / 0.8;
+          mat.opacity = t < 0.15 ? t / 0.15 : 1 - (t - 0.15) / 0.85;
           mat.transparent = true;
+          mat.emissiveIntensity = 1.2 * (1 - t);
         }
       }
     }
 
+    // Arrow / dart / bolt volley — fly along local +Z so FP + wall mounts read as shots into the room.
     if (play === 'shoot') {
+      const flight = 0.55;
       projectileRefs.current.forEach((mesh, i) => {
         if (!mesh) return;
-        const t = (shot - i * 0.05) / 0.42;
+        const t = (shot - i * 0.04) / flight;
         if (t <= 0 || t >= 1) {
           mesh.visible = false;
           return;
         }
         mesh.visible = true;
-        mesh.position.set((i - 1) * s * 0.12, s * 0.35 + t * s * 1.4, 0);
+        const spread = (i - (shootCount - 1) / 2) * s * 0.1;
+        const z = s * 0.2 + t * shootRange;
+        const y = s * 0.32 + Math.sin(t * Math.PI) * s * 0.04;
+        mesh.position.set(spread, y, z);
+        // Cone default axis is +Y — tip along +Z.
+        mesh.rotation.set(Math.PI / 2, 0, 0);
         const mat = mesh.material as THREE.MeshStandardMaterial;
-        mat.opacity = t < 0.75 ? 1 : (1 - t) / 0.25;
+        mat.opacity = t < 0.72 ? 1 : (1 - t) / 0.28;
         mat.transparent = true;
+        mat.emissiveIntensity = 0.55 * (1 - t);
       });
+      const muzzle = muzzleRef.current;
+      if (muzzle) {
+        const flash = shot >= 0 && shot < 0.14 ? 1 - shot / 0.14 : 0;
+        muzzle.intensity = 5.5 * flash;
+        muzzle.visible = flash > 0.02;
+        muzzle.position.set(0, s * 0.32, s * 0.28);
+      }
+    } else if (muzzleRef.current) {
+      muzzleRef.current.intensity = 0;
+      muzzleRef.current.visible = false;
     }
 
     const pl = lightRef.current;
@@ -210,8 +233,9 @@ export function PropAnim3D({
           decay={2}
         />
       ) : null}
-      {play === 'shoot'
-        ? [0, 1, 2].map((i) => (
+      {play === 'shoot' ? (
+        <>
+          {Array.from({ length: shootCount }, (_, i) => (
             <mesh
               key={i}
               ref={(m) => {
@@ -220,17 +244,33 @@ export function PropAnim3D({
               visible={false}
               castShadow
             >
-              <coneGeometry args={[s * 0.04, s * 0.22, 6]} />
-              <meshStandardMaterial color="#c9a84c" metalness={0.4} roughness={0.45} />
+              <coneGeometry args={[s * 0.035, s * 0.28, 7]} />
+              <meshStandardMaterial
+                color="#d8c090"
+                emissive="#c9a84c"
+                emissiveIntensity={0.45}
+                metalness={0.55}
+                roughness={0.32}
+                transparent
+              />
             </mesh>
-          ))
-        : null}
+          ))}
+          <pointLight
+            ref={muzzleRef}
+            color="#ffe08a"
+            intensity={0}
+            distance={s * 5}
+            decay={2}
+            visible={false}
+          />
+        </>
+      ) : null}
       {play === 'burst' ? (
-        <mesh ref={burstRef} visible={false} position={[0, s * 0.15, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-          <ringGeometry args={[s * 0.15, s * 0.42, 24]} />
+        <mesh ref={burstRef} visible={false} position={[0, s * 0.2, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+          <ringGeometry args={[s * 0.12, s * 0.55, 28]} />
           <meshStandardMaterial
-            color="#c9a84c"
-            emissive="#c9a84c"
+            color="#ffd36a"
+            emissive="#ffb020"
             emissiveIntensity={0.8}
             transparent
             opacity={0}

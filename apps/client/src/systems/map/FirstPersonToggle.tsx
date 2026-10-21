@@ -52,6 +52,7 @@ export function FirstPersonToggle({ variant = 'dock' }: { variant?: 'toolbar' | 
     }
     seedFirstPersonPose(token);
     resetFirstPersonMotion();
+    void import('@/systems/map3d/warmMap3DAssets').then(({ warmMap3DAssets }) => warmMap3DAssets());
     setEnabled(true, { seedYawDeg: token.rotation, tokenId: token.id });
     // Drop selection so gizmo/drag can't move tokens while walking with WASD.
     useItemStore.getState().clearSelection();

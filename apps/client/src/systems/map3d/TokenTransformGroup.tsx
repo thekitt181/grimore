@@ -15,7 +15,7 @@ import { groundHeightAt } from './mapGroundRaycast';
 import { bakedGroundHeightSmooth, getMapCollisionGrid } from './mapCollisionGrid';
 import { resolveItemBounds } from './sceneItemBounds';
 import { getActiveMap } from '@/systems/scene/store/itemStore';
-import type { Item, TokenItem } from '@/systems/scene/types';
+import type { ImageItem, Item, TokenItem } from '@/systems/scene/types';
 import { firstPersonLook } from './firstPersonLook';
 import { poseForToken } from './firstPersonPose';
 
@@ -39,6 +39,8 @@ const WALK_SNAP_PX = 180;
 export function SceneItemTransformGroup({
   itemId,
   surfaceY = 0,
+  /** Extra lift on top of ground (wall-mounted props: torch height, etc.). */
+  wallLift = 0,
   baseWidth,
   baseHeight,
   scaleBaseWidth,
@@ -49,6 +51,7 @@ export function SceneItemTransformGroup({
 }: {
   itemId: string;
   surfaceY?: number | 'ground';
+  wallLift?: number;
   baseWidth?: number;
   baseHeight?: number;
   scaleBaseWidth?: number;
@@ -212,8 +215,9 @@ export function SceneItemTransformGroup({
       if (displayOnly && item.type === 'token') {
         yBase += DISPLAY_ONLY_LIFT;
       }
+      if (wallLift !== 0) yBase += wallLift;
     } else {
-      yBase = surfaceY;
+      yBase = surfaceY + wallLift;
     }
 
     const sx = scaleBaseWidth ?? baseWidth;
@@ -229,13 +233,24 @@ export function SceneItemTransformGroup({
     // Remotes still see the mini + walk anim. Display-only underlay stays visible.
     const nextVisible = displayOnly || !(localFpDriver && item.type === 'token');
 
+    // Props: optional 3D pitch/roll (wall mount — tip top sideways / any angle).
+    let pitch = 0;
+    let roll = 0;
+    if (item.type === 'image') {
+      const img = item as ImageItem;
+      pitch = degToRad(img.propPitch ?? 0);
+      roll = degToRad(img.propRoll ?? 0);
+    }
+
     // Dense GLB maps: updateMatrixWorld(true) every frame was the dungeon-vs-model jank.
     // Skip the whole write when nothing moved (static maps stay idle after first frame).
     const unchanged =
       Math.abs(g.position.x - cx) < 1e-3
       && Math.abs(g.position.y - yBase) < 1e-3
       && Math.abs(g.position.z - cz) < 1e-3
+      && Math.abs(g.rotation.x - pitch) < 1e-4
       && Math.abs(g.rotation.y - spinY) < 1e-4
+      && Math.abs(g.rotation.z - roll) < 1e-4
       && Math.abs(g.scale.x - nextSx) < 1e-4
       && Math.abs(g.scale.z - nextSz) < 1e-4
       && g.visible === nextVisible;
@@ -243,7 +258,7 @@ export function SceneItemTransformGroup({
 
     g.scale.set(nextSx, 1, nextSz);
     g.position.set(cx, yBase, cz);
-    g.rotation.set(0, spinY, 0);
+    g.rotation.set(pitch, spinY, roll);
     g.visible = nextVisible;
 
     // Tokens need an immediate world matrix for foot-plant; maps/props can wait for render.

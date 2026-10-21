@@ -114,6 +114,8 @@ interface SceneState extends ActiveGrid {
   wallStyleId: string;
   /** Blank floor surface style when map has no image (3D + FP). */
   floorStyleId: string;
+  /** Door / gate look for dungeon props (3D + 2D). */
+  doorStyleId: string;
 
   // Fog
   revealedCells: Set<string>;
@@ -183,6 +185,7 @@ interface SceneState extends ActiveGrid {
   setWallHeightCells: (cells: number) => void;
   setWallStyleId: (id: string) => void;
   setFloorStyleId: (id: string) => void;
+  setDoorStyleId: (id: string) => void;
   setScanImageWalls: (enabled: boolean) => void;
   setWallScanThreshold: (threshold: number) => void;
 
@@ -241,6 +244,7 @@ export const useMapStore = create<SceneState>((set, get) => ({
   wallStyleId: 'mixed',
   /** Tiled stone art in 3D/FP (use "map" to keep the painted map image). */
   floorStyleId: 'mixed',
+  doorStyleId: 'mixed',
   scanImageWalls: false,
   wallScanThreshold: 64,
   revealedCells: new Set<string>(),
@@ -387,6 +391,7 @@ export const useMapStore = create<SceneState>((set, get) => ({
     set({ wallHeightCells: Math.max(0.5, Math.min(8, wallHeightCells)) }),
   setWallStyleId: (wallStyleId) => set({ wallStyleId }),
   setFloorStyleId: (floorStyleId) => set({ floorStyleId }),
+  setDoorStyleId: (doorStyleId) => set({ doorStyleId }),
   setScanImageWalls: (scanImageWalls) => set({ scanImageWalls }),
   setWallScanThreshold: (wallScanThreshold) =>
     set({ wallScanThreshold: Math.max(50, Math.min(180, wallScanThreshold)) }),
@@ -476,6 +481,7 @@ export const useMapStore = create<SceneState>((set, get) => ({
       scanImageWalls: false,
       wallScanThreshold: 64,
       revealedCells: new Set<string>(),
+      doorStyleId: 'mixed',
       fogRevision: 0,
       fogEnabled: false,
       sessionFogActive: false,

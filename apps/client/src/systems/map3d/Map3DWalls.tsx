@@ -6,7 +6,15 @@ import { useMapStore } from '@/systems/map/store/mapStore';
 import { displayWalls, doorWallsSignature } from '@/systems/map/props/doorCollision';
 import { resolveMapSurfaceStyle } from './mapSurfaceStyles';
 import { getMapSurfaceTexture, tileSurfaceTexture } from './mapSurfaceTextures';
+import { pbrAssetForStyle } from './pbrSurfaceAssets';
+import {
+  disposePbrSurfaceMaps,
+  tilePbrSurfaceMaps,
+  usePbrSurfaceMaps,
+} from './pbrSurfaceLoader';
 import { extrudeWallSegments } from './wallExtrusion';
+
+const WALL_NORMAL_SCALE = new THREE.Vector2(1.38, 1.38);
 
 export function Map3DWalls({
   map,
@@ -37,23 +45,37 @@ export function Map3DWalls({
     );
   }, [displaySegs, map.x, map.y, wallHeight, wallThickness, wallCuts]);
 
+  const pbrAssetId = pbrAssetForStyle(style.id, 'wall');
+  const { maps: pbrBase } = usePbrSurfaceMaps(pbrAssetId);
+
   const baseArt = useMemo(
-    () => getMapSurfaceTexture(wallStyleId, 'wall'),
-    [wallStyleId],
+    () => (pbrBase ? null : getMapSurfaceTexture(wallStyleId, 'wall')),
+    [wallStyleId, pbrBase],
   );
 
-  const wallMats = useMemo(() => {
-    if (!baseArt) return null;
+  const wallTileWorld = Math.max(72, (map.gridSize || 96) * 3.2);
+
+  const wallPbrMats = useMemo(() => {
+    if (!pbrBase) return null;
     return walls.map((w) => {
       const [, h, len] = w.size;
-      return tileSurfaceTexture(baseArt, len, h, (map.gridSize || 96) * 0.85);
+      return tilePbrSurfaceMaps(pbrBase, len, h, wallTileWorld);
     });
-  }, [baseArt, walls, map.gridSize]);
+  }, [pbrBase, walls, wallTileWorld]);
+
+  const wallMats = useMemo(() => {
+    if (!baseArt || pbrBase) return null;
+    return walls.map((w) => {
+      const [, h, len] = w.size;
+      return tileSurfaceTexture(baseArt, len, h, wallTileWorld);
+    });
+  }, [baseArt, pbrBase, walls, wallTileWorld]);
 
   useEffect(() => () => {
     wallMats?.forEach((t) => t.dispose());
+    wallPbrMats?.forEach((m) => disposePbrSurfaceMaps(m));
     for (const w of walls) w.geometry?.dispose();
-  }, [wallMats, walls]);
+  }, [wallMats, wallPbrMats, walls]);
 
   if (walls.length === 0) return null;
 
@@ -78,7 +100,20 @@ export function Map3DWalls({
           {...(w.geometry ? { geometry: w.geometry } : {})}
         >
           {!w.geometry && <boxGeometry args={w.size} />}
-          {wallMats?.[i] ? (
+          {wallPbrMats?.[i] ? (
+            <meshStandardMaterial
+              map={wallPbrMats[i].map}
+              normalMap={wallPbrMats[i].normalMap}
+              roughnessMap={wallPbrMats[i].roughnessMap}
+              aoMap={wallPbrMats[i].aoMap}
+              aoMapIntensity={1.55}
+              normalScale={WALL_NORMAL_SCALE}
+              color="#ffffff"
+              roughness={1}
+              metalness={0.06}
+              side={THREE.DoubleSide}
+            />
+          ) : wallMats?.[i] ? (
             <meshStandardMaterial
               map={wallMats[i]}
               color="#ffffff"

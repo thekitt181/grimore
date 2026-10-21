@@ -38,6 +38,8 @@ export interface WallExtrudePayload {
   wallStyleId?: string;
   /** Blank floor look when map has no background image. */
   floorStyleId?: string;
+  /** Door / gate prop palette (3D + 2D dungeon doors). */
+  doorStyleId?: string;
 }
 
 export interface GridUpdatePayload {

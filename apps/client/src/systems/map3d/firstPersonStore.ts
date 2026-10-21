@@ -29,8 +29,11 @@ interface FirstPersonState {
   drawShape: FpDrawShape;
   /** Brush width in world px for spray + breach window. */
   brushSize: number;
+  /** True while FP look owns the pointer (locked or capturing drag). */
+  lookCaptureActive: boolean;
 
   setEnabled: (enabled: boolean, opts?: { seedYawDeg?: number; tokenId?: string | null }) => void;
+  setLookCaptureActive: (active: boolean) => void;
   setTool: (tool: FpToolMode) => void;
   setDrawShape: (drawShape: FpDrawShape) => void;
   setBrushSize: (brushSize: number) => void;
@@ -48,7 +51,9 @@ export const useFirstPersonStore = create<FirstPersonState>((set, get) => ({
   tool: 'none',
   drawShape: 'circle',
   brushSize: 16,
+  lookCaptureActive: false,
 
+  setLookCaptureActive: (lookCaptureActive) => set({ lookCaptureActive }),
   setEnabled: (enabled, opts) => {
     if (enabled) {
       resetFirstPersonLook(opts?.seedYawDeg ?? 0);
@@ -68,7 +73,7 @@ export const useFirstPersonStore = create<FirstPersonState>((set, get) => ({
     clearFirstPersonPose();
     resetFirstPersonMotion();
     resetFirstPersonLook(0);
-    set({ enabled: false, tokenId: null, tool: 'none' });
+    set({ enabled: false, tokenId: null, tool: 'none', lookCaptureActive: false });
     // Leaving FP always drops selection so the token isn't left grab-ready.
     useItemStore.getState().clearSelection();
     // Keep undo history for the session so re-entering FP can still undo.

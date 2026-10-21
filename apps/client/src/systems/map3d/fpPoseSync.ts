@@ -16,13 +16,13 @@ import {
   broadcastWalkLiveLocal,
 } from '@/systems/scene/token/walkLiveIngress';
 import { firstPersonLook } from './firstPersonLook';
-import { firstPersonPose, seedFirstPersonPose } from './firstPersonPose';
+import { firstPersonFeetForRender, firstPersonPose, seedFirstPersonPose } from './firstPersonPose';
 import { firstPersonMotion } from './firstPersonMotion';
 import { resolveFirstPersonToken } from './resolveFirstPersonToken';
 import { fpGlobal } from './fpGlobals';
 import type { TokenItem } from '@/systems/scene/types';
 
-const NET_MS = 33;
+const NET_MS = 16;
 let lastNetAt = 0;
 let persistedThisStream = false;
 let bound = false;
@@ -54,8 +54,9 @@ function emitLivePose(token: TokenItem): void {
   const sessionId = useSessionStore.getState().sessionId;
   if (!sessionId) return;
 
-  const x = firstPersonPose.x;
-  const y = firstPersonPose.y;
+  const feet = firstPersonFeetForRender();
+  const x = feet.x;
+  const y = feet.y;
   const rotation = firstPersonLook.yaw;
   const cx = x + token.width / 2;
   const cy = y + token.height / 2;
@@ -78,20 +79,10 @@ function emitLivePose(token: TokenItem): void {
   }]);
 
   const socket = getSocket();
-  if (!socket.connected) {
-    if (emitCount === 1 || emitCount % 30 === 0) {
-      console.warn('[FP walk] emit skipped — socket disconnected', emitCount);
-    }
-    return;
-  }
+  if (!socket.connected) return;
 
-  // Lightweight dedicated relays (backup if item:update is filtered).
   socket.emit('token:live', pose);
   socket.emit('fp:pose', pose);
-
-  if (emitCount === 1 || emitCount % 30 === 0) {
-    console.info('[FP walk] emit', emitCount, x.toFixed(0), y.toFixed(0), socket.id);
-  }
 }
 
 function pumpNetwork(): void {

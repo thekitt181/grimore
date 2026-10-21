@@ -107,7 +107,7 @@ export function useLiveTokenPixiSync(appReady: boolean): void {
     if (app?.ticker) {
       app.ticker.add(chaseWalkPoses);
       return () => {
-        app.ticker.remove(chaseWalkPoses);
+        app.ticker?.remove(chaseWalkPoses);
         displayById.clear();
       };
     }

@@ -29,6 +29,12 @@ export type FpLookState = {
   pitch: number;
 };
 
+/** Mouse deltas coalesced into one apply per render frame (smoother than per-pointer-event). */
+export type FpLookPending = {
+  yawDeg: number;
+  pitchRad: number;
+};
+
 export type WalkPose = { x: number; y: number; rotation?: number; at: number };
 
 /** Stamped onto Three.Group / Pixi container — survives Map-split HMR bugs. */
@@ -45,6 +51,7 @@ type FpGlobal = {
   pose: FpPoseState;
   motion: FpMotionState;
   look: FpLookState;
+  lookPending: FpLookPending;
   walkPoses: Map<string, WalkPose>;
   threeGroups: Map<string, RemoteThreeGroup>;
   /** Live R3F scene — resolve tokens by name instead of stale Map refs. */
@@ -79,6 +86,7 @@ function ensure(): FpGlobal {
         accum: 0,
       },
       look: { yaw: 0, pitch: 0 },
+      lookPending: { yawDeg: 0, pitchRad: 0 },
       walkPoses: new Map(),
       threeGroups: new Map(),
       threeScene: null,
@@ -93,6 +101,7 @@ function ensure(): FpGlobal {
   if (!g.walkPoses) g.walkPoses = new Map();
   if (g.threeScene === undefined) g.threeScene = null;
   if (g.walkStreaming == null) g.walkStreaming = false;
+  if (!g.lookPending) g.lookPending = { yawDeg: 0, pitchRad: 0 };
   return g;
 }
 

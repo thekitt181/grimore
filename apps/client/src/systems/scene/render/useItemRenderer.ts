@@ -28,7 +28,8 @@ import { displayWalls, doorWallsSignature } from '@/systems/map/props/doorCollis
 import { clientVisibleTokenIdSet } from '../sceneMapsForClient';
 import { resolveItemBounds } from '@/systems/map3d/sceneItemBounds';
 import { registerPixiToken } from '@/systems/scene/token/remotePoseApply';
-import { hasDragLivePositions } from '../interaction/dragLivePositions';
+import { getDragLivePosition, hasDragLivePositions } from '../interaction/dragLivePositions';
+import { getWalkPose, WALK_POSE_FRESH_MS } from '@/systems/scene/token/walkPoseBus';
 import { isItemDragActive } from '../interaction/selectionDragState';
 
 function itemParentLayer(
@@ -201,11 +202,12 @@ export function useItemRenderer(
       const b = resolveItemBounds(item, liveById[item.id]);
       c.pivot.set(item.width / 2, item.height / 2);
       c.scale.set(b.width / item.width, b.height / item.height);
-      const walkStamp = (c as { __fpWalk?: { at: number } }).__fpWalk;
+      const walk = item.type === 'token' ? getWalkPose(item.id) : undefined;
       const walkOwned = Boolean(
         item.type === 'token'
-        && walkStamp
-        && performance.now() - walkStamp.at < 2000,
+        && !getDragLivePosition(item.id)
+        && walk
+        && performance.now() - walk.at < WALK_POSE_FRESH_MS,
       );
       if (!walkOwned) {
         c.position.set(b.cx, b.cz);

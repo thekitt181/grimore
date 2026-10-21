@@ -7,7 +7,9 @@ import { useSessionStore } from '@/store/sessionStore';
 import { useFirstPersonStore } from '@/systems/map3d/firstPersonStore';
 import { useItemStore } from '@/systems/scene/store/itemStore';
 import { useLiveTransformStore } from '@/systems/scene/store/liveTransformStore';
+import { getDragLivePosition } from '@/systems/scene/interaction/dragLivePositions';
 import { applyRemoteWalkPose } from '@/systems/scene/token/remotePoseApply';
+import { isStaleLiveAfterLocalCommit } from '@/systems/scene/token/tokenMoveCommitGuard';
 import { getWalkPose } from '@/systems/scene/token/walkPoseBus';
 
 let bound: Socket | null = null;
@@ -22,7 +24,10 @@ let ingestLog = 0;
 
 function ignoreLocal(tokenId: string): boolean {
   const fp = useFirstPersonStore.getState();
-  return Boolean(fp.enabled && fp.tokenId === tokenId);
+  if (fp.enabled && fp.tokenId === tokenId) return true;
+  // Mid-drag: pointer hook owns feet — ignore BC/socket echo of throttled live packets.
+  if (getDragLivePosition(tokenId)) return true;
+  return false;
 }
 
 /** Soft item-store write so Pixi/React see mid-walk feet (throttled — not every packet). */
@@ -58,9 +63,7 @@ export function ingestWalkLive(payload: WalkLiveIngest): void {
 
   const x = payload.x;
   const y = payload.y;
-  const rotation = payload.rotation;
-
-  // 1) Walk-bus target — Three/Pixi interpolate toward this every frame
+  if (isStaleLiveAfterLocalCommit(tokenId, x, y)) return;
   applyRemoteWalkPose(tokenId, x, y, rotation);
 
   // 2) Live store without fog thrash every packet

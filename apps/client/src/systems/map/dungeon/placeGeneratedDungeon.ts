@@ -1,10 +1,18 @@
-﻿import { v4 as uuidv4 } from 'uuid';
+import { v4 as uuidv4 } from 'uuid';
 import { useItemStore } from '@/systems/scene/store/itemStore';
 import { emitItemAdd, emitItemUpdate } from '@/systems/scene/sceneSync';
 import type { DungeonFloorLink, DungeonStairRef, HandoutItem, Item, MapItem } from '@/systems/scene/types';
 import { focusSessionMap } from '@/systems/map/mapFocusSync';
+import { useMapStore } from '@/systems/map/store/mapStore';
+import { emitWallExtrudeToSession } from '@/systems/map/wallExtrudeSync';
+import { isMapSurfaceStyleId } from '@/systems/map3d/mapSurfaceStyles';
 import { generateDungeon, type DungeonOptions, type GeneratedDungeon } from './generateDungeon';
 import { paintDungeonOffThread } from './paintDungeonImage';
+import { buildDungeonPropItems } from './dungeonPropSpawn';
+import { DUNGEON_DOORS_SPAWN_REVISION, DUNGEON_PROPS_SPAWN_REVISION } from './ensureDungeonMapProps';
+import { buildDungeonDoorItems } from './dungeonDoorSpawn';
+import { bindMapBoundProp } from '@/systems/map/props/mapBoundProps';
+import { floorSeed } from './dungeonLayoutFromMap';
 
 export interface DungeonLevelPlacement {
   options: DungeonOptions;
@@ -33,13 +41,6 @@ function floorOptions(options: DungeonOptions): DungeonFloorLink['options'] {
     secrets: options.secrets ?? 'few',
     cavern: options.cavern ?? 'natural',
   };
-}
-
-function floorSeed(seed: number, floor: number): number {
-  let hash = (seed ^ Math.imul(floor, 0x9e3779b1)) >>> 0;
-  hash = Math.imul(hash ^ (hash >>> 16), 0x7feb352d);
-  hash = Math.imul(hash ^ (hash >>> 15), 0x846ca68b);
-  return (hash ^ (hash >>> 16)) >>> 0;
 }
 
 function stairRefs(dungeon: GeneratedDungeon, from?: { mapId: string }): DungeonStairRef[] {
@@ -148,6 +149,13 @@ export async function placeGeneratedDungeon(dungeon: GeneratedDungeon, level?: D
   const backgroundUrl = await paintDungeonOffThread(dungeon);
   if (!backgroundUrl) return null;
 
+  if (isMapSurfaceStyleId(dungeon.motif)) {
+    useMapStore.getState().setWallStyleId(dungeon.motif);
+    useMapStore.getState().setFloorStyleId(dungeon.motif);
+    useMapStore.getState().setDoorStyleId(dungeon.motif);
+    emitWallExtrudeToSession();
+  }
+
   const maps = Object.values(useItemStore.getState().items).filter((item) => item.type === 'map');
   const rightEdge = Math.max(0, ...maps.map((map) => map.x + map.width));
   const width = dungeon.cols * dungeon.cell;
@@ -171,6 +179,17 @@ export async function placeGeneratedDungeon(dungeon: GeneratedDungeon, level?: D
       motif: dungeon.motif,
     }),
     stairs: stairRefs(dungeon, level?.from),
+    rooms: dungeon.rooms.map((room) => ({
+      id: room.id,
+      x: room.x,
+      y: room.y,
+      w: room.w,
+      h: room.h,
+      title: room.title,
+      notes: [...room.notes],
+    })),
+    propsSpawnRevision: DUNGEON_PROPS_SPAWN_REVISION,
+    doorsSpawnRevision: DUNGEON_DOORS_SPAWN_REVISION,
   };
   if (level?.floorCount) dungeonLink.floorCount = level.floorCount;
 
@@ -217,6 +236,16 @@ export async function placeGeneratedDungeon(dungeon: GeneratedDungeon, level?: D
   const store = useItemStore.getState();
   store.addItem(map);
   emitItemAdd(map);
+  const tagProps = (list: ReturnType<typeof buildDungeonPropItems>) =>
+    list.map((prop) => bindMapBoundProp(prop, map));
+  for (const prop of tagProps(buildDungeonDoorItems(map, dungeon))) {
+    store.addItem(prop);
+    emitItemAdd(prop);
+  }
+  for (const prop of tagProps(buildDungeonPropItems(map, dungeon))) {
+    store.addItem(prop);
+    emitItemAdd(prop);
+  }
   store.addItem(handout);
   emitItemAdd(handout);
   if (level?.from) linkParentStair(level.from.mapId, level.from.col, level.from.row, mapId);
