@@ -31,7 +31,11 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 
     let cancelled = false;
     void (async () => {
-      await getAuthBearerToken({ skipCache: true });
+      // Don't let a hung auth/DB call pin this screen forever.
+      await Promise.race([
+        getAuthBearerToken({ skipCache: true }),
+        new Promise<null>((r) => setTimeout(() => r(null), 12_000)),
+      ]);
       for (let attempt = 0; attempt < 8 && !cancelled; attempt++) {
         const state = await verifyApiSessionState(true);
         if (cancelled) return;

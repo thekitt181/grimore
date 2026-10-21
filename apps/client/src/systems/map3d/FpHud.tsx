@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import { useMapStore } from '@/systems/map/store/mapStore';
 import { firstPersonLook } from './firstPersonLook';
 import { useFirstPersonStore } from './firstPersonStore';
@@ -7,13 +7,18 @@ import { useFirstPersonStore } from './firstPersonStore';
 export function FpHud() {
   const enabled = useFirstPersonStore((s) => s.enabled);
   const viewMode = useMapStore((s) => s.viewMode);
-  const [yaw, setYaw] = useState(0);
+  const yawEl = useRef<HTMLSpanElement>(null);
 
   useEffect(() => {
     if (!enabled || viewMode !== '3d') return;
     let raf = 0;
+    let last = Number.NaN;
     const tick = () => {
-      setYaw(Math.round(firstPersonLook.yaw));
+      const y = Math.round(firstPersonLook.yaw);
+      if (y !== last && yawEl.current) {
+        last = y;
+        yawEl.current.textContent = String(y);
+      }
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
@@ -31,7 +36,8 @@ export function FpHud() {
         color: 'var(--color-accent-gold)',
       }}
     >
-      First person — click map to look · Esc frees cursor · WASD move · yaw {yaw}°
+      First person — click map to look · Esc frees cursor · WASD move · yaw{' '}
+      <span ref={yawEl}>0</span>°
     </div>
   );
 }

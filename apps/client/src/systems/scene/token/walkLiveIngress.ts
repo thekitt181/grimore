@@ -63,6 +63,7 @@ export function ingestWalkLive(payload: WalkLiveIngest): void {
 
   const x = payload.x;
   const y = payload.y;
+  const rotation = payload.rotation;
   if (isStaleLiveAfterLocalCommit(tokenId, x, y)) return;
   applyRemoteWalkPose(tokenId, x, y, rotation);
 

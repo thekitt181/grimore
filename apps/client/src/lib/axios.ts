@@ -43,6 +43,7 @@ export async function verifyApiSessionState(force = false): Promise<'ok' | 'unau
   try {
     await api.get('/users/me', {
       ...(authHeader ? { headers: { Authorization: authHeader } } : {}),
+      timeout: 12_000,
       __authRetryStage: 99,
     } as RetriableConfig);
     clearApiAuthBlocked();
@@ -55,7 +56,15 @@ export async function verifyApiSessionState(force = false): Promise<'ok' | 'unau
         markApiAuthBlocked('unauthorized');
         return 'unauthorized';
       }
-      if (status === 500 || status === 502 || status === 504 || !err.response) {
+      // Timeout / no response / gateway errors → treat as waking DB so the load screen can advance.
+      if (
+        status === 500 ||
+        status === 502 ||
+        status === 504 ||
+        !err.response ||
+        err.code === 'ECONNABORTED' ||
+        err.code === 'ETIMEDOUT'
+      ) {
         return 'busy';
       }
     }

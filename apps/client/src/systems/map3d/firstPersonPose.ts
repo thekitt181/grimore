@@ -1,4 +1,5 @@
 import type { TokenItem } from '@/systems/scene/types';
+import { useItemStore } from '@/systems/scene/store/itemStore';
 import { useLiveTransformStore } from '@/systems/scene/store/liveTransformStore';
 import { applyWalkPoseVisual } from '@/systems/scene/token/remotePoseApply';
 import { firstPersonLook } from './firstPersonLook';
@@ -72,13 +73,15 @@ function fpMoveKeysHeld(): boolean {
 /**
  * After a 2D drag / grid snap, pull FP feet to the authoritative token position
  * (only when not mid-WASD — avoids fighting the local driver).
+ * Uses item store only — stale liveTransform after walk caused snap-back on stop.
  */
 export function syncFirstPersonPoseFromItem(token: TokenItem, thresholdPx = 2): boolean {
   if (!firstPersonPose.active || firstPersonPose.tokenId !== token.id) return false;
   if (fpGlobal.walkStreaming || fpMoveKeysHeld()) return false;
-  const live = useLiveTransformStore.getState().byId[token.id];
-  const x = live?.x ?? token.x;
-  const y = live?.y ?? token.y;
+  const base = useItemStore.getState().items[token.id];
+  if (!base || base.type !== 'token') return false;
+  const x = base.x;
+  const y = base.y;
   if (Math.hypot(x - firstPersonPose.x, y - firstPersonPose.y) < thresholdPx) return false;
   firstPersonPose.x = x;
   firstPersonPose.y = y;

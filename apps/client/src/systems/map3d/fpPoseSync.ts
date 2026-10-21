@@ -6,6 +6,8 @@
 import { getSocket } from '@/lib/socket';
 import { useSessionStore } from '@/store/sessionStore';
 import { emitItemUpdateLive } from '@/systems/scene/sceneSync';
+import { useItemStore } from '@/systems/scene/store/itemStore';
+import { useLiveTransformStore } from '@/systems/scene/store/liveTransformStore';
 import { emitTokenMove } from '@/systems/scene/token/tokenSync';
 import { clearWalkPose } from '@/systems/scene/token/walkPoseBus';
 import { applyWalkPoseVisual } from '@/systems/scene/token/remotePoseApply';
@@ -154,6 +156,11 @@ export function flushFpPosePersist(): void {
   emitTokenMove(token.id, gridCol, gridRow, firstPersonPose.x, firstPersonPose.y, {
     persist: true,
   });
+  // Persist facing once on stop (mid-look skips item-store writes to keep mouse smooth).
+  useItemStore.getState().updateItem(token.id, { rotation: firstPersonLook.yaw });
+  // Drop stale live overlay — it wasn't updated during local walk (ingress ignores self),
+  // so keeping it made idle sync / resolve snap the camera back to the walk start.
+  useLiveTransformStore.getState().clear([token.id]);
   clearWalkPose(token.id);
   lastEmitX = NaN;
   lastEmitY = NaN;

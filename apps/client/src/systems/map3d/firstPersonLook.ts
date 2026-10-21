@@ -33,14 +33,16 @@ export function adjustFirstPersonLook(deltaYawDeg: number, deltaPitchRad: number
 
 /** ~0.22°/px — matches pointer-lock feel on 1080p. */
 const LOOK_RAD_PER_PX = 0.00385;
-const LOOK_PX_CAP = 140;
+/** Only clip pathological spikes (alt-tab / lock acquire) — not normal flicks. */
+const LOOK_PX_SPIKE = 720;
 
 function applyLookDeltaPx(deltaPxX: number, deltaPxY: number): void {
-  const dx = Math.max(-LOOK_PX_CAP, Math.min(LOOK_PX_CAP, deltaPxX));
-  const dy = Math.max(-LOOK_PX_CAP, Math.min(LOOK_PX_CAP, deltaPxY));
-  if (dx === 0 && dy === 0) return;
-  const yawDeg = dx * LOOK_RAD_PER_PX * (180 / Math.PI);
-  const pitchRad = -dy * LOOK_RAD_PER_PX;
+  if (!Number.isFinite(deltaPxX) || !Number.isFinite(deltaPxY)) return;
+  // Drop one-frame teleport spikes; keep full range for high-poll mice.
+  if (Math.abs(deltaPxX) > LOOK_PX_SPIKE || Math.abs(deltaPxY) > LOOK_PX_SPIKE) return;
+  if (deltaPxX === 0 && deltaPxY === 0) return;
+  const yawDeg = deltaPxX * LOOK_RAD_PER_PX * (180 / Math.PI);
+  const pitchRad = -deltaPxY * LOOK_RAD_PER_PX;
   adjustFirstPersonLook(yawDeg, pitchRad);
 }
 

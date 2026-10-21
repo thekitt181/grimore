@@ -135,13 +135,17 @@ export function emitTokenRotate(tokenId: string, rotation: number) {
   const socket = getSocket();
   if (!socket.connected) return;
 
-  // Local UI only — never emitItemUpdate (that froze remotes when combined with walk).
-  useItemStore.getState().updateItem(tokenId, { rotation });
+  const fpDriving = firstPersonPose.active && firstPersonPose.tokenId === tokenId;
+  // FP look is driven by firstPersonLook — writing item.rotation every mouse tick
+  // re-renders the whole scene and makes looking stutter.
+  if (!fpDriving) {
+    useItemStore.getState().updateItem(tokenId, { rotation });
+  }
 
   // Always send x/y so remotes use mesh apply (never Zustand updateItem on receive).
   let x: number;
   let y: number;
-  if (firstPersonPose.active && firstPersonPose.tokenId === tokenId) {
+  if (fpDriving) {
     x = firstPersonPose.x;
     y = firstPersonPose.y;
   } else {
@@ -157,9 +161,7 @@ export function emitTokenRotate(tokenId: string, rotation: number) {
   socket.emit('token:rotate', {
     sessionId: s,
     tokenId,
-    rotation: firstPersonPose.active && firstPersonPose.tokenId === tokenId
-      ? firstPersonLook.yaw
-      : rotation,
+    rotation: fpDriving ? firstPersonLook.yaw : rotation,
     x,
     y,
   });

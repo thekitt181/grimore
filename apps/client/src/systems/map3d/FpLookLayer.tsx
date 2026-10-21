@@ -2,9 +2,10 @@ import { useEffect, useRef } from 'react';
 import { useMapStore } from '@/systems/map/store/mapStore';
 import { sceneRefs } from '@/systems/scene/sceneRefs';
 import { useFirstPersonStore } from './firstPersonStore';
-import { accumulateFirstPersonLook } from './firstPersonLook';
+import { accumulateFirstPersonLook, firstPersonLook } from './firstPersonLook';
 import { resolveFirstPersonToken } from './resolveFirstPersonToken';
 import { syncFirstPersonYaw } from './firstPersonMove';
+import { useItemStore } from '@/systems/scene/store/itemStore';
 import { beginFpSpray, endFpSpray } from './fpSurfacePaint';
 import { beginFpBreach, endFpBreach } from './fpWallBreach';
 import { beginFpErase, endFpErase } from './fpEraseDecals';
@@ -37,7 +38,8 @@ function releaseUiFocus() {
   resumeFirstPersonMoveAfterMapFocus();
 }
 
-const YAW_SYNC_MS = 48;
+/** Remotes only need coarse facing — keep off the mouse hot path. */
+const YAW_SYNC_MS = 160;
 
 /**
  * Full-screen look capture above the map (below session dock).
@@ -166,6 +168,14 @@ export function FpLookLayer() {
       const locked = document.pointerLockElement === el;
       syncLayerCaptureStyle(locked);
       useFirstPersonStore.getState().setLookCaptureActive(locked);
+      // Commit facing once when freeing the cursor (mid-look skips item-store writes).
+      if (!locked) {
+        const token = resolveFirstPersonToken();
+        if (token) {
+          useItemStore.getState().updateItem(token.id, { rotation: firstPersonLook.yaw });
+          syncFirstPersonYaw(token.id);
+        }
+      }
     }
 
     /** When the cursor is free (Esc), clicks pass through — re-arm look from the map via capture. */
@@ -234,7 +244,7 @@ export function FpLookLayer() {
       yawDirty = false;
       const token = resolveFirstPersonToken();
       if (token) syncFirstPersonYaw(token.id);
-    }, 50);
+    }, YAW_SYNC_MS);
 
     el.addEventListener('pointerdown', onPointerDown);
     el.addEventListener('pointerup', onPointerUp);
