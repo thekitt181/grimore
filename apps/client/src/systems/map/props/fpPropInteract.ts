@@ -137,10 +137,7 @@ export function tryFirstPersonPropInteract(): boolean {
 
   const sessionId = useSessionStore.getState().sessionId;
   if (!sessionId) return false;
-  usePropInteractRequestStore.getState().setPlayerWaiting({
-    requestId,
-    propName: prop.name,
-  });
+  usePropInteractRequestStore.getState().setPlayerWaiting(payload);
   emitPropInteractRequest(sessionId, payload);
   return true;
 }

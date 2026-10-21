@@ -864,7 +864,14 @@ function SpearTrap({ amount }: { amount: number }) {
           />
           <mesh position={[x, h + 0.04, 0]}>
             <coneGeometry args={[0.045, 0.12, 7]} />
-            <Mat color={IRON} metalness={0.7} roughness={0.22} emissive={amount > 0.2 ? GOLD : undefined} emissiveIntensity={amount > 0.2 ? 0.25 : 0} />
+            <Mat
+              color={IRON}
+              metalness={0.7}
+              roughness={0.22}
+              {...(amount > 0.2
+                ? { emissive: GOLD, emissiveIntensity: 0.25 }
+                : { emissiveIntensity: 0 })}
+            />
           </mesh>
         </group>
       ))}

@@ -222,21 +222,30 @@ function WeatherParticles({
 
     for (let i = 0; i < count; i++) {
       const o = i * 3;
+      let x = arr[o] ?? 0;
+      let y = arr[o + 1] ?? 0;
+      let z = arr[o + 2] ?? 0;
+      const vx = velocities[o] ?? 0;
+      const vy = velocities[o + 1] ?? 0;
+      const vz = velocities[o + 2] ?? 0;
       if (firefly) {
-        arr[o] += velocities[o]! * step + Math.sin(t * 1.3 + i) * 0.35;
-        arr[o + 1] += velocities[o + 1]! * step + Math.cos(t * 1.1 + i) * 0.28;
-        arr[o + 2] += velocities[o + 2]! * step + Math.sin(t * 0.9 + i * 0.7) * 0.3;
+        x += vx * step + Math.sin(t * 1.3 + i) * 0.35;
+        y += vy * step + Math.cos(t * 1.1 + i) * 0.28;
+        z += vz * step + Math.sin(t * 0.9 + i * 0.7) * 0.3;
       } else {
-        arr[o] += velocities[o]! * step;
-        arr[o + 1] += velocities[o + 1]! * step;
-        arr[o + 2] += velocities[o + 2]! * step;
+        x += vx * step;
+        y += vy * step;
+        z += vz * step;
       }
+      arr[o] = x;
+      arr[o + 1] = y;
+      arr[o + 2] = z;
 
       const out =
-        arr[o + 1]! < -BOX.y
-        || arr[o + 1]! > BOX.y * 1.4
-        || Math.abs(arr[o]!) > BOX.x * 1.15
-        || Math.abs(arr[o + 2]!) > BOX.z * 1.15;
+        y < -BOX.y
+        || y > BOX.y * 1.4
+        || Math.abs(x) > BOX.x * 1.15
+        || Math.abs(z) > BOX.z * 1.15;
       if (out) respawn(i, arr, velocities, weather, settings);
     }
     attr.needsUpdate = true;

@@ -48,16 +48,25 @@ export function emitTokenPoseLive(
   if (now - lastEmitAt < INTERVAL_MS) return;
   lastEmitAt = now;
 
-  for (const p of livePatches) {
-    const patch = p.patch;
+  for (const entry of livePatches) {
+    const { x, y, rotation, gridCol, gridRow } = entry.patch;
+    if (
+      typeof x !== 'number'
+      || typeof y !== 'number'
+      || typeof rotation !== 'number'
+      || typeof gridCol !== 'number'
+      || typeof gridRow !== 'number'
+    ) {
+      continue;
+    }
     const pose = {
       sessionId,
-      tokenId: p.id,
-      x: patch.x,
-      y: patch.y,
-      rotation: patch.rotation ?? 0,
-      gridCol: patch.gridCol,
-      gridRow: patch.gridRow,
+      tokenId: entry.id,
+      x,
+      y,
+      rotation,
+      gridCol,
+      gridRow,
     };
     broadcastWalkLiveLocal(pose);
 

@@ -361,6 +361,8 @@ export function SceneModel({
   registerRaycast?: boolean;
   /** Brighter materials + render on top of map geometry (tokens). */
   tokenRender?: boolean;
+  /** Softer / flatter lighting for 2D tabletop token display. */
+  tokenRender2d?: boolean;
   /** Textured dungeon props (KayKit GLB). */
   propRender?: boolean;
   footprint?: { width: number; height: number };
