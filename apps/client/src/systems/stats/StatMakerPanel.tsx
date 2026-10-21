@@ -23,6 +23,12 @@ function fmt(t: number): string {
   }
 }
 
+function entryPlayerName(entry: object): string | null {
+  if (!('playerName' in entry)) return null;
+  const name = (entry as { playerName?: unknown }).playerName;
+  return typeof name === 'string' && name.length > 0 ? name : null;
+}
+
 /** Local adventure stats — per player + overall party rollup. */
 export function StatMakerPanel() {
   const open = useStatMakerStore((s) => s.panelOpen);
@@ -162,7 +168,11 @@ export function StatMakerPanel() {
               <StatChip
                 label="Combat rounds"
                 value={String(displayedRounds)}
-                sub={showOverall ? 'party max' : (initActive ? `init r${initRound}` : undefined)}
+                {...(showOverall
+                  ? { sub: 'party max' }
+                  : initActive
+                    ? { sub: `init r${initRound}` }
+                    : {})}
               />
             </div>
 
@@ -180,8 +190,8 @@ export function StatMakerPanel() {
                       {' — '}
                       <strong>{o.name}</strong>
                       <span className="opacity-60"> ({o.action})</span>
-                      {'playerName' in o && o.playerName ? (
-                        <span className="opacity-50"> · {o.playerName}</span>
+                      {entryPlayerName(o) ? (
+                        <span className="opacity-50"> · {entryPlayerName(o)}</span>
                       ) : null}
                     </li>
                   ))}
@@ -203,8 +213,8 @@ export function StatMakerPanel() {
                       {' — '}
                       <strong>{c.name}</strong>
                       {c.round != null ? <span className="opacity-60"> · r{c.round}</span> : null}
-                      {'playerName' in c && c.playerName ? (
-                        <span className="opacity-50"> · {c.playerName}</span>
+                      {entryPlayerName(c) ? (
+                        <span className="opacity-50"> · {entryPlayerName(c)}</span>
                       ) : null}
                     </li>
                   ))}

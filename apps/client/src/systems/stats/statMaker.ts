@@ -479,16 +479,14 @@ export function playerStatTarget(ref: StatUserRef | null | undefined): StatUserR
     if (live) return { userId: live.id, userName: live.username };
   }
 
-  if (byId && byId.role !== 'GM') {
+  if (byId) {
     return { userId: byId.id, userName: byId.username };
   }
 
   if (!ref.userId || isGmUserId(ref.userId)) return null;
   return {
     userId: ref.userId,
-    userName: (!isGenericPlayerLabel(ref.userName) ? ref.userName : null)
-      || byId?.username
-      || 'Player',
+    userName: (!isGenericPlayerLabel(ref.userName) ? ref.userName : null) || 'Player',
   };
 }
 
@@ -1014,9 +1012,12 @@ export function buildOverallStatDoc(
   playerRefs?: StatUserRef[],
 ): OverallStatDoc {
   const refs = playerRefs ?? useStatMakerStore.getState().listPlayers();
-  const docs = refs
-    .map((r) => docsById[r.userId])
-    .filter((d): d is PlayerStatDoc => Boolean(d) && !isGmOwnedDoc(d));
+  const docs: PlayerStatDoc[] = [];
+  for (const r of refs) {
+    const d = docsById[r.userId];
+    if (!d || isGmOwnedDoc(d)) continue;
+    docs.push(d);
+  }
 
   const objects: StatObjectEntryView[] = [];
   for (const doc of docs) {
