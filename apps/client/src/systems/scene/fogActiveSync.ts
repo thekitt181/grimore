@@ -1,12 +1,21 @@
 import { getSocket } from '@/lib/socket';
 import { useMapStore } from '@/systems/map/store/mapStore';
 import { useSessionStore } from '@/store/sessionStore';
+import { getActiveTimeOfDay } from '@/systems/scene/media/sceneMediaStore';
 import { flushFogScene } from './fogSync';
 
 let fogActiveHandler: ((payload: { active: boolean; sessionId?: string }) => void) | null = null;
 
 /** Whether the fog overlay should render for the current client. */
 export function isFogOverlayVisible(): boolean {
+  const { fogEnabled, sessionFogActive } = useMapStore.getState();
+  if (fogEnabled || sessionFogActive) return true;
+  // Midnight = darkness: same as table fog for vision / LOS / FP sight.
+  return getActiveTimeOfDay() === 'midnight';
+}
+
+/** GM-toggled fog only (excludes midnight auto-fog). Used when syncing fog:active. */
+export function isSessionFogToggled(): boolean {
   const { fogEnabled, sessionFogActive } = useMapStore.getState();
   return fogEnabled || sessionFogActive;
 }
@@ -20,7 +29,7 @@ export function emitFogActive(active: boolean): void {
 
 /** GM toggles fog visibility for the whole table. */
 export function setFogVisibleForSession(visible: boolean): void {
-  const wasOn = isFogOverlayVisible();
+  const wasOn = isSessionFogToggled();
   const store = useMapStore.getState();
   store.setFogEnabled(visible);
   store.setSessionFogActive(visible);
@@ -38,7 +47,7 @@ export function setFogVisibleForSession(visible: boolean): void {
 
 export function applySessionFogActive(active: boolean): void {
   const role = useSessionStore.getState().myRole;
-  const wasOn = isFogOverlayVisible();
+  const wasOn = isSessionFogToggled();
   useMapStore.getState().setSessionFogActive(active);
   if (active && !wasOn) {
     useMapStore.getState().setRevealedCells(new Set(), { persist: false });
@@ -67,5 +76,5 @@ export function bindFogActiveSocket(): void {
 /** Push current fog visibility to players (call after socket connects). */
 export function syncFogActiveToSession(): void {
   if (useSessionStore.getState().myRole !== 'GM') return;
-  emitFogActive(isFogOverlayVisible());
+  emitFogActive(isSessionFogToggled());
 }

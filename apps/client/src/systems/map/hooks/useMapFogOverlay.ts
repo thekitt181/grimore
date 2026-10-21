@@ -16,6 +16,8 @@ import {
   registerFogRepaintListener,
 } from '../fogRepaintBridge';
 import { itemsWithDragLiveTransforms } from '@/systems/scene/interaction/dragLivePositions';
+import { isFogOverlayVisible } from '@/systems/scene/fogActiveSync';
+import { getActiveTimeOfDay, useSceneMediaStore } from '@/systems/scene/media/sceneMediaStore';
 import type { MapItem } from '@/systems/scene/types';
 
 function syncMapFogOverlays(
@@ -112,15 +114,17 @@ export function useMapFogOverlay(
 ) {
   const revealedCells = useMapStore((s) => s.revealedCells);
   const fogRevision = useMapStore((s) => s.fogRevision);
-  const fogEnabled = useMapStore((s) => s.fogEnabled);
-  const sessionFogActive = useMapStore((s) => s.sessionFogActive);
+  useMapStore((s) => s.fogEnabled);
+  useMapStore((s) => s.sessionFogActive);
+  // Midnight counts as fog-on — re-render when time changes.
+  useSceneMediaStore(() => getActiveTimeOfDay());
   const items = useItemStore((s) => s.items);
   const selectedIds = useItemStore((s) => s.selectedIds);
   const liveTick = useLiveTransformStore((s) => s.tick);
   const { myRole, myUserId } = useSessionStore();
 
   const isGM = myRole === 'GM';
-  const showFogOverlay = fogEnabled || sessionFogActive;
+  const showFogOverlay = isFogOverlayVisible();
 
   const fogContainers = useRef<Map<string, Container>>(new Map());
   const fogStateRef = useRef({
@@ -173,8 +177,6 @@ export function useMapFogOverlay(
     items,
     revealedCells,
     fogRevision,
-    fogEnabled,
-    sessionFogActive,
     showFogOverlay,
     myRole,
     isGM,

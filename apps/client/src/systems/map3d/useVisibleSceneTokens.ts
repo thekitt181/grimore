@@ -7,6 +7,7 @@ import {
   useLiveTransformStore,
 } from '@/systems/scene/store/liveTransformStore';
 import { sceneTokensForClient } from '@/systems/scene/sceneMapsForClient';
+import { getActiveTimeOfDay, useSceneMediaStore } from '@/systems/scene/media/sceneMediaStore';
 import { useSessionStore } from '@/store/sessionStore';
 import type { TokenItem } from '@/systems/scene/types';
 
@@ -21,6 +22,8 @@ export function useVisibleSceneTokens(opts?: { modelOnly?: boolean }): {
   const selectedIds = useItemStore((s) => s.selectedIds);
   const myUserId = useSessionStore((s) => s.myUserId);
   const fogRevision = useMapStore((s) => s.fogRevision);
+  // Midnight auto-fog changes LOS without bumping fogRevision.
+  const timeOfDay = useSceneMediaStore(() => getActiveTimeOfDay());
   const activeTurnItemId = useInitiativeStore((s) =>
     s.isActive && s.combatants[s.currentIndex] ? s.combatants[s.currentIndex]!.tokenId : undefined,
   );
@@ -30,7 +33,7 @@ export function useVisibleSceneTokens(opts?: { modelOnly?: boolean }): {
     const visible = sceneTokensForClient(Object.values(merged), gm);
     if (!opts?.modelOnly) return visible;
     return visible.filter((t) => Boolean(t.modelUrl));
-  }, [items, liveTick, gm, fogRevision, selectedIds, myUserId, opts?.modelOnly]);
+  }, [items, liveTick, gm, fogRevision, timeOfDay, selectedIds, myUserId, opts?.modelOnly]);
 
   return {
     tokens,

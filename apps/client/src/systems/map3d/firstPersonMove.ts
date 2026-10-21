@@ -15,6 +15,7 @@ import { clearWalkPose } from '@/systems/scene/token/walkPoseBus';
 import { applyWalkPoseVisual } from '@/systems/scene/token/remotePoseApply';
 import type { MapItem, TokenItem } from '@/systems/scene/types';
 import { useMapStore } from '@/systems/map/store/mapStore';
+import { isFogOverlayVisible } from '@/systems/scene/fogActiveSync';
 import { useSessionStore } from '@/store/sessionStore';
 import { useInitiativeStore } from '@/systems/map/store/initiativeStore';
 import { followDungeonStair, stairIndexAt } from '@/systems/map/dungeon/placeGeneratedDungeon';
@@ -72,7 +73,7 @@ let fogCache: { mapId: string; at: number; seen: Set<string> | null } = {
 };
 
 function destinationVisible(token: TokenItem, map: MapItem, destX: number, destY: number): boolean {
-  const fogOn = useMapStore.getState().sessionFogActive || useMapStore.getState().fogEnabled;
+  const fogOn = isFogOverlayVisible();
   const role = useSessionStore.getState().myRole;
   if (!fogOn || role === 'GM') return true;
 

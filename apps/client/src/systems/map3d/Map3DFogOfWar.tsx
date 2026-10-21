@@ -7,6 +7,7 @@ import { useSessionStore } from '@/store/sessionStore';
 import { paintFogCanvas } from '@/systems/map/fogRender';
 import { fogTextureDimensions } from '@/systems/map/fogTextureSize';
 import { isFogOverlayVisible } from '@/systems/scene/fogActiveSync';
+import { getActiveTimeOfDay, useSceneMediaStore } from '@/systems/scene/media/sceneMediaStore';
 import {
   bindFogRepaintSubscriptions,
   registerFogRepaintListener,
@@ -22,18 +23,19 @@ const FOG_RENDER_ORDER = 11;
 function useFogDrawState(map: MapItem) {
   const revealedCells = useMapStore((s) => s.revealedCells);
   const fogRevision = useMapStore((s) => s.fogRevision);
-  const fogEnabled = useMapStore((s) => s.fogEnabled);
-  const sessionFogActive = useMapStore((s) => s.sessionFogActive);
+  // Midnight auto-fog — subscribe so overlays appear when time flips.
+  useSceneMediaStore(() => getActiveTimeOfDay());
+  useMapStore((s) => s.fogEnabled);
+  useMapStore((s) => s.sessionFogActive);
   const items = useItemStore((s) => s.items);
   const selectedIds = useItemStore((s) => s.selectedIds);
   const liveTick = useLiveTransformStore((s) => s.tick);
   const { myRole, myUserId } = useSessionStore();
 
   const isGM = myRole === 'GM';
-  const showFogOverlay = fogEnabled || sessionFogActive;
   const activeMap = getActiveMap();
   const isActive = activeMap?.id === map.id;
-  const visible = isActive && showFogOverlay && isFogOverlayVisible() && (map.visible || isGM);
+  const visible = isActive && isFogOverlayVisible() && (map.visible || isGM);
 
   return {
     visible,

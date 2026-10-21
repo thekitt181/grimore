@@ -36,6 +36,8 @@ import { useFirstPersonControls } from './useFirstPersonControls';
 import { FpPaintSampler } from './FpPaintSampler';
 import { FirstPersonVisionFog } from './FirstPersonVisionFog';
 import { FpTrapImpactSparks } from './FpTrapImpact';
+import { FpWeather3D } from './FpWeather3D';
+import { FpTimeOfDay3D, useTimeLightRig } from './FpTimeOfDay3D';
 import { Environment } from '@react-three/drei';
 import { warmMap3DAssets } from './warmMap3DAssets';
 import { preloadPropModels3D } from './PropModel3D';
@@ -137,17 +139,31 @@ function Map3DSceneContent() {
   const gridSize = activeMap?.gridSize ?? 96;
   const wallHeight = gridSize * wallHeightCells;
   const wallThickness = Math.max(4, gridSize * 0.12);
+  const timeRig = useTimeLightRig();
+  const envBoost = firstPerson ? 0.85 : 1;
 
   return (
     <>
-      <ambientLight intensity={1.05} />
-      <directionalLight position={[800, 1400, 500]} intensity={1.35} castShadow={!mobile} />
-      <directionalLight position={[-400, 900, -400]} intensity={0.65} />
-      <hemisphereLight args={['#f0ece4', '#2a2520', 0.55]} />
+      {/* Map-wide time-of-day lighting (whole dungeon — not a player circle). */}
+      <ambientLight intensity={timeRig.ambient} color={timeRig.ambientColor} />
+      <directionalLight
+        position={timeRig.sunPos}
+        intensity={timeRig.sunIntensity}
+        color={timeRig.sunColor}
+        castShadow={!mobile}
+      />
+      <directionalLight
+        position={[-timeRig.sunPos[0] * 0.5, timeRig.sunPos[1] * 0.65, -timeRig.sunPos[2] * 0.5]}
+        intensity={timeRig.fillIntensity}
+        color={timeRig.fillColor}
+      />
+      <hemisphereLight
+        args={[timeRig.hemiSky, timeRig.hemiGround, timeRig.hemiIntensity]}
+      />
       <Suspense fallback={null}>
         <Environment
           preset="warehouse"
-          environmentIntensity={firstPerson ? 0.34 : 0.44}
+          environmentIntensity={timeRig.envIntensity * envBoost}
         />
       </Suspense>
       {maps.map((map) => (
@@ -160,7 +176,7 @@ function Map3DSceneContent() {
             <Map3DWalls map={map} wallHeight={wallHeight} wallThickness={wallThickness} />
           )}
           <Map3DMapModel map={map} showGizmo={map.id === gizmoMapId && Boolean(map.modelUrl)} />
-          {/* Ground-plane FoW is top-down only; FP uses FirstPersonVisionFog (torch/DV). */}
+          {/* Ground-plane FoW is top-down only; FP uses FirstPersonVisionFog. */}
           {!firstPerson && <Map3DFogOfWar map={map} />}
           {!map.modelUrl && <MapPickGroup map={map} />}
         </group>
@@ -172,8 +188,10 @@ function Map3DSceneContent() {
       <WallDebrisBurst />
       <FpPaintSampler />
       <Map3DImageLayer />
-      {firstPerson && <FirstPersonVisionFog wallHeight={wallHeight} />}
+      {firstPerson && <FirstPersonVisionFog key="fp-vision-v4" wallHeight={wallHeight} />}
       {firstPerson && <FpTrapImpactSparks />}
+      <FpTimeOfDay3D />
+      <FpWeather3D />
     </>
   );
 }
