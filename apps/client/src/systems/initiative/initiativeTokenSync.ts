@@ -5,14 +5,59 @@ import { useItemStore } from '@/systems/scene/store/itemStore';
 import { emitItemUpdate } from '@/systems/scene/sceneSync';
 import { persistInitiativeLocal } from '@/systems/scene/sessionPersistence';
 import type { TokenItem } from '@/systems/scene/types';
+import type { InitiativeSyncPayload } from '@grimoire/shared';
 import { readTempHp } from './hpUtils';
+
+/** Local outbound revision — bumped on every emit. */
+let localRevision = 0;
+/** Highest revision applied from the server (or our own emit). */
+let appliedRevision = 0;
+
+export function getInitiativeAppliedRevision(): number {
+  return appliedRevision;
+}
+
+/**
+ * Apply a remote (or hydrated) initiative payload.
+ * Drops stale revisions so late packets cannot springboard the turn highlighter.
+ */
+export function applyInitiativeSyncPayload(payload: InitiativeSyncPayload): boolean {
+  const rev = payload.revision ?? 0;
+  if (rev > 0 && rev < appliedRevision) return false;
+  if (rev > 0) {
+    appliedRevision = rev;
+    if (rev > localRevision) localRevision = rev;
+  }
+
+  const { sessionId } = useSessionStore.getState();
+  useInitiativeStore.getState().syncFromServer(payload);
+  if (sessionId) {
+    persistInitiativeLocal(sessionId, {
+      combatants: payload.combatants,
+      currentIndex: payload.currentIndex,
+      round: payload.round,
+      isActive: payload.isActive,
+    });
+  }
+  return true;
+}
 
 export function syncInitiativeToServer(): void {
   const { sessionId } = useSessionStore.getState();
   if (!sessionId) return;
   const { combatants, currentIndex, round, isActive } = useInitiativeStore.getState();
+  localRevision += 1;
+  appliedRevision = Math.max(appliedRevision, localRevision);
   persistInitiativeLocal(sessionId, { combatants, currentIndex, round, isActive });
-  (getSocket() as any).emit('initiative:sync', { sessionId, combatants, currentIndex, round, isActive });
+  const payload: InitiativeSyncPayload = {
+    sessionId,
+    combatants,
+    currentIndex,
+    round,
+    isActive,
+    revision: localRevision,
+  };
+  getSocket().emit('initiative:sync', payload);
 }
 
 /** Push initiative combatant HP/temp HP to its linked map token. */

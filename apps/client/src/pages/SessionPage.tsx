@@ -24,6 +24,11 @@ import { RollToast } from '@/systems/dice/RollToast';
 import { PropDdbArmBanner } from '@/systems/map/props/PropDdbArmBanner';
 import { PropInteractApprovalModal } from '@/systems/map/props/PropInteractApprovalModal';
 import { FpInteractHint } from '@/systems/map/props/FpInteractHint';
+import { StatMakerPanel } from '@/systems/stats/StatMakerPanel';
+import { setStatMakerAuthUserName, useStatMakerStore } from '@/systems/stats/statMaker';
+import { bindStatMakerCombatHook } from '@/systems/stats/statMakerCombatHook';
+import { bindStatMakerSync } from '@/systems/stats/statMakerSync';
+import { useGrimoireUser } from '@/hooks/useGrimoireAuth';
 import { DiceTrayOverlay } from '@/systems/dice/DiceTrayOverlay';
 import { AttackTargetPicker } from '@/systems/combat/AttackTargetPicker';
 import { AttackTargetHint } from '@/systems/combat/AttackTargetHint';
@@ -48,6 +53,7 @@ import { useDdbSocket } from '@/systems/ddb/useDdbSocket';
 import { useCombatStore } from '@/systems/combat/combatStore';
 import { useDiceSocket } from '@/systems/dice/useDiceSocket';
 import { InitiativeTracker } from '@/systems/initiative/InitiativeTracker';
+import { applyInitiativeSyncPayload, syncInitiativeToServer } from '@/systems/initiative/initiativeTokenSync';
 import { QuestDock } from '@/systems/quests/QuestDock';
 import { emitQuestSync, useQuestStore } from '@/systems/quests/questStore';
 import { MobileSessionDock } from '@/components/MobileSessionDock';
@@ -62,7 +68,7 @@ import { useCompendiumAuthRecovery } from '@/systems/compendium/useCompendiumAut
 import { useCompendiumUiStore } from '@/systems/compendium/compendiumStore';
 import { getSocket, isMobileClient } from '@/lib/socket';
 import type { InitiativeSyncPayload, QuestSyncPayload, SpellEffectSyncPayload, SpellEffectReminderPayload } from '@grimoire/shared';
-import { loadInitiativeLocal, loadQuestsLocal, persistInitiativeLocal, persistQuestsLocal } from '@/systems/scene/sessionPersistence';
+import { loadInitiativeLocal, loadQuestsLocal, persistQuestsLocal } from '@/systems/scene/sessionPersistence';
 import {
   applyEffectReminderPayload,
   applySpellEffectSyncPayload,
@@ -103,6 +109,7 @@ export function SessionPage() {
     isConnected,
     connectionError,
     myRole,
+    myUserId,
     setMyRole,
     setMyUserId,
     setSession,
@@ -150,6 +157,22 @@ export function SessionPage() {
   const setSceneManagerOpen = useSceneUiStore((s) => s.setSceneManagerOpen);
   const dmScreenOpen = useDmScreenStore((s) => s.open);
   const setDmScreenOpen = useDmScreenStore((s) => s.setOpen);
+  const statMakerOpen = useStatMakerStore((s) => s.panelOpen);
+  const setStatMakerOpen = useStatMakerStore((s) => s.setPanelOpen);
+  const { user: authUser } = useGrimoireUser();
+
+  useEffect(() => bindStatMakerCombatHook(), []);
+  useEffect(() => {
+    bindStatMakerSync(getSocket());
+    const onReady = () => bindStatMakerSync(getSocket());
+    window.addEventListener('grimoire:socket-connected', onReady);
+    return () => window.removeEventListener('grimoire:socket-connected', onReady);
+  }, []);
+  useEffect(() => {
+    setStatMakerAuthUserName(authUser?.username || authUser?.fullName || authUser?.email || null);
+    if (myRole !== 'GM') useStatMakerStore.getState().ensureLocalDoc();
+    useStatMakerStore.getState().refreshFromStorage();
+  }, [myUserId, myRole, authUser?.username, authUser?.fullName, authUser?.email]);
 
   // ── Fetch session info ─────────────────────────────────────────────────────
   const { data: sessionInfo, isLoading } = useQuery({
@@ -181,15 +204,28 @@ export function SessionPage() {
   useEffect(() => {
     if (!socketReady || !sessionId) return;
 
+    // Local cache is a fallback only — live board arrives from hydrate / GM sync.
+    // Avoid applying a stale turn index for players (that caused the delayed highlight).
     const saved = loadInitiativeLocal(sessionId);
+    const isGm = useSessionStore.getState().myRole === 'GM';
     if (saved) {
-      useInitiativeStore.getState().syncFromServer(saved);
+      if (isGm) {
+        useInitiativeStore.getState().syncFromServer(saved);
+        // Seed server cache so joining players get the live turn immediately.
+        queueMicrotask(() => syncInitiativeToServer());
+      } else {
+        useInitiativeStore.getState().syncFromServer({
+          ...saved,
+          // Hold turn highlight until the server board arrives.
+          isActive: false,
+        });
+      }
     }
 
     const socket = getSocket();
     const onInitiativeSync = (payload: InitiativeSyncPayload) => {
-      useInitiativeStore.getState().syncFromServer(payload);
-      persistInitiativeLocal(sessionId, payload);
+      if (payload.sessionId && payload.sessionId !== sessionId) return;
+      applyInitiativeSyncPayload(payload);
     };
     socket.on('initiative:sync', onInitiativeSync);
     return () => { socket.off('initiative:sync', onInitiativeSync); };
@@ -513,6 +549,11 @@ export function SessionPage() {
                     <QuestDock />
                   </div>
                 )}
+                {statMakerOpen && (
+                  <div className="absolute bottom-full right-0 mb-2 z-40 max-h-[calc(100vh-8rem)] overflow-hidden">
+                    <StatMakerPanel />
+                  </div>
+                )}
                 <MapViewModeToggle variant="dock" />
                 <div className="flex flex-col items-end gap-1">
                   <FirstPersonPaintHud />
@@ -592,6 +633,18 @@ export function SessionPage() {
                     🐉
                   </button>
                 )}
+                <button
+                  onClick={() => setStatMakerOpen(!statMakerOpen)}
+                  className="w-10 h-10 rounded-lg flex items-center justify-center text-lg shadow-panel transition-all"
+                  style={{
+                    background: statMakerOpen ? 'rgba(201,168,76,0.2)' : 'var(--color-bg-secondary)',
+                    border: `1px solid ${statMakerOpen ? 'var(--color-accent-gold)' : 'var(--color-border)'}`,
+                    color: statMakerOpen ? 'var(--color-accent-gold)' : 'var(--color-text-secondary)',
+                  }}
+                  title="Stat Maker (local adventure log)"
+                >
+                  📊
+                </button>
                 <button
                   onClick={() => setShowQuests((v) => !v)}
                   className="w-10 h-10 rounded-lg flex items-center justify-center text-lg shadow-panel transition-all"

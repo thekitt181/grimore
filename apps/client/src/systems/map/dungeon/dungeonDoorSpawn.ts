@@ -62,19 +62,18 @@ function roomSideNote(room: DungeonRoom | undefined, side: string): string {
   return line ? line.slice(prefix.length).trim() : '';
 }
 
-function roomNotesBlob(room: DungeonRoom | undefined): string {
-  if (!room) return '';
-  return room.notes.join(' ');
-}
+/**
+ * Pick a prop for this edge only.
+ * Use the matching side note for flavor (gate / runed / hatch) — never the whole room
+ * blob, or every open doorway in a room with one "closed door" note grows a stacked door.
+ */
+function specFromDoor(kind: DoorKind, sideLine: string): DoorSpec | null {
+  // Open passages are painted openings — no interactive door prop.
+  if (kind === 'open') return null;
 
-function specFromDoor(kind: DoorKind, sideLine: string, roomText: string): DoorSpec | null {
-  const text = `${sideLine} ${roomText}`.toLowerCase();
+  const side = sideLine.toLowerCase();
 
-  if (kind === 'open' && !/(closed|locked|secret|portcullis|gate|runed|hatch|trap door|iron door)/i.test(text)) {
-    return null;
-  }
-
-  if (kind === 'secret' || /secret door|illusionary wall|hidden door|secret passage/i.test(text)) {
+  if (kind === 'secret' || /secret door|illusionary wall|hidden door|secret passage/i.test(side)) {
     return {
       propId: 'secret-door',
       visible: false,
@@ -82,16 +81,16 @@ function specFromDoor(kind: DoorKind, sideLine: string, roomText: string): DoorS
       propRevealCheck: 'investigation',
     };
   }
-  if (/portcullis|iron grate|^gate\b|rusted portcullis/i.test(text)) {
+  if (/portcullis|iron grate|\bgate\b|rusted portcullis/i.test(side)) {
     return { propId: 'gate', visible: true };
   }
-  if (/runed door|glyph door|sealed rune/i.test(text)) {
+  if (/runed door|glyph door|sealed rune/i.test(side)) {
     return { propId: 'runed-door', visible: true, propActivateDc: 16, propActivateCheck: 'investigation' };
   }
-  if (/hatch|trap door|trapdoor/i.test(text)) {
+  if (/hatch|trap door|trapdoor/i.test(side)) {
     return { propId: 'hatch', visible: true };
   }
-  if (kind === 'locked' || /locked door/i.test(text)) {
+  if (kind === 'locked' || /locked door/i.test(side)) {
     return {
       propId: 'door',
       visible: true,
@@ -99,8 +98,26 @@ function specFromDoor(kind: DoorKind, sideLine: string, roomText: string): DoorS
       propActivateCheck: 'strength',
     };
   }
-  if (kind === 'closed' || /closed door|iron door|wooden door/i.test(text)) {
+  if (kind === 'closed' || /closed door|iron door|wooden door/i.test(side)) {
     return { propId: 'door', visible: true };
+  }
+  // Kind says closed/locked/secret but note is empty — still place a basic door.
+  if (kind === 'closed') return { propId: 'door', visible: true };
+  if (kind === 'locked') {
+    return {
+      propId: 'door',
+      visible: true,
+      propActivateDc: 15,
+      propActivateCheck: 'strength',
+    };
+  }
+  if (kind === 'secret') {
+    return {
+      propId: 'secret-door',
+      visible: false,
+      propRevealDc: 15,
+      propRevealCheck: 'investigation',
+    };
   }
   return null;
 }
@@ -163,6 +180,7 @@ function makeDoorItem(
     imageUrl: art.rest,
     propId: spec.propId,
     propState: 0,
+    propNeedsDmApprove: true,
     x,
     y,
     rotation,
@@ -187,11 +205,21 @@ function makeDoorItem(
   };
 }
 
-/** Doors / gates / secret doors from generator door map + room note lines (North: locked door, …). */
+function centersTooClose(a: ImageItem, b: ImageItem, minDist: number): boolean {
+  const ax = a.x + a.width / 2;
+  const ay = a.y + a.height / 2;
+  const bx = b.x + b.width / 2;
+  const by = b.y + b.height / 2;
+  return Math.hypot(ax - bx, ay - by) < minDist;
+}
+
+/** Doors / gates / secret doors from generator door map + matching side notes only. */
 export function buildDungeonDoorItems(map: MapItem, dungeon: GeneratedDungeon): ImageItem[] {
   const cell = dungeon.cell;
   const items: ImageItem[] = [];
   const used = new Set<string>();
+  /** After fitDoorOrGateOnMap, reject a second prop snapped onto the same opening. */
+  const minCenterDist = Math.max(cell * 0.45, 28);
 
   for (const edge of doorEntries(dungeon.doors)) {
     if (used.has(edge.key)) continue;
@@ -208,7 +236,7 @@ export function buildDungeonDoorItems(map: MapItem, dungeon: GeneratedDungeon): 
       : { x: edge.x, y: edge.y };
     const side = sideName(from, to);
     const sideLine = roomSideNote(room, side);
-    const spec = specFromDoor(edge.kind, sideLine, roomNotesBlob(room));
+    const spec = specFromDoor(edge.kind, sideLine);
     if (!spec) continue;
 
     used.add(edge.key);
@@ -220,7 +248,9 @@ export function buildDungeonDoorItems(map: MapItem, dungeon: GeneratedDungeon): 
     const fbRow = inside?.row ?? edge.y;
 
     const item = makeDoorItem(map, cell, spec, wx, wy, fbCol, fbRow);
-    if (item) items.push(item);
+    if (!item) continue;
+    if (items.some((prev) => centersTooClose(prev, item, minCenterDist))) continue;
+    items.push(item);
   }
 
   return items;

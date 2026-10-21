@@ -6,6 +6,7 @@ import { isHpHiddenFromPlayers } from '@/systems/scene/types';
 import { useInitiativeStore } from '@/systems/map/store/initiativeStore';
 import { syncInitiativeToServer } from './initiativeTokenSync';
 import { readTempHp } from './hpUtils';
+import { syncInitiativeRoundToAllPlayerStats } from '@/systems/stats/statMaker';
 
 function dexModForToken(token: TokenItem): number {
   return token.initiativeMod ?? 0;
@@ -40,6 +41,7 @@ export function rollInitiativeFromTokens(): void {
         tempHp: readTempHp(token.tempHp),
         name: token.name,
         conditions: [...token.conditions],
+        isPlayer: Boolean(token.isPc || token.ownerId?.trim() || token.ddbCharacterId),
         hideHpFromPlayers: isHpHiddenFromPlayers(token),
       });
     } else {
@@ -52,7 +54,7 @@ export function rollInitiativeFromTokens(): void {
         tempHp: readTempHp(token.tempHp),
         conditions: [...token.conditions],
         tokenId: token.id,
-        isPlayer: false,
+        isPlayer: Boolean(token.isPc || token.ownerId?.trim() || token.ddbCharacterId),
         hideHpFromPlayers: isHpHiddenFromPlayers(token),
       });
     }
@@ -62,4 +64,5 @@ export function rollInitiativeFromTokens(): void {
     useInitiativeStore.getState().startCombat();
   }
   syncInitiativeToServer();
+  syncInitiativeRoundToAllPlayerStats(useInitiativeStore.getState().round);
 }

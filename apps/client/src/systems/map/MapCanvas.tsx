@@ -54,6 +54,7 @@ import { useEraserTool } from './hooks/useEraserTool';
 import { useDeleteKey } from './hooks/useDeleteKey';
 import { usePropTriggerKey } from './hooks/usePropTriggerKey';
 import { bindPropInteractSync } from './props/propInteractSync';
+import { bindStatMakerSync } from '@/systems/stats/statMakerSync';
 import { useMap3DPixiMode } from './hooks/useMap3DPixiMode';
 import { useMap3DOrbit } from './hooks/useMap3DOrbit';
 import { useMap2DMiniOrbit } from './hooks/useMap2DMiniOrbit';
@@ -507,6 +508,7 @@ export function MapCanvas() {
       bindWallExtrudeSocket();
       bindMapFocusSocket();
       bindPropInteractSync(socket);
+      bindStatMakerSync(socket);
     }
 
     attachSceneListeners();

@@ -13,7 +13,7 @@ import { regenerateDungeonForMap } from './dungeonLayoutFromMap';
 /** Bump when spawn rules change so GMs can refresh auto props. */
 export const DUNGEON_PROPS_SPAWN_REVISION = 2;
 /** Bump when door spawn rules change (runs independently of props). */
-export const DUNGEON_DOORS_SPAWN_REVISION = 1;
+export const DUNGEON_DOORS_SPAWN_REVISION = 2;
 
 function propCenterOnMap(map: MapItem, item: ImageItem): boolean {
   const cx = item.x + item.width / 2;
@@ -52,14 +52,34 @@ function hasAutoPropsForMap(mapId: string, items: Record<string, Item>): boolean
   );
 }
 
-/** Drop note-driven props so a spawn-revision bump can re-place from the key (doors stay). */
+function isAutoDoorProp(item: ImageItem): boolean {
+  const propId = resolvePropId(item);
+  if (!propId) return false;
+  const id = canonicalPropId(propId);
+  return isDoorPropId(id) || id === 'hatch' || id === 'gate' || id === 'secret-door' || id === 'runed-door';
+}
+
+/** Drop note-driven floor props so a spawn-revision bump can re-place (doors handled separately). */
 function removeAutoFloorPropsForMap(mapId: string): void {
   const store = useItemStore.getState();
   const ids: string[] = [];
   for (const item of Object.values(store.items)) {
     if (item.type !== 'image' || item.dungeonPropForMapId !== mapId) continue;
-    const propId = resolvePropId(item);
-    if (propId && isDoorPropId(canonicalPropId(propId))) continue;
+    if (isAutoDoorProp(item)) continue;
+    ids.push(item.id);
+  }
+  if (ids.length === 0) return;
+  store.removeItems(ids);
+  emitItemRemove(ids);
+}
+
+/** Clear previous auto doors before re-spawn (avoids stacked overlapping doors). */
+function removeAutoDoorsForMap(mapId: string): void {
+  const store = useItemStore.getState();
+  const ids: string[] = [];
+  for (const item of Object.values(store.items)) {
+    if (item.type !== 'image' || item.dungeonPropForMapId !== mapId) continue;
+    if (!isAutoDoorProp(item)) continue;
     ids.push(item.id);
   }
   if (ids.length === 0) return;
@@ -104,6 +124,7 @@ export function ensureDungeonMapProps(mapId: string): void {
   let roomsSnapshot: NonNullable<MapItem['dungeon']>['rooms'] | undefined;
 
   if (needsDoors) {
+    removeAutoDoorsForMap(mapId);
     const doorItems = tagPropItems(buildDungeonDoorItems(map, dungeon), map);
     for (const prop of doorItems) {
       store.addItem(prop);

@@ -230,6 +230,70 @@ export interface PropInteractResolvePayload {
   action: PropInteractResolveAction;
 }
 
+/** Relay adventure-stat mutations so DM + player local docs stay aligned. */
+export type StatsEventKind =
+  | 'object'
+  | 'creature'
+  | 'downed'
+  | 'round';
+
+export interface StatsEventPayload {
+  sessionId: string;
+  eventId: string;
+  kind: StatsEventKind;
+  userId: string;
+  userName: string;
+  at: number;
+  /** object */
+  propItemId?: string;
+  propName?: string;
+  action?: string;
+  /** creature */
+  combatantId?: string;
+  creatureName?: string;
+  round?: number;
+}
+
+/** Full player stats doc snapshot — merges on peers by player name. */
+export interface StatsDocSyncPayload {
+  sessionId: string;
+  userId: string;
+  userName: string;
+  /** When true, overwrite the peer doc instead of merging (used for Clear). */
+  replace?: boolean;
+  /** Serialized PlayerStatDoc fields (client-shaped). */
+  doc: {
+    userName: string;
+    userId: string;
+    createdAt: number;
+    updatedAt: number;
+    objectsInteracted: Array<{
+      id: string;
+      name: string;
+      action: string;
+      at: number;
+      sessionId?: string;
+    }>;
+    creaturesDefeated: Array<{
+      id: string;
+      name: string;
+      at: number;
+      round?: number;
+      sessionId?: string;
+    }>;
+    timesDowned: number;
+    combatRounds: number;
+    sessionsTouched: string[];
+  };
+}
+
+/** Ask peers to push their stats docs (or acknowledge a session-wide clear). */
+export interface StatsSyncRequestPayload {
+  sessionId: string;
+  /** clear-all = wipe every player doc on every client. */
+  mode?: 'push' | 'clear-all';
+}
+
 // ─── Drawing events ───────────────────────────────────────────────────────────
 
 export interface DrawingAddPayload {
@@ -309,6 +373,8 @@ export interface InitiativeSyncPayload {
   currentIndex: number;
   round: number;
   isActive: boolean;
+  /** Monotonic sync id — clients ignore older revisions (stops turn springboard). */
+  revision?: number;
 }
 
 export type { SpellEffectSyncPayload, SpellEffectReminderPayload };
@@ -456,6 +522,9 @@ export interface ServerToClientEvents {
   'token:condition':      (payload: TokenConditionPayload)     => void;
   'prop:interactRequest': (payload: PropInteractRequestPayload) => void;
   'prop:interactResolve': (payload: PropInteractResolvePayload) => void;
+  'stats:event':          (payload: StatsEventPayload)        => void;
+  'stats:doc':            (payload: StatsDocSyncPayload)      => void;
+  'stats:syncRequest':    (payload: StatsSyncRequestPayload)  => void;
   'map:tokenMove':        (payload: TokenMovePayload)         => void;
   'map:fogUpdate':        (payload: FogUpdatePayload)         => void;
   'fog:sync':             (payload: FogSyncPayload)          => void;
@@ -526,6 +595,9 @@ export interface ClientToServerEvents {
   'token:condition':      (payload: TokenConditionPayload)     => void;
   'prop:interactRequest': (payload: PropInteractRequestPayload) => void;
   'prop:interactResolve': (payload: PropInteractResolvePayload) => void;
+  'stats:event':          (payload: StatsEventPayload)        => void;
+  'stats:doc':            (payload: StatsDocSyncPayload)      => void;
+  'stats:syncRequest':    (payload: StatsSyncRequestPayload)  => void;
   'map:tokenMove':        (payload: TokenMovePayload)         => void;
   'map:fogUpdate':        (payload: FogUpdatePayload)         => void;
   'fog:sync':             (payload: FogSyncPayload)          => void;

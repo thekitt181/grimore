@@ -24,9 +24,12 @@ import {
   rollLabelMatchesCheck,
 } from './propActivateChecks';
 import { usePropDdbArmStore, type PropCheckKind, type PropDdbArm } from './propDdbArmStore';
+import { recordObjectInteract, resolveTokenStatUser } from '@/systems/stats/statMaker';
 
-/** Max distance to use / open a prop from a token (5e interact range). */
-export const PROP_USE_RANGE_FT = 15;
+/** Max distance to use / open a prop from a token (5e interact ≈ 10 ft). */
+export const PROP_USE_RANGE_FT = 10;
+/** First-person E prompt / interact — visible props only, within this range. */
+export const FP_PROP_INTERACT_RANGE_FT = 10;
 
 export interface DungeonProp {
   id: string;
@@ -156,6 +159,7 @@ export function placeDungeonProp(prop: DungeonProp, hidden: boolean): void {
     imageUrl: prop.imageUrl,
     propId: prop.id,
     propState: 0,
+    propNeedsDmApprove: true,
     x,
     y,
     rotation,
@@ -372,20 +376,55 @@ function applyPropTrigger(item: ImageItem, id: string, mode: 'toggle' | 'open' =
   emitItemUpdate([{ id: item.id, patch }]);
 }
 
+/** Credit the acting player's individual stats doc — token owner only, never the DM. */
+function noteLocalPropStat(
+  item: ImageItem,
+  action: string,
+  actor?: TokenItem | null,
+): void {
+  if (!actor) return;
+  const { myUserId, myRole } = useSessionStore.getState();
+  // Prefer explicit assignment on the token.
+  const assigned = resolveTokenStatUser(actor.ownerId, actor.name);
+  if (assigned) {
+    // GM browser keeps a copy on the player's doc; players only write their own.
+    if (myRole === 'GM' || assigned.userId === myUserId) {
+      recordObjectInteract({
+        propItemId: item.id,
+        propName: item.name,
+        action,
+        forUser: assigned,
+      });
+    }
+    return;
+  }
+  // Unassigned PC: only the local player (not the DM) may self-credit.
+  if (myRole === 'GM') return;
+  if (!playerOwnsToken(actor, myUserId) && !isPlayerCharacterToken(actor)) return;
+  recordObjectInteract({
+    propItemId: item.id,
+    propName: item.name,
+    action,
+  });
+}
+
 /** Apply a successful reveal or activate check from VTT / D&D Beyond. */
 export function applyArmedPropResult(
   item: ImageItem,
   success: boolean,
   kind: PropCheckKind = 'activate',
+  actor?: TokenItem | null,
 ): void {
   if (!success) return;
   if (kind === 'reveal') {
     applyReveal(item);
+    noteLocalPropStat(item, 'roll-reveal', actor);
     return;
   }
   const id = resolvePropId(item);
   if (!id || !canTriggerProp(id)) return;
   applyPropTrigger(item, id, 'open');
+  noteLocalPropStat(item, 'roll-activate', actor);
 }
 
 export type TriggerPropResult = 'ok' | 'fail' | 'noop' | 'armed';
@@ -546,7 +585,12 @@ export function tryConsumePropCheckRoll(roll: PropCheckRollIngest): boolean {
     if (item?.type === 'image' && stillNeeded) {
       const nearRoller = rollers.find((t) => isTokenInPropRange(t, item));
       if (nearRoller || tokenNearProp(item)) {
-        applyArmedPropResult(item, roll.total >= pending.dc, pending.kind);
+        applyArmedPropResult(
+          item,
+          roll.total >= pending.dc,
+          pending.kind,
+          nearRoller ?? tokenNearProp(item),
+        );
         usePropDdbArmStore.getState().clear();
         return true;
       }
@@ -560,7 +604,7 @@ export function tryConsumePropCheckRoll(roll: PropCheckRollIngest): boolean {
   if (!hit) return false;
 
   const dc = hit.kind === 'reveal' ? revealDc(hit.prop) : activateDc(hit.prop);
-  applyArmedPropResult(hit.prop, roll.total >= dc, hit.kind);
+  applyArmedPropResult(hit.prop, roll.total >= dc, hit.kind, hit.token);
   if (pending?.propId === hit.prop.id) usePropDdbArmStore.getState().clear();
   return true;
 }
@@ -588,7 +632,7 @@ export function tryConsumePropDdbRoll(payload: DdbRollBridgePayload): boolean {
  */
 export function triggerDungeonProp(
   item: ImageItem,
-  opts?: { skipRoll?: boolean; actor?: TokenItem | null; waitForDdb?: boolean },
+  opts?: { skipRoll?: boolean; skipStat?: boolean; actor?: TokenItem | null; waitForDdb?: boolean },
 ): TriggerPropResult {
   const id = resolvePropId(item);
   if (!id || !canTriggerProp(id)) return 'noop';
@@ -596,11 +640,15 @@ export function triggerDungeonProp(
   const preferred = opts?.actor !== undefined ? opts.actor : null;
   const actor = tokenNearProp(item, preferred);
   const gm = useSessionStore.getState().myRole === 'GM';
+  const credit = (action: string, who: TokenItem | null | undefined) => {
+    if (!opts?.skipStat) noteLocalPropStat(item, action, who);
+  };
   if (!opts?.skipRoll && !actor) {
     if (!gm) return 'noop';
     const rollKind = propNextCheckKind(item);
     if (rollKind) return 'noop';
     applyPropTrigger(item, id, 'toggle');
+    credit('interact', null);
     return 'ok';
   }
 
@@ -616,21 +664,24 @@ export function triggerDungeonProp(
     const entry = useDiceStore.getState().performRoll(resolved.notation, resolved.label);
     if (!entry) return 'noop';
     if (entry.total < resolved.dc) return 'fail';
-    applyArmedPropResult(item, true, nextKind);
+    applyArmedPropResult(item, true, nextKind, actor);
     return 'ok';
   }
 
   // Hidden with no reveal DC: free reveal when used (then stop so activate is a second Use).
   if (item.visible === false && revealDc(item) <= 0 && activateDc(item) > 0) {
     applyReveal(item);
+    credit('reveal', actor);
     return 'ok';
   }
   if (item.visible === false && revealDc(item) <= 0 && activateDc(item) <= 0) {
     applyPropTrigger(item, id, 'toggle');
+    credit(opts?.skipRoll ? 'dm-approved' : 'interact', actor);
     return 'ok';
   }
 
   applyPropTrigger(item, id, 'toggle');
+  credit(opts?.skipRoll ? 'dm-approved' : 'interact', actor);
   return 'ok';
 }
 
@@ -646,7 +697,7 @@ export function wasRecentPropUseRoll(withinMs = 2500): boolean {
  */
 export async function triggerDungeonPropAsync(
   item: ImageItem,
-  opts?: { skipRoll?: boolean; actor?: TokenItem | null; waitForDdb?: boolean },
+  opts?: { skipRoll?: boolean; skipStat?: boolean; actor?: TokenItem | null; waitForDdb?: boolean },
 ): Promise<TriggerPropResult> {
   const actor = tokenNearProp(item, opts?.actor !== undefined ? opts.actor : null);
   const gm = useSessionStore.getState().myRole === 'GM';
@@ -680,8 +731,9 @@ export function triggerablePropAt(wx: number, wy: number, gm: boolean): ImageIte
 }
 
 /**
- * Nearest triggerable prop within 15 ft of a token (gates in walls count when you stand next to them).
+ * Nearest triggerable prop within PROP_USE_RANGE_FT of a token (gates in walls count when adjacent).
  * Players may also find DM-hidden props here so they can search / roll to reveal.
+ * First-person E uses fpInteractPropForToken instead (visible + 10 ft only).
  */
 export function triggerablePropUnderToken(token: TokenItem, gm: boolean): ImageItem | null {
   const items = Object.values(useItemStore.getState().items)

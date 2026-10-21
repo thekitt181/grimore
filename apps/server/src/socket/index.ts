@@ -69,6 +69,9 @@ import {
   SpellEffectReminderPayload,
   PropInteractRequestPayload,
   PropInteractResolvePayload,
+  StatsEventPayload,
+  StatsDocSyncPayload,
+  StatsSyncRequestPayload,
 } from '@grimoire/shared';
 import { setCompendiumSocketServer } from '../services/compendiumBroadcast';
 import { startRollBridge, stopRollBridge, isRollBridgeActive, resolveRollBridgeUserId } from '../services/ddb/ddbRollBridge';
@@ -83,6 +86,32 @@ interface QuestBoard {
 }
 
 const sessionQuests = new Map<string, QuestBoard>();
+
+/** Last initiative board — GM owns turn clock; players may only patch HP/conditions. */
+const sessionInitiative = new Map<string, InitiativeSyncPayload>();
+
+function mergePlayerInitiativeHp(
+  prev: InitiativeSyncPayload,
+  incoming: InitiativeSyncPayload,
+): InitiativeSyncPayload {
+  const byId = new Map(incoming.combatants.map((c) => [c.id, c]));
+  return {
+    ...prev,
+    sessionId: incoming.sessionId,
+    combatants: prev.combatants.map((c) => {
+      const patch = byId.get(c.id);
+      if (!patch) return c;
+      return {
+        ...c,
+        hp: patch.hp,
+        maxHp: patch.maxHp,
+        tempHp: patch.tempHp,
+        conditions: patch.conditions,
+        hideHpFromPlayers: patch.hideHpFromPlayers,
+      };
+    }),
+  };
+}
 
 function sanitizeQuestBoard(rawQuests: QuestEntry[], rawLocations: unknown): QuestBoard {
   const seenIds = new Set<string>();
@@ -279,6 +308,11 @@ async function hydrateSessionFromCache(socket: Socket, sessionId: string): Promi
     } catch {
       /* ignore corrupt cache */
     }
+  }
+
+  const initiative = sessionInitiative.get(sessionId);
+  if (initiative) {
+    socket.emit('initiative:sync', initiative);
   }
 }
 
@@ -695,6 +729,22 @@ export function initSocket(httpServer: HttpServer): Server {
       socket.to(payload.sessionId).emit('prop:interactResolve', payload);
     });
 
+    socket.on('stats:event', (payload: StatsEventPayload) => {
+      if (!isJoinedSession(socket, payload.sessionId)) return;
+      // Relay to everyone else in the room (sender already applied locally).
+      socket.to(payload.sessionId).emit('stats:event', payload);
+    });
+
+    socket.on('stats:doc', (payload: StatsDocSyncPayload) => {
+      if (!isJoinedSession(socket, payload.sessionId)) return;
+      socket.to(payload.sessionId).emit('stats:doc', payload);
+    });
+
+    socket.on('stats:syncRequest', (payload: StatsSyncRequestPayload) => {
+      if (!isJoinedSession(socket, payload.sessionId)) return;
+      socket.to(payload.sessionId).emit('stats:syncRequest', payload);
+    });
+
     // ── Map ──────────────────────────────────────────────────────────────────
     socket.on('map:tokenMove', (payload: TokenMovePayload) => {
       if (!isJoinedSession(socket, payload.sessionId)) return;
@@ -838,7 +888,26 @@ export function initSocket(httpServer: HttpServer): Server {
     // ── Initiative sync ──────────────────────────────────────────────────────
     socket.on('initiative:sync', (payload: InitiativeSyncPayload) => {
       if (!isJoinedSession(socket, payload.sessionId)) return;
-      io.to(payload.sessionId).emit('initiative:sync', payload);
+      const prev = sessionInitiative.get(payload.sessionId);
+      const gm = isSessionGM(socket);
+      let next: InitiativeSyncPayload;
+      if (gm || !prev) {
+        next = {
+          ...payload,
+          revision: Math.max(payload.revision ?? 0, (prev?.revision ?? 0) + 1),
+        };
+      } else {
+        // Player HP/condition patches must not rewind the turn clock.
+        next = {
+          ...mergePlayerInitiativeHp(prev, payload),
+          revision: (prev.revision ?? 0) + 1,
+        };
+      }
+      sessionInitiative.set(payload.sessionId, next);
+      // Exclude sender — applying our own echo was springboarding the DM highlighter.
+      socket.to(payload.sessionId).emit('initiative:sync', next);
+      // Players still need the merged board back so their turn index matches the GM.
+      if (!gm) socket.emit('initiative:sync', next);
     });
 
     socket.on('quest:sync', (payload: QuestSyncPayload) => {

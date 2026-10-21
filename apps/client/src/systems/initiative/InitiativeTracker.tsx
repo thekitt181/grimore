@@ -20,6 +20,7 @@ import { rollInitiativeFromTokens } from './rollInitiative';
 import { ActiveEffectsPanel } from '@/systems/spells/ActiveEffectsPanel';
 import { SpellsWithEffectsPanel } from '@/systems/spells/SpellsWithEffectsPanel';
 import { onTokenTookDamageForConcentration } from '@/systems/spells/concentrationManager';
+import { syncInitiativeRoundToAllPlayerStats } from '@/systems/stats/statMaker';
 
 const CONDITIONS = [
   'Blinded', 'Charmed', 'Deafened', 'Frightened', 'Grappled', 'Incapacitated',
@@ -83,9 +84,17 @@ export function InitiativeTracker({ onClose }: { onClose: () => void }) {
     setNewInit(0);
   }
 
-  function handleNext() { nextTurn(); syncToServer(); }
+  function handleNext() {
+    nextTurn();
+    syncToServer();
+    syncInitiativeRoundToAllPlayerStats(useInitiativeStore.getState().round);
+  }
   function handlePrev() { prevTurn(); syncToServer(); }
-  function handleStart() { startCombat(); syncToServer(); }
+  function handleStart() {
+    startCombat();
+    syncToServer();
+    syncInitiativeRoundToAllPlayerStats(useInitiativeStore.getState().round);
+  }
   function handleEnd()   { endCombat();  syncToServer(); }
 
   function handleHpChange(id: string, delta: number) {
@@ -198,7 +207,7 @@ export function InitiativeTracker({ onClose }: { onClose: () => void }) {
                 setDragIndex(null);
               }}
               onDragEnd={() => setDragIndex(null)}
-              className="rounded px-2 py-1.5 transition-all"
+              className="rounded px-2 py-1.5 transition-colors"
               style={{
                 background: isCurrentTurn ? 'rgba(201,168,76,0.15)' : 'var(--color-bg-tertiary)',
                 border: `1px solid ${isCurrentTurn ? GOLD : BD}`,
@@ -445,6 +454,7 @@ export function InitiativeTracker({ onClose }: { onClose: () => void }) {
                   if (t) {
                     if (!newName) setNewName(t.name);
                     setNewHp(t.hp);
+                    setNewIsPlayer(Boolean(t.isPc || t.ownerId?.trim() || t.ddbCharacterId));
                   }
                 }
               }}

@@ -701,6 +701,19 @@ function PropControls({
         </button>
       )}
 
+      <label
+        className="flex items-center gap-1.5 font-ui text-[10px] px-1 cursor-pointer"
+        title="When on, players must wait for DM approval (default for spawned doors/chests)"
+        style={{ color: 'var(--color-text-secondary)' }}
+      >
+        <input
+          type="checkbox"
+          checked={image.propNeedsDmApprove !== false}
+          onChange={(e) => update({ propNeedsDmApprove: e.target.checked })}
+        />
+        DM approve to use
+      </label>
+
       <span className="font-ui text-[10px] uppercase tracking-wide px-1" style={{ color: 'var(--color-accent-gold)' }}>
         Reveal
       </span>

@@ -251,6 +251,12 @@ export interface ImageItem extends BaseItem {
    * can also satisfy an armed check.
    */
   propActivateCheck?: string;
+  /**
+   * When true (default on spawn), players must get DM approval before use.
+   * When false, anyone in range can open/use without the approve prompt.
+   * `undefined` is treated as true for triggerable props.
+   */
+  propNeedsDmApprove?: boolean;
   /** Set on props auto-placed from dungeon room notes for this map id. */
   dungeonPropForMapId?: string;
   /** Map-local top-left — prop moves and rotates with `dungeonPropForMapId`. */

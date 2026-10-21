@@ -231,6 +231,7 @@ function cellToItem(
     imageUrl,
     propId,
     propState: 0,
+    propNeedsDmApprove: true,
     x: map.x + lx,
     y: map.y + ly,
     rotation: 0,

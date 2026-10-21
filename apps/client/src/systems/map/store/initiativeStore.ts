@@ -77,17 +77,27 @@ export const useInitiativeStore = create<InitiativeState>((set, get) => ({
       return { combatants, currentIndex: Math.max(0, nextIndex) };
     }),
 
-  startCombat: () => set({ isActive: true, currentIndex: 0, round: 1 }),
+  startCombat: () => {
+    set({ isActive: true, currentIndex: 0, round: 1 });
+    queueMicrotask(() => {
+      void import('@/systems/stats/statMaker').then((m) => m.syncInitiativeRoundToAllPlayerStats(1));
+    });
+  },
   endCombat:   () => set({ isActive: false, currentIndex: 0, round: 1 }),
 
-  nextTurn: () =>
+  nextTurn: () => {
     set((s) => {
       const len = s.combatants.length;
       if (len === 0) return s;
       const next = (s.currentIndex + 1) % len;
       const round = next === 0 ? s.round + 1 : s.round;
       return { currentIndex: next, round };
-    }),
+    });
+    queueMicrotask(() => {
+      const r = get().round;
+      void import('@/systems/stats/statMaker').then((m) => m.syncInitiativeRoundToAllPlayerStats(r));
+    });
+  },
 
   prevTurn: () =>
     set((s) => {
@@ -97,7 +107,37 @@ export const useInitiativeStore = create<InitiativeState>((set, get) => ({
       return { currentIndex: prev };
     }),
 
-  syncFromServer: (payload) =>
+  syncFromServer: (payload) => {
+    const prev = get();
+    const sameClock =
+      prev.currentIndex === payload.currentIndex
+      && prev.round === payload.round
+      && prev.isActive === payload.isActive;
+    const sameLen = prev.combatants.length === payload.combatants.length;
+    // Skip no-op replaces that reshuffle object identity and flash the highlighter.
+    if (
+      sameClock
+      && sameLen
+      && prev.combatants.every((c, i) => {
+        const n = payload.combatants[i];
+        return (
+          n
+          && c.id === n.id
+          && c.hp === n.hp
+          && c.maxHp === n.maxHp
+          && (c.tempHp ?? 0) === (n.tempHp ?? 0)
+          && c.initiative === n.initiative
+          && c.name === n.name
+          && c.isPlayer === n.isPlayer
+          && (c.hideHpFromPlayers ?? false) === (n.hideHpFromPlayers ?? false)
+          && c.conditions.length === n.conditions.length
+          && c.conditions.every((x, j) => x === n.conditions[j])
+        );
+      })
+    ) {
+      return;
+    }
+
     set({
       combatants: payload.combatants.map((c) => ({
         ...c,
@@ -106,5 +146,13 @@ export const useInitiativeStore = create<InitiativeState>((set, get) => ({
       currentIndex: payload.currentIndex,
       round:        payload.round,
       isActive:     payload.isActive,
-    }),
+    });
+    if (payload.isActive && payload.round >= 1 && (!sameClock || prev.round !== payload.round)) {
+      queueMicrotask(() => {
+        void import('@/systems/stats/statMaker').then((m) =>
+          m.syncInitiativeRoundToAllPlayerStats(payload.round),
+        );
+      });
+    }
+  },
 }));

@@ -52,9 +52,10 @@ import {
   canTriggerProp,
   resolvePropId,
   triggerablePropAt,
-  triggerDungeonPropAsync,
+  triggerablePropUnderToken,
   triggerPropUnderToken,
 } from '@/systems/map/props/dungeonProps';
+import { tryMapPropInteract } from '@/systems/map/props/fpPropInteract';
 import type { WallEndpoint } from '@/systems/map/wallUtils';
 import type { TokenItem, WallSegment } from '../types';
 
@@ -193,6 +194,8 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
     let wallEndpoint: WallEndpointDrag | null = null;
     let stairPress: { mapId: string; index: number; sx: number; sy: number } | null = null;
     let propClickId: string | null = null;
+    /** Player click-use on locked doors/chests (no drag). */
+    let propClickOnly: { id: string; startX: number; startY: number } | null = null;
     /** Token id — Alt+click uses the prop under this token on pointer-up click. */
     let propUnderTokenClickId: string | null = null;
     let marquee: MarqueeState | null = null;
@@ -233,13 +236,39 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
         useLiveTransformStore.getState().byId,
       );
       if (isGm()) return Object.values(merged) as Item[];
-      return Object.values(merged).filter((i): i is TokenItem => canDragToken(i));
+      // Players: own tokens + visible triggerable props (doors/chests) for click-to-use.
+      const out: Item[] = [];
+      for (const i of Object.values(merged)) {
+        if (i.type === 'token' && canDragToken(i)) {
+          out.push(i);
+          continue;
+        }
+        if (i.type === 'image' && i.visible !== false) {
+          const propId = resolvePropId(i);
+          if (propId && canTriggerProp(propId)) out.push(i);
+        }
+      }
+      return out;
     }
 
     function canManipulate(item: Item): boolean {
       if (canDragToken(item)) return true;
       if (item.locked) return false;
       return isGm();
+    }
+
+    function armPlayerPropClick(prop: ImageItem, e: PointerEvent): void {
+      const store = useItemStore.getState();
+      store.select([prop.id], 'set');
+      store.clearWallSelection();
+      propClickOnly = { id: prop.id, startX: e.clientX, startY: e.clientY };
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      try {
+        interactionEl.setPointerCapture(e.pointerId);
+      } catch {
+        /* ignore */
+      }
     }
 
     /** Pointer delta on the ground plane — correct at any zoom, orbit angle, or token size. */
@@ -458,6 +487,7 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
     function onDown(e: PointerEvent) {
       stairPress = null;
       propClickId = null;
+      propClickOnly = null;
       propUnderTokenClickId = null;
       if (e.button !== 0) return;
       if (isAoePlacementActive()) return;
@@ -479,6 +509,10 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
         if (e.altKey && !e.shiftKey) {
           const under = triggerablePropAt(wx, wy, isGm());
           if (under) {
+            if (!isGm()) {
+              armPlayerPropClick(under, e);
+              return;
+            }
             store.select([under.id], 'set');
             store.clearWallSelection();
             propClickId = under.id;
@@ -499,7 +533,7 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
           }
         }
 
-        // Tokens first (same priority as pure 2D).
+        // Tokens first — props must not steal assigned-token drags.
         const tokenPick = pickInteractableTokenAt(e.clientX, e.clientY);
         if (tokenPick && canDragToken(tokenPick)) {
           const additive = e.shiftKey;
@@ -527,6 +561,14 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
           ?? undefined;
 
         if (hit) {
+          // Players: click-use doors/chests (locked or not) — never drag map props.
+          if (!isGm() && hit.type === 'image') {
+            const propId = resolvePropId(hit);
+            if (propId && canTriggerProp(propId) && hit.visible !== false) {
+              armPlayerPropClick(hit, e);
+            }
+            return;
+          }
           if (hit.locked && !isGm()) return;
           const additive = e.shiftKey;
           const alreadySelected = store.selectedIds.includes(hit.id);
@@ -611,6 +653,10 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
       if (e.altKey && !e.shiftKey) {
         const under = triggerablePropAt(wx, wy, isGm());
         if (under) {
+          if (!isGm()) {
+            armPlayerPropClick(under, e);
+            return;
+          }
           store.select([under.id], 'set');
           store.clearWallSelection();
           propClickId = under.id;
@@ -629,6 +675,7 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
         }
       }
 
+      // Tokens first — props must not steal assigned-token drags.
       const tokenPick = pickInteractableTokenAt(e.clientX, e.clientY);
       if (tokenPick && canDragToken(tokenPick)) {
         const liveById = useLiveTransformStore.getState().byId;
@@ -706,6 +753,15 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
         // Freeze: ignore map clicks for select/move (tokens still pickable for FP).
         if (hit.type === 'map' && mapIsFrozen()) {
           if (!e.shiftKey) store.clearSelection();
+          return;
+        }
+
+        // Players: click-use doors/chests — never drag map props.
+        if (!isGm() && hit.type === 'image') {
+          const propId = resolvePropId(hit);
+          if (propId && canTriggerProp(propId) && hit.visible !== false) {
+            armPlayerPropClick(hit, e);
+          }
           return;
         }
 
@@ -980,6 +1036,16 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
         wallEndpoint = null;
       }
 
+      // Locked prop click-use (players) — no move state.
+      if (!move && propClickOnly && !useFirstPersonStore.getState().enabled) {
+        const travel = Math.hypot(e.clientX - propClickOnly.startX, e.clientY - propClickOnly.startY);
+        if (travel < CLICK_MOVE_THRESHOLD_PX) {
+          const propItem = useItemStore.getState().items[propClickOnly.id];
+          if (propItem?.type === 'image') tryMapPropInteract(propItem);
+        }
+        propClickOnly = null;
+      }
+
       if (move) {
         applyTokenMoveDrag(e);
         const m = move;
@@ -990,15 +1056,22 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
         if (!useFirstPersonStore.getState().enabled) {
           if (isClick && propClickId) {
             const propItem = useItemStore.getState().items[propClickId];
-            if (propItem?.type === 'image') {
-              void triggerDungeonPropAsync(propItem, undefined);
-            }
+            if (propItem?.type === 'image') tryMapPropInteract(propItem);
           } else if (isClick && propUnderTokenClickId) {
             const tok = useItemStore.getState().items[propUnderTokenClickId];
-            if (tok?.type === 'token') void triggerPropUnderToken(tok);
+            if (tok?.type === 'token') {
+              const gm = useSessionStore.getState().myRole === 'GM';
+              const under = triggerablePropUnderToken(tok, gm);
+              if (under && tryMapPropInteract(under)) {
+                /* approved / free use path */
+              } else {
+                void triggerPropUnderToken(tok);
+              }
+            }
           }
         }
         propClickId = null;
+        propClickOnly = null;
         propUnderTokenClickId = null;
         let { dx, dy } = moveDragDelta(m, e);
         if (!isClick && snap && m.ids.length) {
