@@ -210,6 +210,26 @@ export interface TokenConditionPayload {
   conditions: string[];
 }
 
+/** GM approval for player FP prop interact (door / lever / etc.). */
+export type PropInteractResolveAction = 'deny' | 'use' | 'roll-vtt' | 'roll-ddb';
+
+export interface PropInteractRequestPayload {
+  sessionId: string;
+  requestId: string;
+  propItemId: string;
+  actorTokenId: string;
+  requesterUserId: string;
+  requesterName: string;
+  propName: string;
+  at: number;
+}
+
+export interface PropInteractResolvePayload {
+  sessionId: string;
+  requestId: string;
+  action: PropInteractResolveAction;
+}
+
 // ─── Drawing events ───────────────────────────────────────────────────────────
 
 export interface DrawingAddPayload {
@@ -434,6 +454,8 @@ export interface ServerToClientEvents {
   'token:hide':           (payload: TokenHidePayload)          => void;
   'token:delete':         (payload: TokenDeletePayload)        => void;
   'token:condition':      (payload: TokenConditionPayload)     => void;
+  'prop:interactRequest': (payload: PropInteractRequestPayload) => void;
+  'prop:interactResolve': (payload: PropInteractResolvePayload) => void;
   'map:tokenMove':        (payload: TokenMovePayload)         => void;
   'map:fogUpdate':        (payload: FogUpdatePayload)         => void;
   'fog:sync':             (payload: FogSyncPayload)          => void;
@@ -502,6 +524,8 @@ export interface ClientToServerEvents {
   'token:hide':           (payload: TokenHidePayload)          => void;
   'token:delete':         (payload: TokenDeletePayload)        => void;
   'token:condition':      (payload: TokenConditionPayload)     => void;
+  'prop:interactRequest': (payload: PropInteractRequestPayload) => void;
+  'prop:interactResolve': (payload: PropInteractResolvePayload) => void;
   'map:tokenMove':        (payload: TokenMovePayload)         => void;
   'map:fogUpdate':        (payload: FogUpdatePayload)         => void;
   'fog:sync':             (payload: FogSyncPayload)          => void;
