@@ -7,7 +7,13 @@ import type { TokenItem } from '@/systems/scene/types';
 import { sceneCameraRef } from './sceneCameraRef';
 import { pixiToThreeX, pixiToThreeZ } from './coords';
 import { firstPersonLook } from './firstPersonLook';
-import { firstPersonPose, seedFirstPersonPose, syncFirstPersonPoseFromItem } from './firstPersonPose';
+import {
+  firstPersonPose,
+  interpolatedFirstPersonPose,
+  seedFirstPersonPose,
+  snapshotFirstPersonPose,
+  syncFirstPersonPoseFromItem,
+} from './firstPersonPose';
 import { useFirstPersonStore } from './firstPersonStore';
 import { resolveFirstPersonToken } from './resolveFirstPersonToken';
 import {
@@ -18,20 +24,34 @@ import {
 } from './firstPersonMove';
 import { controlFirstPersonMove } from './firstPersonController';
 import { damp, firstPersonMotion, FP_SIM_STEP } from './firstPersonMotion';
-import { startFpPosePublisher, stopFpPosePublisher, tickFpPoseNetwork } from './fpPoseSync';
+import {
+  flushFpPosePersist,
+  startFpPosePublisher,
+  stopFpPosePublisher,
+  tickFpPoseNetwork,
+} from './fpPoseSync';
 import { setMapRaycastPaused } from './mapGroundRaycast';
 import { bakedGroundHeightSmooth, getMapCollisionGrid } from './mapCollisionGrid';
 import { useTokenDragMeasureStore } from '@/systems/scene/interaction/tokenDragMeasureStore';
 
 const EYE_CELLS = 1.1;
-/** Eye height eases only on stair jumps; flat floor snaps. */
-const EYE_FOLLOW = 32;
-const EYE_SNAP_DELTA = 0.35;
-const WALK_CELLS_PER_SEC = 3.25;
+/** Eye height eases on stairs; flat floor snaps. */
+const EYE_FOLLOW = 18;
+const EYE_SNAP_DELTA = 0.28;
+/** Soften baked height samples before eye follow (stairs / grid seams). */
+const GROUND_FOLLOW = 26;
+const GROUND_SNAP = 48;
+/** ~¼ slower than the prior 3.25 cells/s walk. */
+const WALK_CELLS_PER_SEC = 2.44;
+/** Single-layer accel only (~0.17s) — local FP feel, no cam lag / wish stack. */
+const WALK_ACCEL = 12;
+/** Short stop (~0.12s). */
+const WALK_STOP = 18;
+const STOP_EPS = 1.8;
 const MEASURE_MS = 280;
 const STAIR_MS = 400;
 const MAX_FRAME_DT = 0.05;
-const MAX_WALK_SUBSTEPS = 10;
+const MAX_WALK_SUBSTEPS = 12;
 
 function integrateWalk(token: TokenItem, dt: number): void {
   const keys = firstPersonMotion.held;
@@ -62,15 +82,19 @@ function integrateWalk(token: TokenItem, dt: number): void {
 
   const motion = firstPersonMotion;
   if (!hasWish) {
-    // Hard stop the instant WASD is released — no coasting.
-    motion.velX = 0;
-    motion.velY = 0;
-    return;
+    motion.velX = damp(motion.velX, 0, WALK_STOP, dt);
+    motion.velY = damp(motion.velY, 0, WALK_STOP, dt);
+    if (Math.hypot(motion.velX, motion.velY) < STOP_EPS) {
+      motion.velX = 0;
+      motion.velY = 0;
+      return;
+    }
+  } else {
+    motion.velX = damp(motion.velX, wishX, WALK_ACCEL, dt);
+    motion.velY = damp(motion.velY, wishY, WALK_ACCEL, dt);
   }
 
-  // Snap to wish speed while held (accel only mattered for release coast before).
-  motion.velX = wishX;
-  motion.velY = wishY;
+  if (Math.hypot(motion.velX, motion.velY) < 0.4) return;
 
   const slid = controlFirstPersonMove(token, motion.velX, motion.velY, dt);
   motion.velX = slid.velX;
@@ -126,26 +150,30 @@ export function FirstPersonCamera() {
     const grid = map?.gridSize ?? 96;
     const now = performance.now();
 
-    // Variable frame dt split into small slices — smooth on 120/144 Hz, capped on hitches.
+    // Fixed-step physics + render interpolation (camera only — sync still uses real feet).
     const frameDt = Math.min(MAX_FRAME_DT, Math.max(0, dt));
-    const subSteps = Math.min(
-      MAX_WALK_SUBSTEPS,
-      Math.max(1, Math.ceil(frameDt / FP_SIM_STEP)),
-    );
-    const subDt = frameDt / subSteps;
-    for (let i = 0; i < subSteps; i += 1) {
-      integrateWalk(token, subDt);
+    const motion = firstPersonMotion;
+    motion.accum = Math.min(motion.accum + frameDt, FP_SIM_STEP * MAX_WALK_SUBSTEPS);
+    let steps = 0;
+    while (motion.accum >= FP_SIM_STEP && steps < MAX_WALK_SUBSTEPS) {
+      snapshotFirstPersonPose();
+      integrateWalk(token, FP_SIM_STEP);
+      motion.accum -= FP_SIM_STEP;
+      steps += 1;
     }
-    firstPersonMotion.accum = 0;
+    const renderAlpha = motion.accum / FP_SIM_STEP;
 
     const keys = firstPersonMotion.held;
     const keysDown = keys.has('w') || keys.has('a') || keys.has('s') || keys.has('d')
       || keys.has('arrowup') || keys.has('arrowdown') || keys.has('arrowleft') || keys.has('arrowright');
-    const moving = keysDown || Math.hypot(firstPersonMotion.velX, firstPersonMotion.velY) > 0.5;
+    const speed = Math.hypot(firstPersonMotion.velX, firstPersonMotion.velY);
+    const moving = keysDown || speed > 0.5;
     if (moving) {
       publishFirstPersonLiveLocal(token);
       tickFpPoseNetwork(token, true);
     } else {
+      // Soft-stop finished after key release — commit once (no hard zero on keyup).
+      if (!keysDown) flushFpPosePersist();
       syncFirstPersonPoseFromItem(token);
     }
 
@@ -167,12 +195,16 @@ export function FirstPersonCamera() {
     const live = useLiveTransformStore.getState().byId[token.id];
     const w = live?.width ?? token.width;
     const h = live?.height ?? token.height;
-    const feetX = (firstPersonPose.active && firstPersonPose.tokenId === token.id)
-      ? firstPersonPose.x
-      : (live?.x ?? token.x);
-    const feetY = (firstPersonPose.active && firstPersonPose.tokenId === token.id)
-      ? firstPersonPose.y
-      : (live?.y ?? token.y);
+    let feetX: number;
+    let feetY: number;
+    if (firstPersonPose.active && firstPersonPose.tokenId === token.id) {
+      const drawn = interpolatedFirstPersonPose(renderAlpha);
+      feetX = drawn.x;
+      feetY = drawn.y;
+    } else {
+      feetX = live?.x ?? token.x;
+      feetY = live?.y ?? token.y;
+    }
 
     const cx = pixiToThreeX(feetX + w / 2);
     const cz = pixiToThreeZ(feetY + h / 2);
@@ -182,12 +214,23 @@ export function FirstPersonCamera() {
 
     // Follow baked floor so stairs raise the camera (no mid-stride mesh rays).
     const eyeOffset = grid * EYE_CELLS;
-    let groundY = firstPersonMotion.groundY;
+    let groundSample = firstPersonMotion.groundY;
     if (map && getMapCollisionGrid(map.id)?.ready) {
-      groundY = bakedGroundHeightSmooth(map.id, cx, cz, groundY);
+      groundSample = bakedGroundHeightSmooth(map.id, cx, cz, groundSample);
     }
-    firstPersonMotion.groundY = groundY;
-    const targetEye = groundY + eyeOffset;
+    if (!Number.isFinite(firstPersonMotion.groundY)) {
+      firstPersonMotion.groundY = groundSample;
+    } else if (Math.abs(groundSample - firstPersonMotion.groundY) > GROUND_SNAP) {
+      firstPersonMotion.groundY = groundSample;
+    } else {
+      firstPersonMotion.groundY = damp(
+        firstPersonMotion.groundY,
+        groundSample,
+        GROUND_FOLLOW,
+        frameDt,
+      );
+    }
+    const targetEye = firstPersonMotion.groundY + eyeOffset;
     if (!Number.isFinite(firstPersonMotion.eyeY)) {
       firstPersonMotion.eyeY = targetEye;
     } else if (Math.abs(targetEye - firstPersonMotion.eyeY) < EYE_SNAP_DELTA) {

@@ -27,7 +27,7 @@ export function resetFirstPersonMotion(): void {
 }
 
 /** Fixed physics step (seconds) — shared by camera + pose interpolation. */
-export const FP_SIM_STEP = 1 / 120;
+export const FP_SIM_STEP = 1 / 144;
 
 /** Exponential approach — frame-rate independent. */
 export function damp(current: number, target: number, lambda: number, dt: number): number {

@@ -128,10 +128,13 @@ export function useFirstPersonControls(): void {
       if (isMoveKey(key)) {
         pendingMoveKeyUps.delete(key);
         fpGlobal.walkStreaming = true;
-        const token = resolveFirstPersonToken();
-        if (token) {
-          publishFirstPersonLiveLocal(token);
-          tickFpPoseNetwork(token, true);
+        // Skip repeat spam — camera already integrates from held; avoids net hitch.
+        if (!e.repeat) {
+          const token = resolveFirstPersonToken();
+          if (token) {
+            publishFirstPersonLiveLocal(token);
+            tickFpPoseNetwork(token, true);
+          }
         }
       }
       if (key === 'q') {
@@ -150,11 +153,7 @@ export function useFirstPersonControls(): void {
         pendingMoveKeyUps.delete(key);
         firstPersonMotion.held.delete(key);
       }
-      if (!anyMoveHeld()) {
-        firstPersonMotion.velX = 0;
-        firstPersonMotion.velY = 0;
-        flushFpPosePersist();
-      }
+      // Don't hard-zero vel — FirstPersonCamera soft-stops, then flushes when still.
     }
 
     function onKeyUp(e: KeyboardEvent) {
@@ -171,11 +170,7 @@ export function useFirstPersonControls(): void {
       }
       pendingMoveKeyUps.delete(key);
       firstPersonMotion.held.delete(key);
-      if (!anyMoveHeld()) {
-        firstPersonMotion.velX = 0;
-        firstPersonMotion.velY = 0;
-        flushFpPosePersist();
-      }
+      // Soft stop owns deceleration; persist happens when velocity settles (camera).
     }
 
     function onBlur() {
