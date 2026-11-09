@@ -30,7 +30,9 @@ export function FpInteractHint() {
         const label =
           prop?.type === 'map'
             ? modularInteractLabel(prop)
-            : (prop?.name ?? null);
+            : prop
+              ? (gm ? prop.name : 'Interact')
+              : null;
         setPropName(label);
       }
       raf = window.setTimeout(tick, 120);

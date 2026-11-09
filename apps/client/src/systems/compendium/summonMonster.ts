@@ -3,21 +3,25 @@ import { monsterToTokenDefaults } from '@grimoire/monster-dex';
 import type { CompendiumMonster } from '@grimoire/shared';
 import { getActiveMap, useItemStore } from '@/systems/scene/store/itemStore';
 import { emitItemAdd } from '@/systems/scene/sceneSync';
-import { snapPoint } from '@/systems/scene/snap';
-import type { TokenItem } from '@/systems/scene/types';
+import { gridInfoForMap, snapPoint, snapPointToGrid } from '@/systems/scene/snap';
+import type { MapItem, TokenItem } from '@/systems/scene/types';
 import { getEntryImages } from './compendiumApi';
 import { preloadCompendiumImageUrl } from './preloadCompendiumImage';
 import { parseAbilities, parseStatsObject } from './statBlockParser';
 
-function dexModFromMonster(monster: CompendiumMonster): number | undefined {
+function abilityFromMonster(monster: CompendiumMonster, name: 'DEX' | 'INT'): { score: number; mod: number } | undefined {
   if (monster.stats) {
     const parsed = parseStatsObject(monster.stats);
-    const dex = parsed.find((a) => a.name === 'DEX');
-    if (dex) return dex.mod;
+    const hit = parsed.find((a) => a.name === name);
+    if (hit) return { score: hit.score, mod: hit.mod };
   }
   const fromText = parseAbilities(monster.description ?? '');
-  const dex = fromText.find((a) => a.name === 'DEX');
-  return dex?.mod;
+  const hit = fromText.find((a) => a.name === name);
+  return hit ? { score: hit.score, mod: hit.mod } : undefined;
+}
+
+function dexModFromMonster(monster: CompendiumMonster): number | undefined {
+  return abilityFromMonster(monster, 'DEX')?.mod;
 }
 
 export interface SummonPosition {
@@ -39,12 +43,23 @@ async function resolveMonsterPortrait(monster: CompendiumMonster): Promise<strin
 export async function summonMonster(
   monster: CompendiumMonster,
   at?: SummonPosition,
-  opts?: { hidden?: boolean },
+  opts?: {
+    hidden?: boolean;
+    map?: MapItem;
+    select?: boolean;
+    skipPortraitLookup?: boolean;
+    skipSnap?: boolean;
+    skipBoundsClamp?: boolean;
+    sizeCells?: number;
+    encounterGroupId?: string;
+  },
 ): Promise<TokenItem | null> {
-  const map = getActiveMap();
+  const map = opts?.map ?? getActiveMap();
   if (!map) return null;
 
-  const portrait = await resolveMonsterPortrait(monster);
+  const portrait = opts?.skipPortraitLookup
+    ? (monster.imageUrl ?? (monster.image && !monster.image.includes('static-image') ? monster.image : undefined))
+    : await resolveMonsterPortrait(monster);
   preloadCompendiumImageUrl(portrait);
 
   const grid = map.gridSize;
@@ -52,11 +67,21 @@ export async function summonMonster(
     { ...monster, ...(portrait ? { imageUrl: portrait } : {}) },
     grid,
   );
+  if (opts?.sizeCells != null && opts.sizeCells > 0) {
+    const cells = opts.sizeCells;
+    defaults.sizeCells = cells;
+    defaults.width = cells * grid;
+    defaults.height = cells * grid;
+  }
 
   let x: number;
   let y: number;
   if (at) {
-    const snapped = snapPoint(at.x, at.y);
+    const snapped = opts?.skipSnap
+      ? at
+      : opts?.map
+        ? snapPointToGrid(gridInfoForMap(map), at.x, at.y)
+        : snapPoint(at.x, at.y);
     x = snapped.x;
     y = snapped.y;
   } else {
@@ -69,6 +94,11 @@ export async function summonMonster(
   }
 
   const dexMod = dexModFromMonster(monster);
+  const intScore = abilityFromMonster(monster, 'INT')?.score;
+  if (!opts?.skipBoundsClamp) {
+    x = Math.min(map.x + map.width - defaults.width, Math.max(map.x, x));
+    y = Math.min(map.y + map.height - defaults.height, Math.max(map.y, y));
+  }
 
   const token: TokenItem = {
     id: uuidv4(),
@@ -93,11 +123,13 @@ export async function summonMonster(
     monsterSource: defaults.monsterSource,
     hideHpFromPlayers: true,
     ...(dexMod !== undefined ? { initiativeMod: dexMod } : {}),
+    ...(intScore !== undefined ? { monsterInt: intScore } : {}),
+    ...(opts?.encounterGroupId ? { encounterGroupId: opts.encounterGroupId } : {}),
     ...(defaults.imageUrl ? { imageUrl: defaults.imageUrl } : {}),
   };
 
   useItemStore.getState().addItem(token);
   emitItemAdd(token);
-  useItemStore.getState().select([token.id], 'set');
+  if (opts?.select !== false) useItemStore.getState().select([token.id], 'set');
   return token;
 }

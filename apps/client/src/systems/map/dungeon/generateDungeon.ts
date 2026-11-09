@@ -41,6 +41,8 @@ export interface DungeonOptions {
   density?: RoomDensity;
   furnishings?: FurnishingStyle;
   chambers?: ChamberScale;
+  /** Free-text place lore. Drives encounters; also infers crypt/temple/etc. look. */
+  theme?: string;
 }
 
 export interface DungeonRoom {
@@ -66,6 +68,7 @@ export interface GeneratedDungeon {
   walls: WallSegment[];
   keyText: string;
   motif: DungeonMotif;
+  theme?: string;
 }
 
 const CELL = 64;
@@ -138,6 +141,64 @@ const MOTIFS: Record<DungeonMotif, FlavorTables> = {
     treasures: ['a family signet', 'coins in a cracked jar', 'a painting still in its frame', 'a forgotten spellbook', 'silverware in the ash', 'nothing the looters missed'],
   },
 };
+
+const THEME_HINTS: Record<DungeonMotif, string[]> = {
+  crypt: ['crypt', 'undead', 'tomb', 'grave', 'skeleton', 'ghoul', 'lich', 'mummy', 'ossuary', 'barrow', 'catacomb', 'vampire', 'wight', 'ghost'],
+  temple: ['temple', 'cult', 'priest', 'shrine', 'demon', 'devil', 'angel', 'holy', 'unholy', 'altar', 'chapel', 'fane', 'reliquary', 'fiend'],
+  fortress: ['fortress', 'keep', 'soldier', 'guard', 'orc', 'goblin', 'hobgoblin', 'barracks', 'castle', 'war', 'bandit', 'knight', 'armory'],
+  mine: ['mine', 'kobold', 'duergar', 'underdark', 'ore', 'shaft', 'dwarf', 'myconid', 'cave', 'delve', 'quarry', 'fungus'],
+  ruin: ['ruin', 'ooze', 'spider', 'overgrown', 'collapsed', 'wild', 'blight', 'abandoned', 'rubble', 'vine'],
+  mixed: [],
+};
+
+const THEME_STOP = new Set([
+  'the', 'and', 'with', 'from', 'this', 'that', 'into', 'under', 'over', 'a', 'an', 'of', 'in',
+  'on', 'for', 'to', 'its', 'their', 'place', 'dungeon', 'some', 'like', 'very', 'just',
+  'dark', 'deep', 'cave', 'caves', 'stone', 'lost', 'ancient', 'evil', 'hidden', 'forgotten',
+  'old', 'great', 'small', 'huge', 'chamber', 'hall', 'room', 'theme', 'filled', 'full',
+]);
+
+export function normalizeDungeonTheme(text: string | undefined): string {
+  return (text ?? '').trim().replace(/\s+/g, ' ').slice(0, 280);
+}
+
+/** Words from a written theme, used to score the monster codex. */
+export function themeKeywords(theme: string): string[] {
+  const raw = normalizeDungeonTheme(theme).toLowerCase();
+  if (!raw) return [];
+  const words = raw.match(/[a-z][a-z0-9'-]{1,}/g) ?? [];
+  const out: string[] = [];
+  for (const word of words) {
+    if (THEME_STOP.has(word) || word.length < 3) continue;
+    if (!out.includes(word)) out.push(word);
+  }
+  return out;
+}
+
+/** Closest stock look (stone, furnishings) for a written theme. */
+export function inferDungeonMotif(theme: string, fallback: DungeonMotif = 'mixed'): DungeonMotif {
+  const blob = ` ${normalizeDungeonTheme(theme).toLowerCase()} `;
+  if (!blob.trim()) return fallback;
+  let best: DungeonMotif = fallback;
+  let score = 0;
+  for (const motif of Object.keys(THEME_HINTS) as DungeonMotif[]) {
+    if (motif === 'mixed') continue;
+    let n = 0;
+    for (const hint of THEME_HINTS[motif]) {
+      if (blob.includes(` ${hint} `) || blob.includes(hint)) n += hint.length >= 5 ? 2 : 1;
+    }
+    if (n > score) {
+      score = n;
+      best = motif;
+    }
+  }
+  return score >= 1 ? best : fallback;
+}
+
+/** Purposes / notes used so modular maps match the same motif lore as 2D. */
+export function dungeonMotifTables(motif: DungeonMotif): FlavorTables {
+  return MOTIFS[motif];
+}
 
 const MOTIF_LABEL: Record<DungeonMotif, string> = {
   mixed: 'Mixed',
@@ -663,6 +724,16 @@ function addContents(room: DungeonRoom, rnd: () => number, tables: FlavorTables,
   if (rnd() < (detail === 'stocked' ? 1 : 0.45)) room.notes.push(`Find: ${pick(rnd, tables.treasures)}.`);
 }
 
+function stampTheme(rooms: DungeonRoom[], theme: string): void {
+  const line = normalizeDungeonTheme(theme);
+  if (!line) return;
+  for (const room of rooms) {
+    if (!room.notes.some((note) => note.startsWith('Theme:'))) {
+      room.notes.push(`Theme: ${line}`);
+    }
+  }
+}
+
 function noteStairs(room: DungeonRoom, stairs: DungeonStair[]): void {
   for (const stair of stairInRoom(room, stairs)) {
     room.notes.unshift(stair.direction === 'up'
@@ -815,12 +886,13 @@ function deadEndCount(roomCount: number, style: DeadEndStyle): number {
 export function generateDungeon(options: DungeonOptions): GeneratedDungeon {
   const rnd = mulberry32(options.seed);
   const preset = SIZES[options.size];
-  const motif = options.motif ?? 'mixed';
+  const theme = normalizeDungeonTheme(options.theme);
+  const motif = theme ? inferDungeonMotif(theme, options.motif ?? 'mixed') : (options.motif ?? 'mixed');
   const tables = MOTIFS[motif];
   const name = `${pick(rnd, ADJECTIVES)} ${pick(rnd, tables.nouns)}`;
   const detail = options.key ?? 'full';
   const stairsStyle = options.stairs ?? 'down';
-  const subtitle = `${MOTIF_LABEL[motif]} · seed ${options.seed >>> 0}`;
+  const subtitle = `${theme || MOTIF_LABEL[motif]} · seed ${options.seed >>> 0}`;
   const chain = options.layout === 'five-room';
   const hub = options.layout === 'hub';
   const gauntlet = options.layout === 'gauntlet';
@@ -838,6 +910,7 @@ export function generateDungeon(options: DungeonOptions): GeneratedDungeon {
     const rooms = cavernNotes(preset.cols, preset.rows, floor, rnd, motif, detail, stairsStyle);
     const stairs = stairsForRooms(rooms, stairsStyle);
     for (const room of rooms) noteStairs(room, stairs);
+    stampTheme(rooms, theme);
     const doors = new Map<string, DoorKind>();
     return {
       name,
@@ -852,6 +925,7 @@ export function generateDungeon(options: DungeonOptions): GeneratedDungeon {
       walls: buildWalls(preset.cols, preset.rows, CELL, floor, doors),
       keyText: writeKey(name, rooms, subtitle),
       motif,
+      ...(theme ? { theme } : {}),
     };
   }
 
@@ -920,6 +994,7 @@ export function generateDungeon(options: DungeonOptions): GeneratedDungeon {
   );
   const stairs = stairsForRooms(rooms, stairsStyle);
   describeRooms(rooms, options.layout, rnd, motif, detail, stairs);
+  stampTheme(rooms, theme);
 
   return {
     name,
@@ -934,5 +1009,6 @@ export function generateDungeon(options: DungeonOptions): GeneratedDungeon {
     walls: buildWalls(preset.cols, preset.rows, CELL, floor, doors),
     keyText: writeKey(name, rooms, subtitle),
     motif,
+    ...(theme ? { theme } : {}),
   };
 }

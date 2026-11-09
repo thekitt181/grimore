@@ -15,6 +15,8 @@ import {
 export {
   isModularMap,
   isModularGate,
+  isModularFloorTile,
+  isModularDeadEnd,
   modularScaleOf,
   snapModularOriginToGrid,
   footprintPx,
@@ -46,9 +48,10 @@ function snapRot(deg: number): number {
   return ((Math.round(deg / 90) * 90) % 360 + 360) % 360;
 }
 
+/** Map meshes yaw CCW from above (`degToRad(item.rotation)`). */
 function rotCard(side: Cardinal, rotDeg: number): Cardinal {
   const steps = ((Math.round(rotDeg / 90) % 4) + 4) % 4;
-  return ORDER[(ORDER.indexOf(side) + steps) % 4]!;
+  return ORDER[(ORDER.indexOf(side) - steps + 4) % 4]!;
 }
 
 function openingsWorld(piece: ModularPiece, rotDeg: number): Cardinal[] {
@@ -117,9 +120,8 @@ function uniformScaleOf(map: Pick<MapItem, 'width' | 'height' | 'modelUrl'>): nu
 }
 
 /**
- * KayKit grounds: same scale on every side from authored module size
- * (2 m stone ↔ 4 m stone), not live AABB width vs height.
- * Kenney halls keep doorway scale.
+ * KayKit 2 m tiles ↔ 4 m tiles/walls only.
+ * Kenney rooms/halls keep authored size — never shrink to a 2 m door or 4 m hex.
  */
 function scaleToJoin(
   piece: ModularPiece,
@@ -128,13 +130,17 @@ function scaleToJoin(
   anchor: Pick<MapItem, 'width' | 'height' | 'rotation' | 'modelUrl'>,
   aPiece: ModularPiece,
 ): number {
-  const kaykitGround =
-    (piece.kit === 'kaykit' || aPiece.kit === 'kaykit')
-    && (piece.kind === 'tile' || piece.kind === 'wall' || aPiece.kind === 'tile');
-  if (kaykitGround) {
+  if (piece.kind === 'room' || piece.kind === 'hall' || piece.kind === 'stairs') {
+    return 1;
+  }
+  const kaykitPair =
+    piece.kit === 'kaykit'
+    && aPiece.kit === 'kaykit'
+    && (piece.kind === 'tile' || piece.kind === 'wall')
+    && (aPiece.kind === 'tile' || aPiece.kind === 'wall');
+  if (kaykitPair) {
     const ns = seatFacing === 'N' || seatFacing === 'S';
     const hostM = passageAlongM(aPiece, anchor.rotation ?? 0, ns);
-    // Walls: match run length to the floor edge, not thickness after a 90° swap.
     const moverM =
       piece.kind === 'wall'
         ? Math.max(joinMeters(piece).w, joinMeters(piece).h)
@@ -143,6 +149,7 @@ function scaleToJoin(
       return Math.max(0.25, Math.min(8, uniformScaleOf(anchor) * hostM / moverM));
     }
   }
+  if (piece.kit === 'kaykit') return 1;
   return Math.max(0.25, Math.min(8, modularScaleOf(anchor)));
 }
 
@@ -339,7 +346,9 @@ export function snapModularMapPose(
       const ns = seatFacing === 'N' || seatFacing === 'S';
       const fitted = footprintPx(
         piece,
-        scaleToJoin(piece, baseRot, seatFacing, anchor, aPiece),
+        opts?.keepScale
+          ? modularScaleOf(moving)
+          : scaleToJoin(piece, baseRot, seatFacing, anchor, aPiece),
       );
       const opening = piece.kind === 'wall' ? piece : aPiece;
       const centerOpening = wallOnFloor && isCenteredOpening(opening);

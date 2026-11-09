@@ -21,6 +21,7 @@ import { Map3DImageLayer } from './Map3DImages';
 import { Map3DMapModel } from './Map3DMapModel';
 import { Map3DFogOfWar } from './Map3DFogOfWar';
 import { isModularMap } from '@/systems/map/library/modularMapSnap';
+import { isPlaceholderMap } from '@/systems/scene/hitTest';
 import { SyncedPixiOrthographicCamera } from './SyncedPixiCamera';
 import { applyOrthographicCameraFromViewport } from './orthographicCameraSync';
 import { useVisibleSceneTokens } from './useVisibleSceneTokens';
@@ -32,9 +33,6 @@ import { bindWebGLContextRecovery } from './threeWebGLContext';
 import { markThreeFrameRendered, registerThreeRenderer, resetThreeCanvasHealth, notifyThreeCanvasUnhealthy } from './threeCanvasHealth';
 import { applyPixiViewMode } from '@/systems/map/applyPixiViewMode';
 import { FirstPersonCamera } from './FirstPersonCamera';
-import { firstPersonPose, seedFirstPersonPose } from './firstPersonPose';
-import { resolveFirstPersonToken } from './resolveFirstPersonToken';
-import { pixiToThreeX, pixiToThreeZ } from './coords';
 import { useFirstPersonStore } from './firstPersonStore';
 import { useFirstPersonControls } from './useFirstPersonControls';
 import { FpPaintSampler } from './FpPaintSampler';
@@ -137,6 +135,7 @@ function Map3DSceneContent() {
     () => sceneMapsForClient(items, gm),
     [items, gm],
   );
+  const hasRealMaps = maps.some((m) => !isPlaceholderMap(m));
   const drawings = items.filter((i): i is DrawItem => i.type === 'drawing' && isSceneItemOnTable(i, gm));
   const labels = items.filter((i): i is TextItem => i.type === 'text' && isSceneItemOnTable(i, gm));
 
@@ -167,10 +166,12 @@ function Map3DSceneContent() {
       <Suspense fallback={null}>
         <Environment
           preset="warehouse"
+          background={false}
           environmentIntensity={timeRig.envIntensity * envBoost}
         />
       </Suspense>
       {maps.map((map) => (
+        isPlaceholderMap(map) && hasRealMaps ? null : (
         <group key={map.id}>
           <Map3DGround map={map} clayMode={scanImageWalls} skipFloor={Boolean(map.modelUrl)} />
           {showExtrudedWallsFor(map) && scanImageWalls && (
@@ -184,6 +185,7 @@ function Map3DSceneContent() {
           {!firstPerson && !isModularMap(map) && <Map3DFogOfWar map={map} />}
           {!map.modelUrl && <MapPickGroup map={map} />}
         </group>
+        )
       ))}
 
       <TokenLayer />
@@ -217,9 +219,11 @@ const canvasStyle = {
   pointerEvents: 'none' as const,
 };
 
+const NO_OVERLAY_MAPS: MapItem[] = [];
+
 function onThreeCanvasCreated(state: RootState): void {
   const { gl, scene } = state;
-  gl.setClearColor(0x000000, 0);
+  gl.setClearColor(0x1e1e22, 1);
   gl.domElement.style.pointerEvents = 'none';
   gl.domElement.style.width = '100%';
   gl.domElement.style.height = '100%';
@@ -252,8 +256,17 @@ function ThreeReadyNotifier() {
 /** Opaque scene background in 3D/FP so the Pixi map image cannot show through as a fake floor. */
 function SceneBackground() {
   const is3d = useMapStore((s) => s.viewMode === '3d');
+  const firstPerson = useFirstPersonStore((s) => s.enabled) && is3d;
+  const gl = useThree((s) => s.gl);
+  useEffect(() => {
+    if (is3d || firstPerson) {
+      gl.setClearColor(0x1e1e22, 1);
+    } else {
+      gl.setClearColor(0x000000, 0);
+    }
+  }, [firstPerson, gl, is3d]);
   if (!is3d) return null;
-  return <color attach="background" args={['#1e1e22']} />;
+  return null;
 }
 
 function CanvasResizeSync() {
@@ -278,12 +291,12 @@ function FpCanvasTuning() {
   const mobile = isMobileClient();
 
   useEffect(() => {
-    const dpr = firstPerson
-      ? Math.min(mobile ? 1 : 1.25, pixiRenderResolution())
-      : pixiRenderResolution();
-    gl.setPixelRatio(dpr);
+    // Never setPixelRatio here — assigning canvas.width clears the buffer and
+    // fighting Canvas `dpr` leaves a CSS-vs-buffer scissor (black bar at the top).
     gl.shadowMap.enabled = !firstPerson && !mobile;
-  }, [firstPerson, gl, mobile]);
+    if (firstPerson || viewMode === '3d') gl.setClearColor(0x1e1e22, 1);
+    else gl.setClearColor(0x000000, 0);
+  }, [firstPerson, gl, mobile, viewMode]);
 
   return null;
 }
@@ -324,46 +337,36 @@ export function MapSceneCanvas() {
     setGlKey((k) => k + 1);
   }, []);
 
-  const items = useItemStore(selectSortedItems);
-
-  const { tokens: modelCandidates } = useVisibleSceneTokens({ modelOnly: true });
-  const hasModelTokens = modelCandidates.length > 0;
-
-  const overlayMaps = useMemo(
-    () => items.filter((i): i is MapItem => i.type === 'map' && Boolean(i.modelUrl)),
-    [items],
-  );
-  const hasModelMap = overlayMaps.length > 0;
+  const hasModelTokens = useItemStore((s) => {
+    for (const i of Object.values(s.items)) {
+      if (i.type === 'token' && Boolean((i as { modelUrl?: string }).modelUrl)) return true;
+    }
+    return false;
+  });
+  const hasModelMap = useItemStore((s) => {
+    for (const i of Object.values(s.items)) {
+      if (i.type === 'map' && Boolean((i as MapItem).modelUrl)) return true;
+    }
+    return false;
+  });
+  const overlayMaps = useItemStore((s) => {
+    if (is3d) return NO_OVERLAY_MAPS;
+    return Object.values(s.items).filter((i): i is MapItem => i.type === 'map' && Boolean(i.modelUrl));
+  });
   const needsThreeOverlay = is3d || hasModelTokens || hasModelMap;
 
   const orthoDefaults = useStableOrthoCameraDefaults();
-  const fpPerspectiveCamera = useMemo(() => {
-    const token = resolveFirstPersonToken();
-    let x = 0;
-    let y = 120;
-    let z = 0;
-    if (token) {
-      seedFirstPersonPose(token);
-      const grid = token.width || 96;
-      x = pixiToThreeX(firstPersonPose.x + token.width / 2);
-      z = pixiToThreeZ(firstPersonPose.y + token.height / 2);
-      y = grid * 1.1;
-    }
-    return { fov: 72, near: 0.12, far: 8000, position: [x, y, z] as [number, number, number] };
-  }, [firstPerson]);
-
   const mobile = isMobileClient();
-  const glProps = {
+  // Keep Canvas GL config stable — toggling alpha/dpr/orthographic remounts the
+  // renderer and drops every Kenney mesh (blank first-person).
+  const glProps = useMemo(() => ({
     antialias: !mobile,
     alpha: true,
     powerPreference: (mobile ? 'default' : 'high-performance') as WebGLPowerPreference,
     failIfMajorPerformanceCaveat: false,
-  };
-  // FP on dense GLB maps: match dungeon responsiveness — lower pixel load, no shadows.
-  const dpr = firstPerson
-    ? Math.min(mobile ? 1 : 1.25, pixiRenderResolution())
-    : pixiRenderResolution();
-  const useShadows = !firstPerson && !mobile && (is3d || hasModelTokens || hasModelMap);
+  }), [mobile]);
+  const dpr = useMemo(() => pixiRenderResolution(), []);
+  const useShadows = !mobile && (is3d || hasModelTokens || hasModelMap);
 
   useEffect(() => () => {
     sceneRefs.threeCanvas.current = null;
@@ -395,11 +398,11 @@ export function MapSceneCanvas() {
 
   return (
     <Canvas
-      key={`${glKey}-${firstPerson ? 'fp' : 'ortho'}`}
-      orthographic={!firstPerson}
+      key={glKey}
+      orthographic
       shadows={useShadows}
       frameloop="always"
-      camera={firstPerson ? fpPerspectiveCamera : orthoDefaults}
+      camera={orthoDefaults}
       style={canvasStyle}
       gl={glProps}
       dpr={dpr}

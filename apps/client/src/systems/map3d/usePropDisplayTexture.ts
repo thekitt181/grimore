@@ -20,6 +20,7 @@ function canvasToThree(canvas: HTMLCanvasElement): THREE.Texture {
     tex.minFilter = THREE.LinearFilter;
   }
   tex.magFilter = THREE.LinearFilter;
+  tex.premultiplyAlpha = false;
   tex.needsUpdate = true;
   return tex;
 }
@@ -97,9 +98,10 @@ export function usePropDisplayTexture(
         const tex = new THREE.Texture(img);
         tex.colorSpace = THREE.SRGBColorSpace;
         tex.anisotropy = 8;
+        tex.premultiplyAlpha = false;
         tex.magFilter = THREE.LinearFilter;
-        const w = img.naturalWidth || img.width;
-        const h = img.naturalHeight || img.height;
+        const w = 'naturalWidth' in img && img.naturalWidth ? img.naturalWidth : img.width;
+        const h = 'naturalHeight' in img && img.naturalHeight ? img.naturalHeight : img.height;
         if (w >= 8 && h >= 8) {
           tex.generateMipmaps = true;
           tex.minFilter = THREE.LinearMipmapLinearFilter;

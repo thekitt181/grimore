@@ -6,6 +6,7 @@
 import * as THREE from 'three';
 import type { MapItem } from '@/systems/scene/types';
 import {
+  isModularFloorTile,
   isModularGate,
   isModularMap,
   isModularWall,
@@ -67,8 +68,11 @@ function wallLocal(map: MapItem, worldX: number, worldZ: number): { lx: number; 
 /** True when the cell sits on the wall slab (not the empty AABB corners). */
 function onWallCenterline(map: MapItem, worldX: number, worldZ: number): boolean {
   const { lx, ly } = wallLocal(map, worldX, worldZ);
-  const thick = Math.min(map.width, map.height);
-  const half = Math.max(14, thick * 0.46);
+  const short = Math.min(map.width, map.height);
+  const long = Math.max(map.width, map.height);
+  const gs = Math.max(8, map.gridSize);
+  if (long / Math.max(1, short) < 1.35) return false;
+  const half = Math.min(short * 0.46, gs * 0.35);
   if (map.width <= map.height) return Math.abs(lx) <= half;
   return Math.abs(ly) <= half;
 }
@@ -255,9 +259,16 @@ function bakeCell(job: BakeJob, i: number): void {
   }
 
   if (isModularMap(map)) {
+    const kind = pieceForUrl(map.modelUrl)?.kind;
+    if (kind === 'tile') {
+      const floor = sampleFloor(root, x, z, maxFloorY);
+      grid.height[i] = floor.y ?? MISS;
+      grid.walkable[i] = floor.y != null ? 1 : 0;
+      grid.blocked[i] = 0;
+      return;
+    }
     const floor = sampleFloor(root, x, z, maxFloorY);
     if (floor.y != null) {
-      const kind = pieceForUrl(map.modelUrl)?.kind;
       const partition =
         (kind === 'room' || kind === 'hall')
         && sampleInteriorPartition(
@@ -513,6 +524,7 @@ export function bakedMeshBlocksFeet(
   tokenW: number,
   tokenH: number,
 ): boolean {
+  if (isModularFloorTile(map)) return false;
   if (kitWallBlocksFeet(map, fromX, fromY, destX, destY, tokenW, tokenH)) return true;
   const grid = gridsByMap.get(map.id);
   if (!grid?.ready) return false;

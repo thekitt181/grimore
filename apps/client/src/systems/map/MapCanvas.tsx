@@ -53,6 +53,8 @@ import { useWallTool } from './hooks/useWallTool';
 import { useEraserTool } from './hooks/useEraserTool';
 import { useDeleteKey } from './hooks/useDeleteKey';
 import { usePropTriggerKey } from './hooks/usePropTriggerKey';
+import { useWanderMonsters } from './hooks/useWanderMonsters';
+import { useWanderPathTool, WanderPathHud } from './hooks/useWanderPathTool.tsx';
 import { bindPropInteractSync } from './props/propInteractSync';
 import { bindStatMakerSync } from '@/systems/stats/statMakerSync';
 import { useMap3DPixiMode } from './hooks/useMap3DPixiMode';
@@ -572,6 +574,8 @@ export function MapCanvas() {
   useEraserTool(appReady, interactionReady);
   useDeleteKey(appReady);
   usePropTriggerKey(appReady);
+  useWanderMonsters(appReady);
+  useWanderPathTool(appReady, interactionReady);
   useMap3DPixiMode(appReady, viewMode);
   useMap3DOrbit(appReady, viewMode, interactionReady);
   useMap2DMiniOrbit(appReady, viewMode, interactionReady);
@@ -887,6 +891,7 @@ export function MapCanvas() {
 
       <MapCameraControls />
       <Map3DMobileOrbitControls />
+      <WanderPathHud />
 
       {(viewMode === '2d' || viewMode === '3d') && isDragOver && (
         <div

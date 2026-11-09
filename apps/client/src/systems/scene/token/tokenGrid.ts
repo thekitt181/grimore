@@ -63,6 +63,16 @@ export function tokenDisc(size: number): { radius: number; ring: number } {
   return { radius, ring };
 }
 
+/** Keep tokens readable on a zoomed-out map (screen pixels, not world size). */
+export const TOKEN_MIN_SCREEN_PX = 20;
+export const TOKEN_MAX_ZOOM_BOOST = 8;
+
+export function tokenZoomBoost(footprintPx: number, viewScale: number): number {
+  const screen = Math.max(4, footprintPx) * Math.max(viewScale, 1e-4);
+  if (screen >= TOKEN_MIN_SCREEN_PX) return 1;
+  return Math.min(TOKEN_MAX_ZOOM_BOOST, TOKEN_MIN_SCREEN_PX / screen);
+}
+
 export function syncTokenGridFields(token: TokenItem): Pick<TokenItem, 'gridCol' | 'gridRow'> {
   const map = getActiveMap();
   if (!map) return {};

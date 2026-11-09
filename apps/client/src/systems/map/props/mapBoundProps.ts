@@ -6,34 +6,47 @@ export function isMapBoundProp(item: Item): item is ImageItem {
   return item.propMapLocalX != null && item.propMapLocalY != null;
 }
 
+/** Local top-left → world top-left, rotating about the item center with the map. */
+function worldTopLeftFromLocal(
+  lx: number,
+  ly: number,
+  width: number,
+  height: number,
+  map: MapItem,
+): { x: number; y: number } {
+  const mid = mapLocalToWorld(lx + width / 2, ly + height / 2, map);
+  return { x: mid.x - width / 2, y: mid.y - height / 2 };
+}
+
 /** Auto-spawned props: store map-local pose and spawn locked. */
 export function bindMapBoundProp(item: ImageItem, map: MapItem): ImageItem {
   const hasLocal = item.propMapLocalX != null && item.propMapLocalY != null;
   const local = hasLocal
     ? { x: item.propMapLocalX!, y: item.propMapLocalY! }
-    : worldToMapLocal(item.x, item.y, map);
+    : worldToMapLocal(item.x + item.width / 2, item.y + item.height / 2, map);
+  const lx = hasLocal ? local.x : local.x - item.width / 2;
+  const ly = hasLocal ? local.y : local.y - item.height / 2;
   const localRot =
     item.propMapLocalRotation != null
       ? item.propMapLocalRotation
       : item.rotation - map.rotation;
-  const world = mapLocalToWorld(local.x, local.y, map);
+  const world = worldTopLeftFromLocal(lx, ly, item.width, item.height, map);
   return {
     ...item,
     dungeonPropForMapId: map.id,
-    propMapLocalX: local.x,
-    propMapLocalY: local.y,
+    propMapLocalX: lx,
+    propMapLocalY: ly,
     propMapLocalRotation: localRot,
     x: world.x,
     y: world.y,
     rotation: localRot + map.rotation,
-    locked: true,
   };
 }
 
 export function worldPatchForMapBoundProp(item: ImageItem, map: MapItem): Partial<ImageItem> {
   const lx = item.propMapLocalX ?? 0;
   const ly = item.propMapLocalY ?? 0;
-  const w = mapLocalToWorld(lx, ly, map);
+  const w = worldTopLeftFromLocal(lx, ly, item.width, item.height, map);
   const localRot = item.propMapLocalRotation ?? item.rotation - map.rotation;
   return {
     x: w.x,
@@ -63,13 +76,13 @@ export function mapLocalPatchAfterPropMove(
   y: number,
   rotation: number,
 ): Partial<ImageItem> {
-  const local = worldToMapLocal(x, y, map);
+  const mid = worldToMapLocal(x + item.width / 2, y + item.height / 2, map);
   return {
     x,
     y,
     rotation,
-    propMapLocalX: local.x,
-    propMapLocalY: local.y,
+    propMapLocalX: mid.x - item.width / 2,
+    propMapLocalY: mid.y - item.height / 2,
     propMapLocalRotation: rotation - map.rotation,
   };
 }

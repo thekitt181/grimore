@@ -4,7 +4,7 @@ import { emitItemAdd, emitItemUpdate } from '@/systems/scene/sceneSync';
 import { pointInItem } from '@/systems/scene/hitTest';
 import type { ImageItem, MapItem, TokenItem } from '@/systems/scene/types';
 import { itemCenter } from '@/systems/scene/types';
-import { allPropArtEntries, canonicalPropId, propArtById, type PropMotion } from './propArt';
+import { allPropArtEntries, canonicalPropId, propArtById, propFootprintPx, type PropMotion } from './propArt';
 import { propArtByName } from './propCatalog';
 import { isDoorPropId } from './doorCollision';
 import { fitDoorOrGateOnMap } from './doorFit';
@@ -171,7 +171,7 @@ export function placeDungeonProp(prop: DungeonProp, hidden: boolean): void {
 
   const { col, row } = nextFreePropCell(map);
   const center = cellCenter(map, col, row);
-  const size = map.gridSize;
+  const size = isDoorPropId(prop.id) ? map.gridSize : propFootprintPx(prop.id, map.gridSize);
 
   let x = center.x - size / 2;
   let y = center.y - size / 2;
@@ -390,6 +390,15 @@ function applyReveal(item: ImageItem): void {
   const patch: Partial<ImageItem> = { visible: true };
   useItemStore.getState().updateItem(item.id, patch);
   emitItemUpdate([{ id: item.id, patch }]);
+}
+
+/** GM / AI: open or shut a door without a player roll. */
+export function setDungeonDoorOpen(item: ImageItem, open: boolean): void {
+  const id = resolvePropId(item);
+  if (!id || !isDoorPropId(id)) return;
+  const isOpen = (item.propState ?? 0) > 0;
+  if (isOpen === open) return;
+  applyPropTrigger(item, id, 'toggle');
 }
 
 function applyPropTrigger(item: ImageItem, id: string, mode: 'toggle' | 'open' = 'toggle'): void {

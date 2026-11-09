@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useLayoutEffect, useMemo, useRef } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { getActiveMap } from '@/systems/scene/store/itemStore';
@@ -41,8 +41,8 @@ const EYE_SNAP_DELTA = 0.28;
 /** Soften baked height samples before eye follow (stairs / grid seams). */
 const GROUND_FOLLOW = 26;
 const GROUND_SNAP = 48;
-/** ~¼ slower than the prior 3.25 cells/s walk. */
-const WALK_CELLS_PER_SEC = 2.44;
+/** ~¼ slower than the prior 3.25 cells/s walk, then +5%. */
+const WALK_CELLS_PER_SEC = 2.69;
 /** Single-layer accel only (~0.17s) — local FP feel, no cam lag / wish stack. */
 const WALK_ACCEL = 12;
 /** Short stop (~0.12s). */
@@ -52,6 +52,30 @@ const MEASURE_MS = 280;
 const STAIR_MS = 400;
 const MAX_FRAME_DT = 0.05;
 const MAX_WALK_SUBSTEPS = 12;
+
+const fpCssSize = new THREE.Vector2();
+
+/**
+ * The flicker is a 2D crop of the WebGL buffer (hard horizontal bar), not a roof.
+ * Three.js viewports are CSS pixels × pixelRatio. After shadows / env / setPixelRatio,
+ * leftover scissor is the unused top of the drawing buffer (y=0 is the bottom).
+ */
+function bindFpDefaultFramebuffer(
+  gl: THREE.WebGLRenderer,
+  cssW: number,
+  cssH: number,
+) {
+  const w = Math.max(1, Math.round(cssW));
+  const h = Math.max(1, Math.round(cssH));
+  gl.setRenderTarget(null);
+  gl.getSize(fpCssSize);
+  if (Math.abs(fpCssSize.x - w) > 0.5 || Math.abs(fpCssSize.y - h) > 0.5) {
+    gl.setSize(w, h, false);
+  }
+  gl.setViewport(0, 0, w, h);
+  gl.setScissor(0, 0, w, h);
+  gl.setScissorTest(false);
+}
 
 function integrateWalk(token: TokenItem, dt: number): void {
   const keys = firstPersonMotion.held;
@@ -107,7 +131,7 @@ export function FirstPersonCamera() {
   const lastMeasure = useRef(0);
   const lastStair = useRef(0);
   const camera = useMemo(() => {
-    const cam = new THREE.PerspectiveCamera(72, 1, 0.12, 8000);
+    const cam = new THREE.PerspectiveCamera(72, 1, 0.35, 6000);
     cam.up.set(0, 1, 0);
     cam.rotation.order = 'YXZ';
     const token = resolveFirstPersonToken();
@@ -125,7 +149,7 @@ export function FirstPersonCamera() {
 
   // Only depend on `camera` — R3F `get`/`set` identities can churn and were
   // re-running this effect mid-walk (stopFpPosePublisher → token:move → remote freeze).
-  useEffect(() => {
+  useLayoutEffect(() => {
     const prevCamera = get().camera;
     camera.updateProjectionMatrix();
     set({ camera });
@@ -150,9 +174,26 @@ export function FirstPersonCamera() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- get/set must stay out of deps
   }, [camera]);
 
-  useFrame((_, dt) => {
+  // Bind the eye camera before token billboards / sky (they read state.camera).
+  useFrame((state) => {
+    camera.manual = true;
+    if (state.camera !== camera) {
+      state.set({ camera });
+      if (state.raycaster) state.raycaster.camera = camera;
+    }
+  }, -200);
+
+  useFrame((state, dt) => {
+    camera.manual = true;
+    state.set({ camera });
+    if (state.raycaster) state.raycaster.camera = camera;
+
     const token = resolveFirstPersonToken();
-    if (!token) return;
+    if (!token) {
+      camera.updateMatrixWorld();
+      state.gl.render(state.scene, camera);
+      return;
+    }
     if (!firstPersonPose.active || firstPersonPose.tokenId !== token.id) {
       seedFirstPersonPose(token);
     }
@@ -228,6 +269,14 @@ export function FirstPersonCamera() {
     if (map && getMapCollisionGrid(map.id)?.ready) {
       groundSample = bakedGroundHeightSmooth(map.id, cx, cz, groundSample);
     }
+    // Ignore wall-top / ceiling hits — those yank the camera into the roof (black flicker at the top).
+    const maxRise = grid * 0.42;
+    if (
+      Number.isFinite(firstPersonMotion.groundY)
+      && groundSample > firstPersonMotion.groundY + maxRise
+    ) {
+      groundSample = firstPersonMotion.groundY;
+    }
     if (!Number.isFinite(firstPersonMotion.groundY)) {
       firstPersonMotion.groundY = groundSample;
     } else if (Math.abs(groundSample - firstPersonMotion.groundY) > GROUND_SNAP) {
@@ -250,14 +299,16 @@ export function FirstPersonCamera() {
     }
     const eyeY = firstPersonMotion.eyeY;
 
+    const { scene, gl } = state;
+    bindFpDefaultFramebuffer(gl, size.width, size.height);
+    gl.shadowMap.enabled = false;
+
     const aspect = size.width / Math.max(1, size.height);
-    if (Math.abs(aspect - lastAspect.current) > 1e-4) {
-      lastAspect.current = aspect;
-      camera.aspect = aspect;
-      camera.near = 0.12;
-      camera.far = Math.max(4000, grid * 80);
-      camera.updateProjectionMatrix();
-    }
+    camera.aspect = aspect;
+    camera.near = 0.35;
+    camera.far = 8000;
+    if (Math.abs(aspect - lastAspect.current) > 1e-4) lastAspect.current = aspect;
+    camera.updateProjectionMatrix();
 
     camera.position.set(cx, eyeY, cz);
     camera.rotation.y = -((yaw * Math.PI) / 180);
@@ -269,6 +320,16 @@ export function FirstPersonCamera() {
     const flat = Math.cos(pitch) * lookDist;
     const targetX = cx + fx * flat;
     const targetZ = cz + fz * flat;
+
+    const sky = 0x3a3f4a;
+    gl.autoClear = true;
+    gl.setClearColor(sky, 1);
+    scene.fog = null;
+    if (!(scene.background instanceof THREE.Color)) {
+      scene.background = new THREE.Color(sky);
+    } else {
+      scene.background.setHex(sky);
+    }
 
     sceneCameraRef.liveCamera = camera;
     const ref = sceneCameraRef.current;
@@ -292,7 +353,11 @@ export function FirstPersonCamera() {
         far: camera.far,
       };
     }
-  }, -100);
 
-  return null;
+    // Positive priority disables R3F's default render (which kept the orbit camera).
+    camera.updateMatrixWorld();
+    gl.render(scene, camera);
+  }, 1);
+
+  return <primitive object={camera} />;
 }

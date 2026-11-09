@@ -25,15 +25,18 @@ export function activeGridInfo(): GridInfo {
   return gridInfoForMap(getActiveMap());
 }
 
-/** Snap a world point to the nearest grid intersection of the active map. */
-export function snapPoint(wx: number, wy: number): { x: number; y: number } {
-  const g = activeGridInfo();
+export function snapPointToGrid(g: GridInfo, wx: number, wy: number): { x: number; y: number } {
   const ox = g.originX + g.offsetX;
   const oy = g.originY + g.offsetY;
   return {
     x: Math.round((wx - ox) / g.gridSize) * g.gridSize + ox,
     y: Math.round((wy - oy) / g.gridSize) * g.gridSize + oy,
   };
+}
+
+/** Snap a world point to the nearest grid intersection of the active map. */
+export function snapPoint(wx: number, wy: number): { x: number; y: number } {
+  return snapPointToGrid(activeGridInfo(), wx, wy);
 }
 
 /**

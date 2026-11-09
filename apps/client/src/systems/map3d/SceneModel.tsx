@@ -28,6 +28,7 @@ function configureMapMesh(mesh: THREE.Mesh): void {
     mat.side = THREE.DoubleSide;
     // Keep depthWrite on — shared GLTF materials must not stay softened from an underlay.
     mat.depthWrite = true;
+    mat.fog = false;
   }
 }
 
@@ -167,6 +168,7 @@ function GltfModel({
   depthStretch,
   widthStretch,
   hingeChestLid = false,
+  propOpen = false,
 }: {
   url: string;
   targetSize: number;
@@ -185,6 +187,7 @@ function GltfModel({
   depthStretch?: number;
   widthStretch?: number;
   hingeChestLid?: boolean;
+  propOpen?: boolean;
 }) {
   const { scene, animations } = useGLTF(url);
   // Sole align + locomotion only for real tokens (itemId). Props use tokenRender for materials only.
@@ -256,6 +259,12 @@ function GltfModel({
           open={Boolean(modularOpen)}
           {...(modularOpenAt != null ? { openAt: modularOpenAt } : {})}
           {...(doorNode ? { doorNode } : {})}
+        />
+      ) : propRender && animations.length > 0 ? (
+        <ModularPieceAnim
+          root={clone}
+          animations={animations}
+          open={Boolean(propOpen)}
         />
       ) : null}
     </>
@@ -396,6 +405,7 @@ export function SceneModel({
   depthStretch,
   widthStretch,
   hingeChestLid = false,
+  propOpen = false,
 }: {
   url: string;
   targetSize: number;
@@ -421,6 +431,7 @@ export function SceneModel({
   widthStretch?: number;
   /** Cut a lid hinge on single-mesh chests that have no lid bone. */
   hingeChestLid?: boolean;
+  propOpen?: boolean;
 }) {
   const { resolved, status } = useResolvedModelUrl(url);
   const format = modelFormatFromUrl(url);
@@ -479,6 +490,7 @@ export function SceneModel({
         {...(modularOpen != null && modularOpenAt != null ? { modularOpenAt } : {})}
         {...(modularOpen != null && doorNode ? { doorNode } : {})}
         hingeChestLid={hingeChestLid}
+        propOpen={propOpen}
       />
     </Suspense>
   );

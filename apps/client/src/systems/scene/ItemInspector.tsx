@@ -34,7 +34,10 @@ import {
 } from '@/systems/map/props/wallPropFit';
 import { isMapBoundProp, mapLocalPatchAfterPropMove } from '@/systems/map/props/mapBoundProps';
 import { resolveTokenModelUrl } from '@/systems/map3d/defaultTokenModel';
-import { isModularGate } from '@/systems/map/library/modularMapSnap';
+import { setTokensWanderChosen } from '@/systems/map/dungeon/wanderMonsters';
+import { beginWanderPath, clearTokensWanderPath } from '@/systems/map/dungeon/wanderPathDraft';
+import { isModularDeadEnd, isModularGate } from '@/systems/map/library/modularMapSnap';
+import { extendModularFromDeadEnd } from '@/systems/map/dungeon/placeModularDungeon';
 
 function numHex(n: number): string { return '#' + n.toString(16).padStart(6, '0'); }
 function hexNum(s: string): number { return parseInt(s.replace('#', ''), 16); }
@@ -99,6 +102,9 @@ export function ItemInspector() {
           }}
         />
       )}
+      {isGM && selected.length > 0 && selected.every((i) => i.type === 'token') && (
+        <WanderControls tokens={selected as TokenItem[]} />
+      )}
       {single?.type === 'token' && isGM && <TokenPropUnderControls token={single as TokenItem} />}
       {single?.type === 'image' && isGM && (
         <ImagePropPoseControls image={single as ImageItem} update={(p) => update(single.id, p)} />
@@ -146,7 +152,9 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 function MapControls({ map, update }: { map: MapItem; update: (p: Partial<MapItem>) => void }) {
   const [syncing, setSyncing] = useState(false);
+  const [extending, setExtending] = useState(false);
   const gate = isModularGate(map);
+  const deadEnd = isModularDeadEnd(map);
 
   function handleAutoSync() {
     setSyncing(true);
@@ -175,6 +183,21 @@ function MapControls({ map, update }: { map: MapItem; update: (p: Partial<MapIte
           onClick={() => update({ modularOpen: !map.modularOpen, modularOpenAt: Date.now() })}
         >
           {map.modularOpen ? 'Close door' : 'Open door'}
+        </button>
+      ) : null}
+      {deadEnd ? (
+        <button
+          type="button"
+          className="btn-primary text-xs px-2 py-0.5"
+          disabled={extending}
+          title="Remove this cap and grow more rooms from here"
+          onClick={() => {
+            if (extending) return;
+            setExtending(true);
+            void extendModularFromDeadEnd(map).finally(() => setExtending(false));
+          }}
+        >
+          {extending ? 'Extending…' : 'Extend dungeon'}
         </button>
       ) : null}
       <Field label="Grid">
@@ -281,6 +304,42 @@ function TokenControls({
         </Field>
       )}
     </>
+  );
+}
+
+function WanderControls({ tokens }: { tokens: TokenItem[] }) {
+  const on = tokens.length > 0 && tokens.every((t) => t.wanderChosen);
+  const mixed = tokens.some((t) => t.wanderChosen) && !on;
+  const hasPath = tokens.some((t) => (t.wanderPath?.length ?? 0) > 0);
+  const ids = tokens.map((t) => t.id);
+  return (
+    <Field label="Wandering">
+      <button
+        type="button"
+        className="btn-ghost text-xs px-2 py-0.5 whitespace-nowrap"
+        title="Mark these tokens to wander. Shift+W starts or stops the marked ones. Period stops all."
+        onClick={() => setTokensWanderChosen(ids, !on)}
+      >
+        {on ? 'Chosen' : mixed ? 'Mixed' : 'Not chosen'}
+      </button>
+      <button
+        type="button"
+        className="btn-ghost text-xs px-2 py-0.5 whitespace-nowrap"
+        title="Click points on the map, then Enter or double-click to save"
+        onClick={() => beginWanderPath(ids)}
+      >
+        Set path
+      </button>
+      {hasPath && (
+        <button
+          type="button"
+          className="btn-ghost text-xs px-2 py-0.5 whitespace-nowrap"
+          onClick={() => clearTokensWanderPath(ids)}
+        >
+          Clear path
+        </button>
+      )}
+    </Field>
   );
 }
 

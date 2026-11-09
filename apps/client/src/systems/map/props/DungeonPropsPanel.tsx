@@ -5,6 +5,12 @@ import { KAYKIT_PROP_ART } from './kaykitPropCatalog';
 import { SAZKUASH_CREDIT, SAZKUASH_PROP_ART } from './sazkuashPropCatalog';
 import { ASSETS2D_CHEST_ART, ASSETS2D_CREDIT } from './assets2dChestCatalog';
 import { SPAJX_CREDIT, SPAJX_PROP_ART } from './spajxPropCatalog';
+import { FURNITURE_BITS_PROP_ART } from './furnitureBitsPropCatalog';
+import { KENNEY_FURNITURE_PROP_ART } from './kenneyFurniturePropCatalog';
+import { QUATERNIUS_CREDIT, QUATERNIUS_PROP_ART } from './quaterniusPropCatalog';
+import { QUATERNIUS_MORE_CREDIT, QUATERNIUS_MORE_PROP_ART } from './quaterniusMorePropCatalog';
+import { KENNEY_GRAVEYARD_CREDIT, KENNEY_GRAVEYARD_PROP_ART } from './kenneyGraveyardPropCatalog';
+import { KAYKIT_WEAPONS_CREDIT, KAYKIT_WEAPONS_PROP_ART } from './kaykitWeaponsPropCatalog';
 import { ToolSection } from '@/systems/map/ToolSection';
 import { PropCatalogPreview } from './PropCatalogPreview';
 
@@ -13,7 +19,18 @@ const ALSTRA_IDS = new Set(ALSTRA_PROP_ART.map((p) => p.id));
 const A2D_IDS = new Set(ASSETS2D_CHEST_ART.map((p) => p.id));
 const SPAJX_IDS = new Set(SPAJX_PROP_ART.map((p) => p.id));
 const SAZKUASH_IDS = new Set(SAZKUASH_PROP_ART.map((p) => p.id));
-type PropPack = 'core' | 'kaykit' | 'alstra' | 'sazkuash';
+const FURNITURE_IDS = new Set([
+  ...FURNITURE_BITS_PROP_ART.map((p) => p.id),
+  ...KENNEY_FURNITURE_PROP_ART.map((p) => p.id),
+  ...QUATERNIUS_MORE_PROP_ART.filter((p) => p.id.startsWith('qi-')).map((p) => p.id),
+]);
+const LOOT_IDS = new Set([
+  ...QUATERNIUS_PROP_ART.map((p) => p.id),
+  ...QUATERNIUS_MORE_PROP_ART.filter((p) => !p.id.startsWith('qi-')).map((p) => p.id),
+  ...KENNEY_GRAVEYARD_PROP_ART.map((p) => p.id),
+  ...KAYKIT_WEAPONS_PROP_ART.map((p) => p.id),
+]);
+type PropPack = 'core' | 'kaykit' | 'alstra' | 'sazkuash' | 'furniture' | 'loot';
 
 const KAYKIT_GROUPS: Array<{ id: string; label: string; test: (id: string) => boolean }> = [
   { id: 'chest', label: 'Chests', test: (id) => /^(chest|trunk)/.test(id) },
@@ -27,13 +44,22 @@ const KAYKIT_GROUPS: Array<{ id: string; label: string; test: (id: string) => bo
 function packOf(id: string): PropPack {
   if (ALSTRA_IDS.has(id) || A2D_IDS.has(id) || SPAJX_IDS.has(id)) return 'alstra';
   if (SAZKUASH_IDS.has(id)) return 'sazkuash';
+  if (FURNITURE_IDS.has(id)) return 'furniture';
+  if (LOOT_IDS.has(id)) return 'loot';
   if (KAYKIT_IDS.has(id)) return 'kaykit';
   return 'core';
 }
 
 /** Unique label so KayKit variants are not all “Banner” / “Trunk”. */
 function tileLabel(prop: DungeonProp): string {
-  if (packOf(prop.id) === 'core' || packOf(prop.id) === 'sazkuash' || A2D_IDS.has(prop.id) || SPAJX_IDS.has(prop.id)) return prop.short;
+  if (
+    packOf(prop.id) === 'core'
+    || packOf(prop.id) === 'sazkuash'
+    || packOf(prop.id) === 'furniture'
+    || packOf(prop.id) === 'loot'
+    || A2D_IDS.has(prop.id)
+    || SPAJX_IDS.has(prop.id)
+  ) return prop.short;
   const bits = prop.name.replace(/^(Banner |Table |Trunk |Bottle |Candle |Barrier )/, '');
   return bits.length <= 16 ? bits : bits.slice(0, 15);
 }
@@ -48,8 +74,15 @@ export function DungeonPropsPanel() {
   const kaykit = useMemo(() => props.filter((p) => packOf(p.id) === 'kaykit'), [props]);
   const alstra = useMemo(() => props.filter((p) => packOf(p.id) === 'alstra'), [props]);
   const sazkuash = useMemo(() => props.filter((p) => packOf(p.id) === 'sazkuash'), [props]);
+  const furniture = useMemo(() => props.filter((p) => packOf(p.id) === 'furniture'), [props]);
+  const loot = useMemo(() => props.filter((p) => packOf(p.id) === 'loot'), [props]);
   const all =
-    pack === 'kaykit' ? kaykit : pack === 'alstra' ? alstra : pack === 'sazkuash' ? sazkuash : core;
+    pack === 'kaykit' ? kaykit
+    : pack === 'alstra' ? alstra
+    : pack === 'sazkuash' ? sazkuash
+    : pack === 'furniture' ? furniture
+    : pack === 'loot' ? loot
+    : core;
   const [previewId, setPreviewId] = useState(all[0]?.id ?? 'chest');
 
   const q = query.trim().toLowerCase();
@@ -74,7 +107,12 @@ export function DungeonPropsPanel() {
 
   function switchPack(next: PropPack) {
     const list =
-      next === 'kaykit' ? kaykit : next === 'alstra' ? alstra : next === 'sazkuash' ? sazkuash : core;
+      next === 'kaykit' ? kaykit
+      : next === 'alstra' ? alstra
+      : next === 'sazkuash' ? sazkuash
+      : next === 'furniture' ? furniture
+      : next === 'loot' ? loot
+      : core;
     setPack(next);
     setQuery('');
     setGroup('all');
@@ -127,6 +165,28 @@ export function DungeonPropsPanel() {
           onClick={() => switchPack('sazkuash')}
         >
           Potions · {sazkuash.length}
+        </button>
+        <button
+          type="button"
+          className={`flex-1 text-xs py-1 rounded font-ui ${
+            pack === 'furniture'
+              ? 'bg-[#c9a84c22] text-[#c9a84c] ring-1 ring-[#c9a84c44]'
+              : 'text-[#8a8075] border border-[#2a2a3a]'
+          }`}
+          onClick={() => switchPack('furniture')}
+        >
+          Furniture · {furniture.length}
+        </button>
+        <button
+          type="button"
+          className={`flex-1 text-xs py-1 rounded font-ui ${
+            pack === 'loot'
+              ? 'bg-[#c9a84c22] text-[#c9a84c] ring-1 ring-[#c9a84c44]'
+              : 'text-[#8a8075] border border-[#2a2a3a]'
+          }`}
+          onClick={() => switchPack('loot')}
+        >
+          Loot · {loot.length}
         </button>
       </div>
       {preview && (
@@ -203,6 +263,11 @@ export function DungeonPropsPanel() {
                   || prop.imageUrl.includes('/alstra/')
                   || prop.imageUrl.includes('/assets2d/')
                   || prop.imageUrl.includes('/spajx/')
+                  || prop.imageUrl.includes('/furniture-bits/')
+                  || prop.imageUrl.includes('/kenney-furniture/')
+                  || prop.imageUrl.includes('/quaternius/')
+                  || prop.imageUrl.includes('/kenney-graveyard/')
+                  || prop.imageUrl.includes('/kaykit-weapons/')
                     ? 'auto'
                     : 'pixelated',
               }}
@@ -243,6 +308,16 @@ export function DungeonPropsPanel() {
       {pack === 'sazkuash' && (
         <p className="font-ui text-[10px] leading-snug" style={{ color: 'var(--color-text-secondary)' }}>
           {SAZKUASH_CREDIT}
+        </p>
+      )}
+      {pack === 'furniture' && (
+        <p className="font-ui text-[10px] leading-snug" style={{ color: 'var(--color-text-secondary)' }}>
+          KayKit Furniture Bits + Kenney Furniture Kit — CC0.
+        </p>
+      )}
+      {pack === 'loot' && (
+        <p className="font-ui text-[10px] leading-snug" style={{ color: 'var(--color-text-secondary)' }}>
+          {QUATERNIUS_CREDIT} {QUATERNIUS_MORE_CREDIT} {KENNEY_GRAVEYARD_CREDIT} {KAYKIT_WEAPONS_CREDIT}
         </p>
       )}
     </ToolSection>

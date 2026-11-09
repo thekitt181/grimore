@@ -12,7 +12,7 @@ import { doorWallsSignature, movementWalls } from '@/systems/map/props/doorColli
 import { getActiveMap, useItemStore } from '@/systems/scene/store/itemStore';
 import { listModularWallsAlong, listStandFloors } from '@/systems/scene/hitTest';
 import { pixiToThreeX, pixiToThreeZ } from './coords';
-import { isModularMap } from '@/systems/map/library/modularMapSnap';
+import { isModularFloorTile, isModularMap } from '@/systems/map/library/modularMapSnap';
 import { useSessionStore } from '@/store/sessionStore';
 import type { MapItem, TokenItem } from '@/systems/scene/types';
 import { firstPersonPose, seedFirstPersonPose } from './firstPersonPose';
@@ -137,10 +137,12 @@ function clampFpFeet(
   map: MapItem,
   destX: number,
   destY: number,
+  standX: number,
+  standY: number,
 ): { x: number; y: number } {
   const destFloor = floorAtToken(token, destX, destY);
   if (destFloor) return { x: destX, y: destY };
-  const fromFloor = floorAtToken(token, firstPersonPose.x, firstPersonPose.y) ?? map;
+  const fromFloor = floorAtToken(token, standX, standY) ?? map;
   if (isModularMap(fromFloor) || isModularMap(map)) {
     return clampTokenFeetToMap(fromFloor, destX, destY, token.width, token.height);
   }
@@ -149,6 +151,7 @@ function clampFpFeet(
 
 function meshBlocksOn(map: MapItem, token: TokenItem, fromX: number, fromY: number, destX: number, destY: number): boolean {
   if (!map.modelUrl) return false;
+  if (isModularFloorTile(map)) return false;
   // Scanned image maps false-block for GM; Kenney/KayKit walls must still stop everyone.
   if (useSessionStore.getState().myRole === 'GM' && !isModularMap(map)) return false;
   syncOpenDoorPunches(map, useItemStore.getState().items);
@@ -156,7 +159,7 @@ function meshBlocksOn(map: MapItem, token: TokenItem, fromX: number, fromY: numb
 }
 
 /** Authored walls OR baked GLB solids (grid query — no mid-stride mesh rays). */
-function movementBlocked(
+export function tokenFeetBlocked(
   token: TokenItem,
   map: MapItem,
   fromX: number,
@@ -231,7 +234,7 @@ function tryDisplace(
   let destY = fromY + stepDy;
 
   // Hard clamp to the map IMAGE rect (skipped when dest is another kit floor).
-  const rim = clampFpFeet(token, map, destX, destY);
+  const rim = clampFpFeet(token, map, destX, destY, fromX, fromY);
   if (Math.abs(rim.x - destX) > 0.05 || Math.abs(rim.y - destY) > 0.05) {
     destX = rim.x;
     destY = rim.y;
@@ -245,9 +248,9 @@ function tryDisplace(
     }
   }
 
-  if (movementBlocked(token, map, fromX, fromY, destX, destY)) {
-    const xOnly = Math.abs(dx) > 0.01 && !movementBlocked(token, map, fromX, fromY, fromX + dx, fromY);
-    const yOnly = Math.abs(dy) > 0.01 && !movementBlocked(token, map, fromX, fromY, fromX, fromY + dy);
+  if (tokenFeetBlocked(token, map, fromX, fromY, destX, destY)) {
+    const xOnly = Math.abs(dx) > 0.01 && !tokenFeetBlocked(token, map, fromX, fromY, fromX + dx, fromY);
+    const yOnly = Math.abs(dy) > 0.01 && !tokenFeetBlocked(token, map, fromX, fromY, fromX, fromY + dy);
     if (xOnly && !yOnly) {
       stepDx = dx;
       stepDy = 0;
@@ -283,7 +286,7 @@ function tryDisplace(
     }
     destX = fromX + stepDx;
     destY = fromY + stepDy;
-    const rimAfter = clampFpFeet(token, map, destX, destY);
+    const rimAfter = clampFpFeet(token, map, destX, destY, fromX, fromY);
     destX = rimAfter.x;
     destY = rimAfter.y;
   }
@@ -395,7 +398,7 @@ export function controlFirstPersonMove(
     outVelY = vSlid.y;
   }
 
-  const clamped = clampFpFeet(token, map, fromX, fromY);
+  const clamped = clampFpFeet(token, map, fromX, fromY, firstPersonPose.x, firstPersonPose.y);
   firstPersonPose.x = clamped.x;
   firstPersonPose.y = clamped.y;
   if (Math.abs(clamped.x - fromX) > 0.05) outVelX = 0;
@@ -421,4 +424,39 @@ export function clampTokenFeetAgainstWalls(
 ): { x: number; y: number } {
   const step = tryDisplace(token, map, fromX, fromY, toX - fromX, toY - fromY);
   return { x: step.x, y: step.y };
+}
+
+/** Wander / AI — same move-and-slide as FP, without touching the possessed pose. */
+export function slideTokenFeet(
+  token: TokenItem,
+  map: MapItem,
+  fromX: number,
+  fromY: number,
+  dx: number,
+  dy: number,
+): { x: number; y: number } {
+  let x = fromX;
+  let y = fromY;
+  let remX = dx;
+  let remY = dy;
+  for (let i = 0; i < MAX_SLIDES; i++) {
+    const remLen = Math.hypot(remX, remY);
+    if (remLen < 0.15) break;
+    const beforeX = x;
+    const beforeY = y;
+    const step = tryDisplace(token, map, x, y, remX, remY);
+    x = step.x;
+    y = step.y;
+    if (!step.blocked) break;
+    const moved = Math.hypot(x - beforeX, y - beforeY);
+    const left = Math.max(0, remLen - moved);
+    if (left < 0.15) break;
+    const slid = projectOut(remX, remY, step.hitNx, step.hitNy);
+    const sLen = Math.hypot(slid.x, slid.y);
+    if (sLen < 0.15) break;
+    const scale = left / sLen;
+    remX = slid.x * scale;
+    remY = slid.y * scale;
+  }
+  return clampFpFeet(token, map, x, y, fromX, fromY);
 }

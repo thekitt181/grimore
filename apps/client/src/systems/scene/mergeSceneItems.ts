@@ -64,6 +64,11 @@ export function mergeSceneItems(
       else delete mergedToken.imageUrl;
       if (modelUrl) mergedToken.modelUrl = modelUrl;
       else delete mergedToken.modelUrl;
+      if (loc.wandering != null) mergedToken.wandering = loc.wandering;
+      if (loc.wanderChosen != null) mergedToken.wanderChosen = loc.wanderChosen;
+      if (loc.wanderPath != null) mergedToken.wanderPath = loc.wanderPath;
+      if (loc.encounterGroupId != null) mergedToken.encounterGroupId = loc.encounterGroupId;
+      if (loc.monsterInt != null) mergedToken.monsterInt = loc.monsterInt;
       merged.push(mergedToken);
     } else if (item.type === 'handout' && loc?.type === 'handout') {
       const imageUrl = pickBackgroundUrl(item.imageUrl ?? null, loc.imageUrl ?? null);

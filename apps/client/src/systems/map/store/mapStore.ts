@@ -21,6 +21,7 @@ export type MapTool =
   | 'fog-reveal' | 'fog-hide'
   | 'wall'
   | 'measure'
+  | 'wander-path'
   | 'calibrate'
   | 'draw-freehand' | 'draw-rect' | 'draw-circle' | 'draw-arrow' | 'text' | 'eraser';
 

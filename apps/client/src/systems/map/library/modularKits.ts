@@ -4,6 +4,11 @@ import { DEFAULT_MAP_GRID_SIZE } from '@/systems/scene/types';
 /** 1 authored mesh-meter = 1 grid cell on the board (Kenney and KayKit share this). */
 export const MODULAR_PX_PER_UNIT = DEFAULT_MAP_GRID_SIZE;
 export const MODULAR_SNAP_REV = 45;
+/**
+ * Kenney 12 m rooms: the 3D wall cap is ~3 m in from the item AABB.
+ * Keep spawned tokens/props on the dark inner floor, not the gray shell.
+ */
+export const MODULAR_ROOM_WALL_CELLS = 3.5;
 
 export type Cardinal = 'N' | 'E' | 'S' | 'W';
 export type KitId = 'kenney' | 'kaykit';
@@ -79,32 +84,36 @@ function kaykit(
   };
 }
 
-/** Kenney True Modular rooms/halls (CC0). Openings at rotation 0 after yaw. */
+/**
+ * Kenney True Modular rooms/halls (CC0).
+ * Openings at item.rotation 0 after MAP_MODEL_YAW, in board cardinals
+ * (N = −Y / −Z on the table). Ray-checked against the GLBs.
+ */
 export const KENNEY_PIECES: ModularPiece[] = [
   kenney('corridor', 'Corridor', 4, 4, ['E', 'W'], 'hall'),
-  kenney('corridor-corner', 'Corridor corner', 4, 4, ['N', 'E'], 'hall'),
-  kenney('corridor-end', 'Corridor end', 4, 4, ['S'], 'hall'),
+  kenney('corridor-corner', 'Corridor corner', 4, 4, ['E', 'S'], 'hall'),
+  kenney('corridor-end', 'Corridor end', 4, 4, ['W'], 'hall'),
   kenney('corridor-intersection', 'Intersection', 4, 4, ALL, 'hall'),
-  kenney('corridor-junction', 'Junction', 4, 4, ['N', 'E', 'W'], 'hall'),
+  kenney('corridor-junction', 'Junction', 4, 4, ['E', 'S', 'W'], 'hall'),
   kenney('corridor-transition', 'Corridor transition', 8, 8, ['E', 'W'], 'hall'),
   kenney('corridor-wide', 'Wide corridor', 8, 8, ['E', 'W'], 'hall'),
-  kenney('corridor-wide-corner', 'Wide corner', 8, 8, ['N', 'E'], 'hall'),
-  kenney('corridor-wide-end', 'Wide end', 8, 8, ['S'], 'hall'),
+  kenney('corridor-wide-corner', 'Wide corner', 8, 8, ['E', 'S'], 'hall'),
+  kenney('corridor-wide-end', 'Wide end', 8, 8, ['W'], 'hall'),
   kenney('corridor-wide-intersection', 'Wide intersection', 8, 8, ALL, 'hall'),
-  kenney('corridor-wide-junction', 'Wide junction', 8, 8, ['N', 'E', 'W'], 'hall'),
+  kenney('corridor-wide-junction', 'Wide junction', 8, 8, ['E', 'S', 'W'], 'hall'),
   kenney('room-small', 'Small room', 12, 12, ALL, 'room'),
   kenney('room-small-variation', 'Small room · var', 12, 12, ALL, 'room'),
-  kenney('room-corner', 'Corner room', 12, 12, ['N', 'E'], 'room'),
+  kenney('room-corner', 'Corner room', 12, 12, ['E', 'S'], 'room'),
   kenney('room-large', 'Large room', 20, 20, ALL, 'room'),
   kenney('room-large-variation', 'Large room · var', 20, 20, ALL, 'room'),
   kenney('room-wide', 'Wide room', 20, 12, ALL, 'room'),
   kenney('room-wide-variation', 'Wide room · var', 20, 12, ALL, 'room'),
   kenney('stairs', 'Stairs', 4.4, 8.4, ['N', 'S'], 'stairs', { joinW: 4, joinH: 8 }),
   kenney('stairs-wide', 'Wide stairs', 8.4, 8.4, ['N', 'S'], 'stairs', { joinW: 8, joinH: 8 }),
-  kenney('gate', 'Gate', 4.4, 2, ['E', 'W'], 'gate', { anim: { doorNode: 'gate' } }),
-  kenney('gate-door', 'Gate · door', 5.2, 2, ['E', 'W'], 'gate', { anim: { clips: true, doorNode: 'door' } }),
-  kenney('gate-door-window', 'Gate · window', 5.2, 2, ['E', 'W'], 'gate', { anim: { clips: true, doorNode: 'door' } }),
-  kenney('gate-metal-bars', 'Gate · bars', 4.4, 2, ['E', 'W'], 'gate', { anim: { doorNode: 'gate' } }),
+  kenney('gate', 'Gate', 4.4, 2, ['N', 'S'], 'gate', { anim: { doorNode: 'gate' } }),
+  kenney('gate-door', 'Gate · door', 5.2, 2, ['N', 'S'], 'gate', { anim: { clips: true, doorNode: 'door' } }),
+  kenney('gate-door-window', 'Gate · window', 5.2, 2, ['N', 'S'], 'gate', { anim: { clips: true, doorNode: 'door' } }),
+  kenney('gate-metal-bars', 'Gate · bars', 4.4, 2, ['N', 'S'], 'gate', { anim: { doorNode: 'gate' } }),
   kenney('template-floor', 'Floor 4 m', 4, 4, ALL, 'tile'),
   kenney('template-floor-big', 'Floor 8 m', 8, 8, ALL, 'tile'),
   kenney('template-floor-layer', 'Floor layer', 4, 4, ALL, 'tile'),
@@ -231,6 +240,10 @@ export function isModularWall(map: Pick<MapItem, 'modelUrl'> | null | undefined)
   return k === 'wall' || k === 'gate';
 }
 
+export function isModularFloorTile(map: Pick<MapItem, 'modelUrl'> | null | undefined): boolean {
+  return pieceForUrl(map?.modelUrl)?.kind === 'tile';
+}
+
 /** Higher wins when several maps overlap the click: unlocked, then walls, then smaller. */
 export function mapPickRank(it: Pick<MapItem, 'width' | 'height' | 'locked' | 'zIndex' | 'modelUrl'>): number {
   const p = pieceForUrl(it.modelUrl);
@@ -245,7 +258,15 @@ export function mapPickRank(it: Pick<MapItem, 'width' | 'height' | 'locked' | 'z
 
 export function isModularGate(map: Pick<MapItem, 'modelUrl'> | null | undefined): boolean {
   const p = pieceForUrl(map?.modelUrl);
-  return p?.kind === 'gate' || Boolean(p?.anim?.doorNode) || Boolean(p?.anim?.clips);
+  if (!p) return false;
+  if (p.kind === 'gate' || Boolean(p.anim?.doorNode) || Boolean(p.anim?.clips)) return true;
+  const k = p.key.toLowerCase();
+  return k.includes('doorway') || k.includes('gated') || k.includes('gate');
+}
+
+export function isModularDeadEnd(map: Pick<MapItem, 'modelUrl'> | null | undefined): boolean {
+  const key = pieceForUrl(map?.modelUrl)?.key;
+  return key === 'corridor-end' || key === 'corridor-wide-end';
 }
 
 export function joinMeters(piece: ModularPiece): { w: number; h: number } {

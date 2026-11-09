@@ -17,6 +17,7 @@ import {
 } from './generateDungeon';
 import { placeDungeonFloors } from './placeGeneratedDungeon';
 import { ToolSection } from '@/systems/map/ToolSection';
+import { clampPartyLevel, partyLevelFromTokens } from '@/systems/combat/partyLevel';
 
 const LAYOUTS: Array<{ id: DungeonLayout; label: string }> = [
   { id: 'rooms', label: 'Rooms' },
@@ -104,13 +105,13 @@ const FURNISH: Array<{ id: FurnishingStyle; label: string }> = [
   { id: 'full', label: 'Full' },
 ];
 
-const MOTIFS: Array<{ id: DungeonMotif; label: string }> = [
-  { id: 'mixed', label: 'Mixed' },
-  { id: 'crypt', label: 'Crypt' },
-  { id: 'temple', label: 'Temple' },
-  { id: 'fortress', label: 'Fortress' },
-  { id: 'mine', label: 'Mine' },
-  { id: 'ruin', label: 'Ruin' },
+const MOTIFS: Array<{ id: DungeonMotif; label: string; text: string }> = [
+  { id: 'mixed', label: 'Mixed', text: '' },
+  { id: 'crypt', label: 'Crypt', text: 'undead crypt of sealed tombs and restless dead' },
+  { id: 'temple', label: 'Temple', text: 'ruined temple, cultists, and a forgotten altar' },
+  { id: 'fortress', label: 'Fortress', text: 'occupied fortress, soldiers, and a warband hold' },
+  { id: 'mine', label: 'Mine', text: 'underdark mine, kobolds, and a collapsed shaft' },
+  { id: 'ruin', label: 'Ruin', text: 'overgrown ruin, oozes, spiders, and collapsed halls' },
 ];
 
 function ChoiceRow<T extends string>({
@@ -151,6 +152,7 @@ export function DungeonGeneratorPanel() {
   const [layout, setLayout] = useState<DungeonLayout>('rooms');
   const [size, setSize] = useState<DungeonSize>('medium');
   const [motif, setMotif] = useState<DungeonMotif>('mixed');
+  const [themeText, setThemeText] = useState('');
   const [doors, setDoors] = useState<DoorStyle>('mixed');
   const [secrets, setSecrets] = useState<SecretStyle>('few');
   const [corridors, setCorridors] = useState<CorridorStyle>('straight');
@@ -163,6 +165,8 @@ export function DungeonGeneratorPanel() {
   const [density, setDensity] = useState<RoomDensity>('normal');
   const [chambers, setChambers] = useState<ChamberScale>('normal');
   const [furnishings, setFurnishings] = useState<FurnishingStyle>('full');
+  const [monsters, setMonsters] = useState(true);
+  const [partyLevel, setPartyLevel] = useState(() => partyLevelFromTokens() ?? 3);
   const [seedText, setSeedText] = useState('');
   const [lastSeed, setLastSeed] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
@@ -181,6 +185,7 @@ export function DungeonGeneratorPanel() {
       doors,
       seed,
       motif,
+      ...(themeText.trim() ? { theme: themeText.trim() } : {}),
       corridors,
       passages,
       deadEnds,
@@ -194,7 +199,7 @@ export function DungeonGeneratorPanel() {
     };
     try {
       await new Promise<void>((resolve) => { setTimeout(resolve, 0); });
-      await placeDungeonFloors(options, floors);
+      await placeDungeonFloors(options, floors, { monsters, partyLevel });
       setLastSeed(seed);
     } finally {
       setBusy(false);
@@ -212,17 +217,25 @@ export function DungeonGeneratorPanel() {
         <ChoiceRow label="Chambers" value={chambers} options={CHAMBERS} onChange={setChambers} />
       )}
       <label className="block space-y-1">
-        <span className="font-ui text-[10px] uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>Motif</span>
-        <select
-          className="input-dark w-full text-xs py-1"
-          value={motif}
-          onChange={(event) => setMotif(event.target.value as DungeonMotif)}
-        >
-          {MOTIFS.map((option) => (
-            <option key={option.id} value={option.id}>{option.label}</option>
-          ))}
-        </select>
+        <span className="font-ui text-[10px] uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>Theme</span>
+        <textarea
+          className="input-dark w-full text-xs py-1 min-h-[4.5rem] resize-y"
+          placeholder="Write the place — e.g. drowned yuan-ti temple in a mangrove, cultists and snakes"
+          maxLength={280}
+          value={themeText}
+          onChange={(event) => setThemeText(event.target.value)}
+        />
       </label>
+      <ChoiceRow
+        label="Start from"
+        value={motif}
+        options={MOTIFS}
+        onChange={(id) => {
+          setMotif(id);
+          const starter = MOTIFS.find((option) => option.id === id)?.text ?? '';
+          setThemeText(starter);
+        }}
+      />
       {built ? (
         <>
           <ChoiceRow label="Doors" value={doors} options={DOORS} onChange={setDoors} />
@@ -235,6 +248,23 @@ export function DungeonGeneratorPanel() {
         <ChoiceRow label="Cavern" value={cavern} options={CAVERNS} onChange={setCavern} />
       )}
       <ChoiceRow label="Furnishings" value={furnishings} options={FURNISH} onChange={setFurnishings} />
+      <label className="flex items-center gap-2 font-ui text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+        <input type="checkbox" checked={monsters} onChange={(e) => setMonsters(e.target.checked)} />
+        Place monsters from the codex
+      </label>
+      {monsters && (
+        <label className="block space-y-1">
+          <span className="font-ui text-[10px] uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>Party level</span>
+          <input
+            className="input-dark w-full text-xs py-1"
+            inputMode="numeric"
+            min={1}
+            max={20}
+            value={partyLevel}
+            onChange={(event) => setPartyLevel(clampPartyLevel(Number(event.target.value)))}
+          />
+        </label>
+      )}
       <label className="block space-y-1">
         <span className="font-ui text-[10px] uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>Floors</span>
         <input
@@ -278,7 +308,7 @@ export function DungeonGeneratorPanel() {
         </button>
       )}
       <p className="font-ui text-xs leading-snug" style={{ color: 'var(--color-text-secondary)' }}>
-        2XL/3XL are big floors (3XL can take a few seconds). Gauntlet is a left-to-right spine. Chambers scales room size. Floors go up to 12. Mega + packed + grand is the heaviest combo.
+        2XL/3XL are big floors (3XL can take a few seconds). Gauntlet is a left-to-right spine. Chambers scales room size. Floors go up to 12. Mega + packed + grand is the heaviest combo. Theme and party level pick the encounters.
       </p>
     </ToolSection>
   );

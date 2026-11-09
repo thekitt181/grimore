@@ -55,7 +55,7 @@ export function itemVisualSignature(item: Item, ctx: RenderContext): string {
     case 'handout':
       return `${base}|${item.name}|${item.imageUrl}|${item.compendiumItemId}`;
     case 'image':
-      return `${base}|${item.name}|${item.imageUrl}|${item.propId ?? ''}|${item.propState ?? 0}|${item.propAt ?? 0}|${item.propDoorTheme ?? ''}|${item.visible === false ? 0 : 1}`;
+      return `${base}|${item.name}|${item.imageUrl}|${item.propId ?? ''}|${item.propState ?? 0}|${item.propAt ?? 0}|${item.propDoorTheme ?? ''}|${item.visible === false ? 0 : 1}|${ctx.gm ? 1 : 0}`;
   }
 }
 
@@ -69,7 +69,7 @@ export function renderItem(container: Container, item: Item, ctx: RenderContext)
     case 'surfaceDecal': renderSurfaceDecal(container, item); break;
     case 'text':    renderText(container, item); break;
     case 'handout': renderHandout(container, item); break;
-    case 'image':   renderImage(container, item); break;
+    case 'image':   renderImage(container, item, ctx); break;
   }
 }
 
@@ -385,25 +385,27 @@ function renderTokenOverlay(c: Container, item: TokenItem, ctx: RenderContext) {
 
 // ─── Map image (decorative drop) ─────────────────────────────────────────────
 
-function renderImage(c: Container, item: ImageItem) {
+function renderImage(c: Container, item: ImageItem, ctx: RenderContext) {
   const minDim = Math.min(item.width, item.height);
   const nameSize = Math.max(10, Math.min(22, minDim * 0.14));
 
-  const nameText = new Text({
-    text: item.name,
-    style: new TextStyle({
-      fontFamily: 'Inter',
-      fontSize: nameSize,
-      fill: 0xe8e0d0,
-      stroke: { color: 0x000000, width: 3 },
-      fontWeight: '600',
-    }),
-  });
-  nameText.label = 'name';
-  nameText.anchor.set(0.5, 1);
-  nameText.x = item.width / 2;
-  nameText.y = -4;
-  c.addChild(nameText);
+  if (ctx.gm) {
+    const nameText = new Text({
+      text: item.name,
+      style: new TextStyle({
+        fontFamily: 'Inter',
+        fontSize: nameSize,
+        fill: 0xe8e0d0,
+        stroke: { color: 0x000000, width: 3 },
+        fontWeight: '600',
+      }),
+    });
+    nameText.label = 'name';
+    nameText.anchor.set(0.5, 1);
+    nameText.x = item.width / 2;
+    nameText.y = -4;
+    c.addChild(nameText);
+  }
 
   if (mountPropAnimation(c, item)) return;
 

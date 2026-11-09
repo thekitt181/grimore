@@ -99,16 +99,9 @@ export function FirstPersonVisionFog(_props: { wallHeight: number }) {
       fill.intensity = dv ? 2.4 : 2.8;
     }
 
-    const fog = ownFog.current;
-    if (fog) {
-      fog.near = Math.max(12, radiusPx * 0.88);
-      fog.far = Math.max(fog.near + 24, radiusPx);
-      fog.color.set('#000000');
-      if (scene.fog !== fog) scene.fog = fog;
-    }
-    if (!(scene.background instanceof THREE.Color) || scene.background.getHex() !== 0x000000) {
-      scene.background = new THREE.Color('#000000');
-    }
+    // Do not use THREE.Fog here — linear fog paints a hard black horizon that
+    // slices the upper view (and token portraits) whenever it fights time-of-day fog.
+    scene.fog = null;
   });
 
   return null;
@@ -202,11 +195,7 @@ function applyVision(
   ) {
     prevFog.current = scene.fog;
   }
-  if (!ownFog.current) {
-    ownFog.current = new THREE.Fog('#000000', 200, 220);
-  }
-  scene.fog = ownFog.current;
-  scene.background = new THREE.Color('#000000');
+  scene.fog = null;
   visionOn.current = true;
 }
 
@@ -236,10 +225,7 @@ function teardownVision(
     scene.environment = prevEnv.current;
     prevEnv.current = null;
   }
-  if (ownFog.current && scene.fog === ownFog.current) {
-    scene.fog = prevFog.current;
-  }
+  scene.fog = null;
   prevFog.current = null;
-  scene.background = new THREE.Color('#1e1e22');
   visionOn.current = false;
 }

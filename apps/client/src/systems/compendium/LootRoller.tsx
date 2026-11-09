@@ -1,10 +1,8 @@
 import { useState } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
 import type { LootDrop } from './compendiumApi';
 import { rollLoot } from './compendiumApi';
 import { placeLootDrops } from './placeLoot';
-import { useItemStore } from '@/systems/scene/store/itemStore';
-import type { TokenItem } from '@/systems/scene/types';
+import { partyLevelFromTokens } from '@/systems/combat/partyLevel';
 
 export const LOOT_SOURCES: Array<{ id: string; label: string }> = [
   { id: 'this', label: 'This' },
@@ -57,18 +55,6 @@ function clampCount(value: number): number {
   return Math.min(20, Math.max(1, Math.floor(value)));
 }
 
-function partyLevel(qc: ReturnType<typeof useQueryClient>): number | null {
-  const tokens = Object.values(useItemStore.getState().items).filter(
-    (item): item is TokenItem => item.type === 'token' && Boolean(item.ddbCharacterId),
-  );
-  const levels = tokens.flatMap((token) => {
-    const character = qc.getQueryData<{ level?: number }>(['ddb', 'character', token.ddbCharacterId]);
-    return character && typeof character.level === 'number' && character.level > 0 ? [character.level] : [];
-  });
-  if (levels.length === 0) return null;
-  const average = levels.reduce((sum, level) => sum + level, 0) / levels.length;
-  return clampLevel(Math.round(average));
-}
 
 function dropTitle(drop: LootDrop): string {
   return drop.kind === 'currency' ? drop.label : drop.name;
@@ -100,7 +86,6 @@ export function LootRoller({
   targetName?: string;
   onDone?: () => void;
 }) {
-  const qc = useQueryClient();
   const [levelText, setLevelText] = useState('');
   const [minCount, setMinCount] = useState(1);
   const [maxCount, setMaxCount] = useState(6);
@@ -111,7 +96,7 @@ export function LootRoller({
   const [current, setCurrent] = useState<HeldDrop[]>([]);
   const [picked, setPicked] = useState<Record<string, boolean>>({});
   const [kept, setKept] = useState<HeldDrop[]>([]);
-  const suggested = partyLevel(qc);
+  const suggested = partyLevelFromTokens();
 
   const low = Math.min(minCount, maxCount);
   const high = Math.max(minCount, maxCount);

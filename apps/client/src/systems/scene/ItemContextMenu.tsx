@@ -31,6 +31,8 @@ import { getPersistSessionId } from './sessionPersistence';
 import { DraggablePanel } from '@/components/DraggablePanel';
 import { isMobileClient } from '@/lib/socket';
 import { isDdbPcToken } from '@/systems/ddb/ddbTokenUtils';
+import { isModularDeadEnd } from '@/systems/map/library/modularKits';
+import { extendModularFromDeadEnd } from '@/systems/map/dungeon/placeModularDungeon';
 import { TIME_OF_DAY_PRESETS, WEATHER_PRESETS } from '@grimoire/shared';
 import type { TimeOfDay, WeatherOverlay } from '@grimoire/shared';
 import { useSceneMediaStore, selectEffectiveWeather } from './media/sceneMediaStore';
@@ -782,6 +784,15 @@ export function ItemContextMenu() {
       {single?.type === 'map' && isGM && (
         <>
           <div className="gold-divider my-1" />
+          {isModularDeadEnd(single as MapItem) && (
+            <Btn
+              label="↪ Extend dungeon"
+              onClick={() => {
+                void extendModularFromDeadEnd(single as MapItem);
+                close();
+              }}
+            />
+          )}
           {menu.worldX != null && menu.worldY != null && (
             <Btn
               label="🐉 Summon monster here"

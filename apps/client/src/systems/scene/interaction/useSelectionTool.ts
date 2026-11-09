@@ -262,8 +262,9 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
 
     function canManipulate(item: Item): boolean {
       if (canDragToken(item)) return true;
-      if (item.locked) return false;
-      return isGm();
+      if (!isGm()) return false;
+      if (item.locked && item.type !== 'image') return false;
+      return true;
     }
 
     function armPlayerPropClick(prop: ImageItem | MapItem, e: PointerEvent): void {
@@ -520,7 +521,7 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
 
       for (const id of current.ids) {
         const it = storeItems[id];
-        if (!it || it.locked) continue;
+        if (!it || (it.locked && it.type !== 'image')) continue;
         if (it.type === 'map' && !gm) continue;
         if (it.type === 'token' && !gm && !playerCanRotateToken(it, myUserId ?? null)) continue;
         if (it.type === 'drawing' || it.type === 'text' || it.type === 'handout' || it.type === 'surfaceDecal') {
@@ -575,7 +576,7 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
 
       for (const id of ids) {
         const it = storeItems[id];
-        if (!it || it.locked) continue;
+        if (!it || (it.locked && it.type !== 'image')) continue;
         if (it.type !== 'map' && it.type !== 'image') continue;
 
         const live = useLiveTransformStore.getState().byId[id];
@@ -1533,7 +1534,11 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
         marqueeGfx.clear();
         if (w > 3 && h > 3) {
           const hits = selectableItems()
-            .filter((it) => it.type !== 'map')
+            .filter((it) => {
+              if (it.type !== 'map') return true;
+              // Painted boards stay unselectable by marquee; Kenney/KayKit pieces must be.
+              return isGm() && isModularMap(it as MapItem);
+            })
             .filter((it) => itemIntersectsRect(it, x, y, w, h))
             .map((it) => it.id);
           const mode = e.shiftKey ? 'add' : 'set';

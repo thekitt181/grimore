@@ -10,6 +10,12 @@ import { canonicalPropId } from '@/systems/map/props/propArt';
 import { ALSTRA_PROP_MODELS } from '@/systems/map/props/alstraPropCatalog';
 import { KAYKIT_PROP_MODELS } from '@/systems/map/props/kaykitPropCatalog';
 import { SPAJX_PROP_MODELS } from '@/systems/map/props/spajxPropCatalog';
+import { FURNITURE_BITS_PROP_MODELS } from '@/systems/map/props/furnitureBitsPropCatalog';
+import { KENNEY_FURNITURE_PROP_MODELS } from '@/systems/map/props/kenneyFurniturePropCatalog';
+import { QUATERNIUS_PROP_MODELS } from '@/systems/map/props/quaterniusPropCatalog';
+import { QUATERNIUS_MORE_PROP_MODELS } from '@/systems/map/props/quaterniusMorePropCatalog';
+import { KENNEY_GRAVEYARD_PROP_MODELS } from '@/systems/map/props/kenneyGraveyardPropCatalog';
+import { KAYKIT_WEAPONS_PROP_MODELS } from '@/systems/map/props/kaykitWeaponsPropCatalog';
 
 export type PropModelSpec = {
   /** Closed / default model */
@@ -34,6 +40,12 @@ export const PROP_MODEL_3D: Record<string, PropModelSpec> = {
   ...KAYKIT_PROP_MODELS,
   ...ALSTRA_PROP_MODELS,
   ...SPAJX_PROP_MODELS,
+  ...FURNITURE_BITS_PROP_MODELS,
+  ...KENNEY_FURNITURE_PROP_MODELS,
+  ...QUATERNIUS_PROP_MODELS,
+  ...QUATERNIUS_MORE_PROP_MODELS,
+  ...KENNEY_GRAVEYARD_PROP_MODELS,
+  ...KAYKIT_WEAPONS_PROP_MODELS,
   crate: { url: `${P}/crate.glb`, sizeBias: 0.95 },
   barrel: { url: `${P}/kaykit/barrel_small.glb`, sizeBias: 0.95 },
   keg: { url: `${P}/kaykit/keg.glb`, sizeBias: 0.9 },
@@ -71,7 +83,14 @@ export function hasPropModel3D(propId: string | undefined): boolean {
 export function allPropModelUrls(): string[] {
   const urls = new Set<string>();
   for (const spec of Object.values(PROP_MODEL_3D)) {
-    if (spec.url.includes('/spajx/')) continue;
+    if (
+      spec.url.includes('/spajx/')
+      || spec.url.includes('/quaternius/')
+      || spec.url.includes('/furniture-bits/')
+      || spec.url.includes('/kenney-furniture/')
+      || spec.url.includes('/kenney-graveyard/')
+      || spec.url.includes('/kaykit-weapons/')
+    ) continue;
     urls.add(spec.url);
     if (spec.openUrl) urls.add(spec.openUrl);
   }

@@ -7,7 +7,8 @@ import type {
   GeneratedDungeon,
 } from './generateDungeon';
 import type { ImageItem, MapItem } from '@/systems/scene/types';
-import { canonicalPropId, ensurePropCatalogEntry, propIdsFromNoteText } from '@/systems/map/props/propArt';
+import { canonicalPropId, ensurePropCatalogEntry, pickPropVariant, propFootprintPx, propIdsFromNoteText } from '@/systems/map/props/propArt';
+import { MODULAR_PX_PER_UNIT, MODULAR_ROOM_WALL_CELLS } from '@/systems/map/library/modularKits';
 import { isDoorPropId } from '@/systems/map/props/doorCollision';
 
 type SpawnSlot = 'center' | 'edge' | 'corner';
@@ -22,7 +23,12 @@ const RULES: Array<{ test: RegExp; props: PropSpawnPlan[] }> = [
   { test: /chest|stash|pay chest|cache|strongbox/i, props: [{ propId: 'chest', slot: 'center' }] },
   { test: /coin|offering|funeral coin|silverware/i, props: [{ propId: 'coins', slot: 'center', scale: 0.75 }] },
   { test: /ore|gem|uncut|slag|claim token/i, props: [{ propId: 'coins', slot: 'center' }, { propId: 'boulder', slot: 'edge', scale: 0.9 }] },
-  { test: /sarcophagus|canopic|niche|shroud/i, props: [{ propId: 'sarcophagus', slot: 'center' }] },
+  { test: /sarcophagus|canopic|niche|shroud|coffin/i, props: [{ propId: 'sarcophagus', slot: 'center' }] },
+  { test: /gravestone|headstone|\bgrave\b/i, props: [{ propId: 'kg-gravestone-round', slot: 'edge' }] },
+  { test: /\bwell\b/i, props: [{ propId: 'qv-well', slot: 'center', scale: 1.15 }] },
+  { test: /cauldron/i, props: [{ propId: 'qv-cauldron', slot: 'center' }] },
+  { test: /tent|camp/i, props: [{ propId: 'qs-tent', slot: 'center', scale: 1.2 }] },
+  { test: /beartrap|bear trap/i, props: [{ propId: 'qs-beartrap-closed', slot: 'center', scale: 0.85 }] },
   { test: /altar|reliquary|font|mosaic|saint/i, props: [{ propId: 'altar', slot: 'center' }, { propId: 'pedestal', slot: 'edge' }] },
   { test: /empty cage|\bcage\b/i, props: [{ propId: 'cage', slot: 'center', scale: 0.95 }] },
   { test: /faded mural|\bmural\b/i, props: [{ propId: 'mural', slot: 'edge', scale: 1.05 }] },
@@ -30,7 +36,13 @@ const RULES: Array<{ test: RegExp; props: PropSpawnPlan[] }> = [
   { test: /swarm roosting|roosting overhead/i, props: [{ propId: 'swarm', slot: 'center', scale: 0.88 }] },
   { test: /glyph cut into the floor|floor glyph|\bglyph\b/i, props: [{ propId: 'floor-glyph', slot: 'center', scale: 0.85 }] },
   { test: /tripwire/i, props: [{ propId: 'tripwire', slot: 'edge', scale: 0.92 }] },
-  { test: /torch|sconce|candle|incense|votive/i, props: [{ propId: 'torch', slot: 'edge' }] },
+  { test: /torch|sconce|candle|incense|votive|lamp|lantern/i, props: [{ propId: 'torch', slot: 'edge' }] },
+  { test: /bed|bunk|cot|sleeping|quarters|barracks/i, props: [{ propId: 'fb-bed-single-a', slot: 'edge', scale: 1.15 }] },
+  { test: /chair|stool|seat/i, props: [{ propId: 'fb-chair-a', slot: 'edge' }] },
+  { test: /table|desk|dining/i, props: [{ propId: 'fb-table-medium', slot: 'center', scale: 1.12 }] },
+  { test: /bookcase|bookshelf|shelf/i, props: [{ propId: 'fb-shelf-a-small', slot: 'edge', scale: 1.1 }] },
+  { test: /cabinet|cupboard|wardrobe/i, props: [{ propId: 'fb-cabinet-small', slot: 'edge' }] },
+  { test: /couch|sofa|armchair/i, props: [{ propId: 'fb-couch', slot: 'edge', scale: 1.1 }] },
   { test: /campfire|hearth|cold hearth/i, props: [{ propId: 'campfire', slot: 'center' }] },
   { test: /bone|skull|corpse|skeleton|grave dust/i, props: [{ propId: 'skeleton', slot: 'center' }, { propId: 'skull', slot: 'edge' }] },
   { test: /weapon rack|weapon racks|spare weapons|rack of weapons/i, props: [{ propId: 'weapon-rack', slot: 'edge', scale: 1.08 }] },
@@ -68,9 +80,9 @@ function withoutDoorwayProps(plans: PropSpawnPlan[]): PropSpawnPlan[] {
 
 const MOTIF_AMBIENT: Record<DungeonMotif, string[]> = {
   mixed: ['torch', 'boulder'],
-  crypt: ['torch', 'skeleton'],
+  crypt: ['torch', 'skeleton', 'kg-gravestone-round'],
   temple: ['torch', 'altar'],
-  fortress: ['torch', 'crate'],
+  fortress: ['torch', 'crate', 'fb-chair-a'],
   mine: ['torch', 'boulder', 'coins'],
   ruin: ['torch', 'boulder', 'mold'],
 };
@@ -86,8 +98,8 @@ function mulberry32(seed: number): () => number {
   };
 }
 
-function propDef(propId: string) {
-  const art = ensurePropCatalogEntry(propId);
+function propDef(propId: string, rnd?: () => number, used?: Set<string>) {
+  const art = rnd ? pickPropVariant(propId, rnd, used) : ensurePropCatalogEntry(propId);
   if (!art) return null;
   return {
     id: art.id,
@@ -120,7 +132,7 @@ function plansFromNotePhrases(note: string): PropSpawnPlan[] {
   return plans;
 }
 
-function plansFromRoom(
+export function plansFromRoom(
   room: DungeonRoom,
   motif: DungeonMotif,
   furnishings: FurnishingStyle,
@@ -137,6 +149,15 @@ function plansFromRoom(
   }
   if (room.title === 'Entrance' || room.notes.some((n) => n.toLowerCase().includes('way in'))) {
     plans.push({ propId: 'torch', slot: 'edge' });
+  }
+  if (/barracks|quarters|dorm/i.test(room.title)) {
+    plans.push({ propId: 'fb-bed-single-a', slot: 'edge' }, { propId: 'fb-chair-a', slot: 'corner' });
+  }
+  if (/dining|hall|tavern/i.test(room.title)) {
+    plans.push({ propId: 'fb-table-medium', slot: 'center' }, { propId: 'fb-chair-a', slot: 'edge' });
+  }
+  if (/archive|library|study/i.test(room.title)) {
+    plans.push({ propId: 'fb-shelf-a-small', slot: 'edge' }, { propId: 'book', slot: 'center' });
   }
   if (
     room.title === 'Reward'
@@ -170,6 +191,17 @@ function floorCells(room: DungeonRoom, cols: number, rows: number, floor: Uint8A
   return cells;
 }
 
+function minUsedDist(col: number, row: number, used: Set<string>): number {
+  if (used.size === 0) return 8;
+  let best = 99;
+  for (const key of used) {
+    const [uc, ur] = key.split(',').map(Number);
+    if (uc == null || ur == null) continue;
+    best = Math.min(best, Math.hypot(col - uc, row - ur));
+  }
+  return best;
+}
+
 function pickCell(
   rnd: () => number,
   cells: Array<{ col: number; row: number }>,
@@ -178,30 +210,30 @@ function pickCell(
   used: Set<string>,
 ): { col: number; row: number } | null {
   if (cells.length === 0) return null;
-  const cx = room.x + room.w / 2;
-  const cy = room.y + room.h / 2;
-  const scored = cells
-    .map((c) => {
-      const dx = c.col + 0.5 - cx;
-      const dy = c.row + 0.5 - cy;
-      const dist = Math.hypot(dx, dy);
-      const edgeDist = Math.min(
-        c.col - room.x,
-        c.row - room.y,
-        room.x + room.w - 1 - c.col,
-        room.y + room.h - 1 - c.row,
-      );
-      let score = dist;
-      if (slot === 'edge') score = -edgeDist + dist * 0.15;
-      if (slot === 'corner') score = -edgeDist * 1.2 + dist * 0.05;
-      if (slot === 'center') score = dist;
-      return { c, score, key: `${c.col},${c.row}` };
-    })
-    .filter((s) => !used.has(s.key))
-    .sort((a, b) => a.score - b.score);
-  if (scored.length === 0) return null;
-  const pick = scored[Math.min(scored.length - 1, Math.floor(rnd() * Math.min(3, scored.length)))]!;
-  used.add(pick.key);
+  const free = cells.filter((c) => !used.has(`${c.col},${c.row}`));
+  if (free.length === 0) return null;
+  const tagged = free.map((c) => {
+    const left = c.col - room.x;
+    const top = c.row - room.y;
+    const right = room.x + room.w - 1 - c.col;
+    const bottom = room.y + room.h - 1 - c.row;
+    const edgeDist = Math.min(left, top, right, bottom);
+    const kind: SpawnSlot =
+      (left === 0 || right === 0) && (top === 0 || bottom === 0)
+        ? 'corner'
+        : edgeDist === 0
+          ? 'edge'
+          : 'center';
+    return { c, kind, edgeDist, spread: minUsedDist(c.col, c.row, used) };
+  });
+  let pool = tagged.filter((t) => t.kind === slot);
+  if (slot === 'center') pool = tagged.filter((t) => t.kind === 'center' || t.edgeDist >= 1);
+  if (pool.length === 0) pool = tagged.filter((t) => t.kind === 'edge');
+  if (pool.length === 0) pool = tagged;
+  pool.sort((a, b) => b.spread - a.spread + (rnd() - 0.5) * 0.35);
+  const cut = Math.max(4, Math.ceil(pool.length * 0.55));
+  const pick = pool[Math.floor(rnd() * Math.min(cut, pool.length))]!;
+  used.add(`${pick.c.col},${pick.c.row}`);
   return pick.c;
 }
 
@@ -221,7 +253,7 @@ function cellToItem(
   imageUrl: string,
   scale = 1,
 ): ImageItem {
-  const size = cell * scale;
+  const size = propFootprintPx(propId, cell, scale);
   const lx = col * cell + (cell - size) / 2;
   const ly = row * cell + (cell - size) / 2;
   return {
@@ -238,7 +270,7 @@ function cellToItem(
     width: size,
     height: size,
     zIndex: itemZ(col, row),
-    locked: true,
+    locked: false,
     visible: true,
     dungeonPropForMapId: map.id,
     propMapLocalX: lx,
@@ -278,6 +310,7 @@ export function buildDungeonPropItems(
 
   const rnd = mulberry32((dungeon.keyText.length * 997 + map.x * 13 + map.y * 17) >>> 0);
   const used = stairCells(dungeon.stairs);
+  const usedVariants = new Set<string>();
   const items: ImageItem[] = spawnStairProps(map, dungeon, used);
 
   for (const room of dungeon.rooms) {
@@ -287,10 +320,16 @@ export function buildDungeonPropItems(
     );
     if (cells.length === 0) continue;
 
+    let extras = 0;
     for (const plan of plans) {
-      const def = propDef(plan.propId);
+      const def = propDef(plan.propId, rnd, usedVariants);
       if (!def) continue;
-      const cell = pickCell(rnd, cells, room, plan.slot, used);
+      let slot = plan.slot;
+      if (slot === 'center') {
+        extras += 1;
+        if (extras > 1) slot = extras % 2 === 0 ? 'edge' : 'corner';
+      }
+      const cell = pickCell(rnd, cells, room, slot, used);
       if (!cell) continue;
       items.push(
         cellToItem(
@@ -307,5 +346,86 @@ export function buildDungeonPropItems(
     }
   }
 
+  return items;
+}
+
+export type ModularFurnishRoom = {
+  mapId: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  title: string;
+  notes: string[];
+};
+
+/** Place note-driven props inside Kenney/KayKit room footprints (1 m cells, 1 m wall inset). */
+export function buildFurnishingsInWorldRooms(
+  rooms: ModularFurnishRoom[],
+  motif: DungeonMotif,
+  furnishings: FurnishingStyle,
+  seed: number,
+): ImageItem[] {
+  if (furnishings === 'none' || rooms.length === 0) return [];
+  const rnd = mulberry32((seed ^ 0x9e3779b9) >>> 0);
+  const cell = MODULAR_PX_PER_UNIT;
+  const items: ImageItem[] = [];
+  const usedVariants = new Set<string>();
+
+  for (const room of rooms) {
+    const plans = plansFromRoom(
+      { id: 0, x: 0, y: 0, w: 1, h: 1, title: room.title, notes: room.notes },
+      motif,
+      furnishings,
+    );
+    const inset = cell * MODULAR_ROOM_WALL_CELLS;
+    const innerW = room.width - inset * 2;
+    const innerH = room.height - inset * 2;
+    if (innerW < cell || innerH < cell) continue;
+    const cols = Math.max(1, Math.floor(innerW / cell));
+    const rows = Math.max(1, Math.floor(innerH / cell));
+    const cells: Array<{ col: number; row: number }> = [];
+    for (let row = 0; row < rows; row++) {
+      for (let col = 0; col < cols; col++) cells.push({ col, row });
+    }
+    const used = new Set<string>();
+    const fakeRoom: DungeonRoom = { id: 0, x: 0, y: 0, w: cols, h: rows, title: room.title, notes: room.notes };
+    let extras = 0;
+    for (const plan of plans) {
+      const def = propDef(plan.propId, rnd, usedVariants);
+      if (!def) continue;
+      let slot = plan.slot;
+      if (slot === 'center') {
+        extras += 1;
+        if (extras > 1) slot = extras % 2 === 0 ? 'edge' : 'corner';
+      }
+      const picked = pickCell(rnd, cells, fakeRoom, slot, used);
+      if (!picked) continue;
+      const size = propFootprintPx(def.id, cell, plan.scale ?? 1);
+      const lx = inset + picked.col * cell + (cell - size) / 2;
+      const ly = inset + picked.row * cell + (cell - size) / 2;
+      items.push({
+        id: uuidv4(),
+        type: 'image',
+        name: def.name,
+        imageUrl: def.imageUrl,
+        propId: def.id,
+        propState: 0,
+        propNeedsDmApprove: true,
+        x: room.x + lx,
+        y: room.y + ly,
+        rotation: 0,
+        width: size,
+        height: size,
+        zIndex: 4,
+        locked: false,
+        visible: true,
+        dungeonPropForMapId: room.mapId,
+        propMapLocalX: lx,
+        propMapLocalY: ly,
+        propMapLocalRotation: 0,
+      });
+    }
+  }
   return items;
 }

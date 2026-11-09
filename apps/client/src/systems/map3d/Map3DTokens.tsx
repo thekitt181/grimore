@@ -1,5 +1,5 @@
 import { useRef, type ReactNode } from 'react';
-import { useFrame, useThree } from '@react-three/fiber';
+import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { useMapStore } from '@/systems/map/store/mapStore';
 import { useItemStore } from '@/systems/scene/store/itemStore';
@@ -15,7 +15,7 @@ import { TokenConditionDots } from './TokenConditionDots';
 import { TokenTransformGroup } from './TokenTransformGroup';
 import { TokenSelectionGizmo } from './Map3DTokenGizmo';
 import { TABLE_MINI_VIEW_AZIMUTH_OFFSET } from './orthographicCameraSync';
-import { tokenDisc } from '@/systems/scene/token/tokenGrid';
+import { tokenDisc, tokenZoomBoost } from '@/systems/scene/token/tokenGrid';
 import { useFirstPersonStore } from './firstPersonStore';
 import { isTokenVisibleInFpFog } from './fpTokenLosVisibility';
 import { resolveTokenModelUrl } from './defaultTokenModel';
@@ -59,6 +59,39 @@ function useTokenMeshBase(token: TokenItem) {
     ref.current = { w: token.width, h: token.height };
   }
   return ref.current;
+}
+
+/**
+ * Flat disc on the map that ignores wall depth, and grows when zoomed out
+ * so tokens still read as pieces on the dungeon.
+ */
+function TokenMapBeacon({ token, footprint }: { token: TokenItem; footprint: number }) {
+  const firstPerson = useFirstPersonStore((s) => s.enabled);
+  const viewScale = useMapStore((s) => s.viewport.scale);
+  const { texture } = useThreeTexture(token.imageUrl);
+  const boost = tokenZoomBoost(footprint, viewScale);
+  const borderColor = parseBorderColor(token.borderColour);
+  const r = Math.max(4, footprint * 0.48);
+  if (firstPerson) return null;
+
+  return (
+    <group position={[0, 10, 0]} scale={[boost, 1, boost]}>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} renderOrder={46}>
+        <circleGeometry args={[r * 1.14, 40]} />
+        <meshBasicMaterial color={borderColor} depthTest={false} depthWrite={false} toneMapped={false} />
+      </mesh>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.35, 0]} renderOrder={47}>
+        <circleGeometry args={[r, 40]} />
+        <meshBasicMaterial color="#1c1c28" depthTest={false} depthWrite={false} toneMapped={false} />
+      </mesh>
+      {texture ? (
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.7, 0]} renderOrder={48}>
+          <circleGeometry args={[r * 0.9, 40]} />
+          <meshBasicMaterial map={texture} depthTest={false} depthWrite={false} toneMapped={false} />
+        </mesh>
+      ) : null}
+    </group>
+  );
 }
 
 /** Classic D&D-style round base + contact shadow for 2D map minis. */
@@ -129,29 +162,26 @@ function Token2DFlat({
   const portraitH = faceR * 2.15;
   const portraitY = baseTopY + portraitH * 0.52;
   const firstPerson = useFirstPersonStore((s) => s.enabled);
-  const { camera } = useThree();
   const billboardPos = useRef(new THREE.Vector3());
   const parentQuat = useRef(new THREE.Quaternion());
   const parentEuler = useRef(new THREE.Euler());
 
-  useFrame(() => {
+  useFrame((state) => {
     const g = portraitRef.current;
     if (!g || displayOnly) return;
     if (!firstPerson) {
-      // Face the token's own forward (parent already has yaw).
       g.rotation.set(0, 0, 0);
       return;
     }
-    // Y-axis billboard — stand facing the FP camera.
+    const cam = state.camera;
     const parent = g.parent;
     if (!parent) return;
     parent.getWorldPosition(billboardPos.current);
-    const dx = camera.position.x - billboardPos.current.x;
-    const dz = camera.position.z - billboardPos.current.z;
+    const dx = cam.position.x - billboardPos.current.x;
+    const dz = cam.position.z - billboardPos.current.z;
     parent.getWorldQuaternion(parentQuat.current);
     parentEuler.current.setFromQuaternion(parentQuat.current, 'YXZ');
-    const worldYaw = Math.atan2(dx, dz);
-    g.rotation.set(0, worldYaw - parentEuler.current.y, 0);
+    g.rotation.set(0, Math.atan2(dx, dz) - parentEuler.current.y, 0);
   });
 
   // Underlay: lift above GLB map; lay flat so top-down matches classic 2D tokens.
@@ -166,6 +196,7 @@ function Token2DFlat({
       displayOnly={displayOnly}
     >
       <group ref={modelRootRef} scale={[stretchX, 1, stretchZ]}>
+        {!displayOnly ? <TokenMapBeacon token={token} footprint={targetSize} /> : null}
         {displayOnly ? (
           <group rotation={[-Math.PI / 2, 0, 0]}>
             <mesh renderOrder={30}>
@@ -187,27 +218,25 @@ function Token2DFlat({
           <>
             <MiniaturePedestal radius={baseRadius} borderColor={borderColor} />
             <group ref={portraitRef} position={[0, portraitY, 0]}>
-              <mesh renderOrder={12} castShadow>
+              <mesh renderOrder={12}>
                 <circleGeometry args={[faceR, 48]} />
-                <meshStandardMaterial color="#1c1c28" roughness={0.85} metalness={0.05} side={THREE.DoubleSide} />
+                <meshBasicMaterial color={borderColor} depthWrite toneMapped={false} fog={false} />
               </mesh>
-              {texture && (
-                <mesh position={[0, 0, 0.04]} renderOrder={13}>
-                  <circleGeometry args={[faceR * 0.92, 48]} />
-                  <meshStandardMaterial
+              {texture ? (
+                <mesh position={[0, 0, 0.12]} renderOrder={13}>
+                  <circleGeometry args={[faceR * 0.9, 48]} />
+                  <meshBasicMaterial
                     map={texture}
-                    transparent
-                    roughness={0.55}
-                    metalness={0.05}
-                    depthWrite={false}
-                    side={THREE.DoubleSide}
+                    alphaTest={0.08}
+                    depthWrite
+                    toneMapped={false}
+                    fog={false}
+                    polygonOffset
+                    polygonOffsetFactor={-2}
+                    polygonOffsetUnits={-2}
                   />
                 </mesh>
-              )}
-              <mesh position={[0, 0, 0.02]} renderOrder={12}>
-                <ringGeometry args={[faceR * 0.9, faceR, 48]} />
-                <meshStandardMaterial color={borderColor} roughness={0.42} metalness={0.55} side={THREE.DoubleSide} />
-              </mesh>
+              ) : null}
             </group>
             <TokenNameLabel name={token.name} footprint={targetSize} />
             <TokenHpBar tokenId={token.id} footprint={targetSize} />
@@ -279,6 +308,7 @@ function Token3DModel({
       scaleBaseHeight={meshBase.h}
       displayOnly={displayOnly}
     >
+      {!displayOnly ? <TokenMapBeacon token={token} footprint={targetSize} /> : null}
       {view2d && (
         <MiniaturePedestal radius={baseRadius} borderColor={borderColor} />
       )}
@@ -383,6 +413,7 @@ function Token3DMesh({
       displayOnly={displayOnly}
     >
       <group ref={modelRootRef} scale={[stretchX, 1, stretchZ]}>
+      {!displayOnly ? <TokenMapBeacon token={token} footprint={targetSize} /> : null}
       <mesh position={[0, baseHeightMesh / 2, 0]} castShadow receiveShadow={false} renderOrder={10}>
         <cylinderGeometry args={[radius, radius * 1.05, baseHeightMesh, 32]} />
         <meshStandardMaterial color="#2a2018" roughness={0.7} metalness={0.25} />

@@ -79,20 +79,20 @@ function PropArtBillboard({
     item.propMount === 'wall'
     || Math.abs(item.propPitch ?? 0) > 0.5
     || Math.abs(item.propRoll ?? 0) > 0.5;
+  const ghost = opacity < 0.99;
   const plane = (
     <mesh position={[0, planeH / 2, 0]} renderOrder={14}>
       <planeGeometry args={[planeW, planeH]} />
-      <meshStandardMaterial
+      <meshBasicMaterial
         map={texture}
         color="#ffffff"
-        transparent
+        transparent={ghost}
         opacity={opacity}
-        roughness={0.48}
-        metalness={0.04}
-        envMapIntensity={1.15}
         side={THREE.DoubleSide}
-        alphaTest={0.08}
-        depthWrite={opacity >= 0.99}
+        alphaTest={ghost ? 0.08 : 0.5}
+        depthWrite={!ghost}
+        toneMapped={false}
+        premultipliedAlpha={false}
       />
     </mesh>
   );
@@ -129,20 +129,20 @@ function GenericImageBillboard({
     item.propMount === 'wall'
     || Math.abs(item.propPitch ?? 0) > 0.5
     || Math.abs(item.propRoll ?? 0) > 0.5;
+  const ghost = opacity < 0.99;
   const plane = (
     <mesh position={[0, planeH / 2, 0]} renderOrder={14}>
       <planeGeometry args={[planeW, planeH]} />
-      <meshStandardMaterial
+      <meshBasicMaterial
         {...(texture ? { map: texture } : {})}
         color={texture ? '#ffffff' : '#1c1c28'}
-        transparent
+        transparent={ghost}
         opacity={opacity}
-        roughness={0.48}
-        metalness={0.04}
-        envMapIntensity={1.15}
         side={THREE.DoubleSide}
-        alphaTest={0.08}
-        depthWrite={opacity >= 0.99}
+        alphaTest={ghost ? 0.08 : 0.5}
+        depthWrite={!ghost}
+        toneMapped={false}
+        premultipliedAlpha={false}
       />
     </mesh>
   );
@@ -220,6 +220,7 @@ function MeshProp({
 }
 
 function MapImageMesh({ item, displayOnly = false }: { item: ImageItem; displayOnly?: boolean }) {
+  const gm = useSessionStore((s) => s.myRole === 'GM');
   const propId = resolvePropId(item);
   const wallHeightCells = useMapStore((s) => s.wallHeightCells);
   const gridSize = useItemStore((s) => {
@@ -323,7 +324,7 @@ function MapImageMesh({ item, displayOnly = false }: { item: ImageItem; displayO
       ) : (
         <GenericImageBillboard item={item} displayOnly={displayOnly} />
       )}
-      <TokenNameLabel name={item.name} footprint={footprint} />
+      {gm ? <TokenNameLabel name={item.name} footprint={footprint} /> : null}
     </SceneItemTransformGroup>
   );
 }

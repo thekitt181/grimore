@@ -161,6 +161,42 @@ export function canonicalPropId(id: string): string {
   return ALIAS[id] ?? id;
 }
 
+/**
+ * How many 5 ft cells this object should occupy.
+ * Loot and handhelds are inches-to-feet, not a Medium token disc.
+ */
+const FOOTPRINT_CELLS: Array<[RegExp, number]> = [
+  [/coins?|gold|ring$|key|potion|bottle|candle|scroll|book|spellbook|mug|skull|^bone$|bread|ration|orb|rune$|locket|signet|dart$|match/i, 0.2],
+  [/torch|sconce|lantern/i, 0.22],
+  [/dagger|wand|arrow$|smokebomb/i, 0.32],
+  [/chair|stool/i, 0.4],
+  [/sword|axe$|staff|crossbow|shield|quiver/i, 0.48],
+  [/column|statue|gravestone|angel|pillar/i, 0.5],
+  [/corpse|skeleton|mushroom|mold|fungus/i, 0.52],
+  [/plate|spear|trap|glyph|tripwire|net/i, 0.55],
+  [/shelf|cabinet|bookcase|wardrobe|weapon-rack/i, 0.58],
+  [/chest|crate|barrel|keg|strongbox|trunk/i, 0.68],
+  [/boulder|rubble|rock/i, 0.65],
+  [/sarcophag|altar|cage|pedestal|idol|fountain|well|cauldron|campfire/i, 0.82],
+  [/shop|portal|swarm|cart/i, 0.9],
+  [/bed|table|couch|desk|tent/i, 1.05],
+  [/door|gate|stairs|hatch|arch|ladder|mural/i, 1],
+];
+
+/** Map-cell fraction for a prop (1 = one 5 ft square). */
+export function propFootprintCells(propId: string): number {
+  const id = canonicalPropId(propId);
+  for (const [re, cells] of FOOTPRINT_CELLS) {
+    if (re.test(id)) return cells;
+  }
+  return 0.45;
+}
+
+export function propFootprintPx(propId: string, gridSize: number, scale = 1): number {
+  const cells = propFootprintCells(propId) * Math.min(1.2, Math.max(0.75, scale));
+  return Math.max(10, gridSize * cells);
+}
+
 /** Base catalog lookup (runtime extras live in propCatalog). */
 export function propArtByIdBase(id: string): PropArt | undefined {
   const key = canonicalPropId(id);
@@ -170,6 +206,7 @@ export function propArtByIdBase(id: string): PropArt | undefined {
 export {
   allPropArtEntries,
   ensurePropCatalogEntry,
+  pickPropVariant,
   propArtById,
   propIdsFromNoteText,
 } from './propCatalog';

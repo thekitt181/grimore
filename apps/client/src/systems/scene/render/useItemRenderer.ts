@@ -21,6 +21,7 @@ import {
 import type { Item, MapItem } from '../types';
 import { itemDisplayZIndex, wallDisplayZIndex } from '../zOrder';
 import { tokenRendersInThree } from '../token/tokenRenderType';
+import { tokenZoomBoost } from '../token/tokenGrid';
 import { sceneRefs } from '../sceneRefs';
 import { emitItemUpdate } from '../sceneSync';
 import { dungeonWallStretch, scaledMapGeometry } from '@/systems/map/wallUtils';
@@ -66,6 +67,7 @@ export function useItemRenderer(
     s.isActive && s.combatants[s.currentIndex] ? s.combatants[s.currentIndex]!.tokenId : undefined
   );
   const viewMode = useMapStore((s) => s.viewMode);
+  const viewScale = useMapStore((s) => s.viewport.scale);
   const gm2dEditorOpen = useMapStore((s) => s.gm2dEditorOpen);
   const activeTool = useMapStore((s) => s.activeTool);
   const fogRevision = useMapStore((s) => s.fogRevision);
@@ -205,7 +207,8 @@ export function useItemRenderer(
       // Mid-walk: mesh apply owns x/y — do not snap back to item store.
       const b = resolveItemBounds(item, liveById[item.id]);
       c.pivot.set(item.width / 2, item.height / 2);
-      c.scale.set(b.width / item.width, b.height / item.height);
+      const zoomBoost = item.type === 'token' ? tokenZoomBoost(Math.min(item.width, item.height), viewScale) : 1;
+      c.scale.set((b.width / item.width) * zoomBoost, (b.height / item.height) * zoomBoost);
       const walk = item.type === 'token' ? getWalkPose(item.id) : undefined;
       const walkOwned = Boolean(
         item.type === 'token'
@@ -321,6 +324,7 @@ export function useItemRenderer(
     myRole,
     activeTurnItemId,
     viewMode,
+    viewScale,
     gm2dEditorOpen,
     activeTool,
     threeHealthTick,

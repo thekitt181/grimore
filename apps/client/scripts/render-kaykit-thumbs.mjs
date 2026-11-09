@@ -6,8 +6,8 @@ import { createRequire } from 'node:module';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const client = path.resolve(here, '..');
-const glbDir = path.join(client, 'public/props3d/kaykit');
-const outDir = path.join(client, 'public/props/kaykit');
+const glbDir = process.env.THUMB_GLB || path.join(client, 'public/props3d/kaykit');
+const outDir = process.env.THUMB_PNG || path.join(client, 'public/props/kaykit');
 const threeRoot = path.join(client, 'node_modules/three');
 const htmlPath = path.join(here, 'kaykit-thumb.html');
 

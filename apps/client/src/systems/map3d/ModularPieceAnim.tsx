@@ -67,6 +67,21 @@ export function ModularPieceAnim({
   useEffect(() => {
     const openClip = animations.find((c) => /^open$/i.test(c.name));
     const closeClip = animations.find((c) => /^close$/i.test(c.name));
+    const idle = animations.filter((c) => !/^open$/i.test(c.name) && !/^close$/i.test(c.name));
+    if (!openClip && !closeClip && idle.length > 0) {
+      const mixer = new THREE.AnimationMixer(root);
+      mixerRef.current = mixer;
+      for (const clip of idle) {
+        const action = mixer.clipAction(clip);
+        action.reset();
+        action.setLoop(THREE.LoopRepeat, Infinity);
+        action.play();
+      }
+      return () => {
+        mixer.stopAllAction();
+        mixerRef.current = null;
+      };
+    }
     if (!openClip && !closeClip) {
       mixerRef.current?.stopAllAction();
       mixerRef.current = null;

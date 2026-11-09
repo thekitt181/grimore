@@ -10,6 +10,12 @@ import { KAYKIT_PROP_ART } from './kaykitPropCatalog';
 import { SAZKUASH_PROP_ART } from './sazkuashPropCatalog';
 import { ASSETS2D_CHEST_ART } from './assets2dChestCatalog';
 import { SPAJX_PROP_ART } from './spajxPropCatalog';
+import { FURNITURE_BITS_PROP_ART } from './furnitureBitsPropCatalog';
+import { KENNEY_FURNITURE_PROP_ART } from './kenneyFurniturePropCatalog';
+import { QUATERNIUS_PROP_ART } from './quaterniusPropCatalog';
+import { QUATERNIUS_MORE_PROP_ART } from './quaterniusMorePropCatalog';
+import { KENNEY_GRAVEYARD_PROP_ART } from './kenneyGraveyardPropCatalog';
+import { KAYKIT_WEAPONS_PROP_ART } from './kaykitWeaponsPropCatalog';
 
 /** Props registered at runtime when notes / spawn reference an id not in the base list. */
 const EXTRA_PROP_ART: PropArt[] = [];
@@ -77,7 +83,13 @@ const PHRASE_TO_ID: Array<{ test: RegExp; id: string }> = [
   { test: /\bskeleton\b|\bbones\b/i, id: 'skeleton' },
   { test: /\bskull\b/i, id: 'skull' },
   { test: /\bcampfire\b|\bhearth\b|\bcold hearth\b/i, id: 'campfire' },
-  { test: /\btorch\b|\bsconce\b|\bcandle\b/i, id: 'torch' },
+  { test: /\btorch\b|\bsconce\b|\bcandle\b|\blamp\b|\blantern\b/i, id: 'torch' },
+  { test: /\bbeds?\b|\bbunks?\b|\bcots?\b|\bquarters\b|\bbarracks\b/i, id: 'fb-bed-single-a' },
+  { test: /\bchairs?\b|\bstools?\b|\bseats?\b/i, id: 'fb-chair-a' },
+  { test: /\btables?\b|\bdesks?\b|\bdining\b/i, id: 'fb-table-medium' },
+  { test: /\bbookcases?\b|\bbookshel(?:f|ves)\b|\bshelves\b|\bshelf\b/i, id: 'fb-shelf-a-small' },
+  { test: /\bcabinets?\b|\bcupboards?\b|\bwardrobes?\b/i, id: 'fb-cabinet-small' },
+  { test: /\bcouches?\b|\bsofas?\b|\barmchairs?\b/i, id: 'fb-couch' },
 ];
 
 function restCandidates(id: string): string[] {
@@ -157,6 +169,12 @@ export function allPropArtEntries(): PropArt[] {
     ...KAYKIT_PROP_ART,
     ...ALSTRA_PROP_ART,
     ...SPAJX_PROP_ART,
+    ...FURNITURE_BITS_PROP_ART,
+    ...KENNEY_FURNITURE_PROP_ART,
+    ...QUATERNIUS_PROP_ART,
+    ...QUATERNIUS_MORE_PROP_ART,
+    ...KENNEY_GRAVEYARD_PROP_ART,
+    ...KAYKIT_WEAPONS_PROP_ART,
     ...ASSETS2D_CHEST_ART,
     ...SAZKUASH_PROP_ART,
     ...EXTRA_PROP_ART,
@@ -170,6 +188,12 @@ export function propArtById(id: string): PropArt | undefined {
     ?? KAYKIT_PROP_ART.find((p) => p.id === key)
     ?? ALSTRA_PROP_ART.find((p) => p.id === key)
     ?? SPAJX_PROP_ART.find((p) => p.id === key)
+    ?? FURNITURE_BITS_PROP_ART.find((p) => p.id === key)
+    ?? KENNEY_FURNITURE_PROP_ART.find((p) => p.id === key)
+    ?? QUATERNIUS_PROP_ART.find((p) => p.id === key)
+    ?? QUATERNIUS_MORE_PROP_ART.find((p) => p.id === key)
+    ?? KENNEY_GRAVEYARD_PROP_ART.find((p) => p.id === key)
+    ?? KAYKIT_WEAPONS_PROP_ART.find((p) => p.id === key)
     ?? ASSETS2D_CHEST_ART.find((p) => p.id === key)
     ?? SAZKUASH_PROP_ART.find((p) => p.id === key)
     ?? EXTRA_PROP_ART.find((p) => p.id === key);
@@ -231,4 +255,72 @@ export function propIdsFromNoteText(text: string): string[] {
     }
   }
   return [...ids];
+}
+
+/** Kind used to swap among catalog assets when auto-furnishing. */
+export function propVarietyFamily(id: string): string {
+  const key = canonicalPropId(id);
+  const art = propArtById(key);
+  const blob = `${key} ${art?.name ?? ''} ${art?.short ?? ''}`.toLowerCase();
+  if (
+    key.startsWith('spajx-')
+    || key.startsWith('a2d-')
+    || key.startsWith('alstra-chest')
+    || /(^|-)(chest|coffer|trunk|strongbox|footlocker)(-|$)/.test(key)
+    || /\b(chest|coffer|trunk|strongbox|footlocker)\b/.test(blob)
+  ) {
+    return 'chest';
+  }
+  if (/(^|-)(barrel|keg)(-|$)/.test(key) || /\b(barrel|keg)s?\b/.test(blob)) return 'barrel';
+  if (/(^|-)(crate|box)(-|$)/.test(key) || /\b(crates?|boxes|box)\b/.test(blob)) return 'crate';
+  if (/(^|-)(coin)s?(-|$)/.test(key) || /\bcoins?\b/.test(blob) || /ingot/.test(key)) return 'coins';
+  if (/(^|-)torch(-|$)/.test(key) || /\btorch\b/.test(blob)) return 'torch';
+  if (/(^|-)(column|pillar)(-|$)/.test(key) || /\b(column|pillar)s?\b/.test(blob)) return 'column';
+  if (/(^|-)(potion|bottle)/.test(key) || /\b(potion|bottle)s?\b/.test(blob)) return 'potion';
+  if (/(^|-)candle(-|$)/.test(key) || /\bcandles?\b/.test(blob)) return 'candle';
+  if (/(^|-)(key|keyring)/.test(key) || /\bkeys?\b/.test(blob)) return 'key';
+  if (/(^|-)(bookcase|bookshelf|shelf)(-|$)/.test(key) || /\b(bookcase|bookshelf|shelves|shelf)\b/.test(blob)) {
+    return 'shelf';
+  }
+  if (/(^|-)book/.test(key) || /\bbooks?\b/.test(blob)) return 'book';
+  if (/(^|-)(bed|bunk|cot)(-|$)/.test(key) || /\b(beds?|bunks?|cots?)\b/.test(blob)) return 'bed';
+  if (/(^|-)(armchair|chair|stool)(-|$)/.test(key) || /\b(armchairs?|chairs?|stools?)\b/.test(blob)) return 'chair';
+  if (/(^|-)(table|desk)(-|$)/.test(key) || /\b(tables?|desks?)\b/.test(blob)) return 'table';
+  if (/(^|-)(cabinet|cupboard|wardrobe|nightstand)(-|$)/.test(key) || /\b(cabinets?|cupboards?|wardrobes?|nightstands?)\b/.test(blob)) {
+    return 'cabinet';
+  }
+  if (/(^|-)(couch|sofa|lounge)(-|$)/.test(key) || /\b(couches?|sofas?)\b/.test(blob)) return 'couch';
+  if (/(^|-)(lamp|lantern)(-|$)/.test(key) || /\b(lamps?|lanterns?)\b/.test(blob)) return 'lamp';
+  if (/(^|-)(boulder|rubble|rock)(-|$)/.test(key) || /\b(boulder|rubble|rocks?)\b/.test(blob)) return 'boulder';
+  if (/sarcophag|coffin/.test(key) || /\b(sarcophagus|coffins?)\b/.test(blob)) return 'sarcophagus';
+  if (/(^|-)(grave|gravestone)(-|$)/.test(key) || /\b(graves?|gravestones?)\b/.test(blob)) return 'gravestone';
+  if (/(^|-)altar(-|$)/.test(key) || /\baltars?\b/.test(blob)) return 'altar';
+  if (/(^|-)(campfire|bonfire|fireplace)(-|$)/.test(key) || /\b(campfires?|bonfires?|fireplaces?)\b/.test(blob)) {
+    return 'campfire';
+  }
+  if (/(^|-)(well|fountain)(-|$)/.test(key) || /\b(wells?|fountains?)\b/.test(blob)) return 'well';
+  if (/(^|-)(beartrap|blade)(-|$)/.test(key) || /\bbear ?traps?\b/.test(blob)) return 'blade';
+  if (/(^|-)spear(-|$)/.test(key) || /\bspears?\b/.test(blob)) return 'spear';
+  if (/(^|-)shield(-|$)/.test(key) || /\bshields?\b/.test(blob)) return 'sword';
+  if (/(^|-)banner(-|$)/.test(key) || /\bbanners?\b/.test(blob)) return 'banner';
+  if (/(^|-)ring/.test(key) || /\brings?\b/.test(blob)) return 'ring';
+  if (/(^|-)(axe|dagger|bow|hammer|sword)/.test(key) || /\b(axes?|daggers?|bows?|hammers?|swords?)\b/.test(blob)) {
+    return 'sword';
+  }
+  if (/(^|-)sword(-|$)/.test(key) || /\bswords?\b/.test(blob)) return 'sword';
+  if (/(^|-)skeleton(-|$)/.test(key) || /\bskeletons?\b/.test(blob)) return 'skeleton';
+  return key;
+}
+
+/** Random catalog asset in the same family (chests, barrels, crates, …). Avoids repeats when `used` is passed. */
+export function pickPropVariant(id: string, rnd: () => number, used?: Set<string>): PropArt | undefined {
+  const fallback = ensurePropCatalogEntry(id);
+  const family = propVarietyFamily(id);
+  const pool = allPropArtEntries().filter((p) => propVarietyFamily(p.id) === family);
+  if (pool.length === 0) return fallback;
+  const fresh = used ? pool.filter((p) => !used.has(p.id)) : pool;
+  const pickFrom = fresh.length > 0 ? fresh : pool;
+  const art = pickFrom[Math.floor(rnd() * pickFrom.length)] ?? fallback;
+  if (art && used) used.add(art.id);
+  return art;
 }

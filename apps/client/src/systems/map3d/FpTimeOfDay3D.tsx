@@ -5,6 +5,7 @@ import type { TimeOfDay } from '@grimoire/shared';
 import { getActiveTimeOfDay, useSceneMediaStore } from '@/systems/scene/media/sceneMediaStore';
 import { useMapStore } from '@/systems/map/store/mapStore';
 import { fpHardVisionActive } from './FirstPersonVisionFog';
+import { useFirstPersonStore } from './firstPersonStore';
 
 export type TimeLightRig = {
   ambient: number;
@@ -152,18 +153,23 @@ function SkyTint({ color, opacity }: { color: string; opacity: number }) {
     const m = meshRef.current;
     if (!m) return;
     m.position.copy(camera.position);
+    const far = camera instanceof THREE.PerspectiveCamera ? camera.far : 4000;
+    const r = Math.max(200, far * 0.42);
+    m.scale.setScalar(r / 1000);
   });
   if (opacity < 0.01) return null;
   return (
     <mesh ref={meshRef} frustumCulled={false} renderOrder={6}>
-      <sphereGeometry args={[12000, 24, 16]} />
+      <sphereGeometry args={[1000, 24, 16]} />
       <meshBasicMaterial
         color={color}
         transparent
         opacity={opacity}
         side={THREE.BackSide}
         depthWrite={false}
+        depthTest
         blending={THREE.MultiplyBlending}
+        fog={false}
       />
     </mesh>
   );
@@ -178,7 +184,7 @@ function NightStars3D() {
     for (let i = 0; i < n; i++) {
       const theta = Math.random() * Math.PI * 2;
       const phi = Math.random() * Math.PI * 0.45;
-      const r = 9000;
+      const r = 800;
       const o = i * 3;
       positions[o] = r * Math.sin(phi) * Math.cos(theta);
       positions[o + 1] = r * Math.cos(phi) * 0.55 + 400;
@@ -214,6 +220,7 @@ function NightStars3D() {
         transparent
         opacity={0.65}
         depthWrite={false}
+        fog={false}
         blending={THREE.AdditiveBlending}
       />
     </points>
@@ -223,7 +230,7 @@ function NightStars3D() {
 function SceneBackground({ color }: { color: string }) {
   const target = useMemo(() => new THREE.Color(color), [color]);
   useFrame(({ scene }) => {
-    // FoW / midnight DV hard sight paints its own black void.
+    if (useFirstPersonStore.getState().enabled) return;
     if (fpHardVisionActive()) return;
 
     if (!(scene.background instanceof THREE.Color)) {
@@ -237,7 +244,11 @@ function SceneBackground({ color }: { color: string }) {
 
 function SceneFog({ color, density }: { color: string; density: number }) {
   useFrame(({ scene }) => {
-    // FoW or midnight darkvision owns linear Fog — otherwise map-wide time fog.
+    // Linear/exp fog in FP draws a black band across the top of the view.
+    if (useFirstPersonStore.getState().enabled) {
+      scene.fog = null;
+      return;
+    }
     if (fpHardVisionActive()) return;
 
     if (density <= 0) {
@@ -262,6 +273,7 @@ function SceneFog({ color, density }: { color: string; density: number }) {
  */
 export function FpTimeOfDay3D() {
   const view3d = useMapStore((s) => s.viewMode === '3d');
+  const firstPerson = useFirstPersonStore((s) => s.enabled);
   const timeOfDay = useSceneMediaStore(() => getActiveTimeOfDay());
   const rig = TIME_LIGHT_RIG[timeOfDay];
 
@@ -271,8 +283,8 @@ export function FpTimeOfDay3D() {
     <group>
       <SceneBackground color={rig.background} />
       <SceneFog color={rig.fogColor} density={rig.fogDensity} />
-      <SkyTint color={rig.tintColor} opacity={rig.tintOpacity} />
-      {rig.stars && <NightStars3D />}
+      {!firstPerson && <SkyTint color={rig.tintColor} opacity={rig.tintOpacity} />}
+      {!firstPerson && rig.stars && <NightStars3D />}
     </group>
   );
 }

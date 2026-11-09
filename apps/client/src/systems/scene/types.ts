@@ -154,6 +154,7 @@ export interface DungeonFloorLink {
     density?: 'sparse' | 'normal' | 'packed';
     furnishings?: 'none' | 'light' | 'full';
     chambers?: 'cramped' | 'normal' | 'grand';
+    theme?: string;
   };
   stairs: DungeonStairRef[];
   /** Planned depth of this delve. The last floor has no stairs going deeper. */
@@ -214,6 +215,16 @@ export interface TokenItem extends BaseItem {
   hideHpFromPlayers?: boolean;
   /** Initiative modifier (typically DEX mod) for Roll Initiative. */
   initiativeMod?: number;
+  /** GM: token patrols on its own and can open and close doors. */
+  wandering?: boolean;
+  /** GM marked this token to wander. Shift+W starts/stops these only. */
+  wanderChosen?: boolean;
+  /** World-space patrol waypoints. When set, wandering follows this loop. */
+  wanderPath?: Array<{ x: number; y: number }>;
+  /** Tokens spawned as one encounter share this id (room occupancy). */
+  encounterGroupId?: string;
+  /** Intelligence score from the monster stat block (door use). */
+  monsterInt?: number;
   /** Linked D&D Beyond character id. */
   ddbCharacterId?: number;
   /** Player character (vs monster/NPC). */

@@ -30,6 +30,7 @@ import {
 } from './mapSidebarStore';
 import { useCompendiumUiStore } from '@/systems/compendium/compendiumStore';
 import { DungeonGeneratorPanel } from '@/systems/map/dungeon/DungeonGeneratorPanel';
+import { ModularGeneratorPanel } from '@/systems/map/dungeon/ModularGeneratorPanel';
 import { DungeonPropsPanel } from '@/systems/map/props/DungeonPropsPanel';
 import { MapLibraryPanel } from '@/systems/map/library/MapLibraryPanel';
 import { ModularKitPanel } from '@/systems/map/library/ModularKitPanel';
@@ -477,6 +478,7 @@ function GMSidebarContent() {
       <LootPanel />
       <ShopPanel />
       <NpcCodexPanel />
+      <ModularGeneratorPanel />
       <DungeonGeneratorPanel />
       <DungeonPropsPanel />
 

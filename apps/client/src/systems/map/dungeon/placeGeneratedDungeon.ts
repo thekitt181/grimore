@@ -13,6 +13,7 @@ import { DUNGEON_DOORS_SPAWN_REVISION, DUNGEON_PROPS_SPAWN_REVISION } from './en
 import { buildDungeonDoorItems } from './dungeonDoorSpawn';
 import { bindMapBoundProp } from '@/systems/map/props/mapBoundProps';
 import { floorSeed } from './dungeonLayoutFromMap';
+import { spawnDungeonMonsters } from './dungeonMonsterSpawn';
 
 export interface DungeonLevelPlacement {
   options: DungeonOptions;
@@ -24,6 +25,9 @@ export interface DungeonLevelPlacement {
   from?: { mapId: string; col: number; row: number };
   /** When false, leave the camera where it is. */
   focus?: boolean;
+  /** Place theme/CR-matched monsters from the full codex. Default true. */
+  monsters?: boolean;
+  partyLevel?: number;
 }
 
 function floorOptions(options: DungeonOptions): DungeonFloorLink['options'] {
@@ -43,6 +47,7 @@ function floorOptions(options: DungeonOptions): DungeonFloorLink['options'] {
     density: options.density ?? 'normal',
     furnishings: options.furnishings ?? 'full',
     chambers: options.chambers ?? 'normal',
+    ...(options.theme ? { theme: options.theme } : {}),
   };
 }
 
@@ -250,6 +255,9 @@ export async function placeGeneratedDungeon(dungeon: GeneratedDungeon, level?: D
     store.addItem(prop);
     emitItemAdd(prop);
   }
+  if (level?.monsters !== false) {
+    await spawnDungeonMonsters(map, dungeon, { partyLevel: level?.partyLevel });
+  }
   store.addItem(handout);
   emitItemAdd(handout);
   if (level?.from) linkParentStair(level.from.mapId, level.from.col, level.from.row, mapId);
@@ -258,7 +266,11 @@ export async function placeGeneratedDungeon(dungeon: GeneratedDungeon, level?: D
 }
 
 /** Build every floor of a delve. The bottom floor only has stairs back up. */
-export async function placeDungeonFloors(base: DungeonOptions, floorCount: number): Promise<void> {
+export async function placeDungeonFloors(
+  base: DungeonOptions,
+  floorCount: number,
+  extras?: { monsters?: boolean; partyLevel?: number },
+): Promise<void> {
   const count = Math.min(12, Math.max(1, Math.floor(floorCount)));
   const delveId = uuidv4();
   let baseName: string | undefined;
@@ -281,6 +293,8 @@ export async function placeDungeonFloors(base: DungeonOptions, floorCount: numbe
       delveId,
       floor,
       focus: floor === 1,
+      monsters: extras?.monsters !== false,
+      partyLevel: extras?.partyLevel,
     };
     if (count > 1) placement.floorCount = count;
     if (baseName) placement.baseName = baseName;

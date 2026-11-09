@@ -50,7 +50,7 @@ function SheetPropBillboardInner({
 }) {
   const maps = useTexture(urls);
   const list = useMemo(() => (Array.isArray(maps) ? maps : [maps]), [maps]);
-  const matRef = useRef<THREE.MeshStandardMaterial>(null);
+  const matRef = useRef<THREE.MeshBasicMaterial>(null);
   const yawRef = useRef<THREE.Group>(null);
   const camera = useThree((s) => s.camera);
 
@@ -106,21 +106,21 @@ function SheetPropBillboardInner({
     || Math.abs(item.propPitch ?? 0) > 0.5
     || Math.abs(item.propRoll ?? 0) > 0.5;
 
+  const ghost = opacity < 0.99;
   const plane = (
     <mesh position={[0, planeH / 2, 0]} renderOrder={14}>
       <planeGeometry args={[planeW, planeH]} />
-      <meshStandardMaterial
+      <meshBasicMaterial
         ref={matRef}
         map={list[0]}
         color="#ffffff"
-        transparent
+        transparent={ghost}
         opacity={opacity}
-        roughness={0.48}
-        metalness={0.04}
-        envMapIntensity={1.15}
         side={THREE.DoubleSide}
-        alphaTest={0.08}
-        depthWrite={opacity >= 0.99}
+        alphaTest={ghost ? 0.08 : 0.5}
+        depthWrite={!ghost}
+        toneMapped={false}
+        premultipliedAlpha={false}
       />
     </mesh>
   );

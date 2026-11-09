@@ -14,6 +14,16 @@ export function deleteCurrentSelection(): boolean {
   if (itemIds.length > 0) {
     const tokenIds = itemIds.filter((id) => store.items[id]?.type === 'token');
     const otherIds = itemIds.filter((id) => !tokenIds.includes(id));
+    const mapIds = new Set(
+      otherIds.filter((id) => store.items[id]?.type === 'map'),
+    );
+    if (mapIds.size > 0) {
+      for (const it of Object.values(store.items)) {
+        if (it.type !== 'image' || !it.dungeonPropForMapId) continue;
+        if (!mapIds.has(it.dungeonPropForMapId)) continue;
+        if (!otherIds.includes(it.id)) otherIds.push(it.id);
+      }
+    }
 
     for (const tokenId of tokenIds) {
       emitTokenDelete(tokenId);

@@ -1,7 +1,7 @@
 import type { BaseItem, Item, MapItem } from './types';
 import { itemDisplayZIndex } from './zOrder';
 import { sceneRefs } from './sceneRefs';
-import { mapPickRank, pieceForUrl } from '@/systems/map/library/modularKits';
+import { mapPickRank, MODULAR_ROOM_WALL_CELLS, pieceForUrl } from '@/systems/map/library/modularKits';
 import { useItemStore } from './store/itemStore';
 
 /**
@@ -142,25 +142,46 @@ export function listStandFloors(wx: number, wy: number, pad = 0): MapItem[] {
   return floors;
 }
 
-/**
- * Floor a token can stand on: rooms/halls/tiles, never walls or the empty board.
- * Prefers rooms/halls over a 2 m doorway tile that overlaps the same point.
- */
-export function mapUnderTokenFeet(wx: number, wy: number): MapItem | null {
-  const floors = listStandFloors(wx, wy, 0);
+export function inRoomWallRing(map: MapItem, wx: number, wy: number): boolean {
+  const kind = pieceForUrl(map.modelUrl)?.kind;
+  if (kind !== 'room' && kind !== 'hall') return false;
+  const inset = Math.max(8, map.gridSize) * Math.min(2.4, MODULAR_ROOM_WALL_CELLS);
+  const cx = map.x + map.width / 2;
+  const cy = map.y + map.height / 2;
+  const rad = (-map.rotation * Math.PI) / 180;
+  const dx = wx - cx;
+  const dy = wy - cy;
+  const lx = dx * Math.cos(rad) - dy * Math.sin(rad);
+  const ly = dx * Math.sin(rad) + dy * Math.cos(rad);
+  return Math.abs(lx) > map.width / 2 - inset || Math.abs(ly) > map.height / 2 - inset;
+}
+
+function pickStandFloor(floors: MapItem[], wx: number, wy: number): MapItem | null {
   if (floors.length === 0) return null;
+  const tiles = floors.filter((f) => pieceForUrl(f.modelUrl)?.kind === 'tile');
+  if (tiles.length > 0 && floors.some((f) => inRoomWallRing(f, wx, wy))) {
+    tiles.sort((a, b) => a.width * a.height - b.width * b.height);
+    return tiles[0] ?? null;
+  }
   floors.sort((a, b) => floorStandRank(b) - floorStandRank(a));
   return floors[0] ?? null;
+}
+
+/**
+ * Floor a token can stand on: rooms/halls/tiles, never walls or the empty board.
+ * Prefers rooms/halls over a 2 m doorway tile that overlaps the same point,
+ * except in the room wall ring — KayKit path tiles win there so walkers
+ * are not treated as standing in the Kenney shell.
+ */
+export function mapUnderTokenFeet(wx: number, wy: number): MapItem | null {
+  return pickStandFloor(listStandFloors(wx, wy, 0), wx, wy);
 }
 
 /**
  * Next kit floor whose AABB is within `pad` of the point (the visual lip in front of a slab).
  */
 export function mapNearTokenFeet(wx: number, wy: number, pad: number): MapItem | null {
-  const floors = listStandFloors(wx, wy, pad);
-  if (floors.length === 0) return null;
-  floors.sort((a, b) => floorStandRank(b) - floorStandRank(a));
-  return floors[0] ?? null;
+  return pickStandFloor(listStandFloors(wx, wy, pad), wx, wy);
 }
 
 /** True when the point is on open map space (no item, or the map background layer). */

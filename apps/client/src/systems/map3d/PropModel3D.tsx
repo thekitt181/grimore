@@ -37,6 +37,7 @@ export function PropModel3D({
       propRender
       footprint={{ width: w, height: h }}
       hingeChestLid={Boolean(spec.hingeLid)}
+      propOpen={open}
     />
   );
 }

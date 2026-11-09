@@ -218,7 +218,7 @@ export function useTransformControls(appReady: boolean) {
     if (!gm && !playerRotateOk) return;
 
     const manipulable = selected.filter((it) => {
-      if (it.locked) return false;
+      if (it.locked && it.type !== 'image') return false;
       return true;
     });
 
