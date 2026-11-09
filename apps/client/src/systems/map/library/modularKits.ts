@@ -226,6 +226,11 @@ export function isModularMap(map: Pick<MapItem, 'modelUrl'> | null | undefined):
   return pieceForUrl(map?.modelUrl) != null;
 }
 
+export function isModularWall(map: Pick<MapItem, 'modelUrl'> | null | undefined): boolean {
+  const k = pieceForUrl(map?.modelUrl)?.kind;
+  return k === 'wall' || k === 'gate';
+}
+
 /** Higher wins when several maps overlap the click: unlocked, then walls, then smaller. */
 export function mapPickRank(it: Pick<MapItem, 'width' | 'height' | 'locked' | 'zIndex' | 'modelUrl'>): number {
   const p = pieceForUrl(it.modelUrl);

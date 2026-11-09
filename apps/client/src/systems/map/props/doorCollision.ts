@@ -1,6 +1,7 @@
 import type { Point } from '@grimoire/fog-engine';
 import type { ImageItem, Item, MapItem, WallSegment } from '@/systems/scene/types';
 import { losWalls, mapBoundaryWalls } from '@/systems/map/fogLos';
+import { isModularMap } from '@/systems/map/library/modularMapSnap';
 import { resolvePropId } from './dungeonProps';
 import { canonicalPropId } from './propArt';
 import { propObstacleSignature, propObstacleWalls } from './propMovementCollision';
@@ -363,6 +364,8 @@ export function movementWalls(
     const seg = closedDoorWallSegment(door, map);
     if (seg) extras.push(seg);
   }
+  // Kenney/KayKit pieces are not boxed rooms — AABB rims trapped FP on a 2 m tile.
+  if (isModularMap(map)) return [...walls, ...extras];
   // Open doors must never punch the map rim — always re-seal the boundary.
   return [...walls, ...mapBoundaryWalls(map.width, map.height), ...extras];
 }

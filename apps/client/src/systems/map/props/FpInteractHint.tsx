@@ -4,7 +4,7 @@ import { useFirstPersonStore } from '@/systems/map3d/firstPersonStore';
 import { resolveFirstPersonToken } from '@/systems/map3d/resolveFirstPersonToken';
 import { useSessionStore } from '@/store/sessionStore';
 import { canUsePropUnderToken } from './dungeonProps';
-import { fpInteractPropForToken } from './fpPropInteract';
+import { fpInteractPropForToken, modularInteractLabel } from './fpPropInteract';
 import { usePropInteractRequestStore } from './propInteractRequestStore';
 
 /** Center-screen hint while a visible prop is within 10 ft and in your look cone. */
@@ -27,7 +27,11 @@ export function FpInteractHint() {
         setPropName(null);
       } else {
         const prop = fpInteractPropForToken(token, gm);
-        setPropName(prop?.name ?? null);
+        const label =
+          prop?.type === 'map'
+            ? modularInteractLabel(prop)
+            : (prop?.name ?? null);
+        setPropName(label);
       }
       raf = window.setTimeout(tick, 120);
     };

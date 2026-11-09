@@ -93,6 +93,8 @@ export interface MapItem extends BaseItem {
   /** Kenney / KayKit door or gate is open. */
   modularOpen?: boolean;
   modularOpenAt?: number;
+  /** Same as image props — default true (DM must approve E / click use). */
+  propNeedsDmApprove?: boolean;
 }
 
 /**

@@ -66,7 +66,9 @@ import { Map3DMobileOrbitControls } from './Map3DMobileOrbitControls';
 import { useTokenSocket } from '@/systems/scene/token/useTokenSocket';
 import { useLiveTokenPixiSync } from '@/systems/scene/token/useLiveTokenPixiSync';
 import { emitTokenPlace } from '@/systems/scene/token/tokenSync';
-import { tokenBoundsFromGrid, worldToGridColRow } from '@/systems/scene/token/tokenGrid';
+import { worldToGridColRow } from '@/systems/scene/token/tokenGrid';
+import { mapUnderTokenFeet } from '@/systems/scene/hitTest';
+import { MODULAR_PX_PER_UNIT } from '@/systems/map/library/modularMapSnap';
 import { snapPoint } from '@/systems/scene/snap';
 import { useSessionStore } from '@/store/sessionStore';
 import { MapAtmosphereLayer } from '@/systems/scene/media/MapAtmosphereLayer';
@@ -1012,8 +1014,12 @@ async function placeByCategory(
     imageUrl = url;
     modelUrl = undefined;
   }
-  const { gridCol, gridRow } = worldToGridColRow(worldX, worldY, 1);
-  const bounds = tokenBoundsFromGrid({ sizeCells: 1 }, gridCol, gridRow);
+  const hostMap = mapUnderTokenFeet(worldX, worldY);
+  const gs = hostMap?.gridSize || MODULAR_PX_PER_UNIT;
+  const x = Math.round((worldX - gs / 2) / gs) * gs;
+  const y = Math.round((worldY - gs / 2) / gs) * gs;
+  const { gridCol, gridRow } = worldToGridColRow(x + gs / 2, y + gs / 2, 1, hostMap);
+  const bounds = { x, y, width: gs, height: gs, gridCol, gridRow };
   const token: TokenItem = {
     id: tokenId,
     type: 'token',
@@ -1041,6 +1047,7 @@ async function placeByCategory(
     conditions: [],
   };
   emitTokenPlace(token);
+  if (hostMap) useItemStore.getState().setActiveMap(hostMap.id);
 }
 
 function addMapItem(

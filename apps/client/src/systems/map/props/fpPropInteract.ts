@@ -1,7 +1,9 @@
-import type { ImageItem, TokenItem } from '@/systems/scene/types';
+import type { ImageItem, MapItem, TokenItem } from '@/systems/scene/types';
 import { itemCenter } from '@/systems/scene/types';
 import { useItemStore } from '@/systems/scene/store/itemStore';
 import { useSessionStore } from '@/store/sessionStore';
+import { isModularGate, pieceForUrl } from '@/systems/map/library/modularKits';
+import { emitItemUpdate } from '@/systems/scene/sceneSync';
 import { useFirstPersonStore } from '@/systems/map3d/firstPersonStore';
 import { firstPersonLook } from '@/systems/map3d/firstPersonLook';
 import { yawForwardWorld } from '@/systems/map3d/firstPersonMove';
@@ -33,12 +35,29 @@ import { emitPropInteractRequest, emitPropInteractResolve } from './propInteract
 /** cos(~55°) — look cone toward the prop center. */
 const FP_PROP_FACE_DOT_MIN = 0.55;
 
+export type FpInteractTarget = ImageItem | MapItem;
+
 function newRequestId(): string {
   return `pi-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
+export function modularInteractLabel(item: MapItem): string {
+  const title = pieceForUrl(item.modelUrl)?.title?.trim();
+  if (title) return title;
+  return item.modularOpen ? 'Close door' : 'Open door';
+}
+
+function toggleModularGate(map: MapItem): void {
+  const patch = {
+    modularOpen: !map.modularOpen,
+    modularOpenAt: Date.now(),
+  };
+  useItemStore.getState().updateItem(map.id, patch);
+  emitItemUpdate([{ id: map.id, patch }]);
+}
+
 /** True when FP look is aimed at the prop (or standing on it). */
-export function isFacingProp(token: TokenItem, prop: ImageItem): boolean {
+export function isFacingProp(token: TokenItem, prop: FpInteractTarget): boolean {
   const tc = itemCenter(token);
   const pc = itemCenter(prop);
   let dx = pc.cx - tc.cx;
@@ -55,16 +74,21 @@ export function isFacingProp(token: TokenItem, prop: ImageItem): boolean {
  * Nearest visible triggerable prop within 10 ft that you are facing.
  * Hidden props never count — even for the GM.
  */
-export function fpInteractPropForToken(token: TokenItem, _gm = false): ImageItem | null {
+export function fpInteractPropForToken(token: TokenItem, _gm = false): FpInteractTarget | null {
   void _gm;
   const items = Object.values(useItemStore.getState().items);
-  let best: ImageItem | null = null;
+  let best: FpInteractTarget | null = null;
   let bestDist = Infinity;
   for (const item of items) {
-    if (item.type !== 'image') continue;
     if (item.visible === false) continue;
-    const id = resolvePropId(item);
-    if (!id || !canTriggerProp(id)) continue;
+    let usable = false;
+    if (item.type === 'image') {
+      const id = resolvePropId(item);
+      usable = Boolean(id && canTriggerProp(id));
+    } else if (item.type === 'map') {
+      usable = isModularGate(item);
+    }
+    if (!usable) continue;
     const d = distanceTokenToPropFeet(token, item);
     if (d > FP_PROP_INTERACT_RANGE_FT) continue;
     if (!isFacingProp(token, item)) continue;
@@ -95,7 +119,13 @@ async function executePropInteractAction(
 ): Promise<void> {
   const prop = useItemStore.getState().items[propItemId];
   const actor = useItemStore.getState().items[actorTokenId];
-  if (prop?.type !== 'image' || actor?.type !== 'token') return;
+  if (actor?.type !== 'token') return;
+  if (prop?.type === 'map' && isModularGate(prop)) {
+    if (action === 'deny') return;
+    toggleModularGate(prop);
+    return;
+  }
+  if (prop?.type !== 'image') return;
 
   switch (action) {
     case 'deny':
@@ -160,7 +190,8 @@ export function ingestPropInteractResolve(requestId: string, action: PropInterac
   void executePropInteractAction(gmPending.propItemId, gmPending.actorTokenId, action);
 }
 
-export function propInteractCheckHint(item: ImageItem): string | null {
+export function propInteractCheckHint(item: FpInteractTarget): string | null {
+  if (item.type !== 'image') return null;
   const kind = propNextCheckKind(item);
   if (kind === 'reveal') {
     const label = propRevealCheckLabel(item);
@@ -176,20 +207,24 @@ export function propInteractCheckHint(item: ImageItem): string | null {
 }
 
 /** Spawn default / missing flag → DM must approve. Explicit `false` skips the gate. */
-export function propRequiresDmApprove(item: ImageItem): boolean {
+export function propRequiresDmApprove(item: FpInteractTarget): boolean {
   return item.propNeedsDmApprove !== false;
 }
 
 /**
  * Shared use path for FP (E) and 2D click — DM approve when required, else free use.
  */
-export function requestOrUsePropInteract(prop: ImageItem, actor: TokenItem): boolean {
+export function requestOrUsePropInteract(prop: FpInteractTarget, actor: TokenItem): boolean {
   const gm = useSessionStore.getState().myRole === 'GM';
   if (prop.visible === false && !gm) return false;
   if (!canUsePropUnderToken(actor)) return false;
 
   if (!propRequiresDmApprove(prop)) {
-    void triggerDungeonPropAsync(prop, { actor });
+    if (prop.type === 'map' && isModularGate(prop)) {
+      toggleModularGate(prop);
+      return true;
+    }
+    if (prop.type === 'image') void triggerDungeonPropAsync(prop, { actor });
     return true;
   }
 
@@ -205,7 +240,7 @@ export function requestOrUsePropInteract(prop: ImageItem, actor: TokenItem): boo
     actorTokenId: actor.id,
     requesterUserId,
     requesterName,
-    propName: prop.name,
+    propName: prop.type === 'map' ? modularInteractLabel(prop) : prop.name,
     at: Date.now(),
   };
 
@@ -234,7 +269,7 @@ export function tryFirstPersonPropInteract(): boolean {
 }
 
 /** Nearest token this user may operate that is in range of the prop. */
-function mapPropActor(prop: ImageItem): TokenItem | null {
+function mapPropActor(prop: FpInteractTarget): TokenItem | null {
   const preferred = resolveFirstPersonToken();
   if (preferred && canUsePropUnderToken(preferred) && distanceTokenToPropFeet(preferred, prop) <= FP_PROP_INTERACT_RANGE_FT) {
     return preferred;
@@ -281,11 +316,15 @@ function mapPropActor(prop: ImageItem): TokenItem | null {
 /**
  * 2D map click on a door/chest — player or GM; uses nearest owned token in range.
  */
-export function tryMapPropInteract(prop: ImageItem): boolean {
+export function tryMapPropInteract(prop: FpInteractTarget): boolean {
   const gm = useSessionStore.getState().myRole === 'GM';
   if (prop.visible === false && !gm) return false;
-  const id = resolvePropId(prop);
-  if (!id || !canTriggerProp(id)) return false;
+  if (prop.type === 'map') {
+    if (!isModularGate(prop)) return false;
+  } else {
+    const id = resolvePropId(prop);
+    if (!id || !canTriggerProp(id)) return false;
+  }
 
   const actor = mapPropActor(prop);
   if (!actor) return false;

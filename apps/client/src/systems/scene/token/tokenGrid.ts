@@ -1,13 +1,14 @@
 import { getActiveMap } from '../store/itemStore';
-import { activeGridInfo } from '../snap';
-import type { TokenItem } from '../types';
+import { activeGridInfo, gridInfoForMap } from '../snap';
+import type { MapItem, TokenItem } from '../types';
 
 export function worldToGridColRow(
   centerX: number,
   centerY: number,
   sizeCells = 1,
+  map?: MapItem | null,
 ): { gridCol: number; gridRow: number } {
-  const g = activeGridInfo();
+  const g = map ? gridInfoForMap(map) : activeGridInfo();
   const ox = g.originX + g.offsetX;
   const oy = g.originY + g.offsetY;
   // gridCol/gridRow index the token's top-left cell, so its footprint aligns to
@@ -20,8 +21,12 @@ export function worldToGridColRow(
 }
 
 /** Top-left world position of the cell at the given column/row. */
-export function gridCellOrigin(gridCol: number, gridRow: number): { x: number; y: number } {
-  const g = activeGridInfo();
+export function gridCellOrigin(
+  gridCol: number,
+  gridRow: number,
+  map?: MapItem | null,
+): { x: number; y: number } {
+  const g = map ? gridInfoForMap(map) : activeGridInfo();
   const ox = g.originX + g.offsetX;
   const oy = g.originY + g.offsetY;
   return {
@@ -35,10 +40,11 @@ export function tokenBoundsFromGrid(
   token: Pick<TokenItem, 'sizeCells'>,
   gridCol: number,
   gridRow: number,
+  map?: MapItem | null,
 ): { x: number; y: number; width: number; height: number; gridCol: number; gridRow: number } {
-  const g = activeGridInfo();
+  const g = map ? gridInfoForMap(map) : activeGridInfo();
   const size = token.sizeCells * g.gridSize;
-  const origin = gridCellOrigin(gridCol, gridRow);
+  const origin = gridCellOrigin(gridCol, gridRow, map);
   return {
     x: origin.x,
     y: origin.y,

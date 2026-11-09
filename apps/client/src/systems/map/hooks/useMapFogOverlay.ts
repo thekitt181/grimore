@@ -74,7 +74,8 @@ function syncMapFogOverlays(
     fc.rotation = (bounds.rotation * Math.PI) / 180;
     fc.zIndex = fogDisplayZIndex(map.zIndex);
 
-    const showThis = opts.showFogOverlay;
+    const showThis =
+      opts.showFogOverlay && Boolean(map.backgroundUrl || map.modelUrl);
 
     if (map.visible) {
       fc.visible = showThis;

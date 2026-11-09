@@ -5,13 +5,19 @@
  */
 import * as THREE from 'three';
 import type { MapItem } from '@/systems/scene/types';
+import {
+  isModularGate,
+  isModularMap,
+  isModularWall,
+  pieceForUrl,
+} from '@/systems/map/library/modularKits';
 import { pixiToThreeX, pixiToThreeZ } from './coords';
 
 const MISS = Number.NEGATIVE_INFINITY;
 /** Eye / torso height above floor (cells). */
 const TORSO_CELLS = 0.42;
-/** One stair tread / short step — allow this rise between adjacent cells. */
-const MAX_STEP_CELLS = 0.72;
+/** Floor lip / stair tread only — not wall height. KayKit slabs are ~0.3–0.6 m. */
+export const MAX_STEP_CELLS = 0.62;
 /** Hard cliff — block anything taller. */
 const MAX_CLIFF_CELLS = 1.35;
 const CELLS_PER_IDLE = 280;
@@ -35,13 +41,46 @@ export type MapCollisionGrid = {
 
 type BakeJob = {
   mapId: string;
+  map: MapItem;
   root: THREE.Object3D;
   grid: MapCollisionGrid;
   next: number;
   torsoLift: number;
   maxStep: number;
+  wallSolid: boolean;
+  gateOpen: boolean;
   timer: ReturnType<typeof setTimeout> | null;
 };
+
+function wallLocal(map: MapItem, worldX: number, worldZ: number): { lx: number; ly: number } {
+  const cx = map.x + map.width / 2;
+  const cy = map.y + map.height / 2;
+  const rad = (-map.rotation * Math.PI) / 180;
+  const dx = worldX - cx;
+  const dy = worldZ - cy;
+  return {
+    lx: dx * Math.cos(rad) - dy * Math.sin(rad),
+    ly: dx * Math.sin(rad) + dy * Math.cos(rad),
+  };
+}
+
+/** True when the cell sits on the wall slab (not the empty AABB corners). */
+function onWallCenterline(map: MapItem, worldX: number, worldZ: number): boolean {
+  const { lx, ly } = wallLocal(map, worldX, worldZ);
+  const thick = Math.min(map.width, map.height);
+  const half = Math.max(14, thick * 0.46);
+  if (map.width <= map.height) return Math.abs(lx) <= half;
+  return Math.abs(ly) <= half;
+}
+
+/** Passage through a Kenney/KayKit gate (center of the long axis). */
+function inGateOpening(map: MapItem, worldX: number, worldZ: number): boolean {
+  if (!isModularGate(map)) return false;
+  const { lx, ly } = wallLocal(map, worldX, worldZ);
+  const along = map.width <= map.height ? ly : lx;
+  const gs = Math.max(8, map.gridSize);
+  return Math.abs(along) <= gs * 1.35;
+}
 
 const gridsByMap = new Map<string, MapCollisionGrid>();
 const jobsByMap = new Map<string, BakeJob>();
@@ -51,8 +90,10 @@ const rayDirDown = new THREE.Vector3(0, -1, 0);
 const rayDirFlat = new THREE.Vector3();
 const hitNormal = new THREE.Vector3();
 const downCaster = new THREE.Raycaster();
+const bandCaster = new THREE.Raycaster();
 const flatCaster = new THREE.Raycaster();
 downCaster.firstHitOnly = true;
+bandCaster.firstHitOnly = false;
 flatCaster.firstHitOnly = true;
 
 const CARDINALS: Array<[number, number]> = [
@@ -79,6 +120,38 @@ function sampleDown(root: THREE.Object3D, x: number, z: number): {
     ny = hitNormal.y;
   }
   return { y: hit.point.y, ny };
+}
+
+function hitFaceNy(hit: THREE.Intersection): number {
+  if (!hit.face) return 1;
+  hitNormal.copy(hit.face.normal).transformDirection(hit.object.matrixWorld);
+  return hitNormal.y;
+}
+
+/** Lowest floor-like hit below `maxFloorY` — skips doorway lintels and wall caps. */
+function sampleFloor(
+  root: THREE.Object3D,
+  x: number,
+  z: number,
+  maxFloorY: number,
+): { y: number | null; ny: number } {
+  rayOrigin.set(x, 50_000, z);
+  bandCaster.near = 0;
+  bandCaster.far = 100_000;
+  bandCaster.set(rayOrigin, rayDirDown);
+  const hits = bandCaster.intersectObject(root, true);
+  let bestY: number | null = null;
+  let bestNy = 1;
+  for (const hit of hits) {
+    const ny = hitFaceNy(hit);
+    if (ny < 0.35) continue;
+    if (hit.point.y > maxFloorY) continue;
+    if (bestY == null || hit.point.y < bestY) {
+      bestY = hit.point.y;
+      bestNy = ny;
+    }
+  }
+  return { y: bestY, ny: bestNy };
 }
 
 /**
@@ -130,25 +203,95 @@ function indexAt(grid: MapCollisionGrid, worldX: number, worldZ: number): number
   return r * grid.cols + c;
 }
 
+function sampleInteriorPartition(
+  root: THREE.Object3D,
+  x: number,
+  z: number,
+  torsoY: number,
+  reach: number,
+): boolean {
+  flatCaster.near = 0;
+  flatCaster.far = reach;
+  for (const [dx, dz] of CARDINALS) {
+    rayDirFlat.set(dx, 0, dz);
+    rayOrigin.set(x, torsoY, z);
+    flatCaster.set(rayOrigin, rayDirFlat);
+    const hits = flatCaster.intersectObject(root, true);
+    const hit = hits[0];
+    if (!hit || hit.distance > reach) continue;
+    if (hitFaceNy(hit) > 0.5) continue;
+    return true;
+  }
+  return false;
+}
+
 function bakeCell(job: BakeJob, i: number): void {
-  const { grid, root, torsoLift, maxStep } = job;
+  const { grid, root, torsoLift, maxStep, wallSolid, gateOpen, map } = job;
   const c = i % grid.cols;
   const r = Math.floor(i / grid.cols);
   const x = grid.originX + (c + 0.5) * grid.cell;
   const z = grid.originZ + (r + 0.5) * grid.cell;
-  const down = sampleDown(root, x, z);
-  // Steep hit = wall face from above — not a walkable tread.
-  if (down.y == null || down.ny < 0.28) {
+  const gs = Math.max(8, map.gridSize);
+  const torsoY = gs * 1.05;
+  const maxFloorY = gs * 1.35;
+
+  if (wallSolid) {
+    if (!onWallCenterline(map, x, z)) {
+      grid.walkable[i] = 0;
+      grid.blocked[i] = 0;
+      grid.height[i] = MISS;
+      return;
+    }
+    if (gateOpen && inGateOpening(map, x, z)) {
+      grid.walkable[i] = 1;
+      grid.blocked[i] = 0;
+      grid.height[i] = MISS;
+      return;
+    }
     grid.walkable[i] = 0;
     grid.blocked[i] = 1;
+    grid.height[i] = torsoY;
+    return;
+  }
+
+  if (isModularMap(map)) {
+    const floor = sampleFloor(root, x, z, maxFloorY);
+    if (floor.y != null) {
+      const kind = pieceForUrl(map.modelUrl)?.kind;
+      const partition =
+        (kind === 'room' || kind === 'hall')
+        && sampleInteriorPartition(
+          root,
+          x,
+          z,
+          floor.y + torsoY * 0.55,
+          grid.cell * 0.55,
+        );
+      grid.height[i] = floor.y;
+      grid.walkable[i] = partition ? 0 : 1;
+      grid.blocked[i] = partition ? 1 : 0;
+      return;
+    }
+    // No floor — wall mass (cap) vs empty box. An open doorway has floor under the lintel.
+    const sky = sampleDown(root, x, z);
+    grid.walkable[i] = 0;
+    grid.blocked[i] = sky.y != null ? 1 : 0;
+    grid.height[i] = MISS;
+    return;
+  }
+
+  const down = sampleDown(root, x, z);
+  if (down.y == null || down.ny < 0.28) {
+    grid.walkable[i] = 0;
+    grid.blocked[i] = down.y == null ? 0 : 1;
     grid.height[i] = MISS;
     return;
   }
   grid.height[i] = down.y;
   grid.walkable[i] = 1;
-  const torsoY = down.y + torsoLift;
+  const scanTorsoY = down.y + torsoLift;
   const reach = grid.cell * 0.5;
-  grid.blocked[i] = sampleRealWall(root, x, z, down.y, torsoY, reach, maxStep) ? 1 : 0;
+  grid.blocked[i] = sampleRealWall(root, x, z, down.y, scanTorsoY, reach, maxStep) ? 1 : 0;
 }
 
 function pumpJob(job: BakeJob): void {
@@ -171,9 +314,10 @@ export function startMapCollisionBake(
 ): void {
   cancelMapCollisionBake(map.id);
 
-  // Finer cells track stair treads better.
-  const cell = Math.max(12, Math.min(28, map.gridSize * 0.28));
-  const pad = cell;
+  const modular = isModularMap(map);
+  // Finer cells track stair treads / thin kit walls better.
+  const cell = Math.max(10, Math.min(modular ? 16 : 28, map.gridSize * 0.22));
+  const pad = modular ? 0 : cell;
   const originX = pixiToThreeX(map.x) - pad;
   const originZ = pixiToThreeZ(map.y) - pad;
   const width = map.width + pad * 2;
@@ -200,11 +344,14 @@ export function startMapCollisionBake(
   root.updateMatrixWorld(true);
   const job: BakeJob = {
     mapId: map.id,
+    map,
     root,
     grid,
     next: 0,
     torsoLift: map.gridSize * TORSO_CELLS,
     maxStep: map.gridSize * MAX_STEP_CELLS,
+    wallSolid: isModularWall(map),
+    gateOpen: isModularGate(map) && Boolean(map.modularOpen),
     timer: null,
   };
   jobsByMap.set(map.id, job);
@@ -259,6 +406,13 @@ export function punchWalkableDisc(
   }
 }
 
+export function bakedWalkableAt(mapId: string, pixiX: number, pixiY: number): boolean {
+  const grid = gridsByMap.get(mapId);
+  if (!grid?.ready) return false;
+  const i = indexAt(grid, pixiToThreeX(pixiX), pixiToThreeZ(pixiY));
+  return i != null && grid.walkable[i] === 1;
+}
+
 export function bakedGroundHeight(mapId: string, x: number, z: number, fallback = 0): number {
   const grid = gridsByMap.get(mapId);
   if (!grid?.ready) return fallback;
@@ -308,6 +462,48 @@ export function bakedGroundHeightSmooth(
  * True when the move hits a real wall or an unclimbable cliff.
  * Stairs within MAX_STEP_CELLS are allowed.
  */
+/** Occupancy of a Kenney/KayKit wall/gate — works before bake and when mesh rays miss. */
+export function kitWallBlocksFeet(
+  map: MapItem,
+  fromX: number,
+  fromY: number,
+  destX: number,
+  destY: number,
+  tokenW: number,
+  tokenH: number,
+): boolean {
+  if (!isModularWall(map)) return false;
+  const open = isModularGate(map) && Boolean(map.modularOpen);
+  const fx = fromX + tokenW / 2;
+  const fy = fromY + tokenH / 2;
+  const tx = destX + tokenW / 2;
+  const ty = destY + tokenH / 2;
+  const dist = Math.hypot(tx - fx, ty - fy);
+  const step = Math.max(8, Math.min(map.width, map.height) * 0.18);
+  const n = Math.max(1, Math.ceil(dist / step));
+  const r = Math.min(tokenW, tokenH) * 0.32;
+  const offs: Array<[number, number]> = [
+    [0, 0],
+    [r, 0],
+    [-r, 0],
+    [0, r],
+    [0, -r],
+  ];
+  for (let s = 1; s <= n; s++) {
+    const t = s / n;
+    const cx = fx + (tx - fx) * t;
+    const cy = fy + (ty - fy) * t;
+    for (const [ox, oy] of offs) {
+      const wx = pixiToThreeX(cx + ox);
+      const wz = pixiToThreeZ(cy + oy);
+      if (!onWallCenterline(map, wx, wz)) continue;
+      if (open && inGateOpening(map, wx, wz)) continue;
+      return true;
+    }
+  }
+  return false;
+}
+
 export function bakedMeshBlocksFeet(
   map: MapItem,
   fromX: number,
@@ -317,6 +513,7 @@ export function bakedMeshBlocksFeet(
   tokenW: number,
   tokenH: number,
 ): boolean {
+  if (kitWallBlocksFeet(map, fromX, fromY, destX, destY, tokenW, tokenH)) return true;
   const grid = gridsByMap.get(map.id);
   if (!grid?.ready) return false;
 
@@ -331,25 +528,26 @@ export function bakedMeshBlocksFeet(
   const dist = Math.hypot(tx - fx, tz - fz);
   const steps = Math.max(1, Math.ceil(dist / (grid.cell * 0.4)));
   let prevH = grid.height[indexAt(grid, fx, fz) ?? -1] ?? MISS;
+  const kit = isModularMap(map);
 
   for (let s = 1; s <= steps; s++) {
     const t = s / steps;
     const x = fx + (tx - fx) * t;
     const z = fz + (tz - fz) * t;
     const i = indexAt(grid, x, z);
-    if (i == null) return true;
-    if (!grid.walkable[i]) return true;
-    // Blocked cells are walls — but allow if height delta is a step (riser false positive).
+    if (i == null) continue;
     const h = grid.height[i] ?? MISS;
-    if (grid.blocked[i]) {
-      if (prevH === MISS || h === MISS) return true;
+
+    if (grid.blocked[i]) return true;
+    if (!grid.walkable[i]) continue;
+    if (prevH !== MISS && h !== MISS) {
       const rise = h - prevH;
-      if (rise > maxStep || rise < -maxCliff) return true;
-      // Soft blocked + climbable height → treat as step, keep going.
-    } else if (prevH !== MISS && h !== MISS) {
-      const rise = h - prevH;
-      if (rise > maxStep) return true;
-      if (rise < -maxCliff) return true;
+      if (kit) {
+        // Kenney room wall caps sit meters above the floor — not a step.
+        if (rise > maxStep) return true;
+      } else {
+        if (rise > maxStep || rise < -maxCliff) return true;
+      }
     }
     if (h !== MISS) prevH = h;
   }

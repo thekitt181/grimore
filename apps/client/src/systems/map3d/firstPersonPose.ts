@@ -1,4 +1,5 @@
 import type { TokenItem } from '@/systems/scene/types';
+import { floorStandRank, mapUnderTokenFeet } from '@/systems/scene/hitTest';
 import { useItemStore } from '@/systems/scene/store/itemStore';
 import { useLiveTransformStore } from '@/systems/scene/store/liveTransformStore';
 import { applyWalkPoseVisual } from '@/systems/scene/token/remotePoseApply';
@@ -24,16 +25,30 @@ export function clearFirstPersonPose(): void {
   firstPersonPose.tokenId = null;
 }
 
+function feetRank(token: TokenItem, x: number, y: number): number {
+  const floor = mapUnderTokenFeet(x + token.width / 2, y + token.height / 2);
+  return floor ? floorStandRank(floor) : 0;
+}
+
 export function seedFirstPersonPose(token: TokenItem): void {
   const live = useLiveTransformStore.getState().byId[token.id];
-  const x = live?.x ?? token.x;
-  const y = live?.y ?? token.y;
+  const itemX = token.x;
+  const itemY = token.y;
+  const liveX = live?.x ?? itemX;
+  const liveY = live?.y ?? itemY;
+  const itemRank = feetRank(token, itemX, itemY);
+  const liveRank = feetRank(token, liveX, liveY);
+  // Committed item.x wins ties — leftover live at a doorway tile must not win.
+  const x = liveRank > itemRank ? liveX : itemX;
+  const y = liveRank > itemRank ? liveY : itemY;
   firstPersonPose.active = true;
   firstPersonPose.tokenId = token.id;
   firstPersonPose.x = x;
   firstPersonPose.y = y;
   firstPersonPose.prevX = x;
   firstPersonPose.prevY = y;
+  const floor = mapUnderTokenFeet(x + token.width / 2, y + token.height / 2);
+  if (floor) useItemStore.getState().setActiveMap(floor.id);
 }
 
 /** Call once at the start of each render frame (before integrating movement). */
@@ -82,7 +97,11 @@ export function syncFirstPersonPoseFromItem(token: TokenItem, thresholdPx = 2): 
   if (!base || base.type !== 'token') return false;
   const x = base.x;
   const y = base.y;
-  if (Math.hypot(x - firstPersonPose.x, y - firstPersonPose.y) < thresholdPx) return false;
+  const dist = Math.hypot(x - firstPersonPose.x, y - firstPersonPose.y);
+  if (dist < thresholdPx) return false;
+  // Stale item.x on a leftover 2 m tile must not yank the camera across the dungeon.
+  const cell = Math.max(24, token.width, token.height);
+  if (dist > cell * 2) return false;
   firstPersonPose.x = x;
   firstPersonPose.y = y;
   firstPersonPose.prevX = x;

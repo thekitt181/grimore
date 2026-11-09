@@ -116,14 +116,14 @@ export function pickHandle(clientX: number, clientY: number): HandleDesc | null 
     && !isGm2dEditorInteraction()
     && rect
     && sceneCameraRef.liveCamera;
-  // 3D handle hit-tests are in CSS pixels (projected), so keep a size-independent grab radius.
+  // Token corners stay small so a body click moves instead of resizes.
   const tol = useScreen
-    ? (isToken ? 18 : 22)
-    : (isToken ? Math.max(14 / scale, Math.min(minDim * 0.12, 26)) : Math.max(18 / scale, Math.min(minDim * 0.16, 34)));
-  // The rotate knob is a single point that's easy to miss, so give it a more
-  // generous grab radius than the resize corners.
+    ? (isToken ? 12 : 22)
+    : (isToken
+      ? Math.min(minDim * 0.14, Math.max(8 / scale, 10))
+      : Math.max(18 / scale, Math.min(minDim * 0.16, 34)));
   const rotTol = useScreen
-    ? 26
+    ? (isToken ? 20 : 26)
     : Math.max(22 / scale, Math.min(minDim * 0.18, 38));
 
   let best: HandleDesc | null = null;

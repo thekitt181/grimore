@@ -10,12 +10,20 @@ import {
 } from '@/systems/map/fogLos';
 import { doorWallsSignature, movementWalls } from '@/systems/map/props/doorCollision';
 import { getActiveMap, useItemStore } from '@/systems/scene/store/itemStore';
+import { listModularWallsAlong, listStandFloors } from '@/systems/scene/hitTest';
+import { pixiToThreeX, pixiToThreeZ } from './coords';
+import { isModularMap } from '@/systems/map/library/modularMapSnap';
 import { useSessionStore } from '@/store/sessionStore';
 import type { MapItem, TokenItem } from '@/systems/scene/types';
 import { firstPersonPose, seedFirstPersonPose } from './firstPersonPose';
 import { initiativeMoveLimitFt } from './firstPersonMove';
 import { useFirstPersonStore } from './firstPersonStore';
-import { bakedMeshBlocksFeet, syncOpenDoorPunches } from './mapCollisionGrid';
+import {
+  bakedGroundHeight,
+  bakedMeshBlocksFeet,
+  bakedWalkableAt,
+  syncOpenDoorPunches,
+} from './mapCollisionGrid';
 import { fpGlobal } from './fpGlobals';
 
 /** Wall slide passes — keep low; baked mesh is O(1). */
@@ -104,6 +112,49 @@ function drawnWallBlocks(
   return wallBlocksMovement(from, toLocal, walls, bodyR);
 }
 
+function pickWalkFloor(wx: number, wy: number, pad: number): MapItem | null {
+  const floors = listStandFloors(wx, wy, pad);
+  if (floors.length === 0) return null;
+  const tx = pixiToThreeX(wx);
+  const tz = pixiToThreeZ(wy);
+  const onMesh = floors.filter((m) => bakedWalkableAt(m.id, wx, wy));
+  const pool = onMesh.length ? onMesh : floors;
+  pool.sort((a, b) => (
+    bakedGroundHeight(b.id, tx, tz, -1e9) - bakedGroundHeight(a.id, tx, tz, -1e9)
+  ));
+  return pool[0] ?? null;
+}
+
+function floorAtToken(token: TokenItem, x: number, y: number): MapItem | null {
+  const wx = x + token.width / 2;
+  const wy = y + token.height / 2;
+  return pickWalkFloor(wx, wy, 0) ?? pickWalkFloor(wx, wy, 36);
+}
+
+/** Don't AABB-clamp onto a 2 m tile when the dest is another kit floor. */
+function clampFpFeet(
+  token: TokenItem,
+  map: MapItem,
+  destX: number,
+  destY: number,
+): { x: number; y: number } {
+  const destFloor = floorAtToken(token, destX, destY);
+  if (destFloor) return { x: destX, y: destY };
+  const fromFloor = floorAtToken(token, firstPersonPose.x, firstPersonPose.y) ?? map;
+  if (isModularMap(fromFloor) || isModularMap(map)) {
+    return clampTokenFeetToMap(fromFloor, destX, destY, token.width, token.height);
+  }
+  return clampTokenFeetToMap(map, destX, destY, token.width, token.height);
+}
+
+function meshBlocksOn(map: MapItem, token: TokenItem, fromX: number, fromY: number, destX: number, destY: number): boolean {
+  if (!map.modelUrl) return false;
+  // Scanned image maps false-block for GM; Kenney/KayKit walls must still stop everyone.
+  if (useSessionStore.getState().myRole === 'GM' && !isModularMap(map)) return false;
+  syncOpenDoorPunches(map, useItemStore.getState().items);
+  return bakedMeshBlocksFeet(map, fromX, fromY, destX, destY, token.width, token.height);
+}
+
 /** Authored walls OR baked GLB solids (grid query — no mid-stride mesh rays). */
 function movementBlocked(
   token: TokenItem,
@@ -113,11 +164,42 @@ function movementBlocked(
   destX: number,
   destY: number,
 ): boolean {
+  const destFloor = floorAtToken(token, destX, destY);
+  const fromFloor = floorAtToken(token, fromX, fromY);
+  const kitWalk = isModularMap(map) || (fromFloor != null && isModularMap(fromFloor));
+
+  if (kitWalk) {
+    const pad = Math.max(token.width, token.height, 48);
+    const wallHits = listModularWallsAlong(
+      fromX + token.width / 2,
+      fromY + token.height / 2,
+      destX + token.width / 2,
+      destY + token.height / 2,
+      pad,
+    );
+    for (const wall of wallHits) {
+      if (meshBlocksOn(wall, token, fromX, fromY, destX, destY)) return true;
+    }
+    if (fromFloor && meshBlocksOn(fromFloor, token, fromX, fromY, destX, destY)) return true;
+    if (destFloor && destFloor.id !== fromFloor?.id && meshBlocksOn(destFloor, token, fromX, fromY, destX, destY)) {
+      return true;
+    }
+    return false;
+  }
+
   if (drawnWallBlocks(token, map, fromX, fromY, destX, destY)) return true;
-  // Baked GLB solids (players only — scanned meshes often false-block for GM preview).
-  if (map.modelUrl && useSessionStore.getState().myRole !== 'GM') {
-    syncOpenDoorPunches(map, useItemStore.getState().items);
-    return bakedMeshBlocksFeet(map, fromX, fromY, destX, destY, token.width, token.height);
+  if (fromFloor && fromFloor.id !== map.id && drawnWallBlocks(token, fromFloor, fromX, fromY, destX, destY)) {
+    return true;
+  }
+  if (destFloor && destFloor.id !== map.id && drawnWallBlocks(token, destFloor, fromX, fromY, destX, destY)) {
+    return true;
+  }
+  if (meshBlocksOn(map, token, fromX, fromY, destX, destY)) return true;
+  if (fromFloor && fromFloor.id !== map.id && meshBlocksOn(fromFloor, token, fromX, fromY, destX, destY)) {
+    return true;
+  }
+  if (destFloor && destFloor.id !== map.id && meshBlocksOn(destFloor, token, fromX, fromY, destX, destY)) {
+    return true;
   }
   return false;
 }
@@ -148,8 +230,8 @@ function tryDisplace(
   let destX = fromX + stepDx;
   let destY = fromY + stepDy;
 
-  // Hard clamp to the map IMAGE rect.
-  const rim = clampTokenFeetToMap(map, destX, destY, token.width, token.height);
+  // Hard clamp to the map IMAGE rect (skipped when dest is another kit floor).
+  const rim = clampFpFeet(token, map, destX, destY);
   if (Math.abs(rim.x - destX) > 0.05 || Math.abs(rim.y - destY) > 0.05) {
     destX = rim.x;
     destY = rim.y;
@@ -201,7 +283,7 @@ function tryDisplace(
     }
     destX = fromX + stepDx;
     destY = fromY + stepDy;
-    const rimAfter = clampTokenFeetToMap(map, destX, destY, token.width, token.height);
+    const rimAfter = clampFpFeet(token, map, destX, destY);
     destX = rimAfter.x;
     destY = rimAfter.y;
   }
@@ -235,8 +317,15 @@ export function controlFirstPersonMove(
   velY: number,
   dt: number,
 ): { velX: number; velY: number } {
-  const map = getActiveMap();
+  if (!firstPersonPose.active || firstPersonPose.tokenId !== token.id) {
+    seedFirstPersonPose(token);
+  }
+  const stand = floorAtToken(token, firstPersonPose.x, firstPersonPose.y);
+  const map = stand ?? getActiveMap();
   if (!map) return { velX: 0, velY: 0 };
+  if (stand && stand.id !== getActiveMap()?.id) {
+    useItemStore.getState().setActiveMap(stand.id);
+  }
 
   const limit = initiativeMoveLimitFt(token.id);
   if (limit !== null && limit <= 0) {
@@ -246,10 +335,6 @@ export function controlFirstPersonMove(
     return { velX: 0, velY: 0 };
   }
   fpGlobal.moveBlockedReason = null;
-
-  if (!firstPersonPose.active || firstPersonPose.tokenId !== token.id) {
-    seedFirstPersonPose(token);
-  }
 
   let remX = velX * dt;
   let remY = velY * dt;
@@ -310,11 +395,13 @@ export function controlFirstPersonMove(
     outVelY = vSlid.y;
   }
 
-  const clamped = clampTokenFeetToMap(map, fromX, fromY, token.width, token.height);
+  const clamped = clampFpFeet(token, map, fromX, fromY);
   firstPersonPose.x = clamped.x;
   firstPersonPose.y = clamped.y;
   if (Math.abs(clamped.x - fromX) > 0.05) outVelX = 0;
   if (Math.abs(clamped.y - fromY) > 0.05) outVelY = 0;
+  const after = floorAtToken(token, clamped.x, clamped.y);
+  if (after && after.id !== map.id) useItemStore.getState().setActiveMap(after.id);
 
   if (limit !== null && map.gridSize > 0 && walked > 0.01) {
     useFirstPersonStore.getState().addFeetUsed(token.id, (walked / map.gridSize) * 5);

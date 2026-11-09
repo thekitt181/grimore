@@ -20,6 +20,7 @@ import { WallDebrisBurst } from './WallDebrisBurst';
 import { Map3DImageLayer } from './Map3DImages';
 import { Map3DMapModel } from './Map3DMapModel';
 import { Map3DFogOfWar } from './Map3DFogOfWar';
+import { isModularMap } from '@/systems/map/library/modularMapSnap';
 import { SyncedPixiOrthographicCamera } from './SyncedPixiCamera';
 import { applyOrthographicCameraFromViewport } from './orthographicCameraSync';
 import { useVisibleSceneTokens } from './useVisibleSceneTokens';
@@ -31,6 +32,9 @@ import { bindWebGLContextRecovery } from './threeWebGLContext';
 import { markThreeFrameRendered, registerThreeRenderer, resetThreeCanvasHealth, notifyThreeCanvasUnhealthy } from './threeCanvasHealth';
 import { applyPixiViewMode } from '@/systems/map/applyPixiViewMode';
 import { FirstPersonCamera } from './FirstPersonCamera';
+import { firstPersonPose, seedFirstPersonPose } from './firstPersonPose';
+import { resolveFirstPersonToken } from './resolveFirstPersonToken';
+import { pixiToThreeX, pixiToThreeZ } from './coords';
 import { useFirstPersonStore } from './firstPersonStore';
 import { useFirstPersonControls } from './useFirstPersonControls';
 import { FpPaintSampler } from './FpPaintSampler';
@@ -62,7 +66,7 @@ function Map2DModelFogContent({ map, showGizmo = false }: { map: MapItem; showGi
   return (
     <>
       <Map3DMapModel map={map} showGizmo={showGizmo} />
-      <Map3DFogOfWar map={map} />
+      {!isModularMap(map) && <Map3DFogOfWar map={map} />}
     </>
   );
 }
@@ -177,7 +181,7 @@ function Map3DSceneContent() {
           )}
           <Map3DMapModel map={map} showGizmo={map.id === gizmoMapId && Boolean(map.modelUrl)} />
           {/* Ground-plane FoW is top-down only; FP uses FirstPersonVisionFog. */}
-          {!firstPerson && <Map3DFogOfWar map={map} />}
+          {!firstPerson && !isModularMap(map) && <Map3DFogOfWar map={map} />}
           {!map.modelUrl && <MapPickGroup map={map} />}
         </group>
       ))}
@@ -333,10 +337,20 @@ export function MapSceneCanvas() {
   const needsThreeOverlay = is3d || hasModelTokens || hasModelMap;
 
   const orthoDefaults = useStableOrthoCameraDefaults();
-  const fpPerspectiveCamera = useMemo(
-    () => ({ fov: 72, near: 0.12, far: 8000, position: [0, 120, 0] as [number, number, number] }),
-    [],
-  );
+  const fpPerspectiveCamera = useMemo(() => {
+    const token = resolveFirstPersonToken();
+    let x = 0;
+    let y = 120;
+    let z = 0;
+    if (token) {
+      seedFirstPersonPose(token);
+      const grid = token.width || 96;
+      x = pixiToThreeX(firstPersonPose.x + token.width / 2);
+      z = pixiToThreeZ(firstPersonPose.y + token.height / 2);
+      y = grid * 1.1;
+    }
+    return { fov: 72, near: 0.12, far: 8000, position: [x, y, z] as [number, number, number] };
+  }, [firstPerson]);
 
   const mobile = isMobileClient();
   const glProps = {

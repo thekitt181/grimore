@@ -8,6 +8,8 @@ import {
 } from '@/systems/map/fogLos';
 import { movementWalls } from '@/systems/map/props/doorCollision';
 import { getActiveMap, useItemStore } from '@/systems/scene/store/itemStore';
+import { mapUnderTokenFeet } from '@/systems/scene/hitTest';
+import { isModularMap } from '@/systems/map/library/modularMapSnap';
 import { useLiveTransformStore } from '@/systems/scene/store/liveTransformStore';
 import { tokenBoundsFromGrid, worldToGridColRow } from '@/systems/scene/token/tokenGrid';
 import { emitTokenLive, emitTokenMove, emitTokenRotate } from '@/systems/scene/token/tokenSync';
@@ -95,6 +97,9 @@ function destinationVisible(token: TokenItem, map: MapItem, destX: number, destY
       ),
     };
   }
+  const destFloor = mapUnderTokenFeet(destX + token.width / 2, destY + token.height / 2);
+  if (destFloor && destFloor.id !== map.id && isModularMap(destFloor)) return true;
+
   const seen = fogCache.seen;
   if (!seen || seen.size === 0) return true;
 
@@ -122,9 +127,19 @@ function pathClearCheap(
   if (wallBlocksMovement(from, toLocal, walls, bodyR)) {
     return { ok: false, ground: 0, rise: 0 };
   }
+  const destFloor = mapUnderTokenFeet(destX + token.width / 2, destY + token.height / 2);
+  if (isModularMap(map) && !destFloor) {
+    return { ok: false, ground: 0, rise: 0 };
+  }
   if (map.modelUrl) {
     syncOpenDoorPunches(map, items);
     if (bakedMeshBlocksFeet(map, fromX, fromY, destX, destY, token.width, token.height)) {
+      return { ok: false, ground: 0, rise: 0 };
+    }
+  }
+  if (destFloor && destFloor.id !== map.id && destFloor.modelUrl) {
+    syncOpenDoorPunches(destFloor, items);
+    if (bakedMeshBlocksFeet(destFloor, fromX, fromY, destX, destY, token.width, token.height)) {
       return { ok: false, ground: 0, rise: 0 };
     }
   }
@@ -166,12 +181,18 @@ function commitPoseMove(
   // Fog: block entering unrevealed space without snapping to cells for the check.
   if (!destinationVisible(token, map, nextX, nextY)) return 0;
 
-  const clamped = clampTokenFeetToMap(map, nextX, nextY, token.width, token.height);
+  const destFloor = mapUnderTokenFeet(nextX + token.width / 2, nextY + token.height / 2);
+  const clamped = destFloor
+    ? { x: nextX, y: nextY }
+    : clampTokenFeetToMap(map, nextX, nextY, token.width, token.height);
   const dist = Math.hypot(clamped.x - fromX, clamped.y - fromY);
   if (dist < 1e-6) return 0;
 
   firstPersonPose.x = clamped.x;
   firstPersonPose.y = clamped.y;
+  if (destFloor && destFloor.id !== map.id) {
+    useItemStore.getState().setActiveMap(destFloor.id);
+  }
 
   // Initiative budget from real distance walked (not grid squares).
   if (limit !== null && map.gridSize > 0) {
@@ -204,7 +225,8 @@ export function broadcastFirstPersonLive(token: TokenItem): void {
   if (!firstPersonPose.active || firstPersonPose.tokenId !== token.id) return;
   const cx = firstPersonPose.x + token.width / 2;
   const cy = firstPersonPose.y + token.height / 2;
-  const { gridCol, gridRow } = worldToGridColRow(cx, cy, token.sizeCells);
+  const floor = mapUnderTokenFeet(cx, cy);
+  const { gridCol, gridRow } = worldToGridColRow(cx, cy, token.sizeCells, floor);
   emitTokenLive(
     token.id,
     firstPersonPose.x,
@@ -220,7 +242,8 @@ export function syncFirstPersonPosition(token: TokenItem, persist = false): void
   if (!firstPersonPose.active || firstPersonPose.tokenId !== token.id) return;
   const cx = firstPersonPose.x + token.width / 2;
   const cy = firstPersonPose.y + token.height / 2;
-  const { gridCol, gridRow } = worldToGridColRow(cx, cy, token.sizeCells);
+  const floor = mapUnderTokenFeet(cx, cy);
+  const { gridCol, gridRow } = worldToGridColRow(cx, cy, token.sizeCells, floor);
   emitTokenMove(token.id, gridCol, gridRow, firstPersonPose.x, firstPersonPose.y, {
     persist,
   });
@@ -345,8 +368,9 @@ export function tryFirstPersonStep(token: TokenItem, dir: MoveDir): number | nul
   const g = map.gridSize;
   const cx = pose.x + token.width / 2 + dx * g;
   const cy = pose.y + token.height / 2 + dy * g;
-  const { gridCol, gridRow } = worldToGridColRow(cx, cy, token.sizeCells);
-  const bounds = tokenBoundsFromGrid({ ...token, x: pose.x, y: pose.y } as TokenItem, gridCol, gridRow);
+  const destFloor = mapUnderTokenFeet(cx, cy) ?? map;
+  const { gridCol, gridRow } = worldToGridColRow(cx, cy, token.sizeCells, destFloor);
+  const bounds = tokenBoundsFromGrid({ ...token, x: pose.x, y: pose.y } as TokenItem, gridCol, gridRow, destFloor);
 
   if (!pathClearFull(token, map, pose.x, pose.y, bounds.x, bounds.y)) return null;
   if (!destinationVisible(token, map, bounds.x, bounds.y)) return null;
@@ -402,7 +426,8 @@ export function commitFirstPersonLive(token: TokenItem): void {
   const cx = pose.x + token.width / 2;
   const cy = pose.y + token.height / 2;
   // Keep continuous feet — only record gridCol/row as labels, do not snap to cell origin.
-  const { gridCol, gridRow } = worldToGridColRow(cx, cy, token.sizeCells);
+  const floor = mapUnderTokenFeet(cx, cy);
+  const { gridCol, gridRow } = worldToGridColRow(cx, cy, token.sizeCells, floor);
   emitTokenMove(token.id, gridCol, gridRow, pose.x, pose.y, { persist: true });
   emitTokenRotate(token.id, firstPersonLook.yaw);
   useLiveTransformStore.getState().clear([token.id]);

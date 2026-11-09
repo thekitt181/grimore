@@ -1,4 +1,5 @@
 import { getActiveMap } from './store/itemStore';
+import type { MapItem } from './types';
 
 export interface GridInfo {
   gridSize: number;
@@ -8,9 +9,7 @@ export interface GridInfo {
   originY: number; // map world y
 }
 
-/** Returns the active map's grid info, or a sane default if no map exists. */
-export function activeGridInfo(): GridInfo {
-  const map = getActiveMap();
+export function gridInfoForMap(map: Pick<MapItem, 'x' | 'y' | 'gridSize' | 'gridOffsetX' | 'gridOffsetY'> | null): GridInfo {
   if (!map) return { gridSize: 96, offsetX: 0, offsetY: 0, originX: 0, originY: 0 };
   return {
     gridSize: map.gridSize,
@@ -19,6 +18,11 @@ export function activeGridInfo(): GridInfo {
     originX: map.x,
     originY: map.y,
   };
+}
+
+/** Returns the active map's grid info, or a sane default if no map exists. */
+export function activeGridInfo(): GridInfo {
+  return gridInfoForMap(getActiveMap());
 }
 
 /** Snap a world point to the nearest grid intersection of the active map. */

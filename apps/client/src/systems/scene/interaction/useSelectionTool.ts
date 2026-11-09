@@ -14,11 +14,12 @@ import { sceneRefs, pickSceneItem, getMapInteractionEl } from '../sceneRefs';
 import { resolveItemBounds } from '@/systems/map3d/sceneItemBounds';
 import { pointerToMapWorld } from '@/systems/map3d/screenToGround';
 import { groundHeightAt } from '@/systems/map3d/mapGroundRaycast';
-import { worldToGridColRow, tokenBoundsFromGrid } from '@/systems/scene/token/tokenGrid';
+import { worldToGridColRow } from '@/systems/scene/token/tokenGrid';
 import { emitTokenMove } from '@/systems/scene/token/tokenSync';
-import { hitTest, hitTestMap, itemIntersectsRect } from '../hitTest';
+import { hitTest, hitTestMap, itemIntersectsRect, mapUnderTokenFeet } from '../hitTest';
+import { clearWalkPose } from '@/systems/scene/token/walkPoseBus';
 import { isTokenMoveClick } from '../token/tokenMovePick';
-import { snapPoint } from '../snap';
+import { gridInfoForMap, snapPoint } from '../snap';
 import {
   footprintPx,
   isModularGate,
@@ -26,6 +27,7 @@ import {
   modularScaleOf,
   pieceForUrl,
   snapModularOriginToGrid,
+  MODULAR_PX_PER_UNIT,
   MODULAR_DRAG_SNAP_PX,
   MODULAR_SNAP_REV,
   snapModularMapPose,
@@ -38,7 +40,7 @@ import { focusSessionMap } from '@/systems/map/mapFocusSync';
 import { getItemContainer } from '../render/useItemRenderer';
 import { useLiveTransformStore } from '../store/liveTransformStore';
 import { pickHandle } from './useTransformControls';
-import type { Item, HandoutItem, ImageItem, MapItem } from '../types';
+import type { Item, HandoutItem, ImageItem, MapItem, TokenItem } from '../types';
 import { useHandoutViewerStore } from '@/systems/compendium/handoutViewerStore';
 import { isMobileClient } from '@/lib/socket';
 import { isDdbPcToken } from '@/systems/ddb/ddbTokenUtils';
@@ -107,23 +109,12 @@ function resolveTokenDragPosition(
     nx = walled.x;
     ny = walled.y;
   }
-  if (!isGm && view.viewMode === '3d' && !isGm2dEditorInteraction()) {
+  if (!isGm && view.viewMode === '3d' && !isGm2dEditorInteraction() && !isModularMap(map)) {
     const clamped = clampTokenFeetToMap(map, nx, ny, token.width, token.height);
     nx = clamped.x;
     ny = clamped.y;
   }
   return { x: nx, y: ny };
-}
-
-function tokenFeetOutsideMapArt(
-  map: MapItem,
-  feetX: number,
-  feetY: number,
-  tokenW: number,
-  tokenH: number,
-): boolean {
-  const local = worldToMapLocal(feetX + tokenW / 2, feetY + tokenH / 2, map);
-  return local.x < 0 || local.y < 0 || local.x > map.width || local.y > map.height;
 }
 
 interface MarqueeState {
@@ -262,6 +253,9 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
           const propId = resolvePropId(i);
           if (propId && canTriggerProp(propId)) out.push(i);
         }
+        if (i.type === 'map' && i.visible !== false && isModularGate(i as MapItem)) {
+          out.push(i);
+        }
       }
       return out;
     }
@@ -272,7 +266,7 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
       return isGm();
     }
 
-    function armPlayerPropClick(prop: ImageItem, e: PointerEvent): void {
+    function armPlayerPropClick(prop: ImageItem | MapItem, e: PointerEvent): void {
       const store = useItemStore.getState();
       store.select([prop.id], 'set');
       store.clearWallSelection();
@@ -327,7 +321,6 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
       }
 
       const layer = sceneRefs.items.current;
-      const activeMap = getActiveMap();
       const storeItems = useItemStore.getState().items;
       const dragEntries: Array<{ id: string; x: number; y: number }> = [];
       const liveEntries: Array<{
@@ -343,16 +336,19 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
         let ny = o.y + dy;
         // 2D (and GM 2D editor): allow tokens off the map artwork.
         // 3D/FP walk still clamps via firstPersonController.
-        if (it.type === 'token' && activeMap) {
-          const o = current.origins.get(id)!;
-          ({ x: nx, y: ny } = resolveTokenDragPosition(
-            it as TokenItem,
-            activeMap,
-            o.x,
-            o.y,
-            nx,
-            ny,
-          ));
+        if (it.type === 'token') {
+          const host = mapUnderTokenFeet(nx + it.width / 2, ny + it.height / 2);
+          if (host) {
+            const o = current.origins.get(id)!;
+            ({ x: nx, y: ny } = resolveTokenDragPosition(
+              it as TokenItem,
+              host,
+              o.x,
+              o.y,
+              nx,
+              ny,
+            ));
+          }
         }
         const live = useLiveTransformStore.getState().byId[id];
         let drawW = live?.width ?? it.width;
@@ -784,6 +780,10 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
             }
             return;
           }
+          if (!isGm() && hit.type === 'map' && isModularGate(hit as MapItem) && hit.visible !== false) {
+            armPlayerPropClick(hit as MapItem, e);
+            return;
+          }
           if (hit.locked && !isGm()) return;
           const additive = e.shiftKey;
           const alreadySelected = store.selectedIds.includes(hit.id);
@@ -979,6 +979,10 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
           if (propId && canTriggerProp(propId) && hit.visible !== false) {
             armPlayerPropClick(hit, e);
           }
+          return;
+        }
+        if (!isGm() && hit.type === 'map' && isModularGate(hit as MapItem) && hit.visible !== false) {
+          armPlayerPropClick(hit as MapItem, e);
           return;
         }
 
@@ -1258,7 +1262,7 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
         const travel = Math.hypot(e.clientX - propClickOnly.startX, e.clientY - propClickOnly.startY);
         if (travel < CLICK_MOVE_THRESHOLD_PX) {
           const propItem = useItemStore.getState().items[propClickOnly.id];
-          if (propItem?.type === 'image') tryMapPropInteract(propItem);
+          if (propItem?.type === 'image' || propItem?.type === 'map') tryMapPropInteract(propItem);
         }
         propClickOnly = null;
       }
@@ -1273,7 +1277,7 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
         if (!useFirstPersonStore.getState().enabled) {
           if (isClick && propClickId) {
             const propItem = useItemStore.getState().items[propClickId];
-            if (propItem?.type === 'image') tryMapPropInteract(propItem);
+            if (propItem?.type === 'image' || propItem?.type === 'map') tryMapPropInteract(propItem);
           } else if (isClick && propUnderTokenClickId) {
             const tok = useItemStore.getState().items[propUnderTokenClickId];
             if (tok?.type === 'token') {
@@ -1287,17 +1291,8 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
             }
           } else if (isClick && m.ids.length === 1) {
             const gateIt = useItemStore.getState().items[m.ids[0]!];
-            if (
-              gateIt?.type === 'map'
-              && isModularGate(gateIt as MapItem)
-              && useSessionStore.getState().myRole === 'GM'
-            ) {
-              const patch = {
-                modularOpen: !gateIt.modularOpen,
-                modularOpenAt: Date.now(),
-              };
-              useItemStore.getState().updateItem(gateIt.id, patch);
-              emitItemUpdate([{ id: gateIt.id, patch }]);
+            if (gateIt?.type === 'map' && isModularGate(gateIt as MapItem)) {
+              tryMapPropInteract(gateIt as MapItem);
             }
           }
         }
@@ -1309,7 +1304,7 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
           const it = useItemStore.getState().items[id];
           return it?.type === 'map' && isModularMap(it as MapItem);
         });
-        if (!isClick && snap && m.ids.length && !releaseModular) {
+        if (!isClick && snap && m.ids.length && !releaseModular && !moveIncludesOnlyTokens(m.ids)) {
           const lead = m.ids[0]!;
           const o = m.origins.get(lead)!;
           const snapped = snapPoint(o.x + dx, o.y + dy);
@@ -1326,19 +1321,34 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
           let ny = o.y + dy;
           const it = useItemStore.getState().items[id];
           if (it?.type === 'token') {
-            const map = getActiveMap();
-            if (map) {
+            const host = mapUnderTokenFeet(nx + it.width / 2, ny + it.height / 2);
+            if (host) {
               ({ x: nx, y: ny } = resolveTokenDragPosition(
                 it as TokenItem,
-                map,
+                host,
                 o.x,
                 o.y,
                 nx,
                 ny,
               ));
             }
-            const { gridCol, gridRow } = worldToGridColRow(nx + it.width / 2, ny + it.height / 2, it.sizeCells);
-            return { id, kind: 'token' as const, gridCol, gridRow, x: nx, y: ny };
+            const gs = host?.gridSize || MODULAR_PX_PER_UNIT;
+            const { gridCol, gridRow } = worldToGridColRow(
+              nx + it.width / 2,
+              ny + it.height / 2,
+              it.sizeCells,
+              host,
+            );
+            return {
+              id,
+              kind: 'token' as const,
+              gridCol,
+              gridRow,
+              x: nx,
+              y: ny,
+              host,
+              cell: gs,
+            };
           }
           let patch: Partial<Item> = { x: nx, y: ny };
           if (it?.type === 'map' && isModularMap(it)) {
@@ -1391,27 +1401,24 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
                 useItemStore.getState().updateItem(p.id, { ownerId: myUserId, isPc: true });
                 emitItemUpdate([{ id: p.id, patch: { ownerId: myUserId, isPc: true } }]);
               }
-              if (snap) {
-                const map = getActiveMap();
-                const offArt =
-                  isGm()
-                  && map
-                  && tokenFeetOutsideMapArt(map, p.x, p.y, it.width, it.height);
-                if (offArt) {
-                  emitTokenMove(p.id, p.gridCol, p.gridRow, p.x, p.y);
-                } else {
-                  const bounds = tokenBoundsFromGrid(it, p.gridCol, p.gridRow);
-                  emitTokenMove(p.id, bounds.gridCol, bounds.gridRow, bounds.x, bounds.y);
-                  // Keep the footprint exactly sizeCells × gridSize so the token
-                  // stays centered in its square(s) even if its stored size is stale.
-                  if (Math.abs(it.width - bounds.width) > 0.5 || Math.abs(it.height - bounds.height) > 0.5) {
-                    useItemStore.getState().updateItem(p.id, { width: bounds.width, height: bounds.height });
-                    emitItemUpdate([{ id: p.id, patch: { width: bounds.width, height: bounds.height } }]);
-                  }
-                }
-              } else {
-                emitTokenMove(p.id, p.gridCol, p.gridRow, p.x, p.y);
+              let x = p.x;
+              let y = p.y;
+              if (snap && p.host) {
+                const g = gridInfoForMap(p.host);
+                const ox = g.originX + g.offsetX;
+                const oy = g.originY + g.offsetY;
+                x = Math.round((p.x - ox) / g.gridSize) * g.gridSize + ox;
+                y = Math.round((p.y - oy) / g.gridSize) * g.gridSize + oy;
               }
+              const { gridCol, gridRow } = worldToGridColRow(
+                x + it.width / 2,
+                y + it.height / 2,
+                it.sizeCells,
+                p.host,
+              );
+              emitTokenMove(p.id, gridCol, gridRow, x, y);
+              if (p.host) useItemStore.getState().setActiveMap(p.host.id);
+              clearWalkPose(p.id);
               recordDragFeet(p.id, worldDeltaToFeet(dx, dy));
               const liveRot = useLiveTransformStore.getState().byId[p.id]?.rotation;
               if (m.didRotate && liveRot != null && Math.abs((it.rotation ?? 0) - liveRot) > 0.01) {

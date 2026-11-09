@@ -265,13 +265,20 @@ export function selectSortedItems(s: ItemState): Item[] {
   return Object.values(s.items).sort((a, b) => a.zIndex - b.zIndex);
 }
 
-/** The active map item (drives grid + fog + snapping). */
+function isUsableMap(m: MapItem): boolean {
+  return Boolean(m.backgroundUrl || m.modelUrl);
+}
+
+/** The active map item (drives grid + fog + snapping). Skips leftover empty boards. */
 export function getActiveMap(): MapItem | null {
   const s = useItemStore.getState();
+  const maps = Object.values(s.items).filter((i): i is MapItem => i.type === 'map');
+  const usable = maps.filter(isUsableMap);
   if (s.activeMapId) {
     const m = s.items[s.activeMapId];
-    if (m && m.type === 'map') return m;
+    if (m && m.type === 'map') {
+      if (isUsableMap(m) || usable.length === 0) return m;
+    }
   }
-  const first = Object.values(s.items).find((i) => i.type === 'map');
-  return (first as MapItem) ?? null;
+  return usable[0] ?? maps[0] ?? null;
 }

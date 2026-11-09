@@ -81,11 +81,16 @@ function renderMap(c: Container, item: MapItem, ctx: RenderContext) {
     Boolean(item.modelUrl)
     || (!item.backgroundUrl && Boolean(ctx.hasModelMaps));
 
+  // Empty board (no art, no GLB) is an opaque black rect that covers kit pieces.
+  if (!item.backgroundUrl && !item.modelUrl && ctx.hasModelMaps) {
+    return;
+  }
+
   const bg = new Graphics();
   bg.label = 'bg';
   bg.rect(0, 0, item.width, item.height);
   if (hidePixiMapBody) {
-    bg.fill({ color: 0x0d0d14, alpha: 0.001 });
+    bg.fill({ color: 0x0d0d14, alpha: 0 });
   } else {
     bg.fill({ color: 0x0d0d14 });
   }

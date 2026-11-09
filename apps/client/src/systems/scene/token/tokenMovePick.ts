@@ -49,7 +49,7 @@ export function isTokenMoveClick(
         bounds.rotation,
         wx,
         wy,
-        0.48,
+        0.08,
       );
     }
 
@@ -68,7 +68,7 @@ export function isTokenMoveClick(
         bounds.rotation,
         wx,
         wy,
-        0.48,
+        0.08,
       );
     }
 
@@ -80,7 +80,7 @@ export function isTokenMoveClick(
     const maxY = Math.max(...ys);
     // Cap inset so tiny/far tokens keep a usable interior hit, large/near ones don't lose corners.
     const screenMin = Math.min(maxX - minX, maxY - minY);
-    const inset = Math.min(22, Math.max(6, screenMin * 0.18));
+    const inset = Math.min(8, Math.max(3, screenMin * 0.08));
     return isInsideScreenRect(clientX, clientY, minX, minY, maxX, maxY, inset);
   }
 
@@ -92,6 +92,6 @@ export function isTokenMoveClick(
     bounds.rotation,
     wx,
     wy,
-    0.48,
+    0.08,
   );
 }

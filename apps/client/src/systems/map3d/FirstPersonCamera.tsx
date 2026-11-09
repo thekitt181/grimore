@@ -110,6 +110,16 @@ export function FirstPersonCamera() {
     const cam = new THREE.PerspectiveCamera(72, 1, 0.12, 8000);
     cam.up.set(0, 1, 0);
     cam.rotation.order = 'YXZ';
+    const token = resolveFirstPersonToken();
+    if (token) {
+      seedFirstPersonPose(token);
+      const grid = getActiveMap()?.gridSize ?? 96;
+      cam.position.set(
+        pixiToThreeX(firstPersonPose.x + token.width / 2),
+        grid * EYE_CELLS,
+        pixiToThreeZ(firstPersonPose.y + token.height / 2),
+      );
+    }
     return cam;
   }, []);
 

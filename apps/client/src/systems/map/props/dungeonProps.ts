@@ -249,7 +249,7 @@ async function ensureDdbCharacter(ddbCharacterId: number | undefined): Promise<G
 /** Edge-to-edge distance from token to prop in feet. */
 export function distanceTokenToPropFeet(
   token: TokenItem,
-  prop: ImageItem,
+  prop: { x: number; y: number; width: number; height: number },
   gridSize = getMapGridSize(),
 ): number {
   const tc = itemCenter(token);
@@ -263,7 +263,7 @@ export function distanceTokenToPropFeet(
 
 export function isTokenInPropRange(
   token: TokenItem,
-  prop: ImageItem,
+  prop: { x: number; y: number; width: number; height: number },
   rangeFt = PROP_USE_RANGE_FT,
 ): boolean {
   return distanceTokenToPropFeet(token, prop) <= rangeFt;

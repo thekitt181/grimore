@@ -11,6 +11,7 @@ import { useLiveTransformStore } from '@/systems/scene/store/liveTransformStore'
 import { emitTokenMove } from '@/systems/scene/token/tokenSync';
 import { clearWalkPose } from '@/systems/scene/token/walkPoseBus';
 import { applyWalkPoseVisual } from '@/systems/scene/token/remotePoseApply';
+import { mapUnderTokenFeet } from '@/systems/scene/hitTest';
 import { worldToGridColRow } from '@/systems/scene/token/tokenGrid';
 import { bindPoseRelay } from '@/systems/scene/token/poseRelay';
 import {
@@ -62,7 +63,7 @@ function emitLivePose(token: TokenItem): void {
   const rotation = firstPersonLook.yaw;
   const cx = x + token.width / 2;
   const cy = y + token.height / 2;
-  const { gridCol, gridRow } = worldToGridColRow(cx, cy, token.sizeCells);
+  const { gridCol, gridRow } = worldToGridColRow(cx, cy, token.sizeCells, mapUnderTokenFeet(cx, cy));
 
   applyWalkPoseVisual(token.id, x, y, rotation);
   lastEmitX = x;
@@ -152,7 +153,7 @@ export function flushFpPosePersist(): void {
 
   const cx = firstPersonPose.x + token.width / 2;
   const cy = firstPersonPose.y + token.height / 2;
-  const { gridCol, gridRow } = worldToGridColRow(cx, cy, token.sizeCells);
+  const { gridCol, gridRow } = worldToGridColRow(cx, cy, token.sizeCells, mapUnderTokenFeet(cx, cy));
   emitTokenMove(token.id, gridCol, gridRow, firstPersonPose.x, firstPersonPose.y, {
     persist: true,
   });
