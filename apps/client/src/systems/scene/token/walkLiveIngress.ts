@@ -27,6 +27,11 @@ function ignoreLocal(tokenId: string): boolean {
   if (fp.enabled && fp.tokenId === tokenId) return true;
   // Mid-drag: pointer hook owns feet — ignore BC/socket echo of throttled live packets.
   if (getDragLivePosition(tokenId)) return true;
+  // GM simulates wander locally — live echo would fight the walk bus and hitch fog/Pixi.
+  if (useSessionStore.getState().myRole === 'GM') {
+    const it = useItemStore.getState().items[tokenId];
+    if (it?.type === 'token' && it.wandering) return true;
+  }
   return false;
 }
 

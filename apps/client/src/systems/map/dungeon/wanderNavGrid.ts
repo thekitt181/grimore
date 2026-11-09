@@ -10,6 +10,7 @@ import {
 } from '@/systems/map/library/modularKits';
 import { useItemStore } from '@/systems/scene/store/itemStore';
 import type { Item, MapItem } from '@/systems/scene/types';
+import { invalidateWanderGuide, wanderGuideNear, wanderGuidePath, wanderGuideSnap } from './wanderGuide';
 
 export type NavPt = { x: number; y: number };
 
@@ -72,6 +73,70 @@ function mark(nav: WanderNav, wx: number, wy: number): void {
   nav.walk[at(nav, c, r)] = 1;
 }
 
+const SIDES = ['N', 'E', 'S', 'W'] as const;
+type Side = (typeof SIDES)[number];
+
+function worldOpenings(map: MapItem): Side[] {
+  const piece = pieceForUrl(map.modelUrl);
+  if (!piece?.openings?.length) return [];
+  const steps = ((Math.round((map.rotation ?? 0) / 90) % 4) + 4) % 4;
+  return piece.openings.map((s) => SIDES[(SIDES.indexOf(s as Side) - steps + 4) % 4]!);
+}
+
+/** Centered strip from inner floor through the alcove so BFS can leave a room. */
+function markOpeningLanes(nav: WanderNav, map: MapItem, cell: number): void {
+  const kind = pieceForUrl(map.modelUrl)?.kind;
+  if (kind !== 'room' && kind !== 'hall') return;
+  const inner = cell * (kind === 'hall' ? 1.25 : MODULAR_ROOM_WALL_CELLS);
+  const cx = map.x + map.width / 2;
+  const cy = map.y + map.height / 2;
+  const half = cell * 0.35;
+  for (const side of worldOpenings(map)) {
+    let x0 = cx;
+    let y0 = cy;
+    let x1 = cx;
+    let y1 = cy;
+    switch (side) {
+      case 'E':
+        x0 = map.x + map.width - inner;
+        x1 = map.x + map.width + cell;
+        y0 = cy;
+        y1 = cy;
+        break;
+      case 'W':
+        x0 = map.x + inner;
+        x1 = map.x - cell;
+        y0 = cy;
+        y1 = cy;
+        break;
+      case 'S':
+        y0 = map.y + map.height - inner;
+        y1 = map.y + map.height + cell;
+        x0 = cx;
+        x1 = cx;
+        break;
+      default:
+        y0 = map.y + inner;
+        y1 = map.y - cell;
+        x0 = cx;
+        x1 = cx;
+        break;
+    }
+    const dist = Math.hypot(x1 - x0, y1 - y0) || 1;
+    const n = Math.max(4, Math.ceil(dist / (cell * 0.2)));
+    const px = (-(y1 - y0) / dist) * half;
+    const py = ((x1 - x0) / dist) * half;
+    for (let i = 0; i <= n; i++) {
+      const t = i / n;
+      const x = x0 + (x1 - x0) * t;
+      const y = y0 + (y1 - y0) * t;
+      mark(nav, x, y);
+      mark(nav, x + px, y + py);
+      mark(nav, x - px, y - py);
+    }
+  }
+}
+
 function floorWalkable(map: MapItem, wx: number, wy: number, cell: number): boolean {
   const kind = pieceForUrl(map.modelUrl)?.kind;
   if (!kind || kind === 'wall') return false;
@@ -83,11 +148,13 @@ function floorWalkable(map: MapItem, wx: number, wy: number, cell: number): bool
     return Math.abs(across) <= cell * 0.38 && Math.abs(along) <= long * 0.28;
   }
   if (kind === 'room') {
-    const inset = cell * Math.min(2.7, MODULAR_ROOM_WALL_CELLS);
+    // Kenney 12 m rooms: ~3.5 cell wall cap. Stay on the dark inner floor.
+    const inset = cell * MODULAR_ROOM_WALL_CELLS;
     return Math.abs(lx) <= map.width / 2 - inset && Math.abs(ly) <= map.height / 2 - inset;
   }
   if (kind === 'hall') {
-    const inset = cell * 0.95;
+    // 4 m Kenney corridors: ~1.2 cell walls; keep the center strip only.
+    const inset = cell * 1.25;
     return Math.abs(lx) <= map.width / 2 - inset && Math.abs(ly) <= map.height / 2 - inset;
   }
   if (kind === 'stairs' || kind === 'tile') {
@@ -175,6 +242,8 @@ function buildNav(items: Record<string, Item>): WanderNav | null {
     }
   }
 
+  for (const floor of floors) markOpeningLanes(nav, floor, cell);
+
   for (const gate of maps.filter((m) => isModularGate(m))) {
     const cx = gate.x + gate.width / 2;
     const cy = gate.y + gate.height / 2;
@@ -196,12 +265,16 @@ function nav(): WanderNav | null {
 
 export function wanderNavWalkAt(wx: number, wy: number): boolean {
   const g = nav();
+  const cell = g?.cell ?? 96;
+  if (wanderGuideNear(wx, wy, cell * 0.48)) return true;
   if (!g) return false;
   const { c, r } = cellOf(g, wx, wy);
   return g.walk[at(g, c, r)] === 1;
 }
 
 export function wanderNavSnap(wx: number, wy: number): NavPt {
+  const guided = wanderGuideSnap(wx, wy);
+  if (guided.x !== wx || guided.y !== wy) return guided;
   const g = nav();
   if (!g) return { x: wx, y: wy };
   const start = cellOf(g, wx, wy);
@@ -221,6 +294,8 @@ export function wanderNavSnap(wx: number, wy: number): NavPt {
 }
 
 export function wanderNavPath(fromX: number, fromY: number, toX: number, toY: number): NavPt[] | null {
+  const guided = wanderGuidePath(fromX, fromY, toX, toY);
+  if (guided && guided.length > 0) return guided;
   const g = nav();
   if (!g) return null;
   const start = cellOf(g, wanderNavSnap(fromX, fromY).x, wanderNavSnap(fromX, fromY).y);
@@ -280,4 +355,7 @@ export function wanderNavPath(fromX: number, fromY: number, toX: number, toY: nu
 /** Drop a cached grid when maps change (tests / HMR). */
 export function invalidateWanderNav(): void {
   cache = null;
+  invalidateWanderGuide();
 }
+
+invalidateWanderNav();

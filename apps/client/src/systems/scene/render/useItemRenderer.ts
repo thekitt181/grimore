@@ -60,8 +60,6 @@ export function useItemRenderer(
   const selectedIds = useItemStore((s) => s.selectedIds);
   const activeMapId = useItemStore((s) => s.activeMapId);
   const selectedWallIndices = useItemStore((s) => s.selectedWallIndices);
-  /** Bumps when FP walk / prop live transforms stream — keep Pixi feet in sync. */
-  const liveTick = useLiveTransformStore((s) => s.tick);
   const myRole  = useSessionStore((s) => s.myRole);
   const activeTurnItemId = useInitiativeStore((s) =>
     s.isActive && s.combatants[s.currentIndex] ? s.combatants[s.currentIndex]!.tokenId : undefined
@@ -317,7 +315,6 @@ export function useItemRenderer(
     tokenLayer?.sortChildren();
   }, [
     items,
-    liveTick,
     selectedIds,
     activeMapId,
     selectedWallIndices,

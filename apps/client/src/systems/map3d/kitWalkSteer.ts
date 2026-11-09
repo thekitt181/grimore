@@ -51,7 +51,8 @@ function openingCenter(map: MapItem, side: Side, cell: number): { x: number; y: 
 /** Door/opening strip — walking here is allowed through the shell. */
 export function inKitDoorLane(wx: number, wy: number, cell: number): boolean {
   const half = cell * 0.55;
-  const along = cell * 2.1;
+  // Inner floor (3.5 from AABB) to alcove (~0.85 from AABB), not the room center.
+  const along = cell * 3.05;
   for (const floor of listStandFloors(wx, wy, cell * 1.2)) {
     const kind = pieceForUrl(floor.modelUrl)?.kind;
     if (kind !== 'room' && kind !== 'hall') continue;
@@ -95,7 +96,9 @@ function clipVel(vx: number, vy: number, nx: number, ny: number): { vx: number; 
 
 function shellInset(map: MapItem): number {
   const cell = Math.max(8, map.gridSize);
-  return cell * Math.min(2.85, MODULAR_ROOM_WALL_CELLS);
+  const kind = pieceForUrl(map.modelUrl)?.kind;
+  if (kind === 'hall') return cell * 1.25;
+  return cell * MODULAR_ROOM_WALL_CELLS;
 }
 
 function applyRoomShell(

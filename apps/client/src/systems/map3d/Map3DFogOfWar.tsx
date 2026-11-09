@@ -29,7 +29,6 @@ function useFogDrawState(map: MapItem) {
   useMapStore((s) => s.sessionFogActive);
   const items = useItemStore((s) => s.items);
   const selectedIds = useItemStore((s) => s.selectedIds);
-  const liveTick = useLiveTransformStore((s) => s.tick);
   const { myRole, myUserId } = useSessionStore();
 
   const isGM = myRole === 'GM';
@@ -45,7 +44,6 @@ function useFogDrawState(map: MapItem) {
     items,
     selectedIds,
     myUserId,
-    liveTick,
   };
 }
 
@@ -112,7 +110,7 @@ export function Map3DFogOfWar({ map }: { map: MapItem }) {
 
   useEffect(() => {
     repaintFog();
-  }, [repaintFog, state.fogRevision, state.revealedCells, state.visible, state.liveTick, state.items, state.selectedIds]);
+  }, [repaintFog, state.fogRevision, state.revealedCells, state.visible, state.items, state.selectedIds]);
 
   useEffect(() => {
     if (!state.visible && materialRef.current) {

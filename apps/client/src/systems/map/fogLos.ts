@@ -7,6 +7,7 @@ import {
 } from '@grimoire/fog-engine';
 import type { Item, MapItem, TokenItem, WallSegment } from '@/systems/scene/types';
 import { cellKey } from './store/mapStore';
+import { getWalkPose, WALK_POSE_FRESH_MS } from '@/systems/scene/token/walkPoseBus';
 
 export const DEFAULT_VISION_CELLS = 12;
 export const DEFAULT_VISION_FT = DEFAULT_VISION_CELLS * 5;
@@ -73,6 +74,18 @@ export function visionRadiusFromFeet(feet: number): number {
 export function tokenFacingRad(token: TokenItem, map: MapItem): number {
   const deg = token.rotation - map.rotation;
   return (deg * Math.PI) / 180 - Math.PI / 2;
+}
+
+/** Mid-walk / look yaw so the cone matches the sprite, not a stale store heading. */
+function withWalkVisionPose(token: TokenItem): TokenItem {
+  const walk = getWalkPose(token.id);
+  if (!walk || performance.now() - walk.at >= WALK_POSE_FRESH_MS) return token;
+  return {
+    ...token,
+    x: walk.x,
+    y: walk.y,
+    rotation: walk.rotation ?? token.rotation,
+  };
 }
 
 export function mapBoundaryWalls(width: number, height: number): WallSegment[] {
@@ -319,7 +332,8 @@ export function getVisionTokens(
     if (selectedIds.length === 0) return [];
     return selectedIds
       .map((id) => items[id])
-      .filter((i): i is TokenItem => i?.type === 'token' && visibleOnMap(i));
+      .filter((i): i is TokenItem => i?.type === 'token' && visibleOnMap(i))
+      .map(withWalkVisionPose);
   }
 
   const uid = userId?.trim() ?? '';
@@ -332,13 +346,13 @@ export function getVisionTokens(
     });
 
   // Explicit selection wins over assignment (pick which PC drives vision).
-  if (selectedTokens.length > 0) return selectedTokens;
+  if (selectedTokens.length > 0) return selectedTokens.map(withWalkVisionPose);
 
   if (!uid) return [];
 
-  return Object.values(items).filter(
-    (i): i is TokenItem => i.type === 'token' && visibleOnMap(i) && i.ownerId?.trim() === uid,
-  );
+  return Object.values(items)
+    .filter((i): i is TokenItem => i.type === 'token' && visibleOnMap(i) && i.ownerId?.trim() === uid)
+    .map(withWalkVisionPose);
 }
 
 /** Vision polygons clipped by drawn walls and the map boundary. */

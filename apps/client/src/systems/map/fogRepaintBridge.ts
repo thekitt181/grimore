@@ -1,8 +1,12 @@
-import { useItemStore } from '@/systems/scene/store/itemStore';
+import { useSessionStore } from '@/store/sessionStore';
+import { getVisionTokens } from '@/systems/map/fogLos';
+import { useItemStore, getActiveMap } from '@/systems/scene/store/itemStore';
 import { useLiveTransformStore } from '@/systems/scene/store/liveTransformStore';
 import { useMapStore } from '@/systems/map/store/mapStore';
 import { hasDragLivePositions } from '@/systems/scene/interaction/dragLivePositions';
 import { isItemDragActive } from '@/systems/scene/interaction/selectionDragState';
+import { isFogOverlayVisible } from '@/systems/scene/fogActiveSync';
+import type { TokenItem } from '@/systems/scene/types';
 
 type FogRepaintListener = () => void;
 
@@ -10,6 +14,33 @@ const listeners = new Set<FogRepaintListener>();
 let subscriptionsBound = false;
 let pendingRepaint = false;
 let deferredFogWork = false;
+let visibilityRaf = 0;
+
+function visionTokenIds(): Set<string> {
+  const map = getActiveMap();
+  if (!map) return new Set();
+  const { items, selectedIds } = useItemStore.getState();
+  const { myRole, myUserId } = useSessionStore.getState();
+  const isGM = myRole === 'GM';
+  return new Set(
+    getVisionTokens(items, selectedIds, isGM, isGM ? null : myUserId, map).map((t) => t.id),
+  );
+}
+
+function tokenDrivesFog(it: TokenItem, visionIds: Set<string>): boolean {
+  if (visionIds.has(it.id)) return true;
+  if (it.isPc) return true;
+  if (it.ownerId) return true;
+  return false;
+}
+
+function scheduleSceneVisibilityUpdate(): void {
+  if (visibilityRaf) return;
+  visibilityRaf = requestAnimationFrame(() => {
+    visibilityRaf = 0;
+    requestSceneVisibilityUpdate();
+  });
+}
 
 function isDragRepaintSuppressed(): boolean {
   return isItemDragActive() || hasDragLivePositions();
@@ -93,30 +124,46 @@ export function bindFogRepaintSubscriptions(): void {
   subscriptionsBound = true;
 
   useLiveTransformStore.subscribe((state, prev) => {
-    if (state.tick !== prev.tick) requestSceneVisibilityUpdate();
+    if (state.tick === prev.tick) return;
+    if (!isFogOverlayVisible()) return;
+    const vision = visionTokenIds();
+    if (vision.size === 0) return;
+    for (const id of vision) {
+      const a = state.byId[id];
+      const b = prev.byId[id];
+      if (!a && !b) continue;
+      if (!a || !b) {
+        scheduleSceneVisibilityUpdate();
+        return;
+      }
+      if (a.x !== b.x || a.y !== b.y || a.rotation !== b.rotation) {
+        scheduleSceneVisibilityUpdate();
+        return;
+      }
+    }
   });
 
   useItemStore.subscribe((state, prev) => {
     if (state.selectedIds.join(',') !== prev.selectedIds.join(',')) {
-      requestSceneVisibilityUpdate();
+      scheduleSceneVisibilityUpdate();
       return;
     }
     if (state.activeMapId !== prev.activeMapId) {
-      requestSceneVisibilityUpdate();
+      scheduleSceneVisibilityUpdate();
       return;
     }
+    const vision = isFogOverlayVisible() ? visionTokenIds() : new Set<string>();
     for (const id of Object.keys(state.items)) {
       const it = state.items[id];
       const was = prev.items[id];
       if (it?.type !== 'token' || was?.type !== 'token') continue;
-      if (
-        it.x !== was.x
-        || it.y !== was.y
-        || it.rotation !== was.rotation
-        || it.ownerId !== was.ownerId
-        || it.visible !== was.visible
-      ) {
-        requestSceneVisibilityUpdate();
+      if (it.ownerId !== was.ownerId || it.visible !== was.visible) {
+        scheduleSceneVisibilityUpdate();
+        return;
+      }
+      if (it.x === was.x && it.y === was.y && it.rotation === was.rotation) continue;
+      if (!isFogOverlayVisible() || tokenDrivesFog(it, vision)) {
+        scheduleSceneVisibilityUpdate();
         return;
       }
     }

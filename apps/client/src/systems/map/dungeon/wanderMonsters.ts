@@ -13,9 +13,10 @@ import { worldToGridColRow } from '@/systems/scene/token/tokenGrid';
 import { emitTokenLive, emitTokenMove, emitTokenRotate } from '@/systems/scene/token/tokenSync';
 import { applyWalkPoseVisual } from '@/systems/scene/token/remotePoseApply';
 import type { ImageItem, Item, MapItem, TokenItem } from '@/systems/scene/types';
-import { tokenFeetBlocked } from '@/systems/map3d/firstPersonController';
+import { slideTokenFeet } from '@/systems/map3d/firstPersonController';
 import { bakedWalkableAt } from '@/systems/map3d/mapCollisionGrid';
 import { wanderNavPath, wanderNavSnap, wanderNavWalkAt } from './wanderNavGrid';
+import { wanderGuideNear, wanderGuideSnap } from './wanderGuide';
 import { useFirstPersonStore } from '@/systems/map3d/firstPersonStore';
 import { mapLocalToWorld } from '@/systems/map/wallUtils';
 import { isModularFloorTile, isModularGate, isModularMap, isModularWall, MODULAR_ROOM_WALL_CELLS, pieceForUrl } from '@/systems/map/library/modularKits';
@@ -61,8 +62,8 @@ interface WanderState {
 
 const WALK_CELLS_PER_SEC = 1.9;
 const YAW_TURN_PER_SEC = 540;
-const LIVE_EVERY_MS = 50;
-const COMMIT_EVERY_MS = 280;
+const LIVE_EVERY_MS = 80;
+const COMMIT_EVERY_MS = 700;
 /** Stay this far from wall faces (5 ft per cell). */
 const WALL_KEEP_FT = 0.5;
 
@@ -807,7 +808,7 @@ function nearPortal(cx: number, cy: number, range: number): boolean {
 /** Narrow strip through a doorway — not a fat circle that includes jambs. */
 function inDoorLane(wx: number, wy: number, cell: number): boolean {
   const half = cell * 0.52;
-  const along = cell * 2.0;
+  const along = cell * 3.05;
   for (const floor of dungeonStandFloors(useItemStore.getState().items)) {
     const kind = pieceForUrl(floor.modelUrl)?.kind;
     if (kind !== 'room' && kind !== 'hall') continue;
@@ -952,7 +953,7 @@ function kenneyShellBlocks(map: MapItem, wx: number, wy: number, cell: number): 
   if (nearPortal(wx, wy, cell * 1.6)) return false;
   const other = mapUnderTokenFeet(wx, wy) ?? mapNearTokenFeet(wx, wy, cell);
   if (other && other.id !== map.id) return false;
-  const inset = cell * Math.min(1.6, MODULAR_ROOM_WALL_CELLS);
+  const inset = cell * (kind === 'hall' ? 1.25 : MODULAR_ROOM_WALL_CELLS);
   const cx = map.x + map.width / 2;
   const cy = map.y + map.height / 2;
   const rad = (-map.rotation * Math.PI) / 180;
@@ -1311,7 +1312,7 @@ function pickDoorGoal(
 function wanderKenneyClearance(floor: MapItem, wx: number, wy: number, cell: number): number {
   const kind = pieceForUrl(floor.modelUrl)?.kind;
   if (kind !== 'room' && kind !== 'hall') return cell * 4;
-  const inset = cell * Math.min(1.6, MODULAR_ROOM_WALL_CELLS);
+  const inset = cell * (kind === 'hall' ? 1.25 : MODULAR_ROOM_WALL_CELLS);
   const cx = floor.x + floor.width / 2;
   const cy = floor.y + floor.height / 2;
   const rad = (-floor.rotation * Math.PI) / 180;
@@ -1350,7 +1351,7 @@ function bestClearStand(
   cell: number,
   map: MapItem,
 ): { x: number; y: number } {
-  const inset = cell * 2.05;
+  const inset = cell * (pieceForUrl(map.modelUrl)?.kind === 'hall' ? 1.25 : MODULAR_ROOM_WALL_CELLS);
   const step = cell * 0.45;
   let best: { x: number; y: number; score: number } | null = null;
   for (let y = map.y + inset; y <= map.y + map.height - inset; y += step) {
@@ -1386,7 +1387,7 @@ function nearestWalkable(
       }
     }
   }
-  const inset = cell * 2.1;
+  const inset = cell * (pieceForUrl(map.modelUrl)?.kind === 'hall' ? 1.25 : MODULAR_ROOM_WALL_CELLS);
   const x0 = map.x + inset;
   const y0 = map.y + inset;
   const x1 = map.x + map.width - inset;
@@ -1410,7 +1411,7 @@ function wanderSafeStand(map: MapItem, cell: number): { x: number; y: number } {
 
 function innerFloorGoal(map: MapItem): { x: number; y: number } {
   const cell = Math.max(8, map.gridSize);
-  const inset = cell * 2.1;
+  const inset = cell * (pieceForUrl(map.modelUrl)?.kind === 'hall' ? 1.25 : MODULAR_ROOM_WALL_CELLS);
   const hits: Array<{ x: number; y: number }> = [];
   const step = cell * 0.55;
   for (let y = map.y + inset; y <= map.y + map.height - inset; y += step) {
@@ -1667,18 +1668,15 @@ function wanderTryStep(
   dy: number,
   cell: number,
 ): { x: number; y: number } | null {
-  const nx = token.x + dx;
-  const ny = token.y + dy;
   if (Math.hypot(dx, dy) < 0.15) return null;
-  const wx = nx + token.width / 2;
-  const wy = ny + token.height / 2;
-  if (!inDoorLane(wx, wy, cell) && !wanderNavWalkAt(wx, wy) && !wanderCellWalkable(wx, wy, cell)) {
-    return null;
-  }
-  if (tokenFeetBlocked(token, map, token.x, token.y, nx, ny)) return null;
-  if (!wanderFeetOnFloor(token, nx, ny, cell)) return null;
-  if (!inDoorLane(wx, wy, cell) && wanderClearance(wx, wy, cell, map) < cell * 0.12) return null;
-  return { x: nx, y: ny };
+  const slid = slideTokenFeet(token, map, token.x, token.y, dx, dy);
+  const moved = Math.hypot(slid.x - token.x, slid.y - token.y);
+  if (moved < 0.15) return null;
+  const wx = slid.x + token.width / 2;
+  const wy = slid.y + token.height / 2;
+  if (inDoorLane(wx, wy, cell) || wanderNavWalkAt(wx, wy)) return slid;
+  if (!wanderFeetOnFloor(token, slid.x, slid.y, cell)) return null;
+  return slid;
 }
 
 function wanderSlideAround(
@@ -1819,8 +1817,9 @@ function stepToken(token: TokenItem, now: number, dt: number): void {
   const goalGone = st.goalDoorId != null && !items[st.goalDoorId];
   const atGoal = dist2(tx, ty, st.goalX, st.goalY) < (cell * 0.9) ** 2;
   const onGoalFloor = st.goalFloorId != null && map.id === st.goalFloorId;
-  const inPortal = inDoorLane(tx, ty, cell);
+  const inPortal = inDoorLane(tx, ty, cell) && inRoomWallRing(map, tx, ty);
   const settledInRoom = onGoalFloor && !inPortal && atGoal;
+  const needDest = !st.goalFloorId && (atGoal || st.goalUntil === 0 || now > st.goalUntil);
   const goalFloorItem = st.goalFloorId ? items[st.goalFloorId] : undefined;
   const goalCrowded = !patrol
     && goalFloorItem?.type === 'map'
@@ -1837,9 +1836,9 @@ function stepToken(token: TokenItem, now: number, dt: number): void {
       st.goalUntil = now + 30_000;
     }
   } else if (
-    !inPortal
-    && !(st.goalFloorId && map.id !== st.goalFloorId)
-    && (now > st.goalUntil || goalGone || settledInRoom || goalCrowded)
+    !(st.goalFloorId && map.id !== st.goalFloorId)
+    && (needDest || goalGone || settledInRoom || goalCrowded)
+    && (!inPortal || needDest)
   ) {
     const nextFloor = isModularMap(map)
       ? pickRoomGoal(live, map, items, st.goalFloorId, st.crossingFromId ?? st.lastFloorId)
@@ -1894,18 +1893,26 @@ function stepToken(token: TokenItem, now: number, dt: number): void {
   const gux = (aim.x - tx) / glen;
   const guy = (aim.y - ty) / glen;
   const step = Math.min(cell * 0.42, WALK_CELLS_PER_SEC * cell * dt);
-  const huggingWall = !inPortal && wanderClearance(tx, ty, cell, map) < cell * 0.22;
-  if (!wanderFeetOnFloor(live, live.x, live.y, cell) || huggingWall) {
+  if (!inPortal && !wanderGuideNear(tx, ty, cell * 0.42)) {
+    const safe = wanderGuideSnap(tx, ty);
+    const dxs = safe.x - tx;
+    const dys = safe.y - ty;
+    const slen = Math.hypot(dxs, dys) || 1;
+    const pull = Math.min(step * 1.35, slen);
+    live.x += (dxs / slen) * pull;
+    live.y += (dys / slen) * pull;
+    st.feetX = live.x;
+    st.feetY = live.y;
+  } else if (!inPortal && !wanderNavWalkAt(tx, ty) && !wanderFeetOnFloor(live, live.x, live.y, cell)) {
     const safe = wanderNavSnap(tx, ty);
-    const px = safe.x - live.width / 2;
-    const py = safe.y - live.height / 2;
-    st.feetX = px;
-    st.feetY = py;
-    st.lastMoved = true;
-    st.stuckMs = 0;
-    clearNav(st);
-    commitWanderPose({ ...live, x: px, y: py } as TokenItem, st, now, false);
-    return;
+    const dxs = safe.x - tx;
+    const dys = safe.y - ty;
+    const slen = Math.hypot(dxs, dys) || 1;
+    const pull = Math.min(step * 1.6, slen);
+    live.x += (dxs / slen) * pull;
+    live.y += (dys / slen) * pull;
+    st.feetX = live.x;
+    st.feetY = live.y;
   }
   let posed = wanderTryStep(live, map, gux * step, guy * step, cell);
   if (!posed) {
@@ -1923,9 +1930,9 @@ function stepToken(token: TokenItem, now: number, dt: number): void {
     const movedDist = Math.hypot(dx, dy);
     st.feetX = posed.x;
     st.feetY = posed.y;
-    st.dir = dirToward(dx, dy);
+    st.dir = dirToward(gux, guy);
     if (movedDist > 1.2) {
-      st.yaw = lerpYaw(st.yaw, yawFromVec(dx, dy), 1 - Math.exp(-YAW_TURN_PER_SEC * dt / 90));
+      st.yaw = lerpYaw(st.yaw, yawFromVec(gux, guy), 1 - Math.exp(-YAW_TURN_PER_SEC * dt / 90));
     }
     st.stuckMs = 0;
     st.lastMoved = true;

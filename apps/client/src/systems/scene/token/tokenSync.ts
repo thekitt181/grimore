@@ -71,7 +71,7 @@ export function emitTokenMove(
   gridRow: number,
   x: number,
   y: number,
-  opts?: { persist?: boolean },
+  opts?: { persist?: boolean; skipLocalStore?: boolean },
 ) {
   const s = sid();
   if (!s) return;
@@ -81,7 +81,9 @@ export function emitTokenMove(
     return;
   }
   // Local commit only; remotes get token:move (debounced updateItem there).
-  useItemStore.getState().updateItem(tokenId, patch);
+  if (!opts?.skipLocalStore) {
+    useItemStore.getState().updateItem(tokenId, patch);
+  }
   noteLocalTokenMoveCommit(tokenId);
   getSocket().emit('token:move', { sessionId: s, tokenId, gridCol, gridRow, x, y });
 }

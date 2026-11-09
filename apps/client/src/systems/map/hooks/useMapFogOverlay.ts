@@ -121,7 +121,6 @@ export function useMapFogOverlay(
   useSceneMediaStore(() => getActiveTimeOfDay());
   const items = useItemStore((s) => s.items);
   const selectedIds = useItemStore((s) => s.selectedIds);
-  const liveTick = useLiveTransformStore((s) => s.tick);
   const { myRole, myUserId } = useSessionStore();
 
   const isGM = myRole === 'GM';
@@ -183,7 +182,6 @@ export function useMapFogOverlay(
     isGM,
     selectedIds,
     myUserId,
-    liveTick,
     layerRef,
   ]);
 

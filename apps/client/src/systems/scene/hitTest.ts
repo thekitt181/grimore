@@ -145,7 +145,7 @@ export function listStandFloors(wx: number, wy: number, pad = 0): MapItem[] {
 export function inRoomWallRing(map: MapItem, wx: number, wy: number): boolean {
   const kind = pieceForUrl(map.modelUrl)?.kind;
   if (kind !== 'room' && kind !== 'hall') return false;
-  const inset = Math.max(8, map.gridSize) * Math.min(2.4, MODULAR_ROOM_WALL_CELLS);
+  const inset = Math.max(8, map.gridSize) * (kind === 'hall' ? 1.25 : MODULAR_ROOM_WALL_CELLS);
   const cx = map.x + map.width / 2;
   const cy = map.y + map.height / 2;
   const rad = (-map.rotation * Math.PI) / 180;
