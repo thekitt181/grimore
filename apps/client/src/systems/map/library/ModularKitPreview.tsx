@@ -1,6 +1,5 @@
-import { Suspense, useEffect } from 'react';
+import { Suspense } from 'react';
 import { Canvas } from '@react-three/fiber';
-import { useGLTF } from '@react-three/drei';
 import { SceneModel } from '@/systems/map3d/SceneModel';
 import { MAP_MODEL_YAW } from '@/systems/map3d/mapModelYaw';
 import { modularDepthStretch, modularWidthStretch, type ModularPiece } from './modularKits';
@@ -25,10 +24,6 @@ function PreviewScene({ piece }: { piece: ModularPiece }) {
 }
 
 export function ModularKitPreview({ piece }: { piece: ModularPiece }) {
-  useEffect(() => {
-    useGLTF.preload(piece.url);
-  }, [piece.url]);
-
   return (
     <div
       className="relative w-full overflow-hidden rounded border border-[#2a2a3a]"

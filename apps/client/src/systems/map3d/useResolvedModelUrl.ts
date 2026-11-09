@@ -4,6 +4,38 @@ import { isGrimoireModelRef, resolveModelAssetUrl, parseGrimoireModelRef } from 
 /** Session cache — blob URLs stay alive across component remounts (2D/3D toggle). */
 const blobCache = new Map<string, string>();
 const inflight = new Map<string, Promise<string>>();
+const packProbe = new Map<string, boolean>();
+const packProbeInflight = new Map<string, Promise<boolean>>();
+
+function isPackPublicUrl(url: string): boolean {
+  return url.startsWith('/maps3d/') || url.startsWith('/props3d/') || url.startsWith('/props/');
+}
+
+/** Kenney/KayKit packs are gitignored — don't treat a 404 GLB as a fatal app crash. */
+function probePackUrl(url: string): Promise<boolean> {
+  const cached = packProbe.get(url);
+  if (cached != null) return Promise.resolve(cached);
+  const pending = packProbeInflight.get(url);
+  if (pending) return pending;
+  const run = (async () => {
+    try {
+      let res = await fetch(url, { method: 'HEAD', cache: 'force-cache' });
+      if (res.status === 405 || res.status === 501) {
+        res = await fetch(url, { method: 'GET', cache: 'force-cache' });
+      }
+      const ok = res.ok;
+      packProbe.set(url, ok);
+      return ok;
+    } catch {
+      packProbe.set(url, false);
+      return false;
+    } finally {
+      packProbeInflight.delete(url);
+    }
+  })();
+  packProbeInflight.set(url, run);
+  return run;
+}
 
 /** Drop cached blob URL so the next resolve re-reads IndexedDB (after auto-rig overwrite). */
 export function invalidateModelBlobCache(ref: string): void {
@@ -48,13 +80,20 @@ export function useResolvedModelUrl(url: string | null | undefined): {
 } {
   const [resolved, setResolved] = useState<string | null>(() => {
     if (!url) return null;
-    if (!isGrimoireModelRef(url)) return url;
-    return blobCache.get(url) ?? null;
+    if (isGrimoireModelRef(url)) return blobCache.get(url) ?? null;
+    if (isPackPublicUrl(url)) return packProbe.get(url) === true ? url : null;
+    return url;
   });
   const [status, setStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>(() => {
     if (!url) return 'idle';
-    if (!isGrimoireModelRef(url)) return 'ready';
-    return blobCache.has(url) ? 'ready' : 'loading';
+    if (isGrimoireModelRef(url)) return blobCache.has(url) ? 'ready' : 'loading';
+    if (isPackPublicUrl(url)) {
+      const hit = packProbe.get(url);
+      if (hit === true) return 'ready';
+      if (hit === false) return 'error';
+      return 'loading';
+    }
+    return 'ready';
   });
 
   useEffect(() => {
@@ -64,6 +103,35 @@ export function useResolvedModelUrl(url: string | null | undefined): {
       return;
     }
     if (!isGrimoireModelRef(url)) {
+      if (isPackPublicUrl(url)) {
+        const hit = packProbe.get(url);
+        if (hit === true) {
+          setResolved(url);
+          setStatus('ready');
+          return;
+        }
+        if (hit === false) {
+          setResolved(null);
+          setStatus('error');
+          return;
+        }
+        let cancelledPack = false;
+        setResolved(null);
+        setStatus('loading');
+        void probePackUrl(url).then((ok) => {
+          if (cancelledPack) return;
+          if (ok) {
+            setResolved(url);
+            setStatus('ready');
+          } else {
+            setResolved(null);
+            setStatus('error');
+          }
+        });
+        return () => {
+          cancelledPack = true;
+        };
+      }
       setResolved(url);
       setStatus('ready');
       return;

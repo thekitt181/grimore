@@ -1,4 +1,4 @@
-import { useMemo, useEffect, useLayoutEffect, Suspense } from 'react';
+import { useMemo, useEffect, useLayoutEffect, Suspense, Component, type ErrorInfo, type ReactNode } from 'react';
 import { useLoader } from '@react-three/fiber';
 import { useFBX, useGLTF } from '@react-three/drei';
 import * as THREE from 'three';
@@ -369,6 +369,26 @@ function StlModel({
   return <primitive object={mesh} />;
 }
 
+class GltfLoadErrorBoundary extends Component<
+  { fallback: ReactNode; children: ReactNode },
+  { failed: boolean }
+> {
+  state = { failed: false };
+
+  static getDerivedStateFromError(): { failed: boolean } {
+    return { failed: true };
+  }
+
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    console.warn('[SceneModel] GLB failed to load', error.message, info.componentStack);
+  }
+
+  render() {
+    if (this.state.failed) return this.props.fallback;
+    return this.props.children;
+  }
+}
+
 function ModelPlaceholder({ targetSize, tokenRender }: { targetSize: number; tokenRender?: boolean }) {
   const h = Math.max(targetSize * 0.45, 12);
   const r = h * 0.38;
@@ -437,10 +457,14 @@ export function SceneModel({
   const format = modelFormatFromUrl(url);
 
   useEffect(() => {
-    if (!resolved || format === 'stl' || format == null) return;
-    if (resolved.includes('/spajx/')) return;
-    useGLTF.preload(resolved);
-  }, [resolved, format]);
+    if (status !== 'ready' || !resolved || format === 'stl' || format == null) return;
+    if (resolved.includes('/spajx/') || resolved.includes('/maps3d/')) return;
+    try {
+      useGLTF.preload(resolved);
+    } catch {
+      /* pack/CDN miss must not take down the session */
+    }
+  }, [resolved, format, status]);
 
   if (!format) return null;
 
@@ -471,6 +495,7 @@ export function SceneModel({
     );
   }
   return (
+    <GltfLoadErrorBoundary fallback={fallback}>
     <Suspense fallback={fallback}>
       <GltfModel
         url={resolved}
@@ -493,5 +518,6 @@ export function SceneModel({
         propOpen={propOpen}
       />
     </Suspense>
+    </GltfLoadErrorBoundary>
   );
 }
