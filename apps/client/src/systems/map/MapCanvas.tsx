@@ -54,7 +54,7 @@ import { useEraserTool } from './hooks/useEraserTool';
 import { useDeleteKey } from './hooks/useDeleteKey';
 import { usePropTriggerKey } from './hooks/usePropTriggerKey';
 import { useWanderMonsters } from './hooks/useWanderMonsters';
-import { useWanderPathTool, WanderPathHud } from './hooks/useWanderPathTool.tsx';
+import { useWanderPathTool, WanderPathHud } from './hooks/useWanderPathTool';
 import { bindPropInteractSync } from './props/propInteractSync';
 import { bindStatMakerSync } from '@/systems/stats/statMakerSync';
 import { useMap3DPixiMode } from './hooks/useMap3DPixiMode';

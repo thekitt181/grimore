@@ -28,7 +28,7 @@ function configureMapMesh(mesh: THREE.Mesh): void {
     mat.side = THREE.DoubleSide;
     // Keep depthWrite on — shared GLTF materials must not stay softened from an underlay.
     mat.depthWrite = true;
-    mat.fog = false;
+    if ('fog' in mat) (mat as THREE.MeshBasicMaterial).fog = false;
   }
 }
 

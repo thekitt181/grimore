@@ -325,9 +325,9 @@ async function placeGroup(
       select: false,
       skipPortraitLookup: true,
       skipSnap: true,
-      skipBoundsClamp: extra?.skipBoundsClamp,
-      sizeCells: extra?.sizeCells,
       encounterGroupId,
+      ...(extra?.skipBoundsClamp != null ? { skipBoundsClamp: extra.skipBoundsClamp } : {}),
+      ...(extra?.sizeCells != null ? { sizeCells: extra.sizeCells } : {}),
     });
   }
 }

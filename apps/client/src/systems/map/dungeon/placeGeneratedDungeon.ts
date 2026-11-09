@@ -256,7 +256,11 @@ export async function placeGeneratedDungeon(dungeon: GeneratedDungeon, level?: D
     emitItemAdd(prop);
   }
   if (level?.monsters !== false) {
-    await spawnDungeonMonsters(map, dungeon, { partyLevel: level?.partyLevel });
+    await spawnDungeonMonsters(
+      map,
+      dungeon,
+      level?.partyLevel != null ? { partyLevel: level.partyLevel } : {},
+    );
   }
   store.addItem(handout);
   emitItemAdd(handout);
@@ -294,7 +298,7 @@ export async function placeDungeonFloors(
       floor,
       focus: floor === 1,
       monsters: extras?.monsters !== false,
-      partyLevel: extras?.partyLevel,
+      ...(extras?.partyLevel != null ? { partyLevel: extras.partyLevel } : {}),
     };
     if (count > 1) placement.floorCount = count;
     if (baseName) placement.baseName = baseName;

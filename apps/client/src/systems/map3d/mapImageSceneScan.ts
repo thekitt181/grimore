@@ -22,7 +22,11 @@ export {
   type ScannedWater,
 } from '@grimoire/shared';
 
-function readImagePixels(img: HTMLImageElement, width: number, height: number): Uint8ClampedArray | null {
+function readImagePixels(
+  img: HTMLImageElement | HTMLCanvasElement,
+  width: number,
+  height: number,
+): Uint8ClampedArray | null {
   const canvas = document.createElement('canvas');
   canvas.width = width;
   canvas.height = height;

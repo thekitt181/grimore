@@ -128,7 +128,10 @@ export function PropAnim3D({
         const axis = obj.userData.lidAxis === 'y' || obj.userData.lidAxis === 'z' ? obj.userData.lidAxis : 'x';
         const sign = typeof obj.userData.lidSign === 'number' ? obj.userData.lidSign : -1;
         obj.rotation.set(rest.x, rest.y, rest.z);
-        obj.rotation[axis] = rest[axis] + sign * openRad * p;
+        const delta = sign * openRad * p;
+        if (axis === 'y') obj.rotation.y = rest.y + delta;
+        else if (axis === 'z') obj.rotation.z = rest.z + delta;
+        else obj.rotation.x = rest.x + delta;
       });
 
       switch (play) {

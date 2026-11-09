@@ -112,7 +112,7 @@ function SheetPropBillboardInner({
       <planeGeometry args={[planeW, planeH]} />
       <meshBasicMaterial
         ref={matRef}
-        map={list[0]}
+        map={list[0] ?? null}
         color="#ffffff"
         transparent={ghost}
         opacity={opacity}

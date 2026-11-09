@@ -358,7 +358,7 @@ export const TOKEN_SIZE_LABELS: Record<string, string> = {
 };
 
 /** The center of an item in world space (ignoring rotation). */
-export function itemCenter(item: BaseItem): { cx: number; cy: number } {
+export function itemCenter(item: Pick<BaseItem, 'x' | 'y' | 'width' | 'height'>): { cx: number; cy: number } {
   return { cx: item.x + item.width / 2, cy: item.y + item.height / 2 };
 }
 

@@ -176,7 +176,7 @@ export function FirstPersonCamera() {
 
   // Bind the eye camera before token billboards / sky (they read state.camera).
   useFrame((state) => {
-    camera.manual = true;
+    (camera as THREE.PerspectiveCamera & { manual?: boolean }).manual = true;
     if (state.camera !== camera) {
       state.set({ camera });
       if (state.raycaster) state.raycaster.camera = camera;
@@ -184,7 +184,7 @@ export function FirstPersonCamera() {
   }, -200);
 
   useFrame((state, dt) => {
-    camera.manual = true;
+    (camera as THREE.PerspectiveCamera & { manual?: boolean }).manual = true;
     state.set({ camera });
     if (state.raycaster) state.raycaster.camera = camera;
 

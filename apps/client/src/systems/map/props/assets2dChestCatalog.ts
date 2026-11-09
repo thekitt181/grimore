@@ -38,7 +38,7 @@ export const ASSETS2D_CHEST_ART: PropArt[] = ASSETS2D_CHEST_SHEETS.map((s) => {
     motion: 'toggle',
     play: 'lift',
     rest: frames[0]!,
-    open: frames[frames.length - 1],
+    open: frames[frames.length - 1]!,
     frames,
   };
 });

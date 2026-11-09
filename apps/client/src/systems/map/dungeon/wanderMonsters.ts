@@ -1545,7 +1545,7 @@ function wanderFindPath(
   const nbr = [
     [1, 0], [-1, 0], [0, 1], [0, -1],
     [1, 1], [1, -1], [-1, 1], [-1, -1],
-  ];
+  ] as const;
   let found = false;
   for (let qi = 0; qi < q.length && !found; ) {
     const c = q[qi++]!;

@@ -13,7 +13,7 @@ import {
 } from '@/systems/map/library/modularKits';
 import { bindMapBoundProp } from '@/systems/map/props/mapBoundProps';
 import { buildFurnishingsInWorldRooms } from './dungeonPropSpawn';
-import { spawnModularDungeonMonsters } from './dungeonMonsterSpawn';
+import { spawnModularDungeonMonsters, type DungeonMonsterSpawnOpts } from './dungeonMonsterSpawn';
 import {
   generateModularDungeon,
   generateModularExtension,
@@ -28,6 +28,13 @@ import {
 
 const CELL = 4 * MODULAR_PX_PER_UNIT;
 const KISS = 4;
+
+function monsterSpawnOpts(partyLevel?: number, theme?: string): DungeonMonsterSpawnOpts {
+  const opts: DungeonMonsterSpawnOpts = {};
+  if (partyLevel != null) opts.partyLevel = partyLevel;
+  if (theme) opts.theme = theme;
+  return opts;
+}
 
 function snapRot(deg: number): number {
   return ((Math.round(deg / 90) * 90) % 360 + 360) % 360;
@@ -308,7 +315,7 @@ export async function placeModularDungeon(
       })),
       dungeon.motif,
       options.seed,
-      { partyLevel: extras?.partyLevel, theme: dungeon.theme ?? options.theme },
+      monsterSpawnOpts(extras?.partyLevel, dungeon.theme ?? options.theme),
     );
   }
 
@@ -447,7 +454,7 @@ export async function extendModularFromDeadEnd(deadEnd: MapItem): Promise<string
     })),
     dungeon.motif,
     options.seed,
-    { theme: dungeon.theme ?? options.theme },
+    monsterSpawnOpts(undefined, dungeon.theme ?? options.theme),
   );
   if (firstId) focusSessionMap(firstId, { fitToMap: false, select: true });
   return firstId;

@@ -88,7 +88,7 @@ export function fpInteractPropForToken(token: TokenItem, _gm = false): FpInterac
     } else if (item.type === 'map') {
       usable = isModularGate(item);
     }
-    if (!usable) continue;
+    if (!usable || (item.type !== 'image' && item.type !== 'map')) continue;
     const d = distanceTokenToPropFeet(token, item);
     if (d > FP_PROP_INTERACT_RANGE_FT) continue;
     if (!isFacingProp(token, item)) continue;

@@ -40,7 +40,7 @@ import { focusSessionMap } from '@/systems/map/mapFocusSync';
 import { getItemContainer } from '../render/useItemRenderer';
 import { useLiveTransformStore } from '../store/liveTransformStore';
 import { pickHandle } from './useTransformControls';
-import type { Item, HandoutItem, ImageItem, MapItem, TokenItem } from '../types';
+import type { Item, HandoutItem, ImageItem, MapItem, TokenItem, WallSegment } from '../types';
 import { useHandoutViewerStore } from '@/systems/compendium/handoutViewerStore';
 import { isMobileClient } from '@/lib/socket';
 import { isDdbPcToken } from '@/systems/ddb/ddbTokenUtils';
@@ -71,7 +71,6 @@ import {
 } from '@/systems/map/props/dungeonProps';
 import { tryMapPropInteract } from '@/systems/map/props/fpPropInteract';
 import type { WallEndpoint } from '@/systems/map/wallUtils';
-import type { TokenItem, WallSegment } from '../types';
 
 interface MoveState {
   ids: string[];
