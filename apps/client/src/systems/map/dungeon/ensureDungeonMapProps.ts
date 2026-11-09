@@ -1,19 +1,133 @@
-import type { ImageItem, Item, MapItem } from '@/systems/scene/types';
+import type { ImageItem, Item, MapItem, TokenItem } from '@/systems/scene/types';
+import { DEFAULT_MAP_GRID_SIZE } from '@/systems/scene/types';
 import { useItemStore } from '@/systems/scene/store/itemStore';
 import { useSessionStore } from '@/store/sessionStore';
 import { emitItemAdd, emitItemRemove, emitItemUpdate } from '@/systems/scene/sceneSync';
 import { resolvePropId } from '@/systems/map/props/dungeonProps';
 import { isDoorPropId } from '@/systems/map/props/doorCollision';
 import { canonicalPropId } from '@/systems/map/props/propArt';
-import { bindMapBoundProp } from '@/systems/map/props/mapBoundProps';
+import { bindMapBoundProp, isMapBoundProp, worldPatchForMapBoundProp } from '@/systems/map/props/mapBoundProps';
+import { isModularMap } from '@/systems/map/library/modularKits';
+import { mapLocalToWorld, scaledMapGeometry, worldToMapLocal } from '@/systems/map/wallUtils';
+import { worldToGridColRow } from '@/systems/scene/token/tokenGrid';
 import { buildDungeonPropItems } from './dungeonPropSpawn';
 import { buildDungeonDoorItems } from './dungeonDoorSpawn';
 import { regenerateDungeonForMap } from './dungeonLayoutFromMap';
+import { invalidateGeneratedWander } from './generatedWander';
 
 /** Bump when spawn rules change so GMs can refresh auto props. */
 export const DUNGEON_PROPS_SPAWN_REVISION = 2;
 /** Bump when door spawn rules change (runs independently of props). */
 export const DUNGEON_DOORS_SPAWN_REVISION = 2;
+
+/**
+ * Enlarge a painted dungeon so one cell matches a Medium token (96px).
+ * Token pixel size stays the creature footprint; only the map/props grow.
+ */
+export function fitGeneratedDungeonToCreatureGrid(mapId: string): void {
+  const store = useItemStore.getState();
+  const map = store.items[mapId];
+  if (!map || map.type !== 'map' || !map.dungeon || isModularMap(map)) return;
+
+  const cols = Math.max(1, map.dungeon.cols);
+  const rows = Math.max(1, map.dungeon.rows);
+  const cellX = map.width / cols;
+  const cellY = map.height / rows;
+  const painted = (cellX + cellY) / 2;
+  const target = DEFAULT_MAP_GRID_SIZE;
+  if (!(painted > 4) || painted >= target * 0.98) {
+    if (Math.abs(map.gridSize - painted) > 1 && painted > 4) {
+      const patch = { gridSize: painted } as Partial<MapItem>;
+      store.updateItem(mapId, patch);
+      emitItemUpdate([{ id: mapId, patch }]);
+    }
+    return;
+  }
+
+  const sx = target / cellX;
+  const sy = target / cellY;
+  const nextMap: MapItem = {
+    ...map,
+    ...scaledMapGeometry(map, sx, sy),
+    width: map.width * sx,
+    height: map.height * sy,
+    gridSize: target,
+    dungeon: { ...map.dungeon, cell: target },
+  };
+
+  const patches: Array<{ id: string; patch: Partial<Item> }> = [
+    { id: mapId, patch: {
+      width: nextMap.width,
+      height: nextMap.height,
+      gridSize: nextMap.gridSize,
+      gridOffsetX: nextMap.gridOffsetX,
+      gridOffsetY: nextMap.gridOffsetY,
+      walls: nextMap.walls,
+      dungeon: nextMap.dungeon,
+    } },
+  ];
+
+  for (const item of Object.values(store.items)) {
+    if (item.id === mapId) continue;
+    if (item.type === 'token') {
+      const cx = item.x + item.width / 2;
+      const cy = item.y + item.height / 2;
+      if (cx < map.x - item.width || cy < map.y - item.height
+        || cx > map.x + map.width + item.width || cy > map.y + map.height + item.height) {
+        continue;
+      }
+      const local = worldToMapLocal(cx, cy, map);
+      const world = mapLocalToWorld(local.x * sx, local.y * sy, nextMap);
+      const x = world.x - item.width / 2;
+      const y = world.y - item.height / 2;
+      const grid = worldToGridColRow(world.x, world.y, item.sizeCells || 1, nextMap);
+      patches.push({
+        id: item.id,
+        patch: { x, y, gridCol: grid.gridCol, gridRow: grid.gridRow } as Partial<TokenItem>,
+      });
+      continue;
+    }
+    if (item.type !== 'image') continue;
+    if (isMapBoundProp(item) && item.dungeonPropForMapId === mapId) {
+      const width = item.width * sx;
+      const height = item.height * sy;
+      const scaled: ImageItem = {
+        ...item,
+        width,
+        height,
+        propMapLocalX: (item.propMapLocalX ?? 0) * sx,
+        propMapLocalY: (item.propMapLocalY ?? 0) * sy,
+      };
+      patches.push({
+        id: item.id,
+        patch: {
+          width,
+          height,
+          propMapLocalX: scaled.propMapLocalX,
+          propMapLocalY: scaled.propMapLocalY,
+          ...worldPatchForMapBoundProp(scaled, nextMap),
+        },
+      });
+      continue;
+    }
+    if (!propCenterOnMap(map, item)) continue;
+    const local = worldToMapLocal(item.x + item.width / 2, item.y + item.height / 2, map);
+    const world = mapLocalToWorld(local.x * sx, local.y * sy, nextMap);
+    patches.push({
+      id: item.id,
+      patch: {
+        width: item.width * sx,
+        height: item.height * sy,
+        x: world.x - (item.width * sx) / 2,
+        y: world.y - (item.height * sy) / 2,
+      },
+    });
+  }
+
+  store.updateItems(patches);
+  emitItemUpdate(patches);
+  invalidateGeneratedWander();
+}
 
 function propCenterOnMap(map: MapItem, item: ImageItem): boolean {
   const cx = item.x + item.width / 2;
@@ -107,6 +221,8 @@ function migrateLegacyMapBoundProps(map: MapItem): void {
 export function ensureDungeonMapProps(mapId: string): void {
   if (useSessionStore.getState().myRole !== 'GM') return;
 
+  fitGeneratedDungeonToCreatureGrid(mapId);
+
   const map = useItemStore.getState().items[mapId];
   if (!map || map.type !== 'map' || !map.dungeon) return;
 
@@ -168,7 +284,14 @@ export function ensureDungeonMapProps(mapId: string): void {
 }
 
 export function ensureDungeonMapPropsForActiveMap(): void {
-  const mapId = useItemStore.getState().activeMapId;
+  if (useSessionStore.getState().myRole !== 'GM') return;
+  const store = useItemStore.getState();
+  for (const item of Object.values(store.items)) {
+    if (item.type === 'map' && item.dungeon && !isModularMap(item)) {
+      fitGeneratedDungeonToCreatureGrid(item.id);
+    }
+  }
+  const mapId = store.activeMapId;
   if (!mapId) return;
   ensureDungeonMapProps(mapId);
 }

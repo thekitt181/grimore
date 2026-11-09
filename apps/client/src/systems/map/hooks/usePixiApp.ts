@@ -48,6 +48,9 @@ export function usePixiApp(
 
       // Prevent canvas from capturing right-click browser menu
       app.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+      app.canvas.style.display = 'block';
+      app.canvas.style.width = '100%';
+      app.canvas.style.height = '100%';
       container.appendChild(app.canvas);
       appRef.current = app;
 

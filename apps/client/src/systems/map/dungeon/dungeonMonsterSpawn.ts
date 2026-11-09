@@ -4,10 +4,13 @@ import type { CompendiumMonster } from '@grimoire/shared';
 import { searchMonsters } from '@/systems/compendium/compendiumApi';
 import { summonMonster } from '@/systems/compendium/summonMonster';
 import { partyLevelFromTokens, partySizeFromTokens } from '@/systems/combat/partyLevel';
+import { getActiveMap, useItemStore } from '@/systems/scene/store/itemStore';
 import type { MapItem } from '@/systems/scene/types';
-import { themeKeywords, type DungeonMotif, type GeneratedDungeon } from './generateDungeon';
-import { MODULAR_PX_PER_UNIT, MODULAR_ROOM_WALL_CELLS } from '@/systems/map/library/modularKits';
+import { inferDungeonMotif, themeKeywords, type DungeonMotif, type GeneratedDungeon } from './generateDungeon';
+import { isModularMap, MODULAR_PX_PER_UNIT, MODULAR_ROOM_WALL_CELLS, pieceForUrl } from '@/systems/map/library/modularKits';
 import { mapLocalToWorld as mapLocalPointToWorld } from '@/systems/map/wallUtils';
+import { generatedCellSize, isGeneratedDungeonMap } from './generatedWander';
+import { regenerateDungeonForMap } from './dungeonLayoutFromMap';
 import type { ModularFurnishRoom } from './dungeonPropSpawn';
 
 type Difficulty = 'skip' | 'easy' | 'medium' | 'hard' | 'deadly';
@@ -316,7 +319,7 @@ async function placeGroup(
   map: MapItem,
   monster: CompendiumMonster,
   points: Array<{ x: number; y: number }>,
-  extra?: { skipBoundsClamp?: boolean; sizeCells?: number },
+  extra?: { skipBoundsClamp?: boolean; sizeCells?: number; hidden?: boolean },
 ): Promise<void> {
   const encounterGroupId = uuidv4();
   for (const at of points) {
@@ -328,6 +331,7 @@ async function placeGroup(
       encounterGroupId,
       ...(extra?.skipBoundsClamp != null ? { skipBoundsClamp: extra.skipBoundsClamp } : {}),
       ...(extra?.sizeCells != null ? { sizeCells: extra.sizeCells } : {}),
+      ...(extra?.hidden ? { hidden: true } : {}),
     });
   }
 }
@@ -517,4 +521,132 @@ export async function spawnModularDungeonMonsters(
     });
     await placeGroup(map, pick, points, { skipBoundsClamp: true, sizeCells: need });
   }
+}
+
+function modularStandFloors(): MapItem[] {
+  return Object.values(useItemStore.getState().items).filter((i): i is MapItem => {
+    if (i.type !== 'map' || !isModularMap(i)) return false;
+    const kind = pieceForUrl(i.modelUrl)?.kind;
+    return kind === 'room' || kind === 'hall';
+  });
+}
+
+function randomGeneratedStand(
+  map: MapItem,
+  need: number,
+): { x: number; y: number } | null {
+  const dungeon = regenerateDungeonForMap(map);
+  if (!dungeon) return null;
+  const blocked = new Set(dungeon.stairs.map((s) => `${s.x},${s.y}`));
+  const rooms = map.dungeon?.rooms?.length ? map.dungeon.rooms : dungeon.rooms;
+  const shuffled = [...rooms].sort(() => Math.random() - 0.5);
+  let cells: Array<{ col: number; row: number }> = [];
+  for (const room of shuffled) {
+    cells = floorOrigins(dungeon, blocked, room, need);
+    if (cells.length === 0 && need > 1) cells = floorOrigins(dungeon, blocked, room, 1);
+    if (cells.length > 0) break;
+  }
+  if (cells.length === 0) {
+    for (let row = 0; row < dungeon.rows; row++) {
+      for (let col = 0; col < dungeon.cols; col++) {
+        if (footprintFits(dungeon, blocked, col, row, need)) cells.push({ col, row });
+      }
+    }
+  }
+  if (cells.length === 0) return null;
+  const c = cells[Math.floor(Math.random() * cells.length)]!;
+  const { cellX, cellY } = generatedCellSize(map, dungeon);
+  const world = mapLocalPointToWorld((c.col + need / 2) * cellX, (c.row + need / 2) * cellY, map);
+  return { x: world.x - (need * cellX) / 2, y: world.y - (need * cellY) / 2 };
+}
+
+function randomModularStand(
+  needCells: number,
+): { map: MapItem; x: number; y: number; sizeCells: number } | null {
+  const rooms = modularStandFloors().sort(() => Math.random() - 0.5);
+  for (const map of rooms) {
+    const grid = map.gridSize || MODULAR_PX_PER_UNIT;
+    const wall = grid * MODULAR_ROOM_WALL_CELLS;
+    let need = needCells;
+    const innerW = map.width - wall * 2;
+    const innerH = map.height - wall * 2;
+    if (innerW < grid || innerH < grid) continue;
+    if (need * grid > innerW || need * grid > innerH) need = 1;
+    const tokenW = need * grid;
+    const cols = Math.max(1, Math.floor((innerW - tokenW) / grid) + 1);
+    const rows = Math.max(1, Math.floor((innerH - tokenW) / grid) + 1);
+    const col = Math.floor(Math.random() * cols);
+    const row = Math.floor(Math.random() * rows);
+    const localCx = wall + col * grid + tokenW / 2;
+    const localCy = wall + row * grid + tokenW / 2;
+    const world = mapLocalPointToWorld(localCx, localCy, map);
+    return { map, x: world.x - tokenW / 2, y: world.y - tokenW / 2, sizeCells: need };
+  }
+  return null;
+}
+
+/** One hidden token matching the dungeon theme and party level, somewhere on the current map. */
+export async function spawnHiddenThemeMonster(opts?: {
+  partyLevel?: number;
+  theme?: string;
+  motif?: DungeonMotif;
+}): Promise<boolean> {
+  const active = getActiveMap();
+  const items = useItemStore.getState().items;
+  const generated = active && isGeneratedDungeonMap(active)
+    ? active
+    : Object.values(items).find((i): i is MapItem => i.type === 'map' && isGeneratedDungeonMap(i));
+  const modular = modularStandFloors();
+  if (!generated && modular.length === 0) return false;
+
+  const partyLevel = opts?.partyLevel ?? partyLevelFromTokens() ?? 3;
+  const theme = (opts?.theme ?? generated?.dungeon?.options.theme ?? '').trim();
+  const motif = opts?.motif
+    ?? generated?.dungeon?.options.motif
+    ?? (theme ? inferDungeonMotif(theme) : 'mixed');
+
+  let pool: CompendiumMonster[];
+  try {
+    pool = await loadPool(0, partyLevel + 4);
+  } catch {
+    return false;
+  }
+  if (pool.length === 0) return false;
+
+  const lore = loreForRoom(motif, '', [], theme);
+  const band = crWindow(partyLevel, 'medium');
+  const rnd = () => Math.random();
+  let pick = pickFromPool(pool, lore, band.min, band.max, false, partyLevel, rnd, new Set());
+  if (!pick) {
+    pick = pickFromPool(
+      pool,
+      { prefer: [], extra: MOTIF_KEYS[motif], bans: [] },
+      0,
+      partyLevel + 4,
+      false,
+      partyLevel,
+      rnd,
+      new Set(),
+    );
+  }
+  if (!pick) return false;
+
+  const need = Math.min(2, tokenCellsFor(pick));
+  const useGenerated = Boolean(active && isGeneratedDungeonMap(active))
+    || (modular.length === 0 && Boolean(generated));
+  if (useGenerated && generated) {
+    const at = randomGeneratedStand(generated, need);
+    if (!at) return false;
+    await placeGroup(generated, pick, [at], { hidden: true, sizeCells: need });
+    return true;
+  }
+
+  const stand = randomModularStand(need);
+  if (!stand) return false;
+  await placeGroup(stand.map, pick, [{ x: stand.x, y: stand.y }], {
+    hidden: true,
+    skipBoundsClamp: true,
+    sizeCells: stand.sizeCells,
+  });
+  return true;
 }

@@ -11,6 +11,7 @@ import { getPickCanvasRect } from '@/systems/map3d/pickCamera';
 import { sceneCameraRef } from '@/systems/map3d/sceneCameraRef';
 import { worldXZToClientScreen } from '@/systems/map3d/perspectiveCameraSync';
 import { pointerToMapWorld } from '@/systems/map3d/screenToGround';
+import { pixiWorldToClient } from '@/systems/map3d/pixiScreenCoords';
 import { playerInteractableTokens } from './clientTokenVisibility';
 import type { TokenItem } from '../types';
 
@@ -53,51 +54,52 @@ function tokenScreenRect(
   rect: DOMRect | null,
 ): ScreenRect | null {
   const b = resolveItemBounds(token, live);
-  const viewMode = useMapStore.getState().viewMode;
-  const viewport = useMapStore.getState().viewport;
 
-  if (viewMode === '3d' && !isGm2dEditorInteraction() && rect && sceneCameraRef.liveCamera) {
+  const useLiveCam =
+    Boolean(rect && sceneCameraRef.liveCamera) && !isGm2dEditorInteraction();
+  if (useLiveCam && rect) {
     const corners = [
       worldXZToClientScreen(b.x, b.y, rect),
       worldXZToClientScreen(b.x + b.width, b.y, rect),
       worldXZToClientScreen(b.x + b.width, b.y + b.height, rect),
       worldXZToClientScreen(b.x, b.y + b.height, rect),
     ];
-    if (corners.some((c) => c == null)) return null;
-    const xs = corners.map((c) => c!.x);
-    const ys = corners.map((c) => c!.y);
-    const minX = Math.min(...xs);
-    const maxX = Math.max(...xs);
-    const minY = Math.min(...ys);
-    const maxY = Math.max(...ys);
-    const center = worldXZToClientScreen(b.cx, b.cz, rect);
-    if (!center) return null;
-    return {
-      minX,
-      maxX,
-      minY,
-      maxY,
-      cx: center.x,
-      cy: center.y,
-      area: Math.max(1, (maxX - minX) * (maxY - minY)),
-    };
+    if (!corners.some((c) => c == null)) {
+      const xs = corners.map((c) => c!.x);
+      const ys = corners.map((c) => c!.y);
+      const minX = Math.min(...xs);
+      const maxX = Math.max(...xs);
+      const minY = Math.min(...ys);
+      const maxY = Math.max(...ys);
+      const center = worldXZToClientScreen(b.cx, b.cz, rect);
+      if (center) {
+        return {
+          minX,
+          maxX,
+          minY,
+          maxY,
+          cx: center.x,
+          cy: center.y,
+          area: Math.max(1, (maxX - minX) * (maxY - minY)),
+        };
+      }
+    }
   }
 
-  const scale = Math.max(viewport.scale, 0.08);
-  const canvas = rect ?? getPickCanvasRect();
-  const offsetX = canvas?.left ?? 0;
-  const offsetY = canvas?.top ?? 0;
-  const minX = (b.x - viewport.x) * scale;
-  const minY = (b.y - viewport.y) * scale;
-  const maxX = minX + b.width * scale;
-  const maxY = minY + b.height * scale;
+  const tl = pixiWorldToClient(b.x, b.y);
+  const br = pixiWorldToClient(b.x + b.width, b.y + b.height);
+  if (!tl || !br) return null;
+  const minX = Math.min(tl.x, br.x);
+  const maxX = Math.max(tl.x, br.x);
+  const minY = Math.min(tl.y, br.y);
+  const maxY = Math.max(tl.y, br.y);
   return {
-    minX: minX + offsetX,
-    maxX: maxX + offsetX,
-    minY: minY + offsetY,
-    maxY: maxY + offsetY,
-    cx: (minX + maxX) * 0.5 + offsetX,
-    cy: (minY + maxY) * 0.5 + offsetY,
+    minX,
+    maxX,
+    minY,
+    maxY,
+    cx: (minX + maxX) * 0.5,
+    cy: (minY + maxY) * 0.5,
     area: Math.max(1, (maxX - minX) * (maxY - minY)),
   };
 }

@@ -2,6 +2,7 @@
  * Occupancy map of the modular dungeon: inner floors, corridor centers, gate middles.
  * Wanderers BFS this grid so they do not walk into Kenney wall shells.
  */
+import { doorWallsSignature } from '@/systems/map/props/doorCollision';
 import {
   isModularGate,
   isModularWall,
@@ -11,6 +12,13 @@ import {
 import { useItemStore } from '@/systems/scene/store/itemStore';
 import type { Item, MapItem } from '@/systems/scene/types';
 import { invalidateWanderGuide, wanderGuideNear, wanderGuidePath, wanderGuideSnap } from './wanderGuide';
+import {
+  generatedNavCellOpen,
+  generatedOpenAt,
+  generatedSegHitsSolidWall,
+  invalidateGeneratedWander,
+  isGeneratedDungeonMap,
+} from './generatedWander';
 
 export type NavPt = { x: number; y: number };
 
@@ -22,6 +30,8 @@ type WanderNav = {
   cols: number;
   rows: number;
   walk: Uint8Array;
+  /** Bit 1 = east blocked by a wall, bit 2 = south blocked. */
+  wallEdge: Uint8Array;
 };
 
 let cache: WanderNav | null = null;
@@ -31,7 +41,7 @@ function mapsSig(items: Record<string, Item>): string {
   for (const it of Object.values(items)) {
     if (it.type !== 'map') continue;
     bits.push(
-      `${it.id}:${it.x}:${it.y}:${it.width}:${it.height}:${it.rotation ?? 0}:${it.modelUrl ?? ''}:${it.modularOpen ? 1 : 0}`,
+      `${it.id}:${it.x}:${it.y}:${it.width}:${it.height}:${it.rotation ?? 0}:${it.modelUrl ?? ''}:${it.modularOpen ? 1 : 0}:${it.walls?.length ?? 0}:${it.dungeon ? doorWallsSignature(it, items) : ''}`,
     );
   }
   bits.sort();
@@ -180,7 +190,9 @@ function thinWallHit(wall: MapItem, wx: number, wy: number, cell: number): boole
 }
 
 function buildNav(items: Record<string, Item>): WanderNav | null {
-  const maps = Object.values(items).filter((i): i is MapItem => i.type === 'map' && Boolean(i.modelUrl));
+  const maps = Object.values(items).filter(
+    (i): i is MapItem => i.type === 'map' && (Boolean(i.modelUrl) || isGeneratedDungeonMap(i)),
+  );
   if (maps.length === 0) return null;
   const cell = Math.max(8, maps[0]!.gridSize || 96);
   let minX = Infinity;
@@ -212,13 +224,16 @@ function buildNav(items: Record<string, Item>): WanderNav | null {
     cols,
     rows,
     walk: new Uint8Array(cols * rows),
+    wallEdge: new Uint8Array(cols * rows),
   };
 
   const floors = maps.filter((m) => {
+    if (isGeneratedDungeonMap(m)) return false;
     const k = pieceForUrl(m.modelUrl)?.kind;
     return k === 'room' || k === 'hall' || k === 'tile' || k === 'stairs' || k === 'gate';
   });
   const walls = maps.filter((m) => isModularWall(m) && !isModularGate(m));
+  const painted = maps.filter((m) => isGeneratedDungeonMap(m));
 
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
@@ -242,6 +257,21 @@ function buildNav(items: Record<string, Item>): WanderNav | null {
     }
   }
 
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const p = worldOf(nav, c, r);
+      for (const map of painted) {
+        if (p.x < map.x || p.y < map.y || p.x > map.x + map.width || p.y > map.y + map.height) continue;
+        if (generatedNavCellOpen(map, p.x, p.y, items)) {
+          nav.walk[at(nav, c, r)] = 1;
+        } else {
+          nav.walk[at(nav, c, r)] = 0;
+        }
+        break;
+      }
+    }
+  }
+
   for (const floor of floors) markOpeningLanes(nav, floor, cell);
 
   for (const gate of maps.filter((m) => isModularGate(m))) {
@@ -251,6 +281,28 @@ function buildNav(items: Record<string, Item>): WanderNav | null {
     const thinX = gate.width <= gate.height;
     mark(nav, cx + (thinX ? 0 : cell), cy + (thinX ? cell : 0));
     mark(nav, cx - (thinX ? 0 : cell), cy - (thinX ? cell : 0));
+  }
+
+  if (painted.length > 0) {
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const i = at(nav, c, r);
+        if (!nav.walk[i]) continue;
+        const a = worldOf(nav, c, r);
+        if (c + 1 < cols && nav.walk[at(nav, c + 1, r)]) {
+          const b = worldOf(nav, c + 1, r);
+          if (painted.some((map) => generatedSegHitsSolidWall(map, a.x, a.y, b.x, b.y, items))) {
+            nav.wallEdge[i] |= 1;
+          }
+        }
+        if (r + 1 < rows && nav.walk[at(nav, c, r + 1)]) {
+          const b = worldOf(nav, c, r + 1);
+          if (painted.some((map) => generatedSegHitsSolidWall(map, a.x, a.y, b.x, b.y, items))) {
+            nav.wallEdge[i] |= 2;
+          }
+        }
+      }
+    }
   }
 
   return nav;
@@ -264,6 +316,13 @@ function nav(): WanderNav | null {
 }
 
 export function wanderNavWalkAt(wx: number, wy: number): boolean {
+  const items = useItemStore.getState().items;
+  for (const it of Object.values(items)) {
+    if (it.type !== 'map' || !isGeneratedDungeonMap(it)) continue;
+    if (wx < it.x || wy < it.y || wx > it.x + it.width || wy > it.y + it.height) continue;
+    if (!generatedOpenAt(it, wx, wy, items)) return false;
+    break;
+  }
   const g = nav();
   const cell = g?.cell ?? 96;
   if (wanderGuideNear(wx, wy, cell * 0.48)) return true;
@@ -272,9 +331,26 @@ export function wanderNavWalkAt(wx: number, wy: number): boolean {
   return g.walk[at(g, c, r)] === 1;
 }
 
+function pathHitsGeneratedWall(pts: NavPt[]): boolean {
+  if (pts.length < 2) return false;
+  const items = useItemStore.getState().items;
+  const painted = Object.values(items).filter(
+    (i): i is MapItem => i.type === 'map' && isGeneratedDungeonMap(i),
+  );
+  if (painted.length === 0) return false;
+  for (let i = 1; i < pts.length; i++) {
+    const a = pts[i - 1]!;
+    const b = pts[i]!;
+    if (painted.some((map) => generatedSegHitsSolidWall(map, a.x, a.y, b.x, b.y, items))) return true;
+  }
+  return false;
+}
+
 export function wanderNavSnap(wx: number, wy: number): NavPt {
   const guided = wanderGuideSnap(wx, wy);
-  if (guided.x !== wx || guided.y !== wy) return guided;
+  if ((guided.x !== wx || guided.y !== wy) && !pathHitsGeneratedWall([{ x: wx, y: wy }, guided])) {
+    return guided;
+  }
   const g = nav();
   if (!g) return { x: wx, y: wy };
   const start = cellOf(g, wx, wy);
@@ -294,12 +370,28 @@ export function wanderNavSnap(wx: number, wy: number): NavPt {
 }
 
 export function wanderNavPath(fromX: number, fromY: number, toX: number, toY: number): NavPt[] | null {
-  const guided = wanderGuidePath(fromX, fromY, toX, toY);
-  if (guided && guided.length > 0) return guided;
   const g = nav();
-  if (!g) return null;
-  const start = cellOf(g, wanderNavSnap(fromX, fromY).x, wanderNavSnap(fromX, fromY).y);
-  const goalPt = wanderNavSnap(toX, toY);
+  const startCell = g ? cellOf(g, fromX, fromY) : null;
+  const goalCell = g ? cellOf(g, toX, toY) : null;
+  const startPt = g && startCell && g.walk[at(g, startCell.c, startCell.r)]
+    ? { x: fromX, y: fromY }
+    : wanderNavSnap(fromX, fromY);
+  const goalPt = g && goalCell && g.walk[at(g, goalCell.c, goalCell.r)]
+    ? { x: toX, y: toY }
+    : wanderNavSnap(toX, toY);
+  const gridPath = g ? wanderNavGridPath(g, startPt, goalPt) : null;
+  if (gridPath && gridPath.length > 1 && !pathHitsGeneratedWall([startPt, ...gridPath])) return gridPath;
+  const guided = wanderGuidePath(fromX, fromY, toX, toY);
+  if (guided && guided.length > 0 && !pathHitsGeneratedWall([startPt, ...guided, goalPt])) return guided;
+  return null;
+}
+
+function wanderNavGridPath(
+  g: WanderNav,
+  startPt: NavPt,
+  goalPt: NavPt,
+): NavPt[] | null {
+  const start = cellOf(g, startPt.x, startPt.y);
   const goal = cellOf(g, goalPt.x, goalPt.y);
   if (!g.walk[at(g, start.c, start.r)] || !g.walk[at(g, goal.c, goal.r)]) return null;
   if (start.c === goal.c && start.r === goal.r) return [goalPt];
@@ -318,6 +410,11 @@ export function wanderNavPath(fromX: number, fromY: number, toX: number, toY: nu
       if (nc < 0 || nr < 0 || nc >= g.cols || nr >= g.rows) continue;
       const ni = at(g, nc, nr);
       if (parent[ni] !== -1 || !g.walk[ni]) continue;
+      const from = at(g, c, r);
+      if (dc === 1 && (g.wallEdge[from] & 1)) continue;
+      if (dc === -1 && (g.wallEdge[ni] & 1)) continue;
+      if (dr === 1 && (g.wallEdge[from] & 2)) continue;
+      if (dr === -1 && (g.wallEdge[ni] & 2)) continue;
       parent[ni] = at(g, c, r);
       if (nc === goal.c && nr === goal.r) {
         found = true;
@@ -356,6 +453,7 @@ export function wanderNavPath(fromX: number, fromY: number, toX: number, toY: nu
 export function invalidateWanderNav(): void {
   cache = null;
   invalidateWanderGuide();
+  invalidateGeneratedWander();
 }
 
 invalidateWanderNav();

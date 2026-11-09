@@ -100,7 +100,7 @@ function mountThemedDoor(c: Container, item: ImageItem, art: PropArt, theme: Doo
   root.position.set((item.width - 64 * s) / 2, (item.height - 64 * s) / 2);
   c.addChildAt(root, 0);
 
-  const concealed = art.id === 'secret-door' && item.visible === false;
+  const concealed = item.visible === false && isDoorPropId(art.id);
   const open = (item.propState ?? 0) > 0;
 
   const redraw = () => {

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { ToolSection } from '@/systems/map/ToolSection';
 import type { DoorStyle, DungeonMotif, DungeonSize, FurnishingStyle } from './generateDungeon';
 import { placeModularDungeon } from './placeModularDungeon';
+import { spawnHiddenThemeMonster } from './dungeonMonsterSpawn';
 import { clampPartyLevel, partyLevelFromTokens } from '@/systems/combat/partyLevel';
 import type { ModularKitMode, ModularLayout } from './generateModularDungeon';
 
@@ -93,6 +94,8 @@ export function ModularGeneratorPanel() {
   const [seedText, setSeedText] = useState('');
   const [lastSeed, setLastSeed] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
+  const [spawnBusy, setSpawnBusy] = useState(false);
+  const [spawnMsg, setSpawnMsg] = useState<string | null>(null);
 
   async function generate() {
     if (busy) return;
@@ -117,6 +120,22 @@ export function ModularGeneratorPanel() {
       setLastSeed(seed);
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function spawnHidden() {
+    if (busy || spawnBusy) return;
+    setSpawnBusy(true);
+    setSpawnMsg(null);
+    try {
+      const ok = await spawnHiddenThemeMonster({
+        partyLevel,
+        motif,
+        ...(themeText.trim() ? { theme: themeText.trim() } : {}),
+      });
+      setSpawnMsg(ok ? 'Hidden monster placed.' : 'Need a modular dungeon on the table.');
+    } finally {
+      setSpawnBusy(false);
     }
   }
 
@@ -151,19 +170,17 @@ export function ModularGeneratorPanel() {
         <input type="checkbox" checked={monsters} onChange={(e) => setMonsters(e.target.checked)} />
         Place monsters from the codex
       </label>
-      {monsters && (
-        <label className="block space-y-1">
-          <span className="font-ui text-[10px] uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>Party level</span>
-          <input
-            className="input-dark w-full text-xs py-1"
-            inputMode="numeric"
-            min={1}
-            max={20}
-            value={partyLevel}
-            onChange={(event) => setPartyLevel(clampPartyLevel(Number(event.target.value)))}
-          />
-        </label>
-      )}
+      <label className="block space-y-1">
+        <span className="font-ui text-[10px] uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>Party level</span>
+        <input
+          className="input-dark w-full text-xs py-1"
+          inputMode="numeric"
+          min={1}
+          max={20}
+          value={partyLevel}
+          onChange={(event) => setPartyLevel(clampPartyLevel(Number(event.target.value)))}
+        />
+      </label>
       <label className="flex items-center gap-2 font-ui text-xs" style={{ color: 'var(--color-text-secondary)' }}>
         <input type="checkbox" checked={stairs} onChange={(e) => setStairs(e.target.checked)} />
         Stairs
@@ -181,6 +198,17 @@ export function ModularGeneratorPanel() {
       <button type="button" className="btn-primary w-full text-xs py-1.5" onClick={() => { void generate(); }} disabled={busy}>
         {busy ? 'Generating…' : 'Generate modular'}
       </button>
+      <button
+        type="button"
+        className="btn-secondary w-full text-xs py-1.5"
+        onClick={() => { void spawnHidden(); }}
+        disabled={busy || spawnBusy}
+      >
+        {spawnBusy ? 'Spawning…' : 'Spawn hidden monster'}
+      </button>
+      {spawnMsg && (
+        <p className="font-ui text-xs" style={{ color: 'var(--color-text-secondary)' }}>{spawnMsg}</p>
+      )}
       {lastSeed != null && (
         <button
           type="button"

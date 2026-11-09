@@ -3,6 +3,7 @@ import { useMapStore, type MapTool, type WallMode } from './store/mapStore';
 import { useItemStore, getActiveMap } from '@/systems/scene/store/itemStore';
 import { useSessionStore } from '@/store/sessionStore';
 import { resetSessionMapView, syncMapFocusToSession } from '@/systems/map/mapFocusSync';
+import { resyncMapDisplay } from '@/systems/map/resyncMapDisplay';
 import { emitItemUpdate, emitItemRemove, emitItemsSync } from '@/systems/scene/sceneSync';
 import { clsx } from 'clsx';
 import { setFogVisibleForSession } from '@/systems/scene/fogActiveSync';
@@ -198,6 +199,14 @@ export function MapToolbar() {
 
         {/* Fit */}
         <button title="Fit map to screen" onClick={handleFit} className={BTN}>⛶</button>
+        <button
+          type="button"
+          title="Re-align mouse, tokens, and props to the map when clicks or pieces look off"
+          onClick={() => resyncMapDisplay()}
+          className="w-9 rounded flex flex-col items-center justify-center font-ui transition-all py-1 text-[#8a8075] hover:text-[#e8e0d0] hover:bg-[#1c1c28]"
+        >
+          <span className="text-[8px] font-bold tracking-wide leading-tight">Align</span>
+        </button>
 
         {/* Grid toggle */}
         {isGM && (

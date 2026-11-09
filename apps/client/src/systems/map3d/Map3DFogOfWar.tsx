@@ -16,9 +16,10 @@ import { itemsWithDragLiveTransforms } from '@/systems/scene/interaction/dragLiv
 import type { MapItem } from '@/systems/scene/types';
 import { SceneItemTransformGroup } from './TokenTransformGroup';
 import { isModularMap } from '@/systems/map/library/modularMapSnap';
+import { useFirstPersonStore } from './firstPersonStore';
 
 const FOG_Y = 0.1;
-/** Kenney floors sit above 0.1 — lift the overlay so 3D/FP fog is visible on kit meshes. */
+/** Kenney floors sit above 0.1 — lift the overlay so orbit 3D fog sits on kit meshes. */
 const MODULAR_FOG_Y = 10;
 /** Above map mesh (0) but below tokens (12+) so minis stay visible on lit squares. */
 const FOG_RENDER_ORDER = 11;
@@ -52,6 +53,7 @@ function useFogDrawState(map: MapItem) {
 
 /** Fog-of-war on the 3D map ground (GM-painted reveal cells only). */
 export function Map3DFogOfWar({ map }: { map: MapItem }) {
+  const firstPerson = useFirstPersonStore((s) => s.enabled);
   const state = useFogDrawState(map);
 
   const { canvas, texture, texScale } = useMemo(() => {
@@ -121,7 +123,9 @@ export function Map3DFogOfWar({ map }: { map: MapItem }) {
     }
   }, [state.visible]);
 
-  if (!state.visible) return null;
+  // FP uses FirstPersonVisionFog (black past sight). The cell plane sits at
+  // kit floor height (~eye level) and reads as a grey sheet through walls.
+  if (!state.visible || firstPerson) return null;
 
   const kit = isModularMap(map);
   return (

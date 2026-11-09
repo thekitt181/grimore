@@ -9,8 +9,15 @@ import {
   MODULAR_ROOM_WALL_CELLS,
   pieceForUrl,
 } from '@/systems/map/library/modularKits';
+import { doorWallsSignature } from '@/systems/map/props/doorCollision';
 import { useItemStore } from '@/systems/scene/store/itemStore';
 import type { Item, MapItem } from '@/systems/scene/types';
+import {
+  appendGeneratedGuide,
+  generatedCellSize,
+  generatedSegHitsSolidWall,
+  isGeneratedDungeonMap,
+} from './generatedWander';
 
 export type GuidePt = { x: number; y: number };
 
@@ -32,7 +39,7 @@ function mapsSig(items: Record<string, Item>): string {
   for (const it of Object.values(items)) {
     if (it.type !== 'map') continue;
     bits.push(
-      `${it.id}:${it.x}:${it.y}:${it.width}:${it.height}:${it.rotation ?? 0}:${it.modelUrl ?? ''}`,
+      `${it.id}:${it.x}:${it.y}:${it.width}:${it.height}:${it.rotation ?? 0}:${it.modelUrl ?? ''}:${it.walls?.length ?? 0}:${it.dungeon ? doorWallsSignature(it, items) : ''}`,
     );
   }
   bits.sort();
@@ -124,10 +131,18 @@ function floorNear(floors: MapItem[], x: number, y: number, pad: number, skipId?
   return false;
 }
 
+function generatedMaps(items: Record<string, Item>): MapItem[] {
+  return Object.values(items).filter((i): i is MapItem => i.type === 'map' && isGeneratedDungeonMap(i));
+}
+
 function buildGuide(items: Record<string, Item>): Guide | null {
   const floors = standFloors(items);
-  if (floors.length === 0) return null;
-  const cell = Math.max(8, floors[0]!.gridSize || 96);
+  const painted = generatedMaps(items);
+  if (floors.length === 0 && painted.length === 0) return null;
+  const cell = Math.max(
+    8,
+    floors[0]?.gridSize || (painted[0] ? generatedCellSize(painted[0]).cellX : 0) || 96,
+  );
   const nodes: GuidePt[] = [];
   const adj: number[][] = [];
   const segs: Array<{ a: number; b: number }> = [];
@@ -174,6 +189,8 @@ function buildGuide(items: Record<string, Item>): Guide | null {
     }
   }
 
+  for (const map of painted) appendGeneratedGuide(map, addNode, addEdge);
+
   for (const it of Object.values(items)) {
     if (it.type !== 'map' || !isModularWall(it) || isModularGate(it)) continue;
     const key = pieceForUrl(it.modelUrl)?.key ?? '';
@@ -192,7 +209,15 @@ function buildGuide(items: Record<string, Item>): Guide | null {
       const already = adj[i]!.includes(j);
       if (already) continue;
       const axis = Math.abs(dx) < cell * 0.45 || Math.abs(dy) < cell * 0.45;
-      if (axis) addEdge(i, j);
+      if (!axis) continue;
+      let blocked = false;
+      for (const map of painted) {
+        if (generatedSegHitsSolidWall(map, nodes[i]!.x, nodes[i]!.y, nodes[j]!.x, nodes[j]!.y, items)) {
+          blocked = true;
+          break;
+        }
+      }
+      if (!blocked) addEdge(i, j);
     }
   }
 
@@ -226,6 +251,30 @@ export function wanderGuideSnap(wx: number, wy: number): GuidePt {
     }
   }
   return best;
+}
+
+/** Snap onto the guide without walking backward away from `ax, ay`. */
+export function wanderGuideSnapToward(wx: number, wy: number, ax: number, ay: number): GuidePt {
+  const g = guide();
+  if (!g || g.segs.length === 0) return { x: wx, y: wy };
+  const ux = ax - wx;
+  const uy = ay - wy;
+  const ulen = Math.hypot(ux, uy) || 1;
+  let best: GuidePt | null = null;
+  let bestScore = -Infinity;
+  for (const s of g.segs) {
+    const a = g.nodes[s.a]!;
+    const b = g.nodes[s.b]!;
+    const p = projectSeg(wx, wy, a.x, a.y, b.x, b.y);
+    const prog = ((p.x - wx) * ux + (p.y - wy) * uy) / ulen;
+    if (prog < -4) continue;
+    const score = prog * 3 - Math.sqrt(p.d2);
+    if (score > bestScore) {
+      bestScore = score;
+      best = { x: p.x, y: p.y };
+    }
+  }
+  return best ?? { x: wx, y: wy };
 }
 
 export function wanderGuideNear(wx: number, wy: number, radius: number): boolean {
@@ -274,6 +323,16 @@ export function wanderGuidePath(fromX: number, fromY: number, toX: number, toY: 
     if (i === goalN) break;
     for (const n of g.adj[i]!) {
       if (parent[n] !== -1) continue;
+      const a = g.nodes[i]!;
+      const b = g.nodes[n]!;
+      let blocked = false;
+      for (const map of generatedMaps(useItemStore.getState().items)) {
+        if (generatedSegHitsSolidWall(map, a.x, a.y, b.x, b.y)) {
+          blocked = true;
+          break;
+        }
+      }
+      if (blocked) continue;
       parent[n] = i;
       q.push(n);
     }

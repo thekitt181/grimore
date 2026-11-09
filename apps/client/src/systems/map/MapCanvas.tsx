@@ -591,6 +591,8 @@ export function MapCanvas() {
     const updates: Array<{ id: string; patch: Partial<Item> }> = [];
     for (const item of Object.values(store.items)) {
       if (item.type !== 'map' || !item.backgroundUrl) continue;
+      // Generated dungeons size cells to the token grid — don't shrink them to fit-to-view.
+      if (item.dungeon) continue;
       const expected = gridSizeForMap(item.width, item.height);
       if (item.gridSize === DEFAULT_MAP_GRID_SIZE && expected !== DEFAULT_MAP_GRID_SIZE) {
         const scale = expected / item.gridSize;

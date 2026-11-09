@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { isGm2dEditorInteraction, useMapStore } from '@/systems/map/store/mapStore';
+import { isGm2dEditorInteraction } from '@/systems/map/store/mapStore';
 import { sceneCameraRef } from './sceneCameraRef';
 import { getMapPointerRect, pixiClientToWorld } from './pixiScreenCoords';
 import { groundHeightAt } from './mapGroundRaycast';
@@ -91,7 +91,7 @@ export function pointerToMapWorld(
   clientY: number,
   planeY?: number,
 ): { x: number; y: number } {
-  if (useMapStore.getState().viewMode === '3d' && !isGm2dEditorInteraction()) {
+  if (!isGm2dEditorInteraction()) {
     const ground = clientPointerToGround(clientX, clientY, planeY);
     if (ground) return ground;
   }

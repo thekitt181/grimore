@@ -144,10 +144,13 @@ export function clampTokenFeetToMap(
   // Image rect in map-local pixels (0,0)–(width,height).
   const imgW = map.width;
   const imgH = map.height;
-  const minX = halfW + pad;
-  const maxX = imgW - halfW - pad;
-  const minY = halfH + pad;
-  const maxY = imgH - halfH - pad;
+  // Kit halls: clamp the *center*, not the token disc — Huge still walks a 4 m corridor.
+  const keepX = isModularMap(map) ? kitWalkKeepPx(map) : halfW;
+  const keepY = isModularMap(map) ? kitWalkKeepPx(map) : halfH;
+  const minX = keepX + pad;
+  const maxX = imgW - keepX - pad;
+  const minY = keepY + pad;
+  const maxY = imgH - keepY - pad;
   const cx = maxX < minX ? imgW / 2 : Math.min(maxX, Math.max(minX, local.x));
   const cy = maxY < minY ? imgH / 2 : Math.min(maxY, Math.max(minY, local.y));
   if (Math.abs(cx - local.x) < 1e-4 && Math.abs(cy - local.y) < 1e-4) {
@@ -296,6 +299,12 @@ export function fpWallBodyRadius(map: MapItem): number {
   const cell = Math.max(8, map.gridSize || 96);
   // Keep under half a cell so a 1-square corridor stays walkable at the centerline.
   return Math.min(cell * 0.22, 20) + Math.max(2, cell * 0.04);
+}
+
+/** Kenney/KayKit keep — token art size does not fill the hall. */
+export function kitWalkKeepPx(map: MapItem): number {
+  const cell = Math.max(8, map.gridSize || 96);
+  return Math.min(cell * 0.18, 16);
 }
 
 /**

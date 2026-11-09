@@ -215,6 +215,7 @@ export function steerKitWalk(
   vx: number,
   vy: number,
   radius: number,
+  opts?: { roomShell?: boolean },
 ): { x: number; y: number; vx: number; vy: number } {
   let x = wx;
   let y = wy;
@@ -222,15 +223,18 @@ export function steerKitWalk(
   let ovy = vy;
   const cell = 96;
   const pad = Math.max(radius * 4, cell);
+  const useShell = opts?.roomShell !== false;
 
   for (let i = 0; i < 3; i++) {
     const floors = listStandFloors(x, y, pad);
-    for (const floor of floors) {
-      const next = applyRoomShell(floor, x, y, ovx, ovy, radius);
-      x = next.x;
-      y = next.y;
-      ovx = next.vx;
-      ovy = next.vy;
+    if (useShell) {
+      for (const floor of floors) {
+        const next = applyRoomShell(floor, x, y, ovx, ovy, radius);
+        x = next.x;
+        y = next.y;
+        ovx = next.vx;
+        ovy = next.vy;
+      }
     }
     for (const wall of listModularWalls(x, y, pad)) {
       const next = applyThinWall(wall, x, y, ovx, ovy, radius);

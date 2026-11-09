@@ -4,7 +4,7 @@ import { queryClient } from '@/lib/queryClient';
 import { getMonster } from '@/systems/compendium/compendiumApi';
 import { getMonsterAbilities } from '@/systems/compendium/statBlockParser';
 import { clampTokenFeetToMap, fpWallBodyRadius, tokenMapOrigin } from '@/systems/map/fogLos';
-import { isDoorPropClosed, isDoorPropId, isDoorPropOpen } from '@/systems/map/props/doorCollision';
+import { isConcealedDoorProp, isDoorPropClosed, isDoorPropId, isDoorPropOpen } from '@/systems/map/props/doorCollision';
 import { resolvePropId, setDungeonDoorOpen } from '@/systems/map/props/dungeonProps';
 import { inRoomWallRing, listModularWalls, listModularWallsAlong, mapNearTokenFeet, mapUnderTokenFeet } from '@/systems/scene/hitTest';
 import { getActiveMap, useItemStore } from '@/systems/scene/store/itemStore';
@@ -16,9 +16,20 @@ import type { ImageItem, Item, MapItem, TokenItem } from '@/systems/scene/types'
 import { slideTokenFeet } from '@/systems/map3d/firstPersonController';
 import { bakedWalkableAt } from '@/systems/map3d/mapCollisionGrid';
 import { wanderNavPath, wanderNavSnap, wanderNavWalkAt } from './wanderNavGrid';
-import { wanderGuideNear, wanderGuideSnap } from './wanderGuide';
+import { wanderGuideNear, wanderGuideSnap, wanderGuideSnapToward } from './wanderGuide';
+import {
+  generatedFarGoal,
+  generatedOpenAt,
+  generatedOrbitNext,
+  generatedRoomCenters,
+  generatedSegHitsSolidWall,
+  generatedSegHitsWall,
+  generatedWanderGoal,
+  generatedWallBlocksStand,
+  isGeneratedDungeonMap,
+} from './generatedWander';
 import { useFirstPersonStore } from '@/systems/map3d/firstPersonStore';
-import { mapLocalToWorld } from '@/systems/map/wallUtils';
+import { mapLocalToWorld, worldToMapLocal } from '@/systems/map/wallUtils';
 import { isModularFloorTile, isModularGate, isModularMap, isModularWall, MODULAR_ROOM_WALL_CELLS, pieceForUrl } from '@/systems/map/library/modularKits';
 
 type Heading = { x: number; y: number };
@@ -58,6 +69,8 @@ interface WanderState {
   stuckMs: number;
   nav: Array<{ x: number; y: number }> | null;
   navKey: string;
+  storeX: number;
+  storeY: number;
 }
 
 const WALK_CELLS_PER_SEC = 1.9;
@@ -109,7 +122,13 @@ export function setTokensWandering(tokenIds: string[], wandering: boolean): void
     updates.push({ id, patch });
     if (!wandering) {
       const st = stateByToken.get(id);
-      if (st) commitWanderPose(it, st, performance.now(), true);
+      if (st) {
+        if (st.openedDoorId) {
+          const door = items[st.openedDoorId];
+          if (door && (door.type === 'image' || door.type === 'map')) closeWanderPortal(door);
+        }
+        commitWanderPose(it, st, performance.now(), true);
+      }
       stateByToken.delete(id);
     }
     else if (it.monsterId && it.monsterInt == null) void fillMonsterInt(id, it.monsterId);
@@ -204,11 +223,15 @@ async function fillMonsterInt(tokenId: string, monsterId: string): Promise<void>
   }
 }
 
+function isWanderDoorImage(it: Item): it is ImageItem {
+  if (it.type !== 'image') return false;
+  if (!isDoorPropId(resolvePropId(it))) return false;
+  if (it.visible === false || isConcealedDoorProp(it)) return false;
+  return true;
+}
+
 function doorsOnMap(items: Record<string, Item>, map: MapItem): ImageItem[] {
-  return Object.values(items).filter((i): i is ImageItem => {
-    if (i.type !== 'image' || i.visible === false) return false;
-    return isDoorPropId(resolvePropId(i));
-  }).filter((d) => {
+  return Object.values(items).filter((i): i is ImageItem => isWanderDoorImage(i)).filter((d) => {
     const cx = d.x + d.width / 2;
     const cy = d.y + d.height / 2;
     return cx >= map.x - d.width && cy >= map.y - d.height
@@ -259,8 +282,7 @@ function closedPortalOnWay(
     bestD = d;
   }
   for (const it of Object.values(items)) {
-    if (it.type !== 'image' || it.visible === false) continue;
-    if (!isDoorPropId(resolvePropId(it)) || !isDoorPropClosed(it)) continue;
+    if (!isWanderDoorImage(it) || !isDoorPropClosed(it)) continue;
     const c = doorCenter(it);
     const hitR = Math.max(it.width, it.height) / 2 + pad;
     if (distPointToSeg2(c.x, c.y, tx, ty, gx, gy) > hitR * hitR) continue;
@@ -311,9 +333,115 @@ function atPortalThreshold(
   return dist2(tx, ty, c.x, c.y) < r * r;
 }
 
+/** The other leaf of a double door / paired gate on the same opening. */
+function mateWanderPortals(
+  portal: ImageItem | MapItem,
+  items?: Record<string, Item>,
+): Array<ImageItem | MapItem> {
+  const bag = items ?? useItemStore.getState().items;
+  const map = getActiveMap();
+  const cell = Math.max(8, map?.gridSize ?? 96);
+  const c = portalCenter(portal);
+  const alongX = portal.type === 'image'
+    ? doorAlongWallX(portal, map)
+    : portal.width >= portal.height;
+  const maxD = cell * 1.4;
+  const out: Array<ImageItem | MapItem> = [portal];
+  for (const it of Object.values(bag)) {
+    if (it.id === portal.id) continue;
+    if (portal.type === 'image') {
+      if (!isWanderDoorImage(it)) continue;
+      if (doorAlongWallX(it, map) !== alongX) continue;
+      const o = doorCenter(it);
+      if (dist2(c.x, c.y, o.x, o.y) > maxD * maxD) continue;
+      if (alongX) {
+        if (Math.abs(o.y - c.y) > cell * 0.55) continue;
+      } else if (Math.abs(o.x - c.x) > cell * 0.55) {
+        continue;
+      }
+      out.push(it);
+    } else {
+      if (it.type !== 'map' || !isModularGate(it)) continue;
+      const o = floorCenter(it);
+      if (dist2(c.x, c.y, o.x, o.y) > maxD * maxD) continue;
+      const mateAlongX = it.width >= it.height;
+      if (mateAlongX !== alongX) continue;
+      out.push(it);
+    }
+  }
+  return out;
+}
+
+function setWanderPortalOpen(portal: ImageItem | MapItem, open: boolean): void {
+  if (portal.type === 'image') {
+    if (isConcealedDoorProp(portal) || portal.visible === false) return;
+    if (open) setDungeonDoorOpen(portal, true);
+    else if (isDoorPropOpen(portal)) setDungeonDoorOpen(portal, false);
+  } else if (open) {
+    setModularGateOpen(portal, true);
+  } else if (portal.modularOpen) {
+    setModularGateOpen(portal, false);
+  }
+}
+
 function openWanderPortal(portal: ImageItem | MapItem): void {
-  if (portal.type === 'image') setDungeonDoorOpen(portal, true);
-  else setModularGateOpen(portal, true);
+  for (const leaf of mateWanderPortals(portal)) setWanderPortalOpen(leaf, true);
+}
+
+function closeWanderPortal(portal: ImageItem | MapItem): void {
+  for (const leaf of mateWanderPortals(portal)) setWanderPortalOpen(leaf, false);
+}
+
+function wandererAtPortal(
+  portal: ImageItem | MapItem,
+  items: Record<string, Item>,
+  skipId: string,
+  range: number,
+): boolean {
+  const c = portalCenter(portal);
+  const r2 = range * range;
+  for (const it of Object.values(items)) {
+    if (it.type !== 'token' || it.id === skipId || !it.wandering) continue;
+    if (dist2(it.x + it.width / 2, it.y + it.height / 2, c.x, c.y) < r2) return true;
+  }
+  return false;
+}
+
+function doorClearToClose(
+  portal: ImageItem | MapItem,
+  tx: number,
+  ty: number,
+  cell: number,
+  items: Record<string, Item>,
+  tokenId: string,
+): boolean {
+  const away = Math.max(cell * 1.15, 64);
+  for (const leaf of mateWanderPortals(portal, items)) {
+    const c = portalCenter(leaf);
+    if (dist2(tx, ty, c.x, c.y) < away * away) return false;
+    if (wandererAtPortal(leaf, items, tokenId, cell * 1.05)) return false;
+  }
+  return true;
+}
+
+function rememberOpenedDoor(
+  st: WanderState,
+  portal: ImageItem | MapItem,
+  tx: number,
+  ty: number,
+  cell: number,
+  items: Record<string, Item>,
+  tokenId: string,
+): void {
+  if (st.openedDoorId && st.openedDoorId !== portal.id) {
+    const prev = items[st.openedDoorId];
+    if (prev && (prev.type === 'image' || prev.type === 'map') && doorClearToClose(prev, tx, ty, cell, items, tokenId)) {
+      closeWanderPortal(prev);
+    }
+  }
+  st.openedDoorId = portal.id;
+  const c = portalCenter(portal);
+  if (dist2(tx, ty, c.x, c.y) < (cell * 1.4) ** 2) st.openedTouched = true;
 }
 
 function closedPortalToPass(
@@ -344,8 +472,7 @@ function closedPortalToPass(
     if (!portal || d < dist2(tx, ty, portalCenter(portal).x, portalCenter(portal).y)) portal = wall;
   }
   for (const it of Object.values(items)) {
-    if (it.type !== 'image' || it.visible === false) continue;
-    if (!isDoorPropId(resolvePropId(it)) || !isDoorPropClosed(it)) continue;
+    if (!isWanderDoorImage(it) || !isDoorPropClosed(it)) continue;
     const c = doorCenter(it);
     if (dist2(tx, ty, c.x, c.y) > search * search) continue;
     const dx = c.x - tx;
@@ -365,16 +492,43 @@ function closedPortalToPass(
   return null;
 }
 
+/**
+ * True when the door sits on a horizontal red wall (passage is north/south).
+ * Use the wall, not the sprite AABB — rotated door art was steering into the jamb.
+ */
+function doorAlongWallX(door: ImageItem, map?: MapItem | null): boolean {
+  const m = map ?? getActiveMap();
+  if (m?.walls?.length) {
+    const local = worldToMapLocal(door.x + door.width / 2, door.y + door.height / 2, m);
+    const maxDist = Math.max(8, m.gridSize) * 0.85;
+    let bestD = Infinity;
+    let horiz = true;
+    for (const w of m.walls) {
+      const abx = w.b.x - w.a.x;
+      const aby = w.b.y - w.a.y;
+      const len2 = abx * abx + aby * aby;
+      if (len2 < 16) continue;
+      const t = Math.max(0, Math.min(1, ((local.x - w.a.x) * abx + (local.y - w.a.y) * aby) / len2));
+      const dx = local.x - (w.a.x + abx * t);
+      const dy = local.y - (w.a.y + aby * t);
+      const d = dx * dx + dy * dy;
+      if (d >= bestD) continue;
+      bestD = d;
+      horiz = Math.abs(abx) >= Math.abs(aby);
+    }
+    if (bestD <= maxDist * maxDist) return horiz;
+  }
+  const fp = worldFootprint(door);
+  return fp.w >= fp.h;
+}
+
 /** Two points just through the opening — pick the far one so they leave the room. */
 function doorFarSide(token: TokenItem, door: ImageItem): { x: number; y: number } {
   const c = doorCenter(door);
-  const alongW = door.width >= door.height;
-  const rad = (door.rotation * Math.PI) / 180;
-  const nx = alongW ? -Math.sin(rad) : Math.cos(rad);
-  const ny = alongW ? Math.cos(rad) : Math.sin(rad);
+  const alongX = doorAlongWallX(door);
   const push = Math.max(door.width, door.height) * 0.4 + 48;
-  const a = { x: c.x + nx * push, y: c.y + ny * push };
-  const b = { x: c.x - nx * push, y: c.y - ny * push };
+  const a = alongX ? { x: c.x, y: c.y + push } : { x: c.x + push, y: c.y };
+  const b = alongX ? { x: c.x, y: c.y - push } : { x: c.x - push, y: c.y };
   const tx = token.x + token.width / 2;
   const ty = token.y + token.height / 2;
   return dist2(tx, ty, a.x, a.y) >= dist2(tx, ty, b.x, b.y) ? a : b;
@@ -426,12 +580,25 @@ function portalExitGoal(
 }
 
 function beginCrossing(st: WanderState, token: TokenItem, map: MapItem, portal: ImageItem | MapItem, now: number): void {
-  const far = portalExitGoal(token, portal, map);
+  const items = useItemStore.getState().items;
+  const cell = Math.max(8, map.gridSize);
+  rememberOpenedDoor(
+    st,
+    portal,
+    token.x + token.width / 2,
+    token.y + token.height / 2,
+    cell,
+    items,
+    token.id,
+  );
   st.crossingId = portal.id;
   st.crossingFromId = map.id;
-  st.openedDoorId = portal.id;
-  st.openedTouched = true;
   st.goalDoorId = portal.type === 'image' ? portal.id : st.goalDoorId;
+  if (isGeneratedDungeonMap(map)) {
+    st.goalUntil = Math.max(st.goalUntil, now + 18_000);
+    return;
+  }
+  const far = portalExitGoal(token, portal, map);
   const keepRoom = st.goalFloorId != null && itemsRoomGoal(st.goalFloorId);
   if (!keepRoom) {
     st.goalFloorId = far.floorId;
@@ -459,8 +626,7 @@ function portalLinksFloors(
     if (isModularGate(wall)) return true;
   }
   for (const it of Object.values(items)) {
-    if (it.type !== 'image' || it.visible === false) continue;
-    if (!isDoorPropId(resolvePropId(it))) continue;
+    if (!isWanderDoorImage(it)) continue;
     const c = doorCenter(it);
     const hitR = Math.max(it.width, it.height) / 2 + pad;
     if (distPointToSeg2(c.x, c.y, ac.x, ac.y, bc.x, bc.y) <= hitR * hitR) return true;
@@ -634,8 +800,7 @@ function portalToward(
     consider(c.x, c.y, fp.w, fp.h, true);
   }
   for (const it of Object.values(items)) {
-    if (it.type !== 'image' || it.visible === false) continue;
-    if (!isDoorPropId(resolvePropId(it))) continue;
+    if (!isWanderDoorImage(it)) continue;
     const c = doorCenter(it);
     const hitR = Math.max(it.width, it.height) / 2 + pad;
     const fp = worldFootprint(it);
@@ -797,8 +962,7 @@ function nearPortal(cx: number, cy: number, range: number): boolean {
   }
   const range2 = range * range;
   for (const it of Object.values(useItemStore.getState().items)) {
-    if (it.type !== 'image' || it.visible === false) continue;
-    if (!isDoorPropId(resolvePropId(it))) continue;
+    if (!isWanderDoorImage(it)) continue;
     const c = doorCenter(it);
     if (dist2(cx, cy, c.x, c.y) <= range2) return true;
   }
@@ -806,7 +970,7 @@ function nearPortal(cx: number, cy: number, range: number): boolean {
 }
 
 /** Narrow strip through a doorway — not a fat circle that includes jambs. */
-function inDoorLane(wx: number, wy: number, cell: number): boolean {
+function inDoorLane(wx: number, wy: number, cell: number, openOnly = false): boolean {
   const half = cell * 0.52;
   const along = cell * 3.05;
   for (const floor of dungeonStandFloors(useItemStore.getState().items)) {
@@ -824,6 +988,7 @@ function inDoorLane(wx: number, wy: number, cell: number): boolean {
   }
   for (const wall of listModularWalls(wx, wy, cell * 1.4)) {
     if (!isModularGate(wall)) continue;
+    if (openOnly && !wall.modularOpen) continue;
     const c = floorCenter(wall);
     const fp = worldFootprint(wall);
     const thinX = fp.w <= fp.h;
@@ -836,13 +1001,14 @@ function inDoorLane(wx: number, wy: number, cell: number): boolean {
     }
   }
   for (const it of Object.values(useItemStore.getState().items)) {
-    if (it.type !== 'image' || it.visible === false) continue;
-    if (!isDoorPropId(resolvePropId(it))) continue;
+    if (it.type !== 'image' || !isDoorPropId(resolvePropId(it))) continue;
+    if (it.visible === false && !isConcealedDoorProp(it)) continue;
+    if (openOnly && !isDoorPropOpen(it) && !isConcealedDoorProp(it)) continue;
     const c = doorCenter(it);
     const fp = worldFootprint(it);
     const thinX = fp.w <= fp.h;
-    const across = Math.min(fp.w, fp.h) * 0.4 + cell * 0.15;
-    const long = Math.max(fp.w, fp.h) * 0.55 + cell * 0.6;
+    const across = Math.max(cell * 0.42, Math.min(fp.w, fp.h) * 0.55 + cell * 0.2);
+    const long = Math.max(fp.w, fp.h) * 0.7 + cell * 0.85;
     if (thinX) {
       if (Math.abs(wx - c.x) <= across && Math.abs(wy - c.y) <= long) return true;
     } else if (Math.abs(wy - c.y) <= across && Math.abs(wx - c.x) <= long) {
@@ -850,6 +1016,72 @@ function inDoorLane(wx: number, wy: number, cell: number): boolean {
     }
   }
   return false;
+}
+
+function steerToDoorCenter(
+  tx: number,
+  ty: number,
+  aimX: number,
+  aimY: number,
+  items: Record<string, Item>,
+  cell: number,
+  map?: MapItem | null,
+): { x: number; y: number } {
+  let best: ImageItem | null = null;
+  let bestD = Infinity;
+  const reach = cell * 2.4;
+  for (const it of Object.values(items)) {
+    if (it.type !== 'image' || !isDoorPropId(resolvePropId(it))) continue;
+    if (it.visible === false && !isConcealedDoorProp(it)) continue;
+    const c = doorCenter(it);
+    const d = dist2(tx, ty, c.x, c.y);
+    if (d > reach * reach || d >= bestD) continue;
+    const onWay = distPointToSeg2(c.x, c.y, tx, ty, aimX, aimY) <= (cell * 1.2) ** 2;
+    if (!onWay && d > (cell * 1.1) ** 2) continue;
+    best = it;
+    bestD = d;
+  }
+  if (!best) return { x: aimX, y: aimY };
+  const c = doorCenter(best);
+  const alongWallX = doorAlongWallX(best, map);
+  const through = cell * 1.35;
+  if (alongWallX) {
+    const dir = Math.abs(aimY - ty) > 1 ? Math.sign(aimY - ty) : (ty > c.y ? -1 : 1);
+    return { x: c.x, y: c.y + dir * through };
+  }
+  const dir = Math.abs(aimX - tx) > 1 ? Math.sign(aimX - tx) : (tx > c.x ? -1 : 1);
+  return { x: c.x + dir * through, y: c.y };
+}
+
+function pointInDoorOpening(
+  wx: number,
+  wy: number,
+  door: ImageItem,
+  cell: number,
+  map?: MapItem | null,
+): boolean {
+  const c = doorCenter(door);
+  const alongX = doorAlongWallX(door, map);
+  const across = cell * 0.62;
+  const along = cell * 1.35;
+  if (alongX) return Math.abs(wx - c.x) <= across && Math.abs(wy - c.y) <= along;
+  return Math.abs(wy - c.y) <= across && Math.abs(wx - c.x) <= along;
+}
+
+function doorInLaneAt(wx: number, wy: number, cell: number): ImageItem | null {
+  let best: ImageItem | null = null;
+  let bestD = Infinity;
+  for (const it of Object.values(useItemStore.getState().items)) {
+    if (it.type !== 'image' || !isDoorPropId(resolvePropId(it))) continue;
+    if (it.visible === false && !isConcealedDoorProp(it)) continue;
+    if (!pointInDoorOpening(wx, wy, it, cell)) continue;
+    const c = doorCenter(it);
+    const d = dist2(wx, wy, c.x, c.y);
+    if (d >= bestD) continue;
+    best = it;
+    bestD = d;
+  }
+  return best;
 }
 
 function headingFacesPortal(tx: number, ty: number, ux: number, uy: number, range: number): boolean {
@@ -863,8 +1095,7 @@ function headingFacesPortal(tx: number, ty: number, ux: number, uy: number, rang
   }
   const range2 = range * range;
   for (const it of Object.values(useItemStore.getState().items)) {
-    if (it.type !== 'image' || it.visible === false) continue;
-    if (!isDoorPropId(resolvePropId(it))) continue;
+    if (!isWanderDoorImage(it)) continue;
     const c = doorCenter(it);
     if (dist2(tx, ty, c.x, c.y) > range2) continue;
     const dx = c.x - tx;
@@ -1333,14 +1564,28 @@ function wanderClearance(wx: number, wy: number, cell: number, map: MapItem): nu
 }
 
 function wanderCellWalkable(wx: number, wy: number, cell: number): boolean {
-  if (inDoorLane(wx, wy, cell)) return true;
+  const floorHint = mapUnderTokenFeet(wx, wy) ?? mapNearTokenFeet(wx, wy, cell * 0.35);
+  if (inDoorLane(wx, wy, cell, true)) return true;
+  if (floorHint && isGeneratedDungeonMap(floorHint) && !generatedOpenAt(floorHint, wx, wy)) {
+    return inDoorLane(wx, wy, cell);
+  }
+  const floor = floorHint;
+  if (floor && isModularMap(floor)) {
+    if (isModularWall(floor) && !isModularGate(floor)) return false;
+    if (kenneyShellBlocks(floor, wx, wy, Math.max(8, floor.gridSize))) return false;
+    const kind = pieceForUrl(floor.modelUrl)?.kind;
+    if ((kind === 'room' || kind === 'hall') && inRoomWallRing(floor, wx, wy)) return false;
+    if (wanderKenneyClearance(floor, wx, wy, cell) < cell * 0.2) return false;
+  }
   if (wanderNavWalkAt(wx, wy)) return true;
-  const floor = mapUnderTokenFeet(wx, wy) ?? mapNearTokenFeet(wx, wy, cell * 0.35);
   if (!floor || isModularWall(floor)) return false;
   if (wanderKenneyClearance(floor, wx, wy, cell) < cell * 0.2) return false;
   const kind = pieceForUrl(floor.modelUrl)?.kind;
   if ((kind === 'room' || kind === 'hall') && inRoomWallRing(floor, wx, wy)) return false;
   if (kenneyShellBlocks(floor, wx, wy, Math.max(8, floor.gridSize))) return false;
+  if (isGeneratedDungeonMap(floor)) {
+    return generatedOpenAt(floor, wx, wy);
+  }
   if (bakedWalkableAt(floor.id, wx, wy)) return true;
   return kind === 'tile' || kind === 'room' || kind === 'hall' || kind === 'stairs' || !floor.modelUrl;
 }
@@ -1410,6 +1655,10 @@ function wanderSafeStand(map: MapItem, cell: number): { x: number; y: number } {
 }
 
 function innerFloorGoal(map: MapItem): { x: number; y: number } {
+  if (isGeneratedDungeonMap(map)) {
+    const pick = generatedWanderGoal(map);
+    if (pick) return pick;
+  }
   const cell = Math.max(8, map.gridSize);
   const inset = cell * (pieceForUrl(map.modelUrl)?.kind === 'hall' ? 1.25 : MODULAR_ROOM_WALL_CELLS);
   const hits: Array<{ x: number; y: number }> = [];
@@ -1481,6 +1730,13 @@ function wanderFindPath(
   cell: number,
   maps: MapItem[],
 ): Array<{ x: number; y: number }> | null {
+  for (const m of maps) {
+    if (!isGeneratedDungeonMap(m)) continue;
+    if (!generatedOpenAt(m, toX, toY)) continue;
+    if (!generatedSegHitsWall(m, fromX, fromY, toX, toY)) {
+      return [{ x: toX, y: toY }];
+    }
+  }
   const mapped = wanderNavPath(fromX, fromY, toX, toY);
   if (mapped && mapped.length > 0) return mapped;
   if (maps.length === 0) return null;
@@ -1557,6 +1813,9 @@ function wanderFindPath(
       const ni = at(nc, nr);
       if (parent[ni] !== -1 || !walk[ni]) continue;
       if (dc !== 0 && dr !== 0 && !walk[at(c + dc, r)] && !walk[at(c, r + dr)]) continue;
+      const pa = world(c, r);
+      const pb = world(nc, nr);
+      if (maps.some((m) => isGeneratedDungeonMap(m) && generatedSegHitsSolidWall(m, pa.x, pa.y, pb.x, pb.y))) continue;
       parent[ni] = at(c, r);
       if (nc === goal.c && nr === goal.r) {
         found = true;
@@ -1657,6 +1916,28 @@ function wanderAim(
   return { x: cx, y: cy };
 }
 
+function nudgeOffGeneratedWall(
+  token: TokenItem,
+  map: MapItem,
+  cell: number,
+): { x: number; y: number } | null {
+  const cx = token.x + token.width / 2;
+  const cy = token.y + token.height / 2;
+  if (!generatedWallBlocksStand(map, cx, cy)) return null;
+  const step = cell * 0.28;
+  let best: { x: number; y: number; d: number } | null = null;
+  for (const h of DIRS) {
+    const posed = wanderTryStep(token, map, h.x * step, h.y * step, cell);
+    if (!posed) continue;
+    const px = posed.x + token.width / 2;
+    const py = posed.y + token.height / 2;
+    if (generatedWallBlocksStand(map, px, py)) continue;
+    const d = dist2(px, py, cx, cy);
+    if (!best || d < best.d) best = { x: posed.x, y: posed.y, d };
+  }
+  return best;
+}
+
 function wanderFeetOnFloor(token: TokenItem, x: number, y: number, cell: number): boolean {
   return wanderCellWalkable(x + token.width / 2, y + token.height / 2, cell);
 }
@@ -1667,14 +1948,66 @@ function wanderTryStep(
   dx: number,
   dy: number,
   cell: number,
+  st?: WanderState,
 ): { x: number; y: number } | null {
-  if (Math.hypot(dx, dy) < 0.15) return null;
+  const cap = cell * 0.48;
+  const span = Math.hypot(dx, dy);
+  if (span < 0.15) return null;
+  if (span > cap) {
+    dx = (dx / span) * cap;
+    dy = (dy / span) * cap;
+  }
+  const rawX = token.x + dx;
+  const rawY = token.y + dy;
+  const rawCx = rawX + token.width / 2;
+  const rawCy = rawY + token.height / 2;
+  const fromCx = token.x + token.width / 2;
+  const fromCy = token.y + token.height / 2;
+  const door = doorInLaneAt(rawCx, rawCy, cell) ?? doorInLaneAt(fromCx, fromCy, cell);
+  if (door && !isConcealedDoorProp(door) && isDoorPropClosed(door)) {
+    openWanderPortal(door);
+    if (st) {
+      rememberOpenedDoor(st, door, fromCx, fromCy, cell, useItemStore.getState().items, token.id);
+    }
+  }
+  if (isGeneratedDungeonMap(map)) {
+    if (generatedSegHitsSolidWall(map, fromCx, fromCy, rawCx, rawCy)) return null;
+    if (generatedOpenAt(map, rawCx, rawCy)) return { x: rawX, y: rawY };
+    return null;
+  }
+  if (isModularMap(map)) {
+    if (
+      !solidKitWallsBlock(token, token.x, token.y, rawX, rawY)
+      && (inDoorLane(rawCx, rawCy, cell, true) || wanderCellWalkable(rawCx, rawCy, cell) || wanderNavWalkAt(rawCx, rawCy))
+    ) {
+      return { x: rawX, y: rawY };
+    }
+    const slid = slideTokenFeet(token, map, token.x, token.y, dx, dy);
+    const jumped = Math.hypot(slid.x - token.x, slid.y - token.y);
+    if (jumped < 0.15) return null;
+    let sx = slid.x;
+    let sy = slid.y;
+    if (jumped > cap) {
+      sx = token.x + ((slid.x - token.x) / jumped) * cap;
+      sy = token.y + ((slid.y - token.y) / jumped) * cap;
+    }
+    const wx = sx + token.width / 2;
+    const wy = sy + token.height / 2;
+    if (inDoorLane(wx, wy, cell, true) || wanderNavWalkAt(wx, wy) || wanderCellWalkable(wx, wy, cell)) {
+      return { x: sx, y: sy };
+    }
+    return null;
+  }
+  if (door || inDoorLane(rawCx, rawCy, cell, true)) return { x: rawX, y: rawY };
   const slid = slideTokenFeet(token, map, token.x, token.y, dx, dy);
   const moved = Math.hypot(slid.x - token.x, slid.y - token.y);
   if (moved < 0.15) return null;
   const wx = slid.x + token.width / 2;
   const wy = slid.y + token.height / 2;
+  if (inDoorLane(wx, wy, cell, true)) return slid;
+  if (isGeneratedDungeonMap(map) && !generatedOpenAt(map, wx, wy)) return null;
   if (inDoorLane(wx, wy, cell) || wanderNavWalkAt(wx, wy)) return slid;
+  if (isGeneratedDungeonMap(map) && generatedOpenAt(map, wx, wy)) return slid;
   if (!wanderFeetOnFloor(token, slid.x, slid.y, cell)) return null;
   return slid;
 }
@@ -1685,6 +2018,7 @@ function wanderSlideAround(
   gux: number,
   guy: number,
   step: number,
+  st?: WanderState,
 ): { x: number; y: number } | null {
   const cell = Math.max(8, map.gridSize);
   const safe = bestClearStand(token.x + token.width / 2, token.y + token.height / 2, cell, map);
@@ -1699,13 +2033,13 @@ function wanderSlideAround(
   let best: { x: number; y: number; score: number } | null = null;
   for (const [dx, dy] of tries) {
     const len = Math.hypot(dx, dy) || 1;
-    const posed = wanderTryStep(token, map, (dx / len) * step, (dy / len) * step, cell);
+    const posed = wanderTryStep(token, map, (dx / len) * step, (dy / len) * step, cell, st);
     if (!posed) continue;
     const mx = posed.x - token.x;
     const my = posed.y - token.y;
     const moved = Math.hypot(mx, my);
     const progress = mx * gux + my * guy;
-    if (progress < -moved * 0.2) continue;
+    if (progress < 0.05) continue;
     const score = progress * 3 + moved;
     if (!best || score > best.score) best = { x: posed.x, y: posed.y, score };
   }
@@ -1720,10 +2054,14 @@ function stepToken(token: TokenItem, now: number, dt: number): void {
   const fp = useFirstPersonStore.getState();
   if (fp.enabled && fp.tokenId === token.id) return;
 
-  const map = mapUnderTokenFeet(token.x + token.width / 2, token.y + token.height / 2) ?? getActiveMap();
+  let st = stateByToken.get(token.id);
+  const feetCx = (st?.feetX ?? token.x) + token.width / 2;
+  const feetCy = (st?.feetY ?? token.y) + token.height / 2;
+  const map = mapUnderTokenFeet(feetCx, feetCy)
+    ?? mapUnderTokenFeet(token.x + token.width / 2, token.y + token.height / 2)
+    ?? getActiveMap();
   if (!map) return;
 
-  let st = stateByToken.get(token.id);
   if (!st) {
     st = {
       dir: randDir(),
@@ -1749,6 +2087,8 @@ function stepToken(token: TokenItem, now: number, dt: number): void {
       stuckMs: 0,
       nav: null,
       navKey: '',
+      storeX: token.x,
+      storeY: token.y,
     };
     stateByToken.set(token.id, st);
     if (token.monsterId && token.monsterInt == null) void fillMonsterInt(token.id, token.monsterId);
@@ -1761,9 +2101,18 @@ function stepToken(token: TokenItem, now: number, dt: number): void {
       st.goalY = pt.y;
       st.goalUntil = now + 30_000;
     }
-  } else if (Math.hypot(token.x - st.feetX, token.y - st.feetY) > Math.max(24, map.gridSize * 2.5)) {
-    st.feetX = token.x;
-    st.feetY = token.y;
+  } else {
+    const prevStoreX = st.storeX ?? st.feetX;
+    const prevStoreY = st.storeY ?? st.feetY;
+    const storeMoved = Math.hypot(token.x - prevStoreX, token.y - prevStoreY);
+    const awayFromFeet = Math.hypot(token.x - st.feetX, token.y - st.feetY);
+    // GM / player drag moved the store. Ignore token:move echoes of our own feet.
+    if (storeMoved > 12 && awayFromFeet > Math.max(28, map.gridSize * 0.55)) {
+      st.feetX = token.x;
+      st.feetY = token.y;
+    }
+    st.storeX = token.x;
+    st.storeY = token.y;
   }
 
   const live = { ...token, x: st.feetX, y: st.feetY } as TokenItem;
@@ -1776,33 +2125,24 @@ function stepToken(token: TokenItem, now: number, dt: number): void {
   const ty = live.y + live.height / 2;
 
   const body = Math.min(token.width, token.height);
+  if (isGeneratedDungeonMap(map) && generatedWallBlocksStand(map, tx, ty)) {
+    const off = nudgeOffGeneratedWall(live, map, cell);
+    if (off) {
+      st.feetX = off.x;
+      st.feetY = off.y;
+      st.stuckMs = 0;
+      st.lastMoved = true;
+      commitWanderPose(live, st, now, false);
+      return;
+    }
+  }
   if (st.openedDoorId) {
     const opened = items[st.openedDoorId];
     if (opened && (opened.type === 'image' || (opened.type === 'map' && isModularGate(opened)))) {
       const c = portalCenter(opened);
-      const reach = portalUseReach(cell, body, opened);
-      const near = dist2(tx, ty, c.x, c.y) < (reach * 1.15) ** 2;
-      if (near) st.openedTouched = true;
-      const passed = st.openedTouched && dist2(tx, ty, c.x, c.y) > (reach * 1.85) ** 2;
-      const stillNeeded = portalStillOnRoute(opened, tx, ty, st.goalX, st.goalY, cell, body);
-      let allyNear = false;
-      if (passed && !stillNeeded) {
-        const nearAlly = (reach * 1.6) ** 2;
-        for (const it of Object.values(items)) {
-          if (it.type !== 'token' || it.id === token.id || !it.wandering) continue;
-          if (dist2(it.x + it.width / 2, it.y + it.height / 2, c.x, c.y) < nearAlly) {
-            allyNear = true;
-            break;
-          }
-        }
-      }
-      const leftOrigin = st.crossingFromId != null && map.id !== st.crossingFromId;
-      const farFromDoor = dist2(tx, ty, c.x, c.y) > (cell * 2.6) ** 2;
-      if (passed && !stillNeeded && !allyNear && farFromDoor && (leftOrigin || !st.crossingFromId)) {
-        if (smart) {
-          if (opened.type === 'image' && isDoorPropOpen(opened)) setDungeonDoorOpen(opened, false);
-          if (opened.type === 'map' && opened.modularOpen) setModularGateOpen(opened, false);
-        }
+      if (dist2(tx, ty, c.x, c.y) < (cell * 1.05) ** 2) st.openedTouched = true;
+      if (st.openedTouched && doorClearToClose(opened, tx, ty, cell, items, token.id)) {
+        if (smart) closeWanderPortal(opened);
         st.openedDoorId = null;
         st.openedTouched = false;
         st.crossingId = null;
@@ -1843,8 +2183,28 @@ function stepToken(token: TokenItem, now: number, dt: number): void {
     const nextFloor = isModularMap(map)
       ? pickRoomGoal(live, map, items, st.goalFloorId, st.crossingFromId ?? st.lastFloorId)
       : null;
-    const nextDoor = nextFloor ? null : pickDoorGoal(live, doors, smart, st.lastDoorId);
-    if (nextFloor) {
+    const nextDoor = nextFloor || isGeneratedDungeonMap(map)
+      ? null
+      : pickDoorGoal(live, doors, smart, st.lastDoorId);
+    if (isGeneratedDungeonMap(map) && !nextFloor) {
+      const leave = Math.random() < 0.85;
+      let next = leave
+        ? generatedFarGoal(map, tx, ty)
+        : generatedOrbitNext(map, tx, ty);
+      if (leave) {
+        for (let i = 0; i < 8 && !wanderNavPath(tx, ty, next.x, next.y); i++) {
+          next = generatedFarGoal(map, tx, ty);
+        }
+        if (!wanderNavPath(tx, ty, next.x, next.y)) {
+          next = generatedOrbitNext(map, tx, ty);
+        }
+      }
+      st.goalDoorId = null;
+      st.goalFloorId = map.id;
+      st.goalX = next.x;
+      st.goalY = next.y;
+      st.goalUntil = now + 10_000 + Math.random() * 6000;
+    } else if (nextFloor) {
       st.lastFloorId = isModularRoom(map) ? map.id : (st.lastFloorId ?? map.id);
       st.goalDoorId = null;
       st.goalFloorId = nextFloor.floorId;
@@ -1878,52 +2238,93 @@ function stepToken(token: TokenItem, now: number, dt: number): void {
   while (st.nav && st.nav.length > 0 && dist2(tx, ty, st.nav[0]!.x, st.nav[0]!.y) < (cell * 0.4) ** 2) {
     st.nav.shift();
   }
+  if (isGeneratedDungeonMap(map)) {
+    const blocked = st.nav?.[0]
+      && generatedSegHitsSolidWall(map, tx, ty, st.nav[0]!.x, st.nav[0]!.y, items)
+      && !closedPortalOnWay(tx, ty, st.nav[0]!.x, st.nav[0]!.y, items, cell, body);
+    if (blocked) {
+      st.nav = wanderFindPath(tx, ty, st.goalX, st.goalY, cell, navMaps(map, destFloor, items));
+    }
+  }
   const way = st.nav?.[0];
-  const aim = way ?? wanderAim(st, map, tx, ty, items, cell);
-
+  let aim = way ?? wanderAim(st, map, tx, ty, items, cell);
   if (smart) {
-    const portal = closedPortalToPass(live, map, tx, ty, aim.x, aim.y, items, cell, body);
-    if (portal) {
+    const portal = closedPortalToPass(live, map, tx, ty, aim.x, aim.y, items, cell, body)
+      ?? closedPortalOnWay(tx, ty, aim.x, aim.y, items, cell, body);
+    if (portal && (atPortalThreshold(tx, ty, portal, cell, body)
+      || dist2(tx, ty, portalCenter(portal).x, portalCenter(portal).y) <= (cell * 2.8) ** 2)) {
       openWanderPortal(portal);
       beginCrossing(st, live, map, portal, now);
     }
   }
+  if (isGeneratedDungeonMap(map) && generatedSegHitsSolidWall(map, tx, ty, aim.x, aim.y, items)) {
+    const door = closedPortalOnWay(tx, ty, aim.x, aim.y, items, cell, body);
+    if (door && smart) {
+      openWanderPortal(door);
+      beginCrossing(st, live, map, door, now);
+    } else {
+      st.nav = wanderFindPath(tx, ty, st.goalX, st.goalY, cell, navMaps(map, destFloor, items));
+      const next = st.nav?.[0];
+      if (next && !generatedSegHitsSolidWall(map, tx, ty, next.x, next.y, items)) aim = next;
+    }
+  }
 
+  if (isGeneratedDungeonMap(map) && generatedSegHitsSolidWall(map, tx, ty, aim.x, aim.y, items)) {
+    aim = steerToDoorCenter(tx, ty, aim.x, aim.y, items, cell, map);
+  }
   const glen = Math.hypot(aim.x - tx, aim.y - ty) || 1;
   const gux = (aim.x - tx) / glen;
   const guy = (aim.y - ty) / glen;
   const step = Math.min(cell * 0.42, WALK_CELLS_PER_SEC * cell * dt);
-  if (!inPortal && !wanderGuideNear(tx, ty, cell * 0.42)) {
-    const safe = wanderGuideSnap(tx, ty);
-    const dxs = safe.x - tx;
-    const dys = safe.y - ty;
-    const slen = Math.hypot(dxs, dys) || 1;
-    const pull = Math.min(step * 1.35, slen);
-    live.x += (dxs / slen) * pull;
-    live.y += (dys / slen) * pull;
-    st.feetX = live.x;
-    st.feetY = live.y;
-  } else if (!inPortal && !wanderNavWalkAt(tx, ty) && !wanderFeetOnFloor(live, live.x, live.y, cell)) {
-    const safe = wanderNavSnap(tx, ty);
-    const dxs = safe.x - tx;
-    const dys = safe.y - ty;
-    const slen = Math.hypot(dxs, dys) || 1;
-    const pull = Math.min(step * 1.6, slen);
-    live.x += (dxs / slen) * pull;
-    live.y += (dys / slen) * pull;
-    st.feetX = live.x;
-    st.feetY = live.y;
+  const leashOn = !isGeneratedDungeonMap(map) && !isModularMap(map);
+  if (leashOn && !inPortal && !wanderGuideNear(tx, ty, cell * 0.42)) {
+    const safe = wanderGuideSnapToward(tx, ty, aim.x, aim.y);
+    const progress = (safe.x - tx) * gux + (safe.y - ty) * guy;
+    if (progress >= -2 && (safe.x !== tx || safe.y !== ty)) {
+      const dxs = safe.x - tx;
+      const dys = safe.y - ty;
+      const slen = Math.hypot(dxs, dys) || 1;
+      const pull = Math.min(step * 1.35, slen);
+      live.x += (dxs / slen) * pull;
+      live.y += (dys / slen) * pull;
+      st.feetX = live.x;
+      st.feetY = live.y;
+    }
+  } else if (
+    leashOn
+    && !inPortal
+    && !wanderNavWalkAt(tx, ty)
+    && !wanderFeetOnFloor(live, live.x, live.y, cell)
+  ) {
+    const safe = wanderGuideSnapToward(tx, ty, aim.x, aim.y);
+    const progress = (safe.x - tx) * gux + (safe.y - ty) * guy;
+    if (progress >= -2 && (safe.x !== tx || safe.y !== ty)) {
+      const dxs = safe.x - tx;
+      const dys = safe.y - ty;
+      const slen = Math.hypot(dxs, dys) || 1;
+      const pull = Math.min(step * 1.6, slen);
+      live.x += (dxs / slen) * pull;
+      live.y += (dys / slen) * pull;
+      st.feetX = live.x;
+      st.feetY = live.y;
+    }
   }
-  let posed = wanderTryStep(live, map, gux * step, guy * step, cell);
+  let posed = wanderTryStep(live, map, gux * step, guy * step, cell, st);
   if (!posed) {
     const blocking = closedPortalToPass(live, map, tx, ty, aim.x, aim.y, items, cell, body);
     if (blocking) {
       openWanderPortal(blocking);
       beginCrossing(st, live, map, blocking, now);
-      posed = wanderTryStep(live, map, gux * step, guy * step, cell);
+      posed = wanderTryStep(live, map, gux * step, guy * step, cell, st);
     }
   }
-  if (!posed) posed = wanderSlideAround(live, map, gux, guy, step);
+  if (!posed) posed = wanderSlideAround(live, map, gux, guy, step, st);
+  if (posed) {
+    const dx = posed.x - live.x;
+    const dy = posed.y - live.y;
+    const back = dx * gux + dy * guy;
+    if (back < -0.4) posed = null;
+  }
   if (posed) {
     const dx = posed.x - live.x;
     const dy = posed.y - live.y;
@@ -1941,23 +2342,53 @@ function stepToken(token: TokenItem, now: number, dt: number): void {
   }
 
   st.stuckMs = (st.stuckMs ?? 0) + dt * 1000;
-  if (st.stuckMs > 120) {
-    const safe = wanderNavSnap(tx, ty);
-    const dest = { x: safe.x - live.width / 2, y: safe.y - live.height / 2 };
-    st.feetX = dest.x;
-    st.feetY = dest.y;
-    st.dir = dirToward(dest.x - live.x, dest.y - live.y);
-    st.stuckMs = 0;
-    st.lastMoved = true;
-    st.nav = wanderFindPath(
-      safe.x,
-      safe.y,
-      st.goalX,
-      st.goalY,
-      cell,
-      navMaps(map, destFloor, items),
-    );
-    st.navKey = navKey;
+  if (st.stuckMs > 400) {
+    const nearby = closedPortalToPass(live, map, tx, ty, aim.x, aim.y, items, cell, body)
+      ?? closedPortalOnWay(tx, ty, st.goalX, st.goalY, items, cell, body);
+    if (nearby) {
+      openWanderPortal(nearby);
+      beginCrossing(st, live, map, nearby, now);
+      st.stuckMs = 0;
+      commitWanderPose(live, st, now, false);
+      return;
+    }
+    const ahead = wanderGuideSnapToward(tx, ty, st.goalX, st.goalY);
+    const fwd = (ahead.x - tx) * gux + (ahead.y - ty) * guy;
+    if (fwd > 2) {
+      const alen = Math.hypot(ahead.x - tx, ahead.y - ty) || 1;
+      const posedFwd = wanderTryStep(
+        live,
+        map,
+        ((ahead.x - tx) / alen) * step,
+        ((ahead.y - ty) / alen) * step,
+        cell,
+        st,
+      );
+      if (posedFwd) {
+        st.feetX = posedFwd.x;
+        st.feetY = posedFwd.y;
+        st.stuckMs = 0;
+        st.lastMoved = true;
+        commitWanderPose(live, st, now, false);
+        return;
+      }
+    }
+    if (isGeneratedDungeonMap(map) && !tokenPatrolPath(live) && st.stuckMs > 700) {
+      st.nav = wanderFindPath(tx, ty, st.goalX, st.goalY, cell, navMaps(map, destFloor, items));
+      st.navKey = `${Math.round(st.goalX)},${Math.round(st.goalY)},${st.goalFloorId ?? ''}`;
+      if (st.stuckMs > 1800) {
+        let next = generatedFarGoal(map, tx, ty);
+        if (!wanderNavPath(tx, ty, next.x, next.y)) next = generatedOrbitNext(map, tx, ty);
+        st.goalDoorId = null;
+        st.goalFloorId = map.id;
+        st.goalX = next.x;
+        st.goalY = next.y;
+        st.goalUntil = now + 14_000;
+        st.nav = wanderFindPath(tx, ty, st.goalX, st.goalY, cell, navMaps(map, destFloor, items));
+        st.navKey = `${Math.round(st.goalX)},${Math.round(st.goalY)},${st.goalFloorId ?? ''}`;
+        st.stuckMs = 0;
+      }
+    }
     commitWanderPose(live, st, now, false);
     return;
   }
@@ -1982,8 +2413,15 @@ function stepToken(token: TokenItem, now: number, dt: number): void {
       st.goalX = nextFloor.x;
       st.goalY = nextFloor.y;
       st.crossingFromId = st.lastFloorId;
+    } else if (isGeneratedDungeonMap(map)) {
+      let next = generatedFarGoal(map, tx, ty);
+      if (!wanderNavPath(tx, ty, next.x, next.y)) next = generatedOrbitNext(map, tx, ty);
+      st.goalDoorId = null;
+      st.goalFloorId = map.id;
+      st.goalX = next.x;
+      st.goalY = next.y;
     } else {
-      const mid = floorCenter(map);
+      const mid = innerFloorGoal(map);
       st.goalDoorId = null;
       st.goalFloorId = map.id;
       st.goalX = mid.x;

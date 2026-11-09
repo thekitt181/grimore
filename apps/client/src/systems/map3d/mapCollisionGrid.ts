@@ -12,6 +12,7 @@ import {
   isModularWall,
   pieceForUrl,
 } from '@/systems/map/library/modularKits';
+import { kitWalkKeepPx } from '@/systems/map/fogLos';
 import { pixiToThreeX, pixiToThreeZ } from './coords';
 
 const MISS = Number.NEGATIVE_INFINITY;
@@ -492,7 +493,7 @@ export function kitWallBlocksFeet(
   const dist = Math.hypot(tx - fx, ty - fy);
   const step = Math.max(8, Math.min(map.width, map.height) * 0.18);
   const n = Math.max(1, Math.ceil(dist / step));
-  const r = Math.min(tokenW, tokenH) * 0.32;
+  const r = kitWalkKeepPx(map);
   const offs: Array<[number, number]> = [
     [0, 0],
     [r, 0],
@@ -523,6 +524,7 @@ export function bakedMeshBlocksFeet(
   destY: number,
   tokenW: number,
   tokenH: number,
+  opts?: { ignoreKitRise?: boolean },
 ): boolean {
   if (isModularFloorTile(map)) return false;
   if (kitWallBlocksFeet(map, fromX, fromY, destX, destY, tokenW, tokenH)) return true;
@@ -555,10 +557,9 @@ export function bakedMeshBlocksFeet(
     if (prevH !== MISS && h !== MISS) {
       const rise = h - prevH;
       if (kit) {
-        // Kenney room wall caps sit meters above the floor — not a step.
-        if (rise > maxStep) return true;
-      } else {
-        if (rise > maxStep || rise < -maxCliff) return true;
+        if (!opts?.ignoreKitRise && rise > maxStep) return true;
+      } else if (rise > maxStep || rise < -maxCliff) {
+        return true;
       }
     }
     if (h !== MISS) prevH = h;

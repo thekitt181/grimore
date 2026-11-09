@@ -31,6 +31,12 @@ export function isDoorPropOpen(item: ImageItem): boolean {
   return (item.propState ?? 0) > 0;
 }
 
+/** Hidden / secret door: solid wall until reveal, then the door replaces that span. */
+export function isConcealedDoorProp(item: ImageItem): boolean {
+  if (item.visible !== false) return false;
+  return isDoorPropId(resolvePropId(item));
+}
+
 /** Image center in map-local pixels (same math as tokenMapOrigin). */
 function imageMapCenter(item: ImageItem, map: MapItem): Point {
   const wx = item.x + item.width / 2;
@@ -168,6 +174,8 @@ function nearestWallPassage(
     const ny = ux;
     const dist = Math.abs((c.x - wall.a.x) * nx + (c.y - wall.a.y) * ny);
     if (dist > maxDist) continue;
+    // Only the wall the door sits on — not a perpendicular wall at a corner.
+    if (Math.abs(ax * ux + ay * uy) < 0.75) continue;
 
     const tCenter = (c.x - wall.a.x) * ux + (c.y - wall.a.y) * uy;
     // Prefer span along the wall; fall back to prop long-axis length.
@@ -206,20 +214,24 @@ function bestTouchedWall(
   return nearestWallPassage(item, map, walls);
 }
 
-/** Cut only the contact span out of a wall segment. */
-function punchDoorGap(proj: WallProjection): WallSegment[] {
+/** Cut the contact span out of a wall segment. `minGap` widens a too-thin doorway. */
+function punchDoorGap(proj: WallProjection, minGap = 0): WallSegment[] {
   const { wall, ux, uy, len, t0, t1 } = proj;
+  const mid = (t0 + t1) / 2;
+  const half = Math.max((t1 - t0) / 2, minGap / 2);
+  const g0 = Math.max(0, mid - half);
+  const g1 = Math.min(len, mid + half);
   const out: WallSegment[] = [];
   const minKeep = 3;
-  if (t0 > minKeep) {
+  if (g0 > minKeep) {
     out.push({
       a: { x: wall.a.x, y: wall.a.y },
-      b: { x: wall.a.x + ux * t0, y: wall.a.y + uy * t0 },
+      b: { x: wall.a.x + ux * g0, y: wall.a.y + uy * g0 },
     });
   }
-  if (len - t1 > minKeep) {
+  if (len - g1 > minKeep) {
     out.push({
-      a: { x: wall.a.x + ux * t1, y: wall.a.y + uy * t1 },
+      a: { x: wall.a.x + ux * g1, y: wall.a.y + uy * g1 },
       b: { x: wall.b.x, y: wall.b.y },
     });
   }
@@ -240,9 +252,7 @@ function sameWall(a: WallSegment, b: WallSegment): boolean {
  * Always added while shut so open→closed re-blocks punched gaps and
  * dungeon doorways that never had a red wall under the prop.
  */
-function closedDoorWallSegment(item: ImageItem, map: MapItem): WallSegment | null {
-  if (!isDoorPropClosed(item)) return null;
-
+function doorPanelWallSegment(item: ImageItem, map: MapItem): WallSegment | null {
   const c = imageMapCenter(item, map);
   const rad = ((item.rotation - map.rotation) * Math.PI) / 180;
   // Panel spans the opening along the door's long axis.
@@ -257,10 +267,31 @@ function closedDoorWallSegment(item: ImageItem, map: MapItem): WallSegment | nul
   };
 }
 
+function closedDoorWallSegment(item: ImageItem, map: MapItem): WallSegment | null {
+  if (!isDoorPropClosed(item)) return null;
+  return doorPanelWallSegment(item, map);
+}
+
+/** If a hidden door sits in an opening with no authored wall, fill that span. */
+function concealedDoorFillWalls(
+  map: MapItem,
+  doors: ImageItem[],
+  walls: WallSegment[],
+): WallSegment[] {
+  const extras: WallSegment[] = [];
+  for (const door of doors) {
+    if (!isConcealedDoorProp(door)) continue;
+    if (bestTouchedWall(door, map, walls)) continue;
+    const seg = doorPanelWallSegment(door, map);
+    if (seg) extras.push(seg);
+  }
+  return extras;
+}
+
 function doorPropsOnMap(items: Record<string, Item> | Item[], map: MapItem): ImageItem[] {
   const list = Array.isArray(items) ? items : Object.values(items);
   return list.filter((i): i is ImageItem => {
-    if (i.type !== 'image' || i.visible === false) return false;
+    if (i.type !== 'image') return false;
     const id = resolvePropId(i);
     if (!isDoorPropId(id)) return false;
     const c = imageMapCenter(i, map);
@@ -272,18 +303,24 @@ function isGateProp(item: ImageItem): boolean {
   return canonicalPropId(resolvePropId(item) ?? '') === 'gate';
 }
 
+/** Revealed doors/gates only — concealed props leave the authored wall intact. */
+function revealedDoorProps(doors: ImageItem[]): ImageItem[] {
+  return doors.filter((d) => !isConcealedDoorProp(d));
+}
+
 /** Punch openings into a wall list for the given door/gate props. */
 function applyDoorGaps(
   map: MapItem,
   doors: ImageItem[],
   baseWalls: WallSegment[],
+  minGap = 0,
 ): WallSegment[] {
   let walls: WallSegment[] = baseWalls;
   for (const door of doors) {
     const touch = bestTouchedWall(door, map, walls);
     if (!touch) continue;
     walls = walls.flatMap((wall) =>
-      sameWall(wall, touch.wall) ? punchDoorGap(touch) : [wall],
+      sameWall(wall, touch.wall) ? punchDoorGap(touch, minGap) : [wall],
     );
   }
   return walls;
@@ -297,7 +334,7 @@ function applyOpenDoorGaps(
 ): WallSegment[] {
   return applyDoorGaps(
     map,
-    doorPropsOnMap(items, map).filter(isDoorPropOpen),
+    revealedDoorProps(doorPropsOnMap(items, map)).filter(isDoorPropOpen),
     baseWalls,
   );
 }
@@ -311,9 +348,12 @@ export function displayWalls(
   map: MapItem,
   items: Record<string, Item> | Item[],
 ): WallSegment[] {
-  const doors = doorPropsOnMap(items, map);
-  // Punch every door/gate opening — closed doors too, or extruded wall sticks past the panel.
-  return applyDoorGaps(map, doors, [...(map.walls ?? [])]);
+  const allDoors = doorPropsOnMap(items, map);
+  const doors = revealedDoorProps(allDoors);
+  // Punch every revealed door/gate — closed doors too, or extruded wall sticks past the panel.
+  // Hidden/secret doors keep (or fill) the red wall until reveal.
+  const walls = applyDoorGaps(map, doors, [...(map.walls ?? [])]);
+  return [...walls, ...concealedDoorFillWalls(map, allDoors, walls)];
 }
 
 /**
@@ -324,9 +364,11 @@ export function visionWalls(
   map: MapItem,
   items: Record<string, Item> | Item[],
 ): WallSegment[] {
-  const doors = doorPropsOnMap(items, map);
+  const allDoors = doorPropsOnMap(items, map);
+  const doors = revealedDoorProps(allDoors);
   const toPunch = doors.filter((d) => isDoorPropOpen(d) || isGateProp(d));
-  return applyDoorGaps(map, toPunch, losWalls(map));
+  const walls = applyDoorGaps(map, toPunch, losWalls(map));
+  return [...walls, ...concealedDoorFillWalls(map, allDoors, walls)];
 }
 
 /** Signature of door/gate pose so wall redraws when a door toggles or a gate is placed. */
@@ -337,8 +379,9 @@ export function doorWallsSignature(
   return doorPropsOnMap(items, map)
     .map((d) => {
       const open = (d.propState ?? 0) > 0 ? 1 : 0;
+      const vis = d.visible === false ? 0 : 1;
       const gate = isGateProp(d) ? 'g' : 'd';
-      return `${d.id}:${gate}${open}:${d.x.toFixed(0)},${d.y.toFixed(0)},${d.width.toFixed(0)}`;
+      return `${d.id}:${gate}${open}${vis}:${d.x.toFixed(0)},${d.y.toFixed(0)},${d.width.toFixed(0)}`;
     })
     .sort()
     .join(',');
@@ -353,13 +396,19 @@ export function movementWalls(
   map: MapItem,
   items: Record<string, Item> | Item[],
 ): WallSegment[] {
-  const doors = doorPropsOnMap(items, map);
+  const allDoors = doorPropsOnMap(items, map);
+  const doors = revealedDoorProps(allDoors);
   const closedDoors = doors.filter(isDoorPropClosed);
   const baseWalls = losWalls(map);
 
   const walls = applyOpenDoorGaps(map, items, baseWalls);
 
-  const extras: WallSegment[] = [];
+  const extras: WallSegment[] = [...concealedDoorFillWalls(map, allDoors, walls)];
+  for (const door of allDoors) {
+    if (!isConcealedDoorProp(door)) continue;
+    const seg = doorPanelWallSegment(door, map);
+    if (seg) extras.push(seg);
+  }
   for (const door of closedDoors) {
     const seg = closedDoorWallSegment(door, map);
     if (seg) extras.push(seg);
@@ -367,5 +416,31 @@ export function movementWalls(
   // Kenney/KayKit pieces are not boxed rooms — AABB rims trapped FP on a 2 m tile.
   if (isModularMap(map)) return [...walls, ...extras];
   // Open doors must never punch the map rim — always re-seal the boundary.
+  return [...walls, ...mapBoundaryWalls(map.width, map.height), ...extras];
+}
+
+/**
+ * Wander-only collision: hidden/secret doors are a passage (no reveal).
+ * Players still see and collide with the wall via displayWalls / movementWalls.
+ */
+export function wanderMovementWalls(
+  map: MapItem,
+  items: Record<string, Item> | Item[],
+): WallSegment[] {
+  const allDoors = doorPropsOnMap(items, map);
+  const revealed = revealedDoorProps(allDoors);
+  const closedDoors = revealed.filter(isDoorPropClosed);
+  const toPunch = [
+    ...revealed.filter(isDoorPropOpen),
+    ...allDoors.filter(isConcealedDoorProp),
+  ];
+  const minGap = Math.max(map.gridSize * 0.45, 36);
+  const walls = applyDoorGaps(map, toPunch, losWalls(map), minGap);
+  const extras: WallSegment[] = [];
+  for (const door of closedDoors) {
+    const seg = closedDoorWallSegment(door, map);
+    if (seg) extras.push(seg);
+  }
+  if (isModularMap(map)) return [...walls, ...extras];
   return [...walls, ...mapBoundaryWalls(map.width, map.height), ...extras];
 }

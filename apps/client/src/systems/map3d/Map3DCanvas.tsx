@@ -229,7 +229,7 @@ function onThreeCanvasCreated(state: RootState): void {
   gl.domElement.style.height = '100%';
   gl.domElement.style.display = 'block';
   sceneRefs.threeCanvas.current = gl.domElement;
-  registerThreeRenderer(gl);
+  registerThreeRenderer(gl, { setSize: state.setSize, invalidate: state.invalidate });
   void import('@/systems/scene/token/remotePoseApply').then(({ registerThreeScene }) => {
     registerThreeScene(scene);
   });

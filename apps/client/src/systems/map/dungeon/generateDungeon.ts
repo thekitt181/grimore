@@ -1,4 +1,4 @@
-import type { WallSegment } from '@/systems/scene/types';
+import { DEFAULT_MAP_GRID_SIZE, type WallSegment } from '@/systems/scene/types';
 
 export type DungeonLayout = 'rooms' | 'cavern' | 'five-room' | 'hub' | 'gauntlet';
 export type DungeonSize = 'tiny' | 'small' | 'medium' | 'large' | 'huge' | 'vast' | 'mega';
@@ -71,7 +71,8 @@ export interface GeneratedDungeon {
   theme?: string;
 }
 
-const CELL = 64;
+/** Same as a Medium token / table grid so rooms are not smaller than the minis. */
+const CELL = DEFAULT_MAP_GRID_SIZE;
 
 const ADJECTIVES = ['Ashen', 'Sunken', 'Hollow', 'Gilded', 'Briar', 'Cinder', 'Marble', 'Drowned', 'Quiet', 'Iron', 'Velvet', 'Broken'];
 const NOUNS = ['Vault', 'Ossuary', 'Gallery', 'Cistern', 'Warren', 'Sanctum', 'Mine', 'Crypt', 'Hold', 'Labyrinth', 'Cloister', 'Foundry'];

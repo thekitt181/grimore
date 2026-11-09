@@ -15,6 +15,7 @@ import { groundHeightAt } from './mapGroundRaycast';
 import { bakedGroundHeightSmooth, getMapCollisionGrid } from './mapCollisionGrid';
 import { resolveItemBounds } from './sceneItemBounds';
 import { getActiveMap } from '@/systems/scene/store/itemStore';
+import { mapUnderTokenFeet } from '@/systems/scene/hitTest';
 import type { ImageItem, Item, TokenItem } from '@/systems/scene/types';
 import { firstPersonLook } from './firstPersonLook';
 import { poseForToken } from './firstPersonPose';
@@ -190,21 +191,20 @@ export function SceneItemTransformGroup({
       // or display-only underlay. Rays on dense GLBs hitch look/walk and starve socket apply.
       // Still take one sample if we have no prior height so minis don't spawn at Y=0.
       // Prefer baked height (O(1), stair-aware). Skip live mesh rays while FP / mid-walk.
-      const activeMap = getActiveMap();
-      const hasBake = Boolean(activeMap && getMapCollisionGrid(activeMap.id)?.ready);
+      const standMap = mapUnderTokenFeet(cx, cz) ?? getActiveMap();
+      const hasBake = Boolean(standMap && getMapCollisionGrid(standMap.id)?.ready);
       const skipMeshRay = displayOnly
         || ((fp.enabled || useWalk) && (hasBake || lastGroundY.current != null));
       let sampled = fallback;
-      if (hasBake && activeMap) {
-        sampled = bakedGroundHeightSmooth(activeMap.id, cx, cz, fallback);
+      if (hasBake && standMap) {
+        sampled = bakedGroundHeightSmooth(standMap.id, cx, cz, fallback);
       } else if (!skipMeshRay) {
         sampled = groundHeightAt(cx, cz, fallback);
       }
-      // Ignore wild spikes/drops from thin decor hits while dragging (props especially).
+      // Ignore wild spikes/drops (Kenney wall caps, thin decor) — tokens hop otherwise.
       if (
         !displayOnly
         && lastGroundY.current != null
-        && item.type === 'image'
         && Math.abs(sampled - lastGroundY.current) > 80
       ) {
         yBase = lastGroundY.current + pad;

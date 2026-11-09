@@ -196,7 +196,7 @@ function MeshProp({
   const amount = useLivePropAmount(item);
   const doorStyleId = useMapStore((s) => s.doorStyleId);
   const doorTheme = resolveDoorSurfaceStyle(item.propDoorTheme || doorStyleId);
-  const secretConcealed = propId === 'secret-door' && item.visible === false;
+  const secretConcealed = isDoorPropId(propId) && item.visible === false;
   const doorLongAxisX = isDoorPropId(propId) ? item.width >= item.height : undefined;
   const len = Math.max(item.width, 8);
   const depth = Math.max(item.height, 8);
@@ -324,7 +324,9 @@ function MapImageMesh({ item, displayOnly = false }: { item: ImageItem; displayO
       ) : (
         <GenericImageBillboard item={item} displayOnly={displayOnly} />
       )}
-      {gm ? <TokenNameLabel name={item.name} footprint={footprint} /> : null}
+      {gm && !(isDoor && item.visible === false) ? (
+        <TokenNameLabel name={item.name} footprint={footprint} />
+      ) : null}
     </SceneItemTransformGroup>
   );
 }

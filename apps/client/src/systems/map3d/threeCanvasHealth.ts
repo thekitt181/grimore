@@ -2,19 +2,46 @@ import type { WebGLRenderer } from 'three';
 import { sceneRefs } from '@/systems/scene/sceneRefs';
 
 let glRef: WebGLRenderer | null = null;
+let setSizeFn: ((width: number, height: number, updateStyle?: boolean) => void) | null = null;
+let invalidateFn: (() => void) | null = null;
 let hasRenderedFrame = false;
 let readyDispatched = false;
 
-export function registerThreeRenderer(gl: WebGLRenderer): void {
+export function registerThreeRenderer(
+  gl: WebGLRenderer,
+  opts?: {
+    setSize?: (width: number, height: number, updateStyle?: boolean) => void;
+    invalidate?: () => void;
+  },
+): void {
   glRef = gl;
+  setSizeFn = opts?.setSize ?? null;
+  invalidateFn = opts?.invalidate ?? null;
   hasRenderedFrame = false;
   readyDispatched = false;
 }
 
 export function resetThreeCanvasHealth(): void {
   glRef = null;
+  setSizeFn = null;
+  invalidateFn = null;
   hasRenderedFrame = false;
   readyDispatched = false;
+}
+
+/** Match the WebGL buffer to the canvas CSS box (fixes click + token drift). */
+export function forceThreeDisplaySync(): void {
+  const canvas = sceneRefs.threeCanvas.current ?? glRef?.domElement ?? null;
+  if (!canvas) return;
+  canvas.style.width = '100%';
+  canvas.style.height = '100%';
+  canvas.style.display = 'block';
+  const host = canvas.parentElement;
+  const w = Math.max(1, Math.round(host?.clientWidth || canvas.clientWidth || 1));
+  const h = Math.max(1, Math.round(host?.clientHeight || canvas.clientHeight || 1));
+  if (setSizeFn) setSizeFn(w, h, false);
+  else glRef?.setSize(w, h, false);
+  invalidateFn?.();
 }
 
 function contextLost(): boolean {

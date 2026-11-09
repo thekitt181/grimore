@@ -29,6 +29,8 @@ import { steerKitWalk } from './kitWalkSteer';
 
 /** Wall slide passes — keep low; baked mesh is O(1). */
 const MAX_SLIDES = 3;
+/** First-person only — wander keeps the kit room-shell / rise checks. */
+let fpAccurateWalls = false;
 
 /** Reuse wall list for ~1 frame so displace doesn't rebuild every slide. */
 let wallsCache: {
@@ -156,7 +158,9 @@ function meshBlocksOn(map: MapItem, token: TokenItem, fromX: number, fromY: numb
   // Scanned image maps false-block for GM; Kenney/KayKit walls must still stop everyone.
   if (useSessionStore.getState().myRole === 'GM' && !isModularMap(map)) return false;
   syncOpenDoorPunches(map, useItemStore.getState().items);
-  return bakedMeshBlocksFeet(map, fromX, fromY, destX, destY, token.width, token.height);
+  return bakedMeshBlocksFeet(map, fromX, fromY, destX, destY, token.width, token.height, {
+    ignoreKitRise: fpAccurateWalls,
+  });
 }
 
 /** Authored walls OR baked GLB solids (grid query — no mid-stride mesh rays). */
@@ -340,10 +344,12 @@ export function controlFirstPersonMove(
   }
   fpGlobal.moveBlockedReason = null;
 
+  fpAccurateWalls = true;
+  try {
   const body = fpWallBodyRadius(map);
   const cx0 = firstPersonPose.x + token.width / 2;
   const cy0 = firstPersonPose.y + token.height / 2;
-  const steered0 = steerKitWalk(cx0, cy0, velX * dt, velY * dt, body);
+  const steered0 = steerKitWalk(cx0, cy0, velX * dt, velY * dt, body, { roomShell: false });
   firstPersonPose.x = steered0.x - token.width / 2;
   firstPersonPose.y = steered0.y - token.height / 2;
 
@@ -419,6 +425,9 @@ export function controlFirstPersonMove(
   }
 
   return { velX: outVelX, velY: outVelY };
+  } finally {
+    fpAccurateWalls = false;
+  }
 }
 
 /** Tabletop token drag — same authored-wall collision as first-person walk (DM + players). */

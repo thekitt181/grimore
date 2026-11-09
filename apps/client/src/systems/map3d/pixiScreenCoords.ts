@@ -49,3 +49,18 @@ export function pixiClientToWorld(clientX: number, clientY: number): { x: number
     y: (canvas.y - world.y) / scale,
   };
 }
+
+/** Inverse of pixiClientToWorld — map world → browser client pixels. */
+export function pixiWorldToClient(worldX: number, worldY: number): { x: number; y: number } | null {
+  const app = sceneRefs.app.current;
+  const world = sceneRefs.world.current;
+  const rect = getMapPointerRect();
+  if (!app || !world || !rect || rect.width <= 0 || rect.height <= 0) return null;
+  if (app.screen.width <= 0 || app.screen.height <= 0) return null;
+  const canvasX = worldX * world.scale.x + world.x;
+  const canvasY = worldY * world.scale.y + world.y;
+  return {
+    x: rect.left + (canvasX / app.screen.width) * rect.width,
+    y: rect.top + (canvasY / app.screen.height) * rect.height,
+  };
+}
