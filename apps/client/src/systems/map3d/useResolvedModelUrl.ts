@@ -11,17 +11,17 @@ function isPackPublicUrl(url: string): boolean {
   return url.startsWith('/maps3d/') || url.startsWith('/props3d/') || url.startsWith('/props/');
 }
 
-/** Kenney/KayKit packs are gitignored — don't treat a 404 GLB as a fatal app crash. */
+/** Pack GLBs used to 404 in production — never HTTP-cache misses, so a later deploy can recover. */
 function probePackUrl(url: string): Promise<boolean> {
   const cached = packProbe.get(url);
-  if (cached != null) return Promise.resolve(cached);
+  if (cached === true) return Promise.resolve(true);
   const pending = packProbeInflight.get(url);
   if (pending) return pending;
   const run = (async () => {
     try {
-      let res = await fetch(url, { method: 'HEAD', cache: 'force-cache' });
+      let res = await fetch(url, { method: 'HEAD', cache: 'no-store' });
       if (res.status === 405 || res.status === 501) {
-        res = await fetch(url, { method: 'GET', cache: 'force-cache' });
+        res = await fetch(url, { method: 'GET', cache: 'no-store' });
       }
       const ok = res.ok;
       packProbe.set(url, ok);
@@ -110,14 +110,9 @@ export function useResolvedModelUrl(url: string | null | undefined): {
           setStatus('ready');
           return;
         }
-        if (hit === false) {
-          setResolved(null);
-          setStatus('error');
-          return;
-        }
         let cancelledPack = false;
         setResolved(null);
-        setStatus('loading');
+        setStatus(hit === false ? 'error' : 'loading');
         void probePackUrl(url).then((ok) => {
           if (cancelledPack) return;
           if (ok) {
@@ -188,6 +183,32 @@ export function useResolvedModelUrl(url: string | null | undefined): {
     window.addEventListener('grimoire:model-asset-ready', onReady);
     return () => window.removeEventListener('grimoire:model-asset-ready', onReady);
   }, [url]);
+
+  // Pack files may land after a deploy; retry 404s instead of locking the gold placeholder.
+  useEffect(() => {
+    if (!url || !isPackPublicUrl(url) || status !== 'error') return;
+    let cancelled = false;
+    let attempts = 0;
+    const retry = () => {
+      if (cancelled || attempts >= 8) return;
+      attempts += 1;
+      packProbe.delete(url);
+      void probePackUrl(url).then((ok) => {
+        if (cancelled) return;
+        if (ok) {
+          setResolved(url);
+          setStatus('ready');
+        } else {
+          window.setTimeout(retry, Math.min(2000 * attempts, 10000));
+        }
+      });
+    };
+    const timer = window.setTimeout(retry, 1500);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [url, status]);
 
   // Players on mobile may join before model chunks arrive — retry IndexedDB resolve.
   useEffect(() => {
