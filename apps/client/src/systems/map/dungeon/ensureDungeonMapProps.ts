@@ -98,14 +98,17 @@ export function fitGeneratedDungeonToCreatureGrid(mapId: string): void {
         propMapLocalX: (item.propMapLocalX ?? 0) * sx,
         propMapLocalY: (item.propMapLocalY ?? 0) * sy,
       };
+      const world = worldPatchForMapBoundProp(scaled, nextMap);
       patches.push({
         id: item.id,
         patch: {
           width,
           height,
-          propMapLocalX: scaled.propMapLocalX,
-          propMapLocalY: scaled.propMapLocalY,
-          ...worldPatchForMapBoundProp(scaled, nextMap),
+          propMapLocalX: scaled.propMapLocalX ?? 0,
+          propMapLocalY: scaled.propMapLocalY ?? 0,
+          x: world.x ?? scaled.x,
+          y: world.y ?? scaled.y,
+          rotation: world.rotation ?? scaled.rotation,
         },
       });
       continue;

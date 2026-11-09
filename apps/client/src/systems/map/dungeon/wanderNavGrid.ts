@@ -292,13 +292,13 @@ function buildNav(items: Record<string, Item>): WanderNav | null {
         if (c + 1 < cols && nav.walk[at(nav, c + 1, r)]) {
           const b = worldOf(nav, c + 1, r);
           if (painted.some((map) => generatedSegHitsSolidWall(map, a.x, a.y, b.x, b.y, items))) {
-            nav.wallEdge[i] |= 1;
+            nav.wallEdge[i] = (nav.wallEdge[i] ?? 0) | 1;
           }
         }
         if (r + 1 < rows && nav.walk[at(nav, c, r + 1)]) {
           const b = worldOf(nav, c, r + 1);
           if (painted.some((map) => generatedSegHitsSolidWall(map, a.x, a.y, b.x, b.y, items))) {
-            nav.wallEdge[i] |= 2;
+            nav.wallEdge[i] = (nav.wallEdge[i] ?? 0) | 2;
           }
         }
       }
@@ -411,10 +411,12 @@ function wanderNavGridPath(
       const ni = at(g, nc, nr);
       if (parent[ni] !== -1 || !g.walk[ni]) continue;
       const from = at(g, c, r);
-      if (dc === 1 && (g.wallEdge[from] & 1)) continue;
-      if (dc === -1 && (g.wallEdge[ni] & 1)) continue;
-      if (dr === 1 && (g.wallEdge[from] & 2)) continue;
-      if (dr === -1 && (g.wallEdge[ni] & 2)) continue;
+      const edgeFrom = g.wallEdge[from] ?? 0;
+      const edgeNi = g.wallEdge[ni] ?? 0;
+      if (dc === 1 && (edgeFrom & 1)) continue;
+      if (dc === -1 && (edgeNi & 1)) continue;
+      if (dr === 1 && (edgeFrom & 2)) continue;
+      if (dr === -1 && (edgeNi & 2)) continue;
       parent[ni] = at(g, c, r);
       if (nc === goal.c && nr === goal.r) {
         found = true;
