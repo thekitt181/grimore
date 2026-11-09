@@ -34,6 +34,7 @@ import {
 } from '@/systems/map/props/wallPropFit';
 import { isMapBoundProp, mapLocalPatchAfterPropMove } from '@/systems/map/props/mapBoundProps';
 import { resolveTokenModelUrl } from '@/systems/map3d/defaultTokenModel';
+import { isModularGate } from '@/systems/map/library/modularMapSnap';
 
 function numHex(n: number): string { return '#' + n.toString(16).padStart(6, '0'); }
 function hexNum(s: string): number { return parseInt(s.replace('#', ''), 16); }
@@ -145,6 +146,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 function MapControls({ map, update }: { map: MapItem; update: (p: Partial<MapItem>) => void }) {
   const [syncing, setSyncing] = useState(false);
+  const gate = isModularGate(map);
 
   function handleAutoSync() {
     setSyncing(true);
@@ -165,6 +167,16 @@ function MapControls({ map, update }: { map: MapItem; update: (p: Partial<MapIte
       >
         {syncing ? '…' : '⊹ Fit grid'}
       </button>
+      {gate ? (
+        <button
+          type="button"
+          className="btn-ghost text-xs px-2 py-0.5"
+          title={map.modularOpen ? 'Close' : 'Open'}
+          onClick={() => update({ modularOpen: !map.modularOpen, modularOpenAt: Date.now() })}
+        >
+          {map.modularOpen ? 'Close door' : 'Open door'}
+        </button>
+      ) : null}
       <Field label="Grid">
         <input type="color" value={numHex(map.gridColor)} onChange={(e) => update({ gridColor: hexNum(e.target.value) })}
           className="w-6 h-6 rounded cursor-pointer border-0 p-0" />

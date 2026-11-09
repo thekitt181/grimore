@@ -4,6 +4,7 @@ import { sceneRefs } from '@/systems/scene/sceneRefs';
 import { loadTexture } from '@/lib/textureLoader';
 import { resolvePropId } from './dungeonProps';
 import { propArtById, type PropArt } from './propArt';
+import { ASSETS2D_CHEST_IDLE } from './assets2dChestCatalog';
 import { getPropCanvasTexture } from './propCanvasArt';
 import { isDoorPropId } from './doorCollision';
 import { useMapStore } from '@/systems/map/store/mapStore';
@@ -185,8 +186,35 @@ function build(root: Container, art: PropArt, tex: Map<string, Texture>, item: I
     const sprite = new Sprite(frames[0] ?? restTex);
     fit(sprite);
     root.addChild(sprite);
+    const frameMs = art.rest.includes('/sazkuash/') ? 90 : 140;
     return (now: number) => {
-      const next = frames[frameIndex(now, frames.length)] ?? restTex;
+      const next = frames[frameIndex(now, frames.length, frameMs)] ?? restTex;
+      if (sprite.texture !== next) {
+        sprite.texture = next;
+        fit(sprite);
+      }
+    };
+  }
+
+  if (art.play === 'lift' && art.frames && art.frames.length > 8 && art.rest.includes('/assets2d/')) {
+    const all = art.frames.map((url) => tex.get(url)).filter((t): t is Texture => !!t);
+    const idleCount = Math.min(all.length, ASSETS2D_CHEST_IDLE[art.id] ?? Math.max(1, Math.floor(all.length * 0.55)));
+    const idle = all.slice(0, idleCount);
+    const opening = all.slice(idleCount);
+    const sprite = new Sprite(idle[0] ?? restTex);
+    fit(sprite);
+    root.addChild(sprite);
+    return (now: number) => {
+      const p = pose(item, 0.7);
+      let next = idle[0] ?? restTex;
+      if (p <= 0.001) {
+        next = idle[frameIndex(now, idle.length, 90)] ?? next;
+      } else if (opening.length === 0 || p >= 0.999) {
+        next = opening[opening.length - 1] ?? all[all.length - 1] ?? next;
+      } else {
+        const i = Math.min(opening.length - 1, Math.round(p * (opening.length - 1)));
+        next = opening[i] ?? next;
+      }
       if (sprite.texture !== next) {
         sprite.texture = next;
         fit(sprite);
@@ -195,6 +223,35 @@ function build(root: Container, art: PropArt, tex: Map<string, Texture>, item: I
   }
 
   if (art.play === 'lift' && art.open) {
+    const photoLid =
+      /_Open\.png$/i.test(art.open)
+      || /_open\.png$/i.test(art.open)
+      || art.id.startsWith('alstra-')
+      || art.id.startsWith('spajx-');
+    if (photoLid) {
+      const openSpr = new Sprite(tex.get(art.open) ?? restTex);
+      const closedSpr = new Sprite(restTex);
+      fit(openSpr);
+      fit(closedSpr);
+      root.addChild(openSpr, closedSpr);
+      let loadingOpen = false;
+      return () => {
+        const p = pose(item, 0.5);
+        if (p > 0.02 && art.open && !tex.get(art.open) && !loadingOpen) {
+          loadingOpen = true;
+          void restTexture(art.id, art.open).then((t) => {
+            tex.set(art.open!, t);
+            if (!openSpr.destroyed) {
+              openSpr.texture = t;
+              fit(openSpr);
+            }
+          }).catch(() => {});
+        }
+        openSpr.alpha = p;
+        closedSpr.alpha = 1 - p;
+      };
+    }
+
     const openTex = tex.get(art.open);
     const open = new Sprite(openTex ?? restTex);
     const lid = new Sprite(restTex);
@@ -474,7 +531,10 @@ export function mountPropAnimation(c: Container, item: ImageItem): boolean {
   root.position.set((item.width - 64 * s) / 2, (item.height - 64 * s) / 2);
   c.addChildAt(root, 0);
 
-  const urls = [art.rest, art.open, art.projectile, ...(art.frames ?? [])].filter((url): url is string => !!url);
+  const eagerOpen = Boolean(art.open) && !art.id.startsWith('spajx-');
+  const urls = [art.rest, eagerOpen ? art.open : undefined, art.projectile, ...(art.frames ?? [])].filter(
+    (url): url is string => !!url,
+  );
   void Promise.all(urls.map(async (url) => [url, await restTexture(id, url)] as const)).then((pairs) => {
     if (c.destroyed || !root.parent) return;
     const tex = new Map(pairs);

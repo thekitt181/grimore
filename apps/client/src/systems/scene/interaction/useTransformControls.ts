@@ -8,6 +8,7 @@ import { sceneCameraRef } from '@/systems/map3d/sceneCameraRef';
 import { getPickCanvasRect } from '@/systems/map3d/pickCamera';
 import { worldXZToClientScreen } from '@/systems/map3d/perspectiveCameraSync';
 import { snapAngle, snapSize } from '../snap';
+import { footprintPx, isModularMap, modularScaleOf, pieceForUrl } from '@/systems/map/library/modularMapSnap';
 import { emitItemUpdate } from '../sceneSync';
 import { mapBoundPropPatches } from '@/systems/map/props/mapBoundProps';
 import { emitPropTransformLive } from '../propTransformLiveSync';
@@ -334,7 +335,11 @@ export function useTransformControls(appReady: boolean) {
 
         if (drag.handle.id === 'rotate') {
           let deg = (Math.atan2(wy - drag.cy0!, wx - drag.cx0!) * 180) / Math.PI + 90;
-          if (snap) deg = snapAngle(deg);
+          if (it.type === 'map' && isModularMap(it as MapItem)) {
+            deg = ((Math.round(deg / 90) * 90) % 360 + 360) % 360;
+          } else if (snap) {
+            deg = snapAngle(deg);
+          }
           const c = it.type !== 'token' ? getItemContainer(layer, it.id) : null;
           if (c) c.rotation = (deg * Math.PI) / 180;
           (drag as DragState & { _deg?: number })._deg = deg;
@@ -355,6 +360,17 @@ export function useTransformControls(appReady: boolean) {
           });
           newW = r.width; newH = r.height; nx = r.x; ny = r.y;
           cx = drag.cx0!; cy = drag.cy0!;
+          if (isModularMap(it as MapItem)) {
+            const piece = pieceForUrl((it as MapItem).modelUrl);
+            if (piece) {
+              const next = Math.max(0.25, Math.min(8, modularScaleOf({ ...it, width: newW, height: newH })));
+              const sized = footprintPx(piece, next);
+              newW = sized.width;
+              newH = sized.height;
+              nx = cx - newW / 2;
+              ny = cy - newH / 2;
+            }
+          }
         } else {
           const w0 = drag.w0 ?? it.width;
           const h0 = drag.h0 ?? it.height;

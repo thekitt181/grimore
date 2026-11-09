@@ -3,7 +3,7 @@ import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import type { RootState } from '@react-three/fiber';
 import * as THREE from 'three';
 import { isMobileClient } from '@/lib/socket';
-import { getActiveMap, useItemStore, selectSortedItems } from '@/systems/scene/store/itemStore';
+import { useItemStore, selectSortedItems } from '@/systems/scene/store/itemStore';
 import { isSceneItemOnTable, sceneMapsForClient } from '@/systems/scene/sceneMapsForClient';
 import { useSessionStore } from '@/store/sessionStore';
 import { sceneRefs } from '@/systems/scene/sceneRefs';
@@ -80,17 +80,11 @@ function TokenModelOverlayLayer() {
   );
 }
 
-function TokenOverlay2DContent({ map }: { map: MapItem | null }) {
+function TokenOverlay2DContent({ maps }: { maps: MapItem[] }) {
   const activeTool = useMapStore((s) => s.activeTool);
   const selectedIds = useItemStore((s) => s.selectedIds);
-  const hasModelMap = Boolean(map?.modelUrl);
-  const showMapGizmo = Boolean(
-    map &&
-      activeTool === 'select' &&
-      selectedIds.length === 1 &&
-      selectedIds[0] === map.id &&
-      map.modelUrl,
-  );
+  const gizmoId =
+    activeTool === 'select' && selectedIds.length === 1 ? selectedIds[0] : undefined;
   return (
     <>
       <ambientLight intensity={0.62} color="#fff8ef" />
@@ -98,7 +92,13 @@ function TokenOverlay2DContent({ map }: { map: MapItem | null }) {
       <directionalLight position={[-360, 640, -220]} intensity={0.5} color="#ffd4a8" />
       <directionalLight position={[80, 520, -620]} intensity={0.35} color="#ffffff" />
       <Suspense fallback={null}>
-        {hasModelMap && map ? <Map2DModelFogContent map={map} showGizmo={showMapGizmo} /> : null}
+        {maps.map((map) => (
+          <Map2DModelFogContent
+            key={map.id}
+            map={map}
+            showGizmo={gizmoId === map.id}
+          />
+        ))}
         <TokenModelOverlayLayer />
       </Suspense>
     </>
@@ -321,17 +321,15 @@ export function MapSceneCanvas() {
   }, []);
 
   const items = useItemStore(selectSortedItems);
-  const activeMapId = useItemStore((s) => s.activeMapId);
-  const overlayMap = useMemo(() => {
-    void items;
-    void activeMapId;
-    return getActiveMap();
-  }, [items, activeMapId]);
 
   const { tokens: modelCandidates } = useVisibleSceneTokens({ modelOnly: true });
   const hasModelTokens = modelCandidates.length > 0;
 
-  const hasModelMap = Boolean(overlayMap?.modelUrl);
+  const overlayMaps = useMemo(
+    () => items.filter((i): i is MapItem => i.type === 'map' && Boolean(i.modelUrl)),
+    [items],
+  );
+  const hasModelMap = overlayMaps.length > 0;
   const needsThreeOverlay = is3d || hasModelTokens || hasModelMap;
 
   const orthoDefaults = useStableOrthoCameraDefaults();
@@ -351,7 +349,7 @@ export function MapSceneCanvas() {
   const dpr = firstPerson
     ? Math.min(mobile ? 1 : 1.25, pixiRenderResolution())
     : pixiRenderResolution();
-  const useShadows = !firstPerson && !mobile && (is3d || hasModelTokens);
+  const useShadows = !firstPerson && !mobile && (is3d || hasModelTokens || hasModelMap);
 
   useEffect(() => () => {
     sceneRefs.threeCanvas.current = null;
@@ -383,17 +381,11 @@ export function MapSceneCanvas() {
 
   return (
     <Canvas
-      key={glKey}
-      orthographic={is3d && !firstPerson}
+      key={`${glKey}-${firstPerson ? 'fp' : 'ortho'}`}
+      orthographic={!firstPerson}
       shadows={useShadows}
       frameloop="always"
-      camera={
-        firstPerson
-          ? fpPerspectiveCamera
-          : is3d
-            ? orthoDefaults
-            : { position: [1280, 1500, 960], zoom: 1, near: -4500, far: 4500 }
-      }
+      camera={firstPerson ? fpPerspectiveCamera : orthoDefaults}
       style={canvasStyle}
       gl={glProps}
       dpr={dpr}
@@ -413,7 +405,7 @@ export function MapSceneCanvas() {
             {!firstPerson && <Map3DTokenGizmo />}
           </>
         ) : (
-          <TokenOverlay2DContent map={overlayMap} />
+          <TokenOverlay2DContent maps={overlayMaps} />
         )}
       </Suspense>
     </Canvas>

@@ -1,0 +1,1466 @@
+{
+  "kenney": [
+    {
+      "key": "corridor-corner.glb",
+      "f": "corridor-corner.glb",
+      "anim": [],
+      "model": {
+        "w": 4,
+        "h": 4.233,
+        "d": 4
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "corridor-end.glb",
+      "f": "corridor-end.glb",
+      "anim": [],
+      "model": {
+        "w": 4,
+        "h": 4.05,
+        "d": 4
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "corridor-intersection.glb",
+      "f": "corridor-intersection.glb",
+      "anim": [],
+      "model": {
+        "w": 4,
+        "h": 4.05,
+        "d": 4
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "corridor-junction.glb",
+      "f": "corridor-junction.glb",
+      "anim": [],
+      "model": {
+        "w": 4.006,
+        "h": 4.05,
+        "d": 4
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "corridor-transition.glb",
+      "f": "corridor-transition.glb",
+      "anim": [],
+      "model": {
+        "w": 8,
+        "h": 4.05,
+        "d": 8
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "corridor-wide-corner.glb",
+      "f": "corridor-wide-corner.glb",
+      "anim": [],
+      "model": {
+        "w": 8,
+        "h": 4.233,
+        "d": 8
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "corridor-wide-end.glb",
+      "f": "corridor-wide-end.glb",
+      "anim": [],
+      "model": {
+        "w": 8,
+        "h": 4.233,
+        "d": 8
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "corridor-wide-intersection.glb",
+      "f": "corridor-wide-intersection.glb",
+      "anim": [],
+      "model": {
+        "w": 8,
+        "h": 4.05,
+        "d": 8
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "corridor-wide-junction.glb",
+      "f": "corridor-wide-junction.glb",
+      "anim": [],
+      "model": {
+        "w": 8,
+        "h": 4.233,
+        "d": 8
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "corridor-wide.glb",
+      "f": "corridor-wide.glb",
+      "anim": [],
+      "model": {
+        "w": 8,
+        "h": 4.233,
+        "d": 8
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "corridor.glb",
+      "f": "corridor.glb",
+      "anim": [],
+      "model": {
+        "w": 4,
+        "h": 4.05,
+        "d": 4
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "gate-door-window.glb",
+      "f": "gate-door-window.glb",
+      "anim": [
+        "open",
+        "close",
+        "open-and-close"
+      ],
+      "model": {
+        "w": 4.4,
+        "h": 4.4,
+        "d": 1.4
+      },
+      "doorNode": "door",
+      "lidNode": null
+    },
+    {
+      "key": "gate-door.glb",
+      "f": "gate-door.glb",
+      "anim": [
+        "open",
+        "close",
+        "open-and-close"
+      ],
+      "model": {
+        "w": 4.4,
+        "h": 4.4,
+        "d": 1.4
+      },
+      "doorNode": "door",
+      "lidNode": null
+    },
+    {
+      "key": "gate-metal-bars.glb",
+      "f": "gate-metal-bars.glb",
+      "anim": [],
+      "model": {
+        "w": 4.4,
+        "h": 4.4,
+        "d": 1.4
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "gate.glb",
+      "f": "gate.glb",
+      "anim": [],
+      "model": {
+        "w": 4.4,
+        "h": 4.4,
+        "d": 1.4
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "room-corner.glb",
+      "f": "room-corner.glb",
+      "anim": [],
+      "model": {
+        "w": 12,
+        "h": 4.233,
+        "d": 12
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "room-large-variation.glb",
+      "f": "room-large-variation.glb",
+      "anim": [],
+      "model": {
+        "w": 20,
+        "h": 4.233,
+        "d": 20
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "room-large.glb",
+      "f": "room-large.glb",
+      "anim": [],
+      "model": {
+        "w": 20,
+        "h": 4.233,
+        "d": 20
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "room-small-variation.glb",
+      "f": "room-small-variation.glb",
+      "anim": [],
+      "model": {
+        "w": 12,
+        "h": 4.233,
+        "d": 12
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "room-small.glb",
+      "f": "room-small.glb",
+      "anim": [],
+      "model": {
+        "w": 12,
+        "h": 4.233,
+        "d": 12
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "room-wide-variation.glb",
+      "f": "room-wide-variation.glb",
+      "anim": [],
+      "model": {
+        "w": 20,
+        "h": 4.233,
+        "d": 12
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "room-wide.glb",
+      "f": "room-wide.glb",
+      "anim": [],
+      "model": {
+        "w": 20,
+        "h": 4.233,
+        "d": 12
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "stairs-wide.glb",
+      "f": "stairs-wide.glb",
+      "anim": [],
+      "model": {
+        "w": 8.4,
+        "h": 8.55,
+        "d": 8.4
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "stairs.glb",
+      "f": "stairs.glb",
+      "anim": [],
+      "model": {
+        "w": 4.4,
+        "h": 8.55,
+        "d": 8.4
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "template-corner.glb",
+      "f": "template-corner.glb",
+      "anim": [],
+      "model": {
+        "w": 4,
+        "h": 4.233,
+        "d": 4
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "template-detail.glb",
+      "f": "template-detail.glb",
+      "anim": [],
+      "model": {
+        "w": 2,
+        "h": 2,
+        "d": 2
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "template-floor-big.glb",
+      "f": "template-floor-big.glb",
+      "anim": [],
+      "model": {
+        "w": 8,
+        "h": 4.233,
+        "d": 8
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "template-floor-detail-a.glb",
+      "f": "template-floor-detail-a.glb",
+      "anim": [],
+      "model": {
+        "w": 4,
+        "h": 0.2,
+        "d": 4
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "template-floor-detail.glb",
+      "f": "template-floor-detail.glb",
+      "anim": [],
+      "model": {
+        "w": 4,
+        "h": 0.2,
+        "d": 4
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "template-floor-layer-hole.glb",
+      "f": "template-floor-layer-hole.glb",
+      "anim": [],
+      "model": {
+        "w": 4.043,
+        "h": 3.089,
+        "d": 4
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "template-floor-layer-raised.glb",
+      "f": "template-floor-layer-raised.glb",
+      "anim": [],
+      "model": {
+        "w": 4.024,
+        "h": 3,
+        "d": 4
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "template-floor-layer.glb",
+      "f": "template-floor-layer.glb",
+      "anim": [],
+      "model": {
+        "w": 4.024,
+        "h": 0.5,
+        "d": 4
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "template-floor.glb",
+      "f": "template-floor.glb",
+      "anim": [],
+      "model": {
+        "w": 4,
+        "h": 0,
+        "d": 4
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "template-wall-corner.glb",
+      "f": "template-wall-corner.glb",
+      "anim": [],
+      "model": {
+        "w": 2,
+        "h": 2,
+        "d": 2
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "template-wall-detail-a.glb",
+      "f": "template-wall-detail-a.glb",
+      "anim": [],
+      "model": {
+        "w": 4,
+        "h": 4.233,
+        "d": 1.994
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "template-wall-half.glb",
+      "f": "template-wall-half.glb",
+      "anim": [],
+      "model": {
+        "w": 2,
+        "h": 2,
+        "d": 2
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "template-wall-stairs.glb",
+      "f": "template-wall-stairs.glb",
+      "anim": [],
+      "model": {
+        "w": 2,
+        "h": 1.848,
+        "d": 2
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "template-wall-top.glb",
+      "f": "template-wall-top.glb",
+      "anim": [],
+      "model": {
+        "w": 2,
+        "h": 2,
+        "d": 2
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "template-wall.glb",
+      "f": "template-wall.glb",
+      "anim": [],
+      "model": {
+        "w": 4,
+        "h": 4.05,
+        "d": 1.994
+      },
+      "doorNode": null,
+      "lidNode": null
+    }
+  ],
+  "kaykit": [
+    {
+      "key": "barrier.glb",
+      "f": "barrier.glb",
+      "anim": [],
+      "model": {
+        "w": 4,
+        "h": 1.1,
+        "d": 0.5
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "barrier_colum_half.glb",
+      "f": "barrier_colum_half.glb",
+      "anim": [],
+      "model": {
+        "w": 2.35,
+        "h": 1.4,
+        "d": 0.7
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "barrier_column.glb",
+      "f": "barrier_column.glb",
+      "anim": [],
+      "model": {
+        "w": 4,
+        "h": 1.4,
+        "d": 0.7
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "barrier_corner.glb",
+      "f": "barrier_corner.glb",
+      "anim": [],
+      "model": {
+        "w": 2.395,
+        "h": 1.4,
+        "d": 2.395
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "barrier_half.glb",
+      "f": "barrier_half.glb",
+      "anim": [],
+      "model": {
+        "w": 2,
+        "h": 1.1,
+        "d": 0.5
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "column.glb",
+      "f": "column.glb",
+      "anim": [],
+      "model": {
+        "w": 0.7,
+        "h": 1.4,
+        "d": 0.7
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "floor_dirt_large.glb",
+      "f": "floor_dirt_large.glb",
+      "anim": [],
+      "model": {
+        "w": 4,
+        "h": 0.209,
+        "d": 4
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "floor_dirt_large_rocky.glb",
+      "f": "floor_dirt_large_rocky.glb",
+      "anim": [],
+      "model": {
+        "w": 4,
+        "h": 0.393,
+        "d": 4
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "floor_dirt_small_A.glb",
+      "f": "floor_dirt_small_A.glb",
+      "anim": [],
+      "model": {
+        "w": 2,
+        "h": 0.186,
+        "d": 2
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "floor_dirt_small_B.glb",
+      "f": "floor_dirt_small_B.glb",
+      "anim": [],
+      "model": {
+        "w": 2,
+        "h": 0.189,
+        "d": 2
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "floor_dirt_small_C.glb",
+      "f": "floor_dirt_small_C.glb",
+      "anim": [],
+      "model": {
+        "w": 2,
+        "h": 0.209,
+        "d": 2
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "floor_dirt_small_D.glb",
+      "f": "floor_dirt_small_D.glb",
+      "anim": [],
+      "model": {
+        "w": 2,
+        "h": 0.138,
+        "d": 2
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "floor_dirt_small_corner.glb",
+      "f": "floor_dirt_small_corner.glb",
+      "anim": [],
+      "model": {
+        "w": 2,
+        "h": 0.154,
+        "d": 2
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "floor_dirt_small_weeds.glb",
+      "f": "floor_dirt_small_weeds.glb",
+      "anim": [],
+      "model": {
+        "w": 2,
+        "h": 0.295,
+        "d": 2
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "floor_foundation_allsides.glb",
+      "f": "floor_foundation_allsides.glb",
+      "anim": [],
+      "model": {
+        "w": 2.2,
+        "h": 2,
+        "d": 2.2
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "floor_foundation_corner.glb",
+      "f": "floor_foundation_corner.glb",
+      "anim": [],
+      "model": {
+        "w": 2.1,
+        "h": 2,
+        "d": 2.1
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "floor_foundation_diagonal_corner.glb",
+      "f": "floor_foundation_diagonal_corner.glb",
+      "anim": [],
+      "model": {
+        "w": 2.1,
+        "h": 2,
+        "d": 2.1
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "floor_foundation_front.glb",
+      "f": "floor_foundation_front.glb",
+      "anim": [],
+      "model": {
+        "w": 2,
+        "h": 2,
+        "d": 2.1
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "floor_foundation_front_and_back.glb",
+      "f": "floor_foundation_front_and_back.glb",
+      "anim": [],
+      "model": {
+        "w": 2,
+        "h": 2,
+        "d": 2.2
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "floor_foundation_front_and_sides.glb",
+      "f": "floor_foundation_front_and_sides.glb",
+      "anim": [],
+      "model": {
+        "w": 2.2,
+        "h": 2,
+        "d": 2.1
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "floor_tile_big_grate.glb",
+      "f": "floor_tile_big_grate.glb",
+      "anim": [],
+      "model": {
+        "w": 4,
+        "h": 1.05,
+        "d": 4
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "floor_tile_big_grate_open.glb",
+      "f": "floor_tile_big_grate_open.glb",
+      "anim": [],
+      "model": {
+        "w": 4,
+        "h": 1.05,
+        "d": 4
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "floor_tile_big_spikes.glb",
+      "f": "floor_tile_big_spikes.glb",
+      "anim": [],
+      "model": {
+        "w": 4,
+        "h": 0.2,
+        "d": 4
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "floor_tile_extralarge_grates.glb",
+      "f": "floor_tile_extralarge_grates.glb",
+      "anim": [],
+      "model": {
+        "w": 8,
+        "h": 1.13,
+        "d": 8
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "floor_tile_extralarge_grates_open.glb",
+      "f": "floor_tile_extralarge_grates_open.glb",
+      "anim": [],
+      "model": {
+        "w": 8,
+        "h": 1.13,
+        "d": 8
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "floor_tile_grate.glb",
+      "f": "floor_tile_grate.glb",
+      "anim": [],
+      "model": {
+        "w": 4,
+        "h": 1.03,
+        "d": 2
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "floor_tile_grate_open.glb",
+      "f": "floor_tile_grate_open.glb",
+      "anim": [],
+      "model": {
+        "w": 4,
+        "h": 1.03,
+        "d": 2
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "floor_tile_large.glb",
+      "f": "floor_tile_large.glb",
+      "anim": [],
+      "model": {
+        "w": 4,
+        "h": 0.15,
+        "d": 4
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "floor_tile_large_rocks.glb",
+      "f": "floor_tile_large_rocks.glb",
+      "anim": [],
+      "model": {
+        "w": 4,
+        "h": 0.636,
+        "d": 4
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "floor_tile_small.glb",
+      "f": "floor_tile_small.glb",
+      "anim": [],
+      "model": {
+        "w": 2,
+        "h": 0.15,
+        "d": 2
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "floor_tile_small_broken_A.glb",
+      "f": "floor_tile_small_broken_A.glb",
+      "anim": [],
+      "model": {
+        "w": 2,
+        "h": 0.15,
+        "d": 2
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "floor_tile_small_broken_B.glb",
+      "f": "floor_tile_small_broken_B.glb",
+      "anim": [],
+      "model": {
+        "w": 2,
+        "h": 0.15,
+        "d": 2
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "floor_tile_small_corner.glb",
+      "f": "floor_tile_small_corner.glb",
+      "anim": [],
+      "model": {
+        "w": 2,
+        "h": 0.15,
+        "d": 2
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "floor_tile_small_decorated.glb",
+      "f": "floor_tile_small_decorated.glb",
+      "anim": [],
+      "model": {
+        "w": 2,
+        "h": 0.773,
+        "d": 2
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "floor_tile_small_weeds_A.glb",
+      "f": "floor_tile_small_weeds_A.glb",
+      "anim": [],
+      "model": {
+        "w": 2,
+        "h": 0.295,
+        "d": 2
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "floor_tile_small_weeds_B.glb",
+      "f": "floor_tile_small_weeds_B.glb",
+      "anim": [],
+      "model": {
+        "w": 2,
+        "h": 0.295,
+        "d": 2
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "floor_wood_large.glb",
+      "f": "floor_wood_large.glb",
+      "anim": [],
+      "model": {
+        "w": 4,
+        "h": 0.15,
+        "d": 4
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "floor_wood_large_dark.glb",
+      "f": "floor_wood_large_dark.glb",
+      "anim": [],
+      "model": {
+        "w": 4,
+        "h": 0.15,
+        "d": 4
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "floor_wood_small.glb",
+      "f": "floor_wood_small.glb",
+      "anim": [],
+      "model": {
+        "w": 2,
+        "h": 0.15,
+        "d": 2
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "floor_wood_small_dark.glb",
+      "f": "floor_wood_small_dark.glb",
+      "anim": [],
+      "model": {
+        "w": 2,
+        "h": 0.15,
+        "d": 2
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "pillar.glb",
+      "f": "pillar.glb",
+      "anim": [],
+      "model": {
+        "w": 1.5,
+        "h": 4,
+        "d": 1.5
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "pillar_decorated.glb",
+      "f": "pillar_decorated.glb",
+      "anim": [],
+      "model": {
+        "w": 2.232,
+        "h": 4,
+        "d": 1.71
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "stairs.glb",
+      "f": "stairs.glb",
+      "anim": [],
+      "model": {
+        "w": 5,
+        "h": 5.1,
+        "d": 4
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "stairs_narrow.glb",
+      "f": "stairs_narrow.glb",
+      "anim": [],
+      "model": {
+        "w": 4,
+        "h": 5.1,
+        "d": 4
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "stairs_wall_left.glb",
+      "f": "stairs_wall_left.glb",
+      "anim": [],
+      "model": {
+        "w": 4,
+        "h": 5.1,
+        "d": 5
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "stairs_wall_right.glb",
+      "f": "stairs_wall_right.glb",
+      "anim": [],
+      "model": {
+        "w": 4,
+        "h": 5.1,
+        "d": 5
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "stairs_walled.glb",
+      "f": "stairs_walled.glb",
+      "anim": [],
+      "model": {
+        "w": 5,
+        "h": 4,
+        "d": 4
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "stairs_wide.glb",
+      "f": "stairs_wide.glb",
+      "anim": [],
+      "model": {
+        "w": 7,
+        "h": 5.1,
+        "d": 4
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "stairs_wood.glb",
+      "f": "stairs_wood.glb",
+      "anim": [],
+      "model": {
+        "w": 3.3,
+        "h": 4.05,
+        "d": 6
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "stairs_wood_decorated.glb",
+      "f": "stairs_wood_decorated.glb",
+      "anim": [],
+      "model": {
+        "w": 3.3,
+        "h": 4.05,
+        "d": 6
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "wall.glb",
+      "f": "wall.glb",
+      "anim": [],
+      "model": {
+        "w": 4,
+        "h": 4,
+        "d": 1
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "wall_Tsplit.glb",
+      "f": "wall_Tsplit.glb",
+      "anim": [],
+      "model": {
+        "w": 4,
+        "h": 4,
+        "d": 2.5
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "wall_Tsplit_sloped.glb",
+      "f": "wall_Tsplit_sloped.glb",
+      "anim": [],
+      "model": {
+        "w": 4,
+        "h": 4,
+        "d": 2.5
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "wall_arched.glb",
+      "f": "wall_arched.glb",
+      "anim": [],
+      "model": {
+        "w": 4,
+        "h": 4,
+        "d": 1
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "wall_archedwindow_gated.glb",
+      "f": "wall_archedwindow_gated.glb",
+      "anim": [],
+      "model": {
+        "w": 4,
+        "h": 4,
+        "d": 1
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "wall_archedwindow_gated_scaffold.glb",
+      "f": "wall_archedwindow_gated_scaffold.glb",
+      "anim": [],
+      "model": {
+        "w": 4,
+        "h": 4,
+        "d": 1
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "wall_archedwindow_open.glb",
+      "f": "wall_archedwindow_open.glb",
+      "anim": [],
+      "model": {
+        "w": 4,
+        "h": 4,
+        "d": 1
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "wall_broken.glb",
+      "f": "wall_broken.glb",
+      "anim": [],
+      "model": {
+        "w": 4,
+        "h": 4,
+        "d": 1
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "wall_corner.glb",
+      "f": "wall_corner.glb",
+      "anim": [],
+      "model": {
+        "w": 2.5,
+        "h": 4,
+        "d": 2.5
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "wall_corner_gated.glb",
+      "f": "wall_corner_gated.glb",
+      "anim": [],
+      "model": {
+        "w": 2.5,
+        "h": 4,
+        "d": 2.5
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "wall_corner_scaffold.glb",
+      "f": "wall_corner_scaffold.glb",
+      "anim": [],
+      "model": {
+        "w": 2.5,
+        "h": 4,
+        "d": 2.5
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "wall_corner_small.glb",
+      "f": "wall_corner_small.glb",
+      "anim": [],
+      "model": {
+        "w": 1.5,
+        "h": 4,
+        "d": 1.5
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "wall_cracked.glb",
+      "f": "wall_cracked.glb",
+      "anim": [],
+      "model": {
+        "w": 4,
+        "h": 4,
+        "d": 1.259
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "wall_crossing.glb",
+      "f": "wall_crossing.glb",
+      "anim": [],
+      "model": {
+        "w": 4,
+        "h": 4,
+        "d": 4
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "wall_doorway.glb",
+      "f": "wall_doorway.glb",
+      "anim": [],
+      "model": {
+        "w": 4,
+        "h": 4,
+        "d": 1
+      },
+      "doorNode": "wall_doorway_door",
+      "lidNode": null
+    },
+    {
+      "key": "wall_doorway_Tsplit.glb",
+      "f": "wall_doorway_Tsplit.glb",
+      "anim": [],
+      "model": {
+        "w": 8,
+        "h": 4,
+        "d": 2.5
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "wall_doorway_scaffold.glb",
+      "f": "wall_doorway_scaffold.glb",
+      "anim": [],
+      "model": {
+        "w": 4,
+        "h": 4,
+        "d": 1
+      },
+      "doorNode": "wall_doorway_scaffold_door",
+      "lidNode": null
+    },
+    {
+      "key": "wall_doorway_sides.glb",
+      "f": "wall_doorway_sides.glb",
+      "anim": [],
+      "model": {
+        "w": 5,
+        "h": 4,
+        "d": 4
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "wall_endcap.glb",
+      "f": "wall_endcap.glb",
+      "anim": [],
+      "model": {
+        "w": 1.067,
+        "h": 4,
+        "d": 1
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "wall_gated.glb",
+      "f": "wall_gated.glb",
+      "anim": [],
+      "model": {
+        "w": 4,
+        "h": 4,
+        "d": 1
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "wall_half.glb",
+      "f": "wall_half.glb",
+      "anim": [],
+      "model": {
+        "w": 2,
+        "h": 4,
+        "d": 1
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "wall_half_endcap.glb",
+      "f": "wall_half_endcap.glb",
+      "anim": [],
+      "model": {
+        "w": 2,
+        "h": 4,
+        "d": 1
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "wall_half_endcap_sloped.glb",
+      "f": "wall_half_endcap_sloped.glb",
+      "anim": [],
+      "model": {
+        "w": 2,
+        "h": 4,
+        "d": 1
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "wall_open_scaffold.glb",
+      "f": "wall_open_scaffold.glb",
+      "anim": [],
+      "model": {
+        "w": 4,
+        "h": 4,
+        "d": 1
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "wall_pillar.glb",
+      "f": "wall_pillar.glb",
+      "anim": [],
+      "model": {
+        "w": 4,
+        "h": 4,
+        "d": 1.5
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "wall_scaffold.glb",
+      "f": "wall_scaffold.glb",
+      "anim": [],
+      "model": {
+        "w": 4,
+        "h": 4,
+        "d": 1
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "wall_shelves.glb",
+      "f": "wall_shelves.glb",
+      "anim": [],
+      "model": {
+        "w": 4,
+        "h": 4,
+        "d": 1.368
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "wall_sloped.glb",
+      "f": "wall_sloped.glb",
+      "anim": [],
+      "model": {
+        "w": 4,
+        "h": 4,
+        "d": 1
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "wall_window_closed.glb",
+      "f": "wall_window_closed.glb",
+      "anim": [],
+      "model": {
+        "w": 4,
+        "h": 4,
+        "d": 1
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "wall_window_closed_scaffold.glb",
+      "f": "wall_window_closed_scaffold.glb",
+      "anim": [],
+      "model": {
+        "w": 4,
+        "h": 4,
+        "d": 1
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "wall_window_open.glb",
+      "f": "wall_window_open.glb",
+      "anim": [],
+      "model": {
+        "w": 4,
+        "h": 4,
+        "d": 1
+      },
+      "doorNode": null,
+      "lidNode": null
+    },
+    {
+      "key": "wall_window_open_scaffold.glb",
+      "f": "wall_window_open_scaffold.glb",
+      "anim": [],
+      "model": {
+        "w": 4,
+        "h": 4,
+        "d": 1
+      },
+      "doorNode": null,
+      "lidNode": null
+    }
+  ]
+}

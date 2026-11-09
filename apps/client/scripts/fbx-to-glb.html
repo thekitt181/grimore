@@ -1,0 +1,73 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8" /></head>
+<body>
+<script type="importmap">
+{
+  "imports": {
+    "three": "/vendor/three.module.js",
+    "three/addons/": "/vendor/addons/"
+  }
+}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
+import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
+
+const params = new URLSearchParams(location.search);
+const src = params.get('src');
+window.__ready = false;
+window.__error = null;
+window.__glb = null;
+window.__info = '';
+
+function toB64(buf) {
+  const bytes = new Uint8Array(buf);
+  let bin = '';
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    bin += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return btoa(bin);
+}
+
+try {
+  const fbx = await new FBXLoader().loadAsync(src);
+  const tex = await new THREE.TextureLoader().loadAsync('/alstra/PolyPack_Main1.png');
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.flipY = false;
+  tex.needsUpdate = true;
+
+  let meshes = 0;
+  fbx.traverse((obj) => {
+    if (!obj.isMesh) return;
+    meshes += 1;
+    const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+    for (const mat of mats) {
+      if (!mat) continue;
+      mat.map = tex;
+      mat.needsUpdate = true;
+    }
+  });
+  window.__info = `meshes=${meshes} tex=${tex.image?.width}x${tex.image?.height}`;
+
+  const glb = await new Promise((resolve, reject) => {
+    new GLTFExporter().parse(
+      fbx,
+      (result) => resolve(result),
+      (err) => reject(err),
+      { binary: true },
+    );
+  });
+  window.__glb = toB64(glb);
+  window.__ready = true;
+} catch (err) {
+  window.__error = String(err?.stack ?? err);
+  window.__ready = true;
+}
+</script>
+</body>
+</html>

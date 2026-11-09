@@ -19,7 +19,7 @@ import { isAoePlacementActive } from '@/systems/combat/aoePlacementUtils';
 import { isSpellTargetPicking } from '@/systems/spells/pickSpellTargets';
 import { sceneRefs, getMapInteractionEl } from '@/systems/scene/sceneRefs';
 import { useFirstPersonStore } from '@/systems/map3d/firstPersonStore';
-import { getActiveMap } from '@/systems/scene/store/itemStore';
+import { getActiveMap, useItemStore } from '@/systems/scene/store/itemStore';
 import type { MapItem } from '@/systems/scene/types';
 
 let viewportPersistTimer: ReturnType<typeof setTimeout> | null = null;
@@ -206,6 +206,15 @@ export function useMapViewport(
     function onWheel(e: WheelEvent) {
       if (!isOverMapArea(e.clientX, e.clientY)) return;
       const ms = useMapStore.getState();
+      // Hold-click + wheel rotates; Shift+wheel scales selected pieces — don't zoom.
+      if (isItemDragActive()) return;
+      if (
+        e.shiftKey
+        && ms.activeTool === 'select'
+        && useItemStore.getState().selectedIds.length > 0
+      ) {
+        return;
+      }
       if (ms.viewMode === '3d' && ms.mapFrozen) return;
       e.preventDefault();
       e.stopImmediatePropagation();

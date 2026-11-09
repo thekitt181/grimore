@@ -86,7 +86,7 @@ function resolveContextMenu(
 
   if (isMapGroundHit(hit)) {
     if (!isGM) return null;
-    const mapAt = hit?.type === 'map' ? hit : hitTestMap(visible, wx, wy);
+    const mapAt = hitTestMap(visible, wx, wy) ?? (hit?.type === 'map' ? hit : null);
     // Right-click map surface: select map for lock/unlock/delete (shift = ground menu).
     if (!shiftKey && mapAt?.type === 'map') {
       const store = useItemStore.getState();

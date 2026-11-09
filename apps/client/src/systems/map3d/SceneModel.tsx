@@ -16,6 +16,8 @@ import {
 } from './retargetMixamoWalk';
 import { rootHasSkinnedMesh } from './tokenSmartRig';
 import { enhancePropMaterials } from './propMaterialEnhance';
+import { ModularPieceAnim } from './ModularPieceAnim';
+import { cloneHingedChestRoot, disposeSyntheticChestLid } from './chestLidHinge';
 // Warm the Mixamo walk pack so token Suspense rarely stalls on first place.
 useFBX.preload(SHARED_MIXAMO_WALK_URL);
 
@@ -61,9 +63,12 @@ function useNormalizedModel(
   /** Tokens only: one-shot sole align after normalize (not per-frame plant). */
   soleAlign = false,
   tokenUpright = false,
+  fixedWorldScale?: number,
+  depthStretch?: number,
+  widthStretch?: number,
 ) {
   useLayoutEffect(() => {
-    const normKey = `${targetSize}|${footprint?.width ?? ''}|${footprint?.height ?? ''}|${groundAlign ? 1 : 0}|up2|grnd1|${tokenUpright ? 1 : 0}`;
+    const normKey = `${targetSize}|${footprint?.width ?? ''}|${footprint?.height ?? ''}|${groundAlign ? 1 : 0}|up2|grnd1|${tokenUpright ? 1 : 0}|fx${fixedWorldScale ?? ''}|dz${depthStretch ?? ''}|dx${widthStretch ?? ''}`;
     // Skip destructive re-normalize when this root is already fitted (e.g. after a drag re-render).
     if (root.userData.__grimoireNormKey === normKey) {
       root.visible = true;
@@ -103,7 +108,7 @@ function useNormalizedModel(
           return;
         }
 
-        if (applyModelNormalization(root, targetSize, groundAlign, footprint, tokenUpright)) {
+        if (applyModelNormalization(root, targetSize, groundAlign, footprint, tokenUpright, fixedWorldScale, depthStretch, widthStretch)) {
           normalized = true;
           reveal();
         } else if (normTries++ < maxNormTries) {
@@ -141,7 +146,7 @@ function useNormalizedModel(
       cancelled = true;
       cancelAnimationFrame(frameId);
     };
-  }, [root, targetSize, groundAlign, footprint?.width, footprint?.height, soleAlign, tokenUpright]);
+  }, [root, targetSize, groundAlign, footprint?.width, footprint?.height, soleAlign, tokenUpright, fixedWorldScale, depthStretch, widthStretch]);
 }
 
 function GltfModel({
@@ -155,6 +160,13 @@ function GltfModel({
   footprint,
   itemId,
   collisionMap,
+  fixedWorldScale,
+  modularOpen,
+  modularOpenAt,
+  doorNode,
+  depthStretch,
+  widthStretch,
+  hingeChestLid = false,
 }: {
   url: string;
   targetSize: number;
@@ -166,6 +178,13 @@ function GltfModel({
   footprint?: { width: number; height: number };
   itemId?: string;
   collisionMap?: import('@/systems/scene/types').MapItem;
+  fixedWorldScale?: number;
+  modularOpen?: boolean;
+  modularOpenAt?: number;
+  doorNode?: string;
+  depthStretch?: number;
+  widthStretch?: number;
+  hingeChestLid?: boolean;
 }) {
   const { scene, animations } = useGLTF(url);
   // Sole align + locomotion only for real tokens (itemId). Props use tokenRender for materials only.
@@ -179,7 +198,13 @@ function GltfModel({
       });
       return skinned;
     })();
-    const root = (hasSkinned ? cloneSkinned(scene) : scene.clone(true)) as THREE.Object3D;
+    const root = (
+      hingeChestLid
+        ? cloneHingedChestRoot(scene, url)
+        : hasSkinned
+          ? cloneSkinned(scene)
+          : scene.clone(true)
+    ) as THREE.Object3D;
     // Hide only token minis until sole-align. Props share tokenRender materials but must
     // stay visible — they have no itemId, so soleAlign never reveals them otherwise.
     if (isTokenMini) root.visible = false;
@@ -199,9 +224,10 @@ function GltfModel({
     if (propRender) enhancePropMaterials(root);
     else if (tokenRender) brightenMeshMaterials(root, tokenRender2d, true);
     return root;
-  }, [scene, animations.length, tokenRender, propRender, tokenRender2d, isTokenMini]);
+  }, [url, scene, animations.length, tokenRender, propRender, tokenRender2d, isTokenMini, hingeChestLid]);
 
-  useNormalizedModel(clone, targetSize, groundAlign, footprint, isTokenMini, isTokenMini);
+  useNormalizedModel(clone, targetSize, groundAlign, footprint, isTokenMini, isTokenMini, fixedWorldScale, depthStretch, widthStretch);
+  const gateAnim = modularOpen != null;
 
   useEffect(() => {
     if (!registerRaycast || tokenRender) return;
@@ -212,6 +238,7 @@ function GltfModel({
   // Never dispose clone geometry/materials — shared with useGLTF cache (wipes maps/tokens).
   useEffect(() => () => {
     clone.removeFromParent();
+    disposeSyntheticChestLid(clone);
   }, [clone]);
 
   return (
@@ -221,6 +248,15 @@ function GltfModel({
         <Suspense fallback={null}>
           <TokenMixamoWalkDriver root={clone} embedded={animations} itemId={itemId} />
         </Suspense>
+      ) : null}
+      {gateAnim ? (
+        <ModularPieceAnim
+          root={clone}
+          animations={animations}
+          open={Boolean(modularOpen)}
+          {...(modularOpenAt != null ? { openAt: modularOpenAt } : {})}
+          {...(doorNode ? { doorNode } : {})}
+        />
       ) : null}
     </>
   );
@@ -353,6 +389,13 @@ export function SceneModel({
   itemId,
   propRender = false,
   collisionMap,
+  fixedWorldScale,
+  modularOpen,
+  modularOpenAt,
+  doorNode,
+  depthStretch,
+  widthStretch,
+  hingeChestLid = false,
 }: {
   url: string;
   targetSize: number;
@@ -370,12 +413,21 @@ export function SceneModel({
   itemId?: string;
   /** When set with registerRaycast — bake O(1) FP collision grid from this map. */
   collisionMap?: import('@/systems/scene/types').MapItem;
+  fixedWorldScale?: number;
+  modularOpen?: boolean;
+  modularOpenAt?: number;
+  doorNode?: string;
+  depthStretch?: number;
+  widthStretch?: number;
+  /** Cut a lid hinge on single-mesh chests that have no lid bone. */
+  hingeChestLid?: boolean;
 }) {
   const { resolved, status } = useResolvedModelUrl(url);
   const format = modelFormatFromUrl(url);
 
   useEffect(() => {
     if (!resolved || format === 'stl' || format == null) return;
+    if (resolved.includes('/spajx/')) return;
     useGLTF.preload(resolved);
   }, [resolved, format]);
 
@@ -420,6 +472,13 @@ export function SceneModel({
         {...(footprint ? { footprint } : {})}
         propRender={propRender}
         {...(collisionMap ? { collisionMap } : {})}
+        {...(fixedWorldScale != null ? { fixedWorldScale } : {})}
+        {...(depthStretch != null ? { depthStretch } : {})}
+        {...(widthStretch != null ? { widthStretch } : {})}
+        {...(modularOpen != null ? { modularOpen } : {})}
+        {...(modularOpen != null && modularOpenAt != null ? { modularOpenAt } : {})}
+        {...(modularOpen != null && doorNode ? { doorNode } : {})}
+        hingeChestLid={hingeChestLid}
       />
     </Suspense>
   );

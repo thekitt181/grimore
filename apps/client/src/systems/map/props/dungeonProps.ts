@@ -116,7 +116,52 @@ function cellCenter(map: MapItem, col: number, row: number): { x: number; y: num
   };
 }
 
-/** Drop a prop on the active map, near the middle, nudged so repeats do not stack. */
+function occupiedPropCells(map: MapItem): Set<string> {
+  const g = map.gridSize;
+  const ox = map.x + map.gridOffsetX;
+  const oy = map.y + map.gridOffsetY;
+  const occupied = new Set<string>();
+  for (const item of Object.values(useItemStore.getState().items)) {
+    if (item.type !== 'image') continue;
+    if (item.x + item.width < map.x || item.x > map.x + map.width) continue;
+    if (item.y + item.height < map.y || item.y > map.y + map.height) continue;
+    const c0 = Math.floor((item.x - ox) / g);
+    const r0 = Math.floor((item.y - oy) / g);
+    const c1 = Math.floor((item.x + item.width - ox - 0.01) / g);
+    const r1 = Math.floor((item.y + item.height - oy - 0.01) / g);
+    for (let r = r0; r <= r1; r++) {
+      for (let c = c0; c <= c1; c++) occupied.add(`${c},${r}`);
+    }
+  }
+  return occupied;
+}
+
+function nextFreePropCell(map: MapItem): { col: number; row: number } {
+  const cols = Math.max(1, Math.floor(map.width / map.gridSize));
+  const rows = Math.max(1, Math.floor(map.height / map.gridSize));
+  const occupied = occupiedPropCells(map);
+  const startCol = Math.min(cols - 1, Math.max(0, Math.floor(cols / 2) - 2));
+  const startRow = Math.min(rows - 1, Math.max(0, Math.floor(rows / 2)));
+  const free = (col: number, row: number) =>
+    col >= 0 && row >= 0 && col < cols && row < rows && !occupied.has(`${col},${row}`);
+  for (let row = startRow; row < rows; row++) {
+    for (let col = row === startRow ? startCol : 0; col < cols; col++) {
+      if (free(col, row)) return { col, row };
+    }
+  }
+  for (let row = 0; row < startRow; row++) {
+    for (let col = 0; col < cols; col++) {
+      if (free(col, row)) return { col, row };
+    }
+  }
+  const n = occupied.size;
+  return {
+    col: Math.min(cols - 1, (startCol + n) % cols),
+    row: Math.min(rows - 1, startRow + Math.floor((startCol + n) / cols)),
+  };
+}
+
+/** Drop a prop on the active map, in the next free cell (side by side, not stacked). */
 export function placeDungeonProp(prop: DungeonProp, hidden: boolean): void {
   const map = getActiveMap();
   if (!map) {
@@ -124,13 +169,7 @@ export function placeDungeonProp(prop: DungeonProp, hidden: boolean): void {
     return;
   }
 
-  const same = Object.values(useItemStore.getState().items).filter(
-    (item) => item.type === 'image' && item.name === prop.name,
-  ).length;
-  const cols = Math.max(1, Math.floor(map.width / map.gridSize));
-  const rows = Math.max(1, Math.floor(map.height / map.gridSize));
-  const col = Math.min(cols - 1, Math.max(0, Math.floor(cols / 2) - 2 + (same % 5)));
-  const row = Math.min(rows - 1, Math.max(0, Math.floor(rows / 2) + Math.floor(same / 5)));
+  const { col, row } = nextFreePropCell(map);
   const center = cellCenter(map, col, row);
   const size = map.gridSize;
 

@@ -90,6 +90,9 @@ export interface MapItem extends BaseItem {
   breachFx?: MapBreachFx | null;
   /** Generated dungeon floors. Clicking a stair opens the linked level. */
   dungeon?: DungeonFloorLink;
+  /** Kenney / KayKit door or gate is open. */
+  modularOpen?: boolean;
+  modularOpenAt?: number;
 }
 
 /**

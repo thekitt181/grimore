@@ -92,6 +92,14 @@ export function applyModelNormalization(
   footprint?: { width: number; height: number },
   /** Table minis: stand up Z-up / sideways exports before footprint scaling. */
   tokenUpright = false,
+  /**
+   * Kenney / KayKit maps: 1 mesh-meter → this many world px (same for every piece
+   * so walls/passages match). When set, footprint fit is ignored.
+   */
+  fixedWorldScale?: number,
+  /** Extra local-Z scale after meter fit (KayKit walls 1 m → 2 m thick). */
+  depthStretch?: number,
+  widthStretch?: number,
 ): boolean {
   const prevParent = root.parent;
   const prevPos = root.position.clone();
@@ -116,7 +124,9 @@ export function applyModelNormalization(
 
   const size = box.getSize(new THREE.Vector3());
   let scaleFactor: number;
-  if (footprint && size.x > 1e-6 && size.z > 1e-6) {
+  if (fixedWorldScale != null && Number.isFinite(fixedWorldScale) && fixedWorldScale > 0) {
+    scaleFactor = fixedWorldScale;
+  } else if (footprint && size.x > 1e-6 && size.z > 1e-6) {
     scaleFactor = Math.min(footprint.width / size.x, footprint.height / size.z);
   } else {
     const maxDim = Math.max(size.x, size.y, size.z);
@@ -128,6 +138,14 @@ export function applyModelNormalization(
   }
   scaleFactor = THREE.MathUtils.clamp(scaleFactor, 1e-3, 1e3);
   root.scale.setScalar(scaleFactor);
+  const zStretch = depthStretch != null && Number.isFinite(depthStretch) && depthStretch > 0
+    ? depthStretch
+    : 1;
+  const xStretch = widthStretch != null && Number.isFinite(widthStretch) && widthStretch > 0
+    ? widthStretch
+    : 1;
+  if (zStretch !== 1) root.scale.z *= zStretch;
+  if (xStretch !== 1) root.scale.x *= xStretch;
   root.updateMatrixWorld(true);
 
   box.setFromObject(root);

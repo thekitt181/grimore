@@ -1,0 +1,253 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <style>
+    html, body { margin: 0; background: #12121a; overflow: hidden; }
+    canvas { display: block; width: 256px; height: 256px; }
+  </style>
+</head>
+<body>
+<canvas id="c" width="256" height="256"></canvas>
+<script type="importmap">
+{
+  "imports": {
+    "three": "/vendor/three.module.js",
+    "three/addons/": "/vendor/addons/"
+  }
+}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+const params = new URLSearchParams(location.search);
+const src = params.get('src');
+const poseOpen = params.get('open') === '1';
+const canvas = document.getElementById('c');
+window.__ready = false;
+window.__error = null;
+
+const renderer = new THREE.WebGLRenderer({
+  canvas,
+  antialias: true,
+  alpha: false,
+  preserveDrawingBuffer: true,
+});
+renderer.setSize(256, 256, false);
+renderer.setPixelRatio(1);
+renderer.setClearColor(0x12121a, 1);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.15;
+
+const scene = new THREE.Scene();
+scene.add(new THREE.AmbientLight(0xfff8ef, 0.9));
+const key = new THREE.DirectionalLight(0xfff5e6, 1.6);
+key.position.set(6, 10, 4);
+scene.add(key);
+const fill = new THREE.DirectionalLight(0xffd4a8, 0.5);
+fill.position.set(-4, 6, -3);
+scene.add(fill);
+
+const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, -80, 80);
+camera.position.set(1.05, 1.55, 1.25);
+camera.lookAt(0, 0, 0);
+
+function heightOf(pos, i, up) {
+  return pos.getX(i) * up.x + pos.getY(i) * up.y + pos.getZ(i) * up.z;
+}
+function copyTris(src, tris) {
+  const dst = new THREE.BufferGeometry();
+  const vCount = tris.length * 3;
+  for (const name of Object.keys(src.attributes)) {
+    const attr = src.getAttribute(name);
+    const itemSize = attr.itemSize;
+    const next = new Float32Array(vCount * itemSize);
+    let o = 0;
+    for (const t of tris) {
+      for (let v = 0; v < 3; v++) {
+        const i = t * 3 + v;
+        next[o++] = attr.getX(i);
+        if (itemSize > 1) next[o++] = attr.getY(i);
+        if (itemSize > 2) next[o++] = attr.getZ(i);
+        if (itemSize > 3) next[o++] = attr.getW(i);
+      }
+    }
+    dst.setAttribute(name, new THREE.BufferAttribute(next, itemSize, attr.normalized));
+  }
+  return dst;
+}
+function attachSyntheticChestLid(root) {
+  let named = false;
+  root.traverse((obj) => {
+    const n = obj.name.toLowerCase();
+    if (n.includes('lid') || n.endsWith('_top') || n.endsWith('_cover')) named = true;
+  });
+  if (named || root.userData.syntheticChestLid) return;
+  root.userData.syntheticChestLid = true;
+  root.updateMatrixWorld(true);
+  const meshes = [];
+  root.traverse((obj) => { if (obj.isMesh) meshes.push(obj); });
+  const _q = new THREE.Quaternion();
+  const _a = new THREE.Vector3();
+  const _b = new THREE.Vector3();
+  const _n = new THREE.Vector3();
+  for (const mesh of meshes) {
+    mesh.updateMatrix();
+    mesh.getWorldQuaternion(_q);
+    const up = new THREE.Vector3(0, 1, 0).applyQuaternion(_q.invert()).normalize();
+    if (up.lengthSq() < 1e-8) up.set(0, 1, 0);
+    const src = mesh.geometry.index ? mesh.geometry.toNonIndexed() : mesh.geometry.clone();
+    const pos = src.getAttribute('position');
+    if (!pos || pos.count < 9) continue;
+    let minH = Infinity, maxH = -Infinity;
+    for (let i = 0; i < pos.count; i++) {
+      const h = heightOf(pos, i, up);
+      if (h < minH) minH = h;
+      if (h > maxH) maxH = h;
+    }
+    const span = maxH - minH;
+    if (!(span > 1e-8)) continue;
+    let picked = null;
+    let split = minH + 0.84 * span;
+    for (const f of [0.88, 0.84, 0.8, 0.76, 0.72]) {
+      split = minH + f * span;
+      const triCount = Math.floor(pos.count / 3);
+      const lidTris = [];
+      const bodyTris = [];
+      for (let t = 0; t < triCount; t++) {
+        const i = t * 3;
+        const h0 = heightOf(pos, i, up);
+        const h1 = heightOf(pos, i + 1, up);
+        const h2 = heightOf(pos, i + 2, up);
+        _a.set(pos.getX(i + 1) - pos.getX(i), pos.getY(i + 1) - pos.getY(i), pos.getZ(i + 1) - pos.getZ(i));
+        _b.set(pos.getX(i + 2) - pos.getX(i), pos.getY(i + 2) - pos.getY(i), pos.getZ(i + 2) - pos.getZ(i));
+        _n.copy(_a).cross(_b);
+        const facingUp = (_n.x * up.x + _n.y * up.y + _n.z * up.z) / (_n.length() || 1) > 0.35;
+        const isLid = Math.min(h0, h1, h2) >= split || ((h0 + h1 + h2) / 3 >= split && facingUp);
+        (isLid ? lidTris : bodyTris).push(t);
+      }
+      const share = lidTris.length / triCount;
+      if (lidTris.length >= 24 && bodyTris.length >= 24 && share >= 0.02 && share <= 0.4) {
+        picked = { lid: copyTris(src, lidTris), body: copyTris(src, bodyTris) };
+        break;
+      }
+    }
+    if (!picked) continue;
+    picked.body.computeBoundingBox();
+    picked.lid.computeBoundingBox();
+    const lidBox = picked.lid.boundingBox;
+    const bodyBox = picked.body.boundingBox;
+    const size = lidBox.getSize(new THREE.Vector3());
+    const upAxis = Math.abs(up.x) >= Math.abs(up.y) && Math.abs(up.x) >= Math.abs(up.z) ? 'x'
+      : Math.abs(up.y) >= Math.abs(up.z) ? 'y' : 'z';
+    const horiz = ['x', 'y', 'z'].filter((a) => a !== upAxis);
+    const hingeAxis = size[horiz[0]] >= size[horiz[1]] ? horiz[0] : horiz[1];
+    const across = hingeAxis === horiz[0] ? horiz[1] : horiz[0];
+    const posBody = picked.body.getAttribute('position');
+    let minHBody = Infinity, maxHBody = -Infinity;
+    for (let i = 0; i < posBody.count; i++) {
+      const h = heightOf(posBody, i, up);
+      if (h < minHBody) minHBody = h;
+      if (h > maxHBody) maxHBody = h;
+    }
+    mesh.updateWorldMatrix(true, false);
+    const localBack = new THREE.Vector3(0, 0, -1).transformDirection(
+      new THREE.Matrix4().copy(mesh.matrixWorld).invert(),
+    );
+    const back = localBack[across] >= 0 ? lidBox.max[across] : lidBox.min[across];
+    const hingePos = new THREE.Vector3().copy(lidBox.getCenter(new THREE.Vector3()));
+    hingePos[across] = back;
+    hingePos.addScaledVector(up, split - hingePos.dot(up));
+    picked.lid.translate(-hingePos.x, -hingePos.y, -hingePos.z);
+    mesh.geometry = picked.body;
+    const hinge = new THREE.Group();
+    hinge.name = 'chest_lid';
+    hinge.position.copy(hingePos);
+    const lidCentroid = lidBox.getCenter(new THREE.Vector3()).sub(hingePos);
+    const axisVec = new THREE.Vector3(hingeAxis === 'x' ? 1 : 0, hingeAxis === 'y' ? 1 : 0, hingeAxis === 'z' ? 1 : 0);
+    const openSign = axisVec.clone().cross(lidCentroid).dot(up) >= 0 ? 1 : -1;
+    hinge.userData.lidAxis = hingeAxis;
+    hinge.userData.lidSign = openSign;
+    hinge.userData.lidOpenRad = 1.15;
+    const lidMesh = new THREE.Mesh(picked.lid, mesh.material);
+    const innerMat = new THREE.MeshStandardMaterial({
+      color: '#5a3d24', roughness: 0.86, metalness: 0.06,
+      emissive: '#2a1810', emissiveIntensity: 0.22,
+    });
+    const under = innerMat.clone();
+    under.side = THREE.BackSide;
+    lidMesh.add(new THREE.Mesh(picked.lid, under));
+    mesh.add(hinge);
+    hinge.add(lidMesh);
+    const c = bodyBox.getCenter(new THREE.Vector3());
+    const half = bodyBox.getSize(new THREE.Vector3()).multiplyScalar(0.36);
+    const depth = Math.max(0.03, (split - minHBody) * 0.42);
+    const floor = new THREE.Mesh(new THREE.PlaneGeometry(Math.max(half.x, half.y) * 2, Math.max(half.z, half.y) * 2), innerMat);
+    floor.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), up.clone().normalize());
+    floor.position.copy(c).addScaledVector(up, -depth);
+    mesh.add(floor);
+    const loot = new THREE.Group();
+    loot.name = 'chest_loot';
+    loot.visible = false;
+    const lootGeo = new THREE.SphereGeometry(Math.min(half.x, half.z) * 0.22, 10, 8);
+    const lootMat = new THREE.MeshStandardMaterial({
+      color: '#e2c05a', metalness: 0.78, roughness: 0.28,
+      emissive: '#c9a84c', emissiveIntensity: 0.55,
+    });
+    for (const [ox, oz] of [[0, 0], [0.35, 0.2], [-0.3, 0.15], [0.12, -0.28]]) {
+      const coin = new THREE.Mesh(lootGeo, lootMat);
+      coin.scale.set(1, 0.38, 1);
+      coin.position.copy(c).addScaledVector(up, -depth * 0.55);
+      coin.position.x += ox * half.x;
+      coin.position.z += oz * half.z;
+      loot.add(coin);
+    }
+    mesh.add(loot);
+  }
+}
+
+try {
+  const gltf = await new GLTFLoader().loadAsync(src);
+  const root = gltf.scene;
+  if (poseOpen) {
+    attachSyntheticChestLid(root);
+    root.traverse((obj) => {
+      const n = obj.name.toLowerCase();
+      if (n.includes('lid') || n.endsWith('_top')) {
+        const axis = obj.userData.lidAxis === 'y' || obj.userData.lidAxis === 'z' ? obj.userData.lidAxis : 'x';
+        const sign = typeof obj.userData.lidSign === 'number' ? obj.userData.lidSign : -1;
+        const rad = typeof obj.userData.lidOpenRad === 'number' ? obj.userData.lidOpenRad : 1.35;
+        obj.rotation[axis] += sign * rad;
+      }
+      if (n.includes('lock') && !n.includes('clock')) obj.visible = false;
+      if (n.includes('loot')) obj.visible = true;
+    });
+  } else {
+    root.traverse((obj) => {
+      if (obj.name.toLowerCase().includes('loot')) obj.visible = false;
+    });
+  }
+  const box = new THREE.Box3().setFromObject(root);
+  const size = box.getSize(new THREE.Vector3());
+  const center = box.getCenter(new THREE.Vector3());
+  root.position.sub(center);
+  const max = Math.max(size.x, size.y, size.z, 0.001);
+  const half = max * 0.72;
+  camera.left = -half;
+  camera.right = half;
+  camera.top = half;
+  camera.bottom = -half;
+  camera.updateProjectionMatrix();
+  scene.add(root);
+  renderer.render(scene, camera);
+  window.__png = canvas.toDataURL('image/png');
+  window.__ready = true;
+} catch (err) {
+  window.__error = String(err);
+  window.__ready = true;
+}
+</script>
+</body>
+</html>

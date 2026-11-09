@@ -8,13 +8,14 @@ import { isMobileClient } from '@/lib/socket';
 import { Map3DTokens } from '@/systems/map3d/Map3DTokens';
 import { useVisibleSceneTokens } from '@/systems/map3d/useVisibleSceneTokens';
 import { tokenUsesModelMesh } from '@/systems/scene/token/tokenRenderType';
+import type { MapItem } from '@/systems/scene/types';
 
 function Gm2dUnderlayScene({
-  map,
+  maps,
   tokens,
   activeTurnItemId,
 }: {
-  map: NonNullable<ReturnType<typeof getActiveMap>>;
+  maps: MapItem[];
   tokens: ReturnType<typeof useVisibleSceneTokens>['tokens'];
   activeTurnItemId?: string;
 }) {
@@ -26,8 +27,9 @@ function Gm2dUnderlayScene({
       <directionalLight position={[-360, 640, -220]} intensity={0.5} color="#ffd4a8" />
       <directionalLight position={[80, 520, -620]} intensity={0.35} color="#ffffff" />
       <Suspense fallback={null}>
-        {/* Map GLB only — props + flat 2D tokens stay as Pixi sprites above this canvas. */}
-        {map.modelUrl ? <Map3DMapModel map={map} displayOnly /> : null}
+        {maps.map((m) => (
+          <Map3DMapModel key={m.id} map={m} displayOnly />
+        ))}
         {/* GLB minis only — flat tokens are Pixi (DOM above underlay). */}
         <group renderOrder={20}>
           <Map3DTokens
@@ -66,6 +68,10 @@ export function Gm2dEditorMapUnderlay() {
     void activeMapId;
     return getActiveMap();
   }, [items, activeMapId]);
+  const maps = useMemo(
+    () => Object.values(items).filter((i): i is MapItem => i.type === 'map' && Boolean(i.modelUrl)),
+    [items],
+  );
 
   const { tokens: allTokens, activeTurnItemId } = useVisibleSceneTokens();
   const tokens = useMemo(
@@ -74,7 +80,7 @@ export function Gm2dEditorMapUnderlay() {
   );
 
   if (!map) return null;
-  if (!map.modelUrl && tokens.length === 0) return null;
+  if (maps.length === 0 && tokens.length === 0) return null;
 
   const mobile = isMobileClient();
   const glProps = {
@@ -104,7 +110,7 @@ export function Gm2dEditorMapUnderlay() {
       }}
     >
       <Gm2dUnderlayScene
-        map={map}
+        maps={maps}
         tokens={tokens}
         {...(activeTurnItemId ? { activeTurnItemId } : {})}
       />

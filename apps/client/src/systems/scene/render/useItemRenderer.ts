@@ -113,12 +113,16 @@ export function useItemRenderer(
     const pixiTokenFallback = viewMode === '3d' && isMobileClient() && !isThreeCanvasHealthy();
     const gm2dEditor = viewMode === '3d' && gm2dEditorOpen && myRole === 'GM';
     const gm: boolean = myRole === 'GM';
+    const hasModelMaps = Object.values(items).some(
+      (i) => i.type === 'map' && Boolean((i as MapItem).modelUrl),
+    );
     const ctx: RenderContext = {
       gm,
       viewMode,
       selectedIds,
       pixiTokenFallback,
       gm2dEditor,
+      hasModelMaps,
       ...(activeTurnItemId ? { activeTurnItemId } : {}),
     };
     const activeMap = getActiveMap();
@@ -250,14 +254,10 @@ export function useItemRenderer(
           c.alpha = 0;
         }
       } else {
-        if (item.type === 'map' && (item as MapItem).modelUrl) {
-          // 2D: Three.js draws the GLB — hide the grey Pixi map chrome (grid/border box).
-          c.visible = false;
-          c.alpha = 0;
-        } else {
-          c.visible = show;
-          c.alpha = show ? alpha : 0;
-        }
+        // Keep a near-invisible Pixi hit body so kit pieces stay selectable
+        // (the Three overlay is pointer-events: none in 2D).
+        c.visible = show;
+        c.alpha = show ? alpha : 0;
       }
 
       // Wall overlay — always above map background/grid, below tokens

@@ -6,11 +6,20 @@ import { SceneItemTransformGroup } from './TokenTransformGroup';
 import { MapPickVolume } from './MapPickVolume';
 import { TokenSelectionGizmo } from './Map3DTokenGizmo';
 import { MAP_MODEL_YAW } from './mapModelYaw';
+import { useLiveTransformStore } from '@/systems/scene/store/liveTransformStore';
+import {
+  isModularGate,
+  isModularMap,
+  modularDepthStretch,
+  modularScaleOf,
+  modularWidthStretch,
+  MODULAR_PX_PER_UNIT,
+  pieceForUrl,
+} from '@/systems/map/library/modularMapSnap';
 
 export function Map3DMapModel({
   map,
   showGizmo = false,
-  /** Preview underlay — no pick volumes / pose registration. */
   displayOnly = false,
 }: {
   map: MapItem;
@@ -18,36 +27,50 @@ export function Map3DMapModel({
   displayOnly?: boolean;
 }) {
   const modelRootRef = useRef<Group>(null);
+  const live = useLiveTransformStore((s) => s.byId[map.id]);
+  const width = live?.width ?? map.width;
+  const height = live?.height ?? map.height;
+  const targetSize = Math.max(width, height);
+  const modelUrl = map.modelUrl ?? null;
+  if (!modelUrl) return null;
 
-  if (!map.modelUrl) return null;
-  const targetSize = Math.max(map.width, map.height);
+  const modular = isModularMap(map);
+  const gate = isModularGate(map);
+  const piece = pieceForUrl(modelUrl);
+  const meterScale = modular ? modularScaleOf({ ...map, width, height }) : 1;
+  const fixedWorldScale = modular ? meterScale * MODULAR_PX_PER_UNIT : undefined;
+  const doorNode = piece?.anim?.doorNode;
 
   return (
     <SceneItemTransformGroup
       itemId={map.id}
       surfaceY={0}
-      baseWidth={map.width}
-      baseHeight={map.height}
+      baseWidth={width}
+      baseHeight={height}
       displayOnly={displayOnly}
     >
-      {/* Same yaw in 2D, 3D, and the side editor — keeps mesh locked to the grid. */}
       <group ref={modelRootRef} rotation={[0, MAP_MODEL_YAW, 0]}>
         <SceneModel
           key={`${map.id}:${map.modelUrl}`}
-          url={map.modelUrl}
+          url={modelUrl}
           targetSize={targetSize}
-          footprint={{ width: map.width, height: map.height }}
+          footprint={{ width, height }}
           groundAlign
           registerRaycast={!displayOnly}
+          {...(fixedWorldScale != null ? { fixedWorldScale } : {})}
+          {...(piece ? { depthStretch: modularDepthStretch(piece), widthStretch: modularWidthStretch(piece) } : {})}
           {...(!displayOnly ? { collisionMap: map } : {})}
+          {...(gate ? { modularOpen: Boolean(map.modularOpen) } : {})}
+          {...(gate && map.modularOpenAt != null ? { modularOpenAt: map.modularOpenAt } : {})}
+          {...(gate ? { doorNode: doorNode ?? 'door' } : {})}
         />
       </group>
       {!displayOnly && <MapPickVolume map={map} modelRootRef={modelRootRef} />}
       {showGizmo && !displayOnly && (
         <TokenSelectionGizmo
           itemId={map.id}
-          meshBaseWidth={map.width}
-          meshBaseHeight={map.height}
+          meshBaseWidth={width}
+          meshBaseHeight={height}
           modelRootRef={modelRootRef}
           fitToModelBounds
         />

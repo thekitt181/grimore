@@ -7,6 +7,9 @@
  */
 
 import { canonicalPropId } from '@/systems/map/props/propArt';
+import { ALSTRA_PROP_MODELS } from '@/systems/map/props/alstraPropCatalog';
+import { KAYKIT_PROP_MODELS } from '@/systems/map/props/kaykitPropCatalog';
+import { SPAJX_PROP_MODELS } from '@/systems/map/props/spajxPropCatalog';
 
 export type PropModelSpec = {
   /** Closed / default model */
@@ -20,30 +23,31 @@ export type PropModelSpec = {
   sizeBias?: number;
   /** Attach a warm point light (torch / campfire / lit altar) */
   light?: 'torch' | 'campfire' | 'altar';
+  /** Single-mesh chests: synthesize a lid hinge at runtime. */
+  hingeLid?: boolean;
 };
 
 const P = '/props3d';
 
 /** Catalog propId → KayKit GLB. Unlisted ids fall back to procedural meshes. */
 export const PROP_MODEL_3D: Record<string, PropModelSpec> = {
-  chest: { url: `${P}/chest.glb`, sizeBias: 0.92 },
-  sarcophagus: { url: `${P}/chest_gold.glb`, sizeBias: 1.05 },
+  ...KAYKIT_PROP_MODELS,
+  ...ALSTRA_PROP_MODELS,
+  ...SPAJX_PROP_MODELS,
   crate: { url: `${P}/crate.glb`, sizeBias: 0.95 },
-  barrel: { url: `${P}/barrel.glb`, sizeBias: 0.95 },
-  keg: { url: `${P}/keg.glb`, sizeBias: 0.9 },
+  barrel: { url: `${P}/kaykit/barrel_small.glb`, sizeBias: 0.95 },
+  keg: { url: `${P}/kaykit/keg.glb`, sizeBias: 0.9 },
   coins: { url: `${P}/coins.glb`, sizeBias: 0.72 },
-  key: { url: `${P}/key.glb`, sizeBias: 0.55 },
-  column: { url: `${P}/column.glb`, sizeBias: 1.35 },
-  pedestal: { url: `${P}/pillar.glb`, sizeBias: 0.85 },
-  campfire: { url: `${P}/campfire.glb`, sizeBias: 0.9, light: 'campfire' },
-  boulder: { url: `${P}/boulder.glb`, sizeBias: 1.05 },
-  plate: { url: `${P}/plate.glb`, sizeBias: 0.95 },
+  key: { url: `${P}/kaykit/key.glb`, sizeBias: 0.55 },
+  column: { url: `${P}/kaykit/column.glb`, sizeBias: 1.35 },
+  pedestal: { url: `${P}/kaykit/pillar.glb`, sizeBias: 0.85 },
+  boulder: { url: `${P}/kaykit/rubble_large.glb`, sizeBias: 1.05 },
   'stairs-up': { url: `${P}/stairs.glb`, sizeBias: 1.2 },
   'stairs-down': { url: `${P}/stairs.glb`, sizeBias: 1.2 },
-  potion: { url: `${P}/potion.glb`, sizeBias: 0.55 },
-  ring: { url: `${P}/ring.glb`, sizeBias: 0.45 },
-  shop: { url: `${P}/table.glb`, sizeBias: 1.1 },
-  book: { url: `${P}/shelf.glb`, sizeBias: 0.85 },
+  potion: { url: `${P}/kaykit/bottle_A_green.glb`, sizeBias: 0.55 },
+  candle: { url: `${P}/kaykit/candle.glb`, sizeBias: 0.55, light: 'torch' },
+  torch: { url: `${P}/kaykit/torch_lit.glb`, sizeBias: 1.2, light: 'torch' },
+  'weapon-rack': { url: `${P}/kaykit/sword_shield.glb`, sizeBias: 1.05 },
 };
 
 export function resolvePropModel3D(
@@ -67,6 +71,7 @@ export function hasPropModel3D(propId: string | undefined): boolean {
 export function allPropModelUrls(): string[] {
   const urls = new Set<string>();
   for (const spec of Object.values(PROP_MODEL_3D)) {
+    if (spec.url.includes('/spajx/')) continue;
     urls.add(spec.url);
     if (spec.openUrl) urls.add(spec.openUrl);
   }

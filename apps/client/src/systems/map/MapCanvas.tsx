@@ -780,7 +780,7 @@ export function MapCanvas() {
   const activeMap = items[activeMapId ?? '']?.type === 'map'
     ? (items[activeMapId!] as MapItem)
     : getActiveMap();
-  const hasModelMap = Boolean(activeMap?.modelUrl);
+  const hasModelMap = itemList.some((i) => i.type === 'map' && Boolean((i as MapItem).modelUrl));
   const hasModelTokens = itemList.some(
     (i) => i.type === 'token' && Boolean((i as TokenItem).modelUrl),
   );

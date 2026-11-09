@@ -20,3 +20,12 @@ services/floorplan-scan/src/*.egg-info/
 __pycache__/
 *.pyc
 *.safetensors
+apps/client/public/props3d/alstra/
+apps/client/public/props/alstra/
+apps/client/public/props/sazkuash/
+apps/client/public/props/assets2d/
+apps/client/public/props3d/spajx/
+apps/client/public/props/spajx/
+apps/client/public/props3d/kaykit/
+apps/client/public/props/kaykit/
+apps/client/public/maps3d/

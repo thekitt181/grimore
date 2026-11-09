@@ -1,7 +1,7 @@
-import { Component, Suspense, useRef, type ReactNode } from 'react';
+import { Component, Suspense, useMemo, useRef, type ReactNode } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
-import { getActiveMap, useItemStore } from '@/systems/scene/store/itemStore';
+import { useItemStore } from '@/systems/scene/store/itemStore';
 import { useMapStore } from '@/systems/map/store/mapStore';
 import { useSessionStore } from '@/store/sessionStore';
 import { isSceneItemOnTable } from '@/systems/scene/sceneMapsForClient';
@@ -17,6 +17,7 @@ import { PropMesh3D, hasPropMesh3D } from './propMeshes3d';
 import { PropModel3D, hasPropModel3D, PropModelsPreload, propModelLight } from './PropModel3D';
 import { PropAnim3D, useLivePropAmount } from './propAnim3d';
 import { resolveDoorSurfaceStyle } from './doorSurfaceStyles';
+import { isSheetChestProp, SheetPropBillboard } from './SheetPropBillboard';
 
 const _world = new THREE.Vector3();
 
@@ -120,7 +121,7 @@ function GenericImageBillboard({
   const footprint = Math.max(planeW, planeH);
   const opacity = item.visible === false ? 0.35 : 1;
 
-  if (fallbackPropId && (hasPropMesh3D(fallbackPropId) || !texture || status === 'error')) {
+  if (fallbackPropId && hasPropMesh3D(fallbackPropId) && (status === 'error' || !texture)) {
     return <MeshProp item={item} propId={fallbackPropId} />;
   }
 
@@ -200,8 +201,10 @@ function MeshProp({
   const len = Math.max(item.width, 8);
   const depth = Math.max(item.height, 8);
   const animSize = Math.max(len, depth);
+  const meshLight =
+    propId === 'campfire' ? 'campfire' : propId === 'altar' ? 'altar' : undefined;
   return (
-    <PropAnim3D item={item} size={animSize} driveGroup={false}>
+    <PropAnim3D item={item} size={animSize} driveGroup={false} {...(meshLight ? { light: meshLight } : {})}>
       <PropMesh3D
         propId={propId}
         amount={amount}
@@ -220,19 +223,20 @@ function MapImageMesh({ item, displayOnly = false }: { item: ImageItem; displayO
   const propId = resolvePropId(item);
   const wallHeightCells = useMapStore((s) => s.wallHeightCells);
   const gridSize = useItemStore((s) => {
-    void s.items;
-    void s.activeMapId;
-    return getActiveMap()?.gridSize ?? 96;
+    const id = s.activeMapId;
+    const m = id ? s.items[id] : undefined;
+    return m && m.type === 'map' ? m.gridSize : 96;
   });
   const isDoor = isDoorPropId(propId);
   const footprint = Math.max(item.width, item.height, 8);
   const wallHeight = isDoor ? gridSize * wallHeightCells : undefined;
-  // Prefer real 3D (GLB → procedural mesh) over flat canvas billboards.
-  const useGlb = Boolean(propId && hasPropModel3D(propId));
+  // Spajx GLBs are 30–70MB each — never mount them on the map (billboard + open PNG).
+  const useGlb = Boolean(propId && hasPropModel3D(propId) && !propId.startsWith('spajx-'));
   const useMesh = Boolean(propId && !useGlb && hasPropMesh3D(propId));
   const useCanvasBillboard = Boolean(
     propId && !useGlb && !useMesh && hasPropCanvasArt(propId),
   );
+  const useSheet = Boolean(propId && !useGlb && !useMesh && !useCanvasBillboard && isSheetChestProp(propId));
 
   const meshBase = useRef({ w: item.width, h: item.height });
   if (meshBase.current.w !== item.width || meshBase.current.h !== item.height) {
@@ -312,6 +316,10 @@ function MapImageMesh({ item, displayOnly = false }: { item: ImageItem; displayO
             />
           )}
         </>
+      ) : propId && useSheet ? (
+        <Suspense fallback={<GenericImageBillboard item={item} displayOnly={displayOnly} />}>
+          <SheetPropBillboard item={item} propId={propId} displayOnly={displayOnly} />
+        </Suspense>
       ) : (
         <GenericImageBillboard item={item} displayOnly={displayOnly} />
       )}
@@ -341,8 +349,12 @@ export function Map3DImages({
 export function useSceneTableImages(): ImageItem[] {
   const items = useItemStore((s) => s.items);
   const gm = useSessionStore((s) => s.myRole === 'GM');
-  return Object.values(items).filter(
-    (i): i is ImageItem => i.type === 'image' && isSceneItemOnTable(i, gm),
+  return useMemo(
+    () =>
+      Object.values(items).filter(
+        (i): i is ImageItem => i.type === 'image' && isSceneItemOnTable(i, gm),
+      ),
+    [items, gm],
   );
 }
 
@@ -355,9 +367,7 @@ export function Map3DImageLayer() {
   return (
     <>
       <PropModelsPreload />
-      <Suspense fallback={null}>
-        <Map3DImages images={images} />
-      </Suspense>
+      <Map3DImages images={images} />
     </>
   );
 }

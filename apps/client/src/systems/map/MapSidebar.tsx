@@ -32,6 +32,18 @@ import { useCompendiumUiStore } from '@/systems/compendium/compendiumStore';
 import { DungeonGeneratorPanel } from '@/systems/map/dungeon/DungeonGeneratorPanel';
 import { DungeonPropsPanel } from '@/systems/map/props/DungeonPropsPanel';
 import { MapLibraryPanel } from '@/systems/map/library/MapLibraryPanel';
+import { ModularKitPanel } from '@/systems/map/library/ModularKitPanel';
+import {
+  footprintPx,
+  isModularMap,
+  modularGridDefaults,
+  placeModularMap,
+  snapModularOriginToGrid,
+  MODULAR_PX_PER_UNIT,
+  type ModularPiece,
+} from '@/systems/map/library/modularMapSnap';
+import { sceneRefs } from '@/systems/scene/sceneRefs';
+import { viewportGroundCenter } from '@/systems/map3d/viewportGroundCenter';
 import { LootPanel } from '@/systems/compendium/LootPanel';
 import { ShopPanel } from '@/systems/compendium/ShopPanel';
 import { NpcCodexPanel } from '@/systems/npcs/NpcCodexPanel';
@@ -280,8 +292,11 @@ function GMSidebarContent() {
 
   function applyMapAsset(patch: Partial<MapItem> & { width: number; height: number }, mapId?: string) {
     const map = getActiveMap();
-    const gridDefaults = defaultMapGrid(patch.width, patch.height);
-    if (map) {
+    const modular = Boolean(patch.modelUrl && isModularMap({ modelUrl: patch.modelUrl }));
+    const gridDefaults = modular
+      ? modularGridDefaults()
+      : defaultMapGrid(patch.width, patch.height);
+    if (map && !modular) {
       const fullPatch: Partial<MapItem> = { ...patch, ...gridDefaults };
       useItemStore.getState().updateItem(map.id, fullPatch);
       emitItemUpdate([{ id: map.id, patch: fullPatch }]);
@@ -291,11 +306,65 @@ function GMSidebarContent() {
         zIndex: 0, locked: false, visible: true, backgroundUrl: patch.backgroundUrl ?? null,
         modelUrl: patch.modelUrl ?? null,
         ...gridDefaults, gridType: 'square', gridColor: 0x2a2a3a, gridOpacity: 0.8,
-        showGrid: true, walls: [],
+        showGrid: modular ? false : true, walls: [],
       };
       useItemStore.getState().addItem(m);
       emitItemAdd(m);
     }
+  }
+
+  function placeKitPiece(piece: ModularPiece) {
+    const existing = Object.values(useItemStore.getState().items)
+      .filter((i): i is MapItem => i.type === 'map');
+    const modularExisting = existing.filter((m) => isModularMap(m));
+    const preferId =
+      useItemStore.getState().selectedIds.find((id) => {
+        const it = useItemStore.getState().items[id];
+        return it?.type === 'map' && isModularMap(it as MapItem);
+      })
+      ?? modularExisting[modularExisting.length - 1]?.id
+      ?? null;
+    let placed = placeModularMap(piece, modularExisting, preferId);
+    if (modularExisting.length === 0) {
+      const size = footprintPx(piece, 1);
+      const app = sceneRefs.app.current;
+      const vp = useMapStore.getState().viewport;
+      const { cx, cz } = viewportGroundCenter(
+        vp,
+        app?.screen.width ?? 1280,
+        app?.screen.height ?? 720,
+      );
+      const cell = MODULAR_PX_PER_UNIT;
+      const ncx = (Math.floor(cx / cell) + 0.5) * cell;
+      const ncy = (Math.floor(cz / cell) + 0.5) * cell;
+      const origin = snapModularOriginToGrid(ncx - size.width / 2, ncy - size.height / 2);
+      placed = { ...placed, ...size, x: origin.x, y: origin.y };
+    }
+    const m: MapItem = {
+      id: uuidv4(),
+      type: 'map',
+      x: placed.x,
+      y: placed.y,
+      rotation: placed.rotation,
+      width: placed.width,
+      height: placed.height,
+      zIndex: piece.kind === 'wall' || piece.kind === 'gate' ? 3
+        : piece.kind === 'stairs' ? 2
+        : 1,
+      locked: false,
+      visible: true,
+      backgroundUrl: null,
+      modelUrl: piece.url,
+      ...modularGridDefaults(),
+      gridType: 'square',
+      gridColor: 0x2a2a3a,
+      gridOpacity: 0.8,
+      showGrid: false,
+      walls: [],
+    };
+    useItemStore.getState().addItem(m);
+    emitItemAdd(m);
+    focusSessionMap(m.id, { fitToMap: modularExisting.length === 0, select: true });
   }
 
   function resetGridToDefault() {
@@ -402,6 +471,7 @@ function GMSidebarContent() {
         </p>
       </ToolSection>
 
+      <ModularKitPanel onPlace={placeKitPiece} />
       <MapLibraryPanel onUse={(map) => applyBackground(map.imageUrl, map.width, map.height)} />
 
       <LootPanel />
@@ -458,7 +528,7 @@ function GMSidebarContent() {
               }}>
               <span style={{ fontSize: 13 }}>🗺️</span>
               <span className="font-ui text-xs flex-1 truncate" style={{ color: 'var(--color-text-primary)' }}>
-                {m.backgroundUrl ? 'Map' : m.modelUrl ? '3D map' : 'Empty map'}
+                {m.backgroundUrl ? 'Map' : m.modelUrl ? (m.modelUrl.includes('/kaykit/') ? 'KayKit' : m.modelUrl.includes('/kenney/') ? 'Kenney' : '3D map') : 'Empty map'}
               </span>
               {maps.length > 1 && (
                 <button onClick={(e) => { e.stopPropagation(); removeMap(m.id); }}

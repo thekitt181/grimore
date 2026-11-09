@@ -1,6 +1,7 @@
-import type { BaseItem, Item } from './types';
+import type { BaseItem, Item, MapItem } from './types';
 import { itemDisplayZIndex } from './zOrder';
 import { sceneRefs } from './sceneRefs';
+import { mapPickRank } from '@/systems/map/library/modularKits';
 
 /**
  * Transform a world-space point into an item's local (un-rotated) space and
@@ -36,10 +37,12 @@ export function hitTest(
   return null;
 }
 
-/** Topmost map under a world point, or null. */
+/** Topmost map under a world point, or null. Locked floors lose to unlocked walls on top. */
 export function hitTestMap(items: Item[], wx: number, wy: number): Item | null {
-  const maps = items.filter((i) => i.type === 'map');
-  return hitTest(maps, wx, wy, { includeLocked: true });
+  const hits = items.filter((i): i is MapItem => i.type === 'map' && pointInItem(i, wx, wy));
+  if (hits.length === 0) return null;
+  hits.sort((a, b) => mapPickRank(b) - mapPickRank(a));
+  return hits[0] ?? null;
 }
 
 /** True when the point is on open map space (no item, or the map background layer). */

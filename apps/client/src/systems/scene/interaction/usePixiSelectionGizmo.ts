@@ -86,7 +86,6 @@ export function usePixiSelectionGizmo(appReady: boolean) {
         const myUserId = useSessionStore.getState().myUserId;
         if (playerCanRotateToken(selected[0] as any, myUserId)) handleMode = 'rotate';
       }
-
       const layout = computeTokenGizmoLayout(selected, liveById, { handleMode });
       syncTransformHandleRegistry(layout);
       drawPixiSelectionGizmo(box!, handlesG!, layout);

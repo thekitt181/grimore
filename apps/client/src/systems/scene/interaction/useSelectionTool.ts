@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { Graphics } from 'pixi.js';
 import { isGm2dEditorInteraction, useMapStore } from '@/systems/map/store/mapStore';
-import { isPlayerCharacterToken } from '@/systems/scene/token/clientTokenVisibility';
+import { isPlayerCharacterToken, playerCanRotateToken } from '@/systems/scene/token/clientTokenVisibility';
 import { pickInteractableTokenAt } from '@/systems/scene/token/pickInteractableToken';
 import { setItemDragActive } from './selectionDragState';
 import { setDragLivePositions, clearDragLivePositions } from './dragLivePositions';
@@ -19,6 +19,18 @@ import { emitTokenMove } from '@/systems/scene/token/tokenSync';
 import { hitTest, hitTestMap, itemIntersectsRect } from '../hitTest';
 import { isTokenMoveClick } from '../token/tokenMovePick';
 import { snapPoint } from '../snap';
+import {
+  footprintPx,
+  isModularGate,
+  isModularMap,
+  modularScaleOf,
+  pieceForUrl,
+  snapModularOriginToGrid,
+  MODULAR_DRAG_SNAP_PX,
+  MODULAR_SNAP_REV,
+  snapModularMapPose,
+} from '@/systems/map/library/modularMapSnap';
+void MODULAR_SNAP_REV;
 import { emitItemUpdate } from '../sceneSync';
 import { emitPropTransformLive } from '../propTransformLiveSync';
 import { emitTokenPoseLive } from '@/systems/scene/token/tokenPoseLiveSync';
@@ -68,6 +80,9 @@ interface MoveState {
   /** Locked ground height for 3D raycasts — keeps the grab point under the cursor at any orbit. */
   planeY?: number;
   origins: Map<string, { x: number; y: number }>;
+  /** Wheel-rotated or scaled while the button was held — not a click. */
+  didRotate?: boolean;
+  didScale?: boolean;
 }
 
 /** Pointer travel (screen px) below which a press counts as a click, not a drag. */
@@ -287,33 +302,41 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
     }
 
     function applyTokenMoveDrag(e: PointerEvent) {
-      if (!move) return;
+      const current = move;
+      if (!current) return;
       const snap = useItemStore.getState().snapToGrid;
-      const tokenOnly = moveIncludesOnlyTokens(move.ids);
-      let { dx, dy } = moveDragDelta(move, e);
+      const tokenOnly = moveIncludesOnlyTokens(current.ids);
+      let { dx, dy } = moveDragDelta(current, e);
 
+      const dragItems = current.ids.map((id) => useItemStore.getState().items[id]);
+      const modularInDrag = dragItems.some(
+        (it) => it?.type === 'map' && isModularMap(it as MapItem),
+      );
       // Snap maps/drawings during drag; tokens snap on release for smooth motion.
-      if (snap && move.ids.length && !tokenOnly) {
-        const lead = move.ids[0]!;
-        const o = move.origins.get(lead)!;
+      if (snap && current.ids.length && !tokenOnly && !modularInDrag) {
+        const lead = current.ids[0]!;
+        const o = current.origins.get(lead)!;
         const snapped = snapPoint(o.x + dx, o.y + dy);
         dx = snapped.x - o.x;
         dy = snapped.y - o.y;
       }
 
-      if (tokenOnly && move.ids.length === 1) {
+      if (tokenOnly && current.ids.length === 1) {
         const gridSize = getActiveMap()?.gridSize ?? 70;
-        ({ dx, dy } = clampDragToMoveBudget(move.ids[0]!, dx, dy, gridSize));
+        ({ dx, dy } = clampDragToMoveBudget(current.ids[0]!, dx, dy, gridSize));
       }
 
       const layer = sceneRefs.items.current;
       const activeMap = getActiveMap();
       const storeItems = useItemStore.getState().items;
       const dragEntries: Array<{ id: string; x: number; y: number }> = [];
-      const liveEntries: Array<{ id: string; patch: { x: number; y: number; rotation?: number } }> = [];
+      const liveEntries: Array<{
+        id: string;
+        patch: { x: number; y: number; rotation?: number; width?: number; height?: number };
+      }> = [];
       const mapPoses = new Map<string, MapItem>();
-      for (const id of move.ids) {
-        const o = move.origins.get(id)!;
+      for (const id of current.ids) {
+        const o = current.origins.get(id)!;
         const it = useItemStore.getState().items[id];
         if (!it) continue;
         let nx = o.x + dx;
@@ -321,7 +344,7 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
         // 2D (and GM 2D editor): allow tokens off the map artwork.
         // 3D/FP walk still clamps via firstPersonController.
         if (it.type === 'token' && activeMap) {
-          const o = move.origins.get(id)!;
+          const o = current.origins.get(id)!;
           ({ x: nx, y: ny } = resolveTokenDragPosition(
             it as TokenItem,
             activeMap,
@@ -332,14 +355,61 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
           ));
         }
         const live = useLiveTransformStore.getState().byId[id];
-        const drawW = live?.width ?? it.width;
-        const drawH = live?.height ?? it.height;
+        let drawW = live?.width ?? it.width;
+        let drawH = live?.height ?? it.height;
+        let nRot = live?.rotation ?? it.rotation ?? 0;
+        if (it.type === 'map' && isModularMap(it as MapItem)) {
+          const piece = pieceForUrl(it.modelUrl);
+          if (piece) {
+            const sized = footprintPx(
+              piece,
+              modularScaleOf({ ...(it as MapItem), width: drawW, height: drawH }),
+            );
+            drawW = sized.width;
+            drawH = sized.height;
+          }
+          const others = Object.values(storeItems).filter(
+            (m): m is MapItem =>
+              m.type === 'map' && m.id !== id && !current.ids.includes(m.id),
+          );
+          const snapped = snapModularMapPose(
+            {
+              ...(it as MapItem),
+              x: nx,
+              y: ny,
+              width: drawW,
+              height: drawH,
+              rotation: nRot,
+            },
+            others,
+            { maxDist: MODULAR_DRAG_SNAP_PX },
+          );
+          if (snapped) {
+            nx = snapped.x;
+            ny = snapped.y;
+            drawW = snapped.width;
+            drawH = snapped.height;
+            nRot = snapped.rotation;
+          } else {
+            const origin = snapModularOriginToGrid(nx, ny);
+            nx = origin.x;
+            ny = origin.y;
+          }
+        }
         const c = getItemContainer(layer, id);
-        if (c) c.position.set(nx + drawW / 2, ny + drawH / 2);
+        if (c) {
+          c.position.set(nx + drawW / 2, ny + drawH / 2);
+          if (it.type === 'map') c.rotation = (nRot * Math.PI) / 180;
+        }
         if (it.type === 'token') {
           dragEntries.push({ id, x: nx, y: ny });
         } else {
-          liveEntries.push({ id, patch: { x: nx, y: ny } });
+          liveEntries.push({
+            id,
+            patch: it.type === 'map'
+              ? { x: nx, y: ny, rotation: nRot, width: drawW, height: drawH }
+              : { x: nx, y: ny },
+          });
         }
         if (it.type === 'map') {
           mapPoses.set(id, {
@@ -348,7 +418,7 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
             y: ny,
             width: drawW,
             height: drawH,
-            rotation: live?.rotation ?? it.rotation,
+            rotation: nRot,
           });
         }
       }
@@ -427,12 +497,157 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
         ...(planeY != null ? { planeY } : {}),
         origins,
       };
+      wheelAcc = 0;
       if (moveIncludesOnlyTokens(moveIds)) {
         useTokenDragMeasureStore.getState().setMeasure(0, e.clientX, e.clientY);
       } else {
         useTokenDragMeasureStore.getState().clear();
       }
       interactionEl.setPointerCapture(e.pointerId);
+    }
+
+    let wheelAcc = 0;
+
+    function rotateHeldItems(dir: 1 | -1) {
+      const current = move;
+      if (!current) return;
+      current.didRotate = true;
+      const gm = isGm();
+      const myUserId = useSessionStore.getState().myUserId;
+      const layer = sceneRefs.items.current;
+      const storeItems = useItemStore.getState().items;
+      const liveEntries: Array<{
+        id: string;
+        patch: { x: number; y: number; rotation?: number; width?: number; height?: number };
+      }> = [];
+      const tokenLive: Array<{ id: string; x: number; y: number; rotation: number }> = [];
+
+      for (const id of current.ids) {
+        const it = storeItems[id];
+        if (!it || it.locked) continue;
+        if (it.type === 'map' && !gm) continue;
+        if (it.type === 'token' && !gm && !playerCanRotateToken(it, myUserId ?? null)) continue;
+        if (it.type === 'drawing' || it.type === 'text' || it.type === 'handout' || it.type === 'surfaceDecal') {
+          if (!gm) continue;
+        }
+
+        const live = useLiveTransformStore.getState().byId[id];
+        const w = live?.width ?? it.width;
+        const h = live?.height ?? it.height;
+        const x = live?.x ?? it.x;
+        const y = live?.y ?? it.y;
+        const rot0 = live?.rotation ?? it.rotation ?? 0;
+        const step = it.type === 'map' && isModularMap(it as MapItem) ? 90 : 15;
+        let nRot = ((Math.round((rot0 + dir * step) / step) * step) % 360 + 360) % 360;
+        let nx = x;
+        let ny = y;
+        let nw = w;
+        let nh = h;
+
+        const c = getItemContainer(layer, id);
+        if (c) {
+          c.position.set(nx + nw / 2, ny + nh / 2);
+          c.rotation = (nRot * Math.PI) / 180;
+        }
+        liveEntries.push({
+          id,
+          patch: { x: nx, y: ny, rotation: nRot, width: nw, height: nh },
+        });
+        if (it.type === 'token') {
+          tokenLive.push({ id, x: nx, y: ny, rotation: nRot });
+        }
+      }
+
+      if (liveEntries.length) {
+        useLiveTransformStore.getState().setLiveMany(liveEntries, { bumpTick: false });
+        emitPropTransformLive(liveEntries);
+      }
+      if (tokenLive.length) {
+        emitTokenPoseLive(tokenLive);
+      }
+    }
+
+    function scaleItems(ids: string[], deltaY: number, commit: boolean) {
+      if (!isGm() || !ids.length) return;
+      const layer = sceneRefs.items.current;
+      const storeItems = useItemStore.getState().items;
+      const liveEntries: Array<{
+        id: string;
+        patch: { x: number; y: number; rotation?: number; width?: number; height?: number };
+      }> = [];
+      const factor = Math.min(1.06, Math.max(1 / 1.06, Math.exp(-deltaY * 0.0004)));
+
+      for (const id of ids) {
+        const it = storeItems[id];
+        if (!it || it.locked) continue;
+        if (it.type !== 'map' && it.type !== 'image') continue;
+
+        const live = useLiveTransformStore.getState().byId[id];
+        const w = live?.width ?? it.width;
+        const h = live?.height ?? it.height;
+        const x = live?.x ?? it.x;
+        const y = live?.y ?? it.y;
+        const rot = live?.rotation ?? it.rotation ?? 0;
+        const cx = x + w / 2;
+        const cy = y + h / 2;
+        let nw = Math.max(16, w * factor);
+        let nh = Math.max(16, h * factor);
+        const nRot = rot;
+
+        const piece = it.type === 'map' ? pieceForUrl(it.modelUrl) : null;
+        if (piece) {
+          const next = Math.max(0.25, Math.min(8, modularScaleOf({ ...it, width: w, height: h }) * factor));
+          const sized = footprintPx(piece, next);
+          nw = sized.width;
+          nh = sized.height;
+        }
+
+        const nx = cx - nw / 2;
+        const ny = cy - nh / 2;
+
+        const c = getItemContainer(layer, id);
+        if (c) {
+          c.pivot.set(it.width / 2, it.height / 2);
+          c.scale.set(nw / it.width, nh / it.height);
+          c.position.set(nx + nw / 2, ny + nh / 2);
+          if (it.type === 'map') c.rotation = (nRot * Math.PI) / 180;
+        }
+        const patch = { x: nx, y: ny, rotation: nRot, width: nw, height: nh };
+        liveEntries.push({ id, patch });
+        if (commit) {
+          useItemStore.getState().updateItem(id, patch);
+        }
+      }
+
+      if (!liveEntries.length) return;
+      if (commit) {
+        emitItemUpdate(liveEntries);
+        useLiveTransformStore.getState().clear(liveEntries.map((e) => e.id));
+      } else {
+        useLiveTransformStore.getState().setLiveMany(liveEntries, { bumpTick: false });
+        emitPropTransformLive(liveEntries);
+      }
+    }
+
+    function onWheel(e: WheelEvent) {
+      const shift = e.shiftKey;
+      const selected = useItemStore.getState().selectedIds;
+      const scaleIds = move?.ids ?? (shift && useMapStore.getState().activeTool === 'select' ? selected : []);
+      if (!move && !(shift && scaleIds.length)) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      if (shift) {
+        if (move) move.didScale = true;
+        scaleItems(scaleIds, e.deltaY, !move);
+        return;
+      }
+      if (!move) return;
+      wheelAcc += e.deltaY;
+      const notch = 48;
+      if (Math.abs(wheelAcc) < notch) return;
+      const dir: 1 | -1 = wheelAcc > 0 ? 1 : -1;
+      wheelAcc = 0;
+      rotateHeldItems(dir);
     }
 
     let measureRaf: number | null = null;
@@ -713,7 +928,9 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
 
       // In 2D (and Shift+click in 3D), Pixi hit-tests must win over Three map pick volumes.
       if (!hit && !is3dNavigate) {
-        hit = hitTest(pick2dPool, wx, wy, { includeLocked: true }) ?? undefined;
+        const nonMaps = pick2dPool.filter((i) => i.type !== 'map');
+        hit = hitTest(nonMaps, wx, wy, { includeLocked: true }) ?? undefined;
+        if (!hit) hit = hitTestMap(pick2dPool, wx, wy) ?? undefined;
       }
       if (!hit) {
         const pickId = pickSceneItem(e.clientX, e.clientY);
@@ -1052,7 +1269,7 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
         const snap = useItemStore.getState().snapToGrid;
         // A click (negligible pointer travel) should only select — never snap/move.
         const screenTravel = Math.hypot(e.clientX - m.startScreenX, e.clientY - m.startScreenY);
-        const isClick = screenTravel < CLICK_MOVE_THRESHOLD_PX;
+        const isClick = screenTravel < CLICK_MOVE_THRESHOLD_PX && !m.didRotate && !m.didScale;
         if (!useFirstPersonStore.getState().enabled) {
           if (isClick && propClickId) {
             const propItem = useItemStore.getState().items[propClickId];
@@ -1068,13 +1285,31 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
                 void triggerPropUnderToken(tok);
               }
             }
+          } else if (isClick && m.ids.length === 1) {
+            const gateIt = useItemStore.getState().items[m.ids[0]!];
+            if (
+              gateIt?.type === 'map'
+              && isModularGate(gateIt as MapItem)
+              && useSessionStore.getState().myRole === 'GM'
+            ) {
+              const patch = {
+                modularOpen: !gateIt.modularOpen,
+                modularOpenAt: Date.now(),
+              };
+              useItemStore.getState().updateItem(gateIt.id, patch);
+              emitItemUpdate([{ id: gateIt.id, patch }]);
+            }
           }
         }
         propClickId = null;
         propClickOnly = null;
         propUnderTokenClickId = null;
         let { dx, dy } = moveDragDelta(m, e);
-        if (!isClick && snap && m.ids.length) {
+        const releaseModular = m.ids.some((id) => {
+          const it = useItemStore.getState().items[id];
+          return it?.type === 'map' && isModularMap(it as MapItem);
+        });
+        if (!isClick && snap && m.ids.length && !releaseModular) {
           const lead = m.ids[0]!;
           const o = m.origins.get(lead)!;
           const snapped = snapPoint(o.x + dx, o.y + dy);
@@ -1105,9 +1340,47 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
             const { gridCol, gridRow } = worldToGridColRow(nx + it.width / 2, ny + it.height / 2, it.sizeCells);
             return { id, kind: 'token' as const, gridCol, gridRow, x: nx, y: ny };
           }
-          return { id, kind: 'item' as const, patch: { x: nx, y: ny } as Partial<Item> };
+          let patch: Partial<Item> = { x: nx, y: ny };
+          if (it?.type === 'map' && isModularMap(it)) {
+            const others = Object.values(useItemStore.getState().items).filter(
+              (mItem): mItem is MapItem =>
+                mItem.type === 'map' && mItem.id !== id && !m.ids.includes(mItem.id),
+            );
+            const live = useLiveTransformStore.getState().byId[id];
+            const fromLive = live?.x != null && live?.y != null;
+            const snapped = snapModularMapPose(
+              {
+                ...it,
+                x: fromLive ? live.x! : nx,
+                y: fromLive ? live.y! : ny,
+                width: live?.width ?? it.width,
+                height: live?.height ?? it.height,
+                rotation: live?.rotation ?? it.rotation ?? 0,
+              },
+              others,
+              { maxDist: MODULAR_DRAG_SNAP_PX },
+            );
+            if (snapped) {
+              patch = {
+                x: snapped.x,
+                y: snapped.y,
+                rotation: snapped.rotation,
+                width: snapped.width,
+                height: snapped.height,
+              };
+            } else if (fromLive) {
+              patch = {
+                x: live.x!,
+                y: live.y!,
+                ...(live.rotation != null ? { rotation: live.rotation } : {}),
+                ...(live.width != null ? { width: live.width } : {}),
+                ...(live.height != null ? { height: live.height } : {}),
+              };
+            }
+          }
+          return { id, kind: 'item' as const, patch };
         });
-        if (!isClick && (Math.abs(dx) > 0.01 || Math.abs(dy) > 0.01)) {
+        if (!isClick && (m.didRotate || m.didScale || Math.abs(dx) > 0.01 || Math.abs(dy) > 0.01)) {
           const myUserId = useSessionStore.getState().myUserId?.trim() ?? '';
           const claimOwner = !isGm() && myUserId;
           for (const p of patches) {
@@ -1140,6 +1413,11 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
                 emitTokenMove(p.id, p.gridCol, p.gridRow, p.x, p.y);
               }
               recordDragFeet(p.id, worldDeltaToFeet(dx, dy));
+              const liveRot = useLiveTransformStore.getState().byId[p.id]?.rotation;
+              if (m.didRotate && liveRot != null && Math.abs((it.rotation ?? 0) - liveRot) > 0.01) {
+                useItemStore.getState().updateItem(p.id, { rotation: liveRot });
+                emitItemUpdate([{ id: p.id, patch: { rotation: liveRot } }]);
+              }
             }
           }
           const storeSnap = useItemStore.getState();
@@ -1311,6 +1589,7 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
     interactionEl.addEventListener('pointermove', onMove, captureOpts);
     interactionEl.addEventListener('pointerup', onUp, captureOpts);
     interactionEl.addEventListener('pointercancel', onUp, captureOpts);
+    interactionEl.addEventListener('wheel', onWheel, captureOpts);
 
     return () => {
       if (move) clearDragLivePositions(move.ids);
@@ -1323,6 +1602,7 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
       interactionEl.removeEventListener('pointermove', onMove, captureOpts);
       interactionEl.removeEventListener('pointerup', onUp, captureOpts);
       interactionEl.removeEventListener('pointercancel', onUp, captureOpts);
+      interactionEl.removeEventListener('wheel', onWheel, captureOpts);
       interactionEl.style.cursor = '';
       marqueeGfx?.destroy();
       marqueeGfx = null;

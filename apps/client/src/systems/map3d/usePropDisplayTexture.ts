@@ -35,6 +35,7 @@ export function resolvePropDisplayImageUrl(
   if (id && hasPropCanvasArt(id)) return null;
   if (id) {
     const art = propArtById(id);
+    if ((item.propState ?? 0) > 0 && art?.open) return art.open;
     if (art?.rest) return art.rest;
   }
   return raw || null;
@@ -115,7 +116,7 @@ export function usePropDisplayTexture(
       cancelled = true;
       current?.dispose();
     };
-  }, [item.id, item.imageUrl, propId]);
+  }, [item.id, item.imageUrl, item.propState, propId]);
 
   return { texture, status };
 }

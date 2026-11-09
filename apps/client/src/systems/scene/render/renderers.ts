@@ -19,6 +19,8 @@ export interface RenderContext {
   pixiTokenFallback?: boolean;
   /** GM live 2D editor beside 3D — draw full Pixi tokens/maps. */
   gm2dEditor?: boolean;
+  /** Any Kenney/KayKit (or other GLB) map is on the table. */
+  hasModelMaps?: boolean;
 }
 
 import { tokenConditionColor } from '../token/tokenConditionColors';
@@ -41,7 +43,7 @@ export function itemVisualSignature(item: Item, ctx: RenderContext): string {
   const base = `${item.type}|${item.width}|${item.height}`;
   switch (item.type) {
     case 'map':
-      return `${base}|${item.backgroundUrl}|${item.modelUrl ?? ''}|${item.gridSize}|${item.gridType}|${item.gridColor}|${item.gridOpacity}|${item.gridOffsetX}|${item.gridOffsetY}|${item.showGrid}|${ctx.gm2dEditor ? 'e' : ''}|${ctx.viewMode ?? '2d'}`;
+      return `${base}|${item.backgroundUrl}|${item.modelUrl ?? ''}|${item.gridSize}|${item.gridType}|${item.gridColor}|${item.gridOpacity}|${item.gridOffsetX}|${item.gridOffsetY}|${item.showGrid}|${ctx.gm2dEditor ? 'e' : ''}|${ctx.viewMode ?? '2d'}|${ctx.hasModelMaps ? 'm' : ''}`;
     case 'token':
       return `${base}|${tokenBaseVisualSignature(item)}|${ctx.viewMode ?? '2d'}|${ctx.gm2dEditor ? 'e' : ''}`;
     case 'drawing':
@@ -76,14 +78,8 @@ export function renderItem(container: Container, item: Item, ctx: RenderContext)
 function renderMap(c: Container, item: MapItem, ctx: RenderContext) {
   /** Three.js draws the GLB — hide Pixi map art so it can't bury underlay tokens. */
   const hidePixiMapBody =
-    Boolean(item.modelUrl) &&
-    (
-      // Pure 2D / model-only 3D: Three owns the map mesh.
-      ctx.viewMode !== '3d'
-      || !item.backgroundUrl
-      // GM 2D editor: underlay draws the GLB; an opaque Pixi map would hide token minis.
-      || Boolean(ctx.gm2dEditor)
-    );
+    Boolean(item.modelUrl)
+    || (!item.backgroundUrl && Boolean(ctx.hasModelMaps));
 
   const bg = new Graphics();
   bg.label = 'bg';

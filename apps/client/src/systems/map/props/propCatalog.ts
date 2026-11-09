@@ -5,6 +5,11 @@ import {
   canonicalPropId,
   propArtByIdBase,
 } from './propArt';
+import { ALSTRA_PROP_ART } from './alstraPropCatalog';
+import { KAYKIT_PROP_ART } from './kaykitPropCatalog';
+import { SAZKUASH_PROP_ART } from './sazkuashPropCatalog';
+import { ASSETS2D_CHEST_ART } from './assets2dChestCatalog';
+import { SPAJX_PROP_ART } from './spajxPropCatalog';
 
 /** Props registered at runtime when notes / spawn reference an id not in the base list. */
 const EXTRA_PROP_ART: PropArt[] = [];
@@ -147,12 +152,27 @@ function pushExtra(art: PropArt): PropArt {
 }
 
 export function allPropArtEntries(): PropArt[] {
-  return [...PROP_ART, ...EXTRA_PROP_ART];
+  return [
+    ...PROP_ART,
+    ...KAYKIT_PROP_ART,
+    ...ALSTRA_PROP_ART,
+    ...SPAJX_PROP_ART,
+    ...ASSETS2D_CHEST_ART,
+    ...SAZKUASH_PROP_ART,
+    ...EXTRA_PROP_ART,
+  ];
 }
 
 export function propArtById(id: string): PropArt | undefined {
   const key = canonicalPropId(id);
-  const base = propArtByIdBase(key) ?? EXTRA_PROP_ART.find((p) => p.id === key);
+  const base =
+    propArtByIdBase(key)
+    ?? KAYKIT_PROP_ART.find((p) => p.id === key)
+    ?? ALSTRA_PROP_ART.find((p) => p.id === key)
+    ?? SPAJX_PROP_ART.find((p) => p.id === key)
+    ?? ASSETS2D_CHEST_ART.find((p) => p.id === key)
+    ?? SAZKUASH_PROP_ART.find((p) => p.id === key)
+    ?? EXTRA_PROP_ART.find((p) => p.id === key);
   if (base) return base;
   const discovered = guessArt(key);
   return discovered ? pushExtra(discovered) : undefined;

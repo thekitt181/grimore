@@ -12,11 +12,26 @@ import {
 } from '@/systems/map/props/propPose';
 
 const FLAME = '#ff8a2b';
-const _lidEuler = new THREE.Euler();
+const lidRest = new WeakMap<THREE.Object3D, { x: number; y: number; z: number }>();
 
 function isLidObject(obj: THREE.Object3D): boolean {
   const n = obj.name.toLowerCase();
-  return n.includes('lid') || n.endsWith('_cover') || n.includes('top_lid');
+  if (!n) return false;
+  return (
+    n.includes('lid')
+    || n.endsWith('_cover')
+    || n.includes('top_lid')
+    || n.endsWith('_top')
+  );
+}
+
+function isLootObject(obj: THREE.Object3D): boolean {
+  return obj.name.toLowerCase().includes('loot');
+}
+
+function isLockObject(obj: THREE.Object3D): boolean {
+  const n = obj.name.toLowerCase();
+  return n.includes('lock') && !n.includes('clock') && !n.includes('block');
 }
 
 function liveAmountFor(item: ImageItem): number {
@@ -89,14 +104,31 @@ export function PropAnim3D({
     root.scale.set(1, 1, 1);
 
     if (driveGroup) {
-      // Lid hinge on KayKit chests (and any future *_lid nodes).
+      // Lid hinge on KayKit `*_lid` and Alstra `*_Top` (loot/lock stay on the body).
       let hinged = false;
       root.traverse((obj) => {
-        if (!isLidObject(obj) || obj === root) return;
+        if (obj === root) return;
+        if (isLootObject(obj)) {
+          obj.visible = p > 0.22;
+          return;
+        }
+        if (isLockObject(obj)) {
+          obj.visible = p < 0.45;
+          return;
+        }
+        if (!isLidObject(obj)) return;
         hinged = true;
-        // Closed = identity; open = tip back ~60°.
-        _lidEuler.set(-1.05 * p, 0, 0);
-        obj.rotation.copy(_lidEuler);
+        let rest = lidRest.get(obj);
+        if (!rest) {
+          rest = { x: obj.rotation.x, y: obj.rotation.y, z: obj.rotation.z };
+          lidRest.set(obj, rest);
+        }
+        // Closed = rest pose; open = tip the lid back.
+        const openRad = typeof obj.userData.lidOpenRad === 'number' ? obj.userData.lidOpenRad : 1.35;
+        const axis = obj.userData.lidAxis === 'y' || obj.userData.lidAxis === 'z' ? obj.userData.lidAxis : 'x';
+        const sign = typeof obj.userData.lidSign === 'number' ? obj.userData.lidSign : -1;
+        obj.rotation.set(rest.x, rest.y, rest.z);
+        obj.rotation[axis] = rest[axis] + sign * openRad * p;
       });
 
       switch (play) {
