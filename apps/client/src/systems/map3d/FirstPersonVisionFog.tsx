@@ -2,12 +2,11 @@ import { useEffect, useRef } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { getActiveMap } from '@/systems/scene/store/itemStore';
-import { isSessionFogToggled } from '@/systems/scene/fogActiveSync';
+import { isFogOverlayVisible } from '@/systems/scene/fogActiveSync';
 import { fpVisionRadiusPx, hasDarkvision } from '@/systems/map/fogLos';
 import { getActiveTimeOfDay } from '@/systems/scene/media/sceneMediaStore';
 import { useFirstPersonStore } from './firstPersonStore';
 import { resolveFirstPersonToken } from './resolveFirstPersonToken';
-import { useSessionStore } from '@/store/sessionStore';
 
 type LightSnap = {
   ambient: Array<{ light: THREE.AmbientLight; intensity: number; color: THREE.Color }>;
@@ -17,24 +16,34 @@ type LightSnap = {
 type SceneFog = THREE.Fog | THREE.FogExp2;
 
 const DV_AMB_NAME = 'fp-fow-ambient';
+const SHELL_NAME = 'fp-vision-shell';
 
 /**
- * FP hard sight (FoW bubble) is on when:
- * - midnight (everyone in FP, including GM — otherwise midnight is just black fog), or
- * - table fog toggled for non-GM players
+ * FP hard sight (FoW bubble) is on whenever table fog or midnight is active.
+ * GM included — dungeon gen / modular play in first person should be black past vision.
  */
 export function fpHardVisionActive(): boolean {
   if (!useFirstPersonStore.getState().enabled) return false;
-  // Midnight darkness for everyone in FP (GM included — otherwise it’s just black).
-  if (getActiveTimeOfDay() === 'midnight') return true;
-  // Table fog: players only (GM keeps full FP light while fog is on for the table).
-  if (useSessionStore.getState().myRole === 'GM') return false;
-  return isSessionFogToggled();
+  return isFogOverlayVisible();
+}
+
+function enableSceneFogMaterials(scene: THREE.Scene): void {
+  scene.traverse((o) => {
+    if (o.name === SHELL_NAME) return;
+    if (!(o as THREE.Mesh).isMesh) return;
+    const mesh = o as THREE.Mesh;
+    const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    for (const mat of mats) {
+      if (mat && 'fog' in mat && (mat as THREE.MeshBasicMaterial).fog === false) {
+        (mat as THREE.MeshBasicMaterial).fog = true;
+      }
+    }
+  });
 }
 
 /**
- * FoW / midnight sight: even ambient + hard fog at vision ft.
- * Never camera PointLights (floor disc).
+ * FoW / midnight sight: even ambient + hard black past vision ft.
+ * A camera-centered shell occludes Kenney/KayKit GLBs that ignore THREE.Fog.
  */
 export function FirstPersonVisionFog(_props: { wallHeight: number }) {
   const fpOn = useFirstPersonStore((s) => s.enabled);
@@ -45,6 +54,8 @@ export function FirstPersonVisionFog(_props: { wallHeight: number }) {
   const visionOn = useRef(false);
   const fillRef = useRef<THREE.AmbientLight | null>(null);
   const prevEnv = useRef<THREE.Texture | null>(null);
+  const shellRef = useRef<THREE.Mesh>(null);
+  const fogMatTick = useRef(0);
 
   useEffect(() => {
     purgeOrphanVisionPointLights(scene);
@@ -63,10 +74,11 @@ export function FirstPersonVisionFog(_props: { wallHeight: number }) {
     };
   }, [scene]);
 
-  useFrame(() => {
+  useFrame(({ camera }) => {
     purgeOrphanVisionPointLights(scene);
     const wantVision = fpOn && fpHardVisionActive();
     const fill = fillRef.current;
+    const shell = shellRef.current;
 
     if (!wantVision) {
       if (visionOn.current) {
@@ -76,14 +88,18 @@ export function FirstPersonVisionFog(_props: { wallHeight: number }) {
         fill.visible = false;
         fill.intensity = 0;
       }
+      if (shell) {
+        shell.visible = false;
+        if (shell.parent && shell.parent !== scene) scene.add(shell);
+      }
       return;
     }
 
     if (!visionOn.current) {
       applyVision(scene, prevLights, prevFog, ownFog, visionOn, prevEnv);
     } else {
-      // React re-applies timeRig light intensities — keep them muted every frame.
       muteWorldLights(scene, prevLights);
+      scene.environment = null;
     }
 
     const token = resolveFirstPersonToken();
@@ -95,16 +111,51 @@ export function FirstPersonVisionFog(_props: { wallHeight: number }) {
     if (fill) {
       fill.visible = true;
       fill.color.set(dv ? '#e8eef8' : '#ffe2b0');
-      // Bright enough that MeshStandard walls/floors read clearly inside the bubble.
       fill.intensity = dv ? 2.4 : 2.8;
     }
 
-    // Do not use THREE.Fog here — linear fog paints a hard black horizon that
-    // slices the upper view (and token portraits) whenever it fights time-of-day fog.
-    scene.fog = null;
+    const fog = ownFog.current;
+    if (fog) {
+      fog.near = Math.max(8, radiusPx * 0.92);
+      fog.far = Math.max(fog.near + 8, radiusPx);
+      fog.color.set('#000000');
+      if (scene.fog !== fog) scene.fog = fog;
+    }
+    if (!(scene.background instanceof THREE.Color) || scene.background.getHex() !== 0x000000) {
+      scene.background = new THREE.Color('#000000');
+    }
+
+    if (shell) {
+      if (shell.parent !== camera) camera.add(shell);
+      shell.visible = true;
+      shell.position.set(0, 0, 0);
+      shell.quaternion.identity();
+      shell.scale.setScalar(Math.max(24, radiusPx));
+    }
+
+    fogMatTick.current += 1;
+    if (fogMatTick.current % 30 === 1) enableSceneFogMaterials(scene);
   });
 
-  return null;
+  return (
+    <mesh
+      ref={shellRef}
+      name={SHELL_NAME}
+      visible={false}
+      frustumCulled={false}
+      renderOrder={40}
+    >
+      <sphereGeometry args={[1, 48, 32]} />
+      <meshBasicMaterial
+        color="#000000"
+        side={THREE.BackSide}
+        depthTest
+        depthWrite
+        fog={false}
+        toneMapped={false}
+      />
+    </mesh>
+  );
 }
 
 function purgeOrphanVisionPointLights(scene: THREE.Scene) {
@@ -132,7 +183,6 @@ function muteWorldLights(
     p.light.intensity = 0;
     p.light.visible = false;
   }
-  // Pick up any lights React remounted after the first snap.
   scene.traverse((o) => {
     if (o instanceof THREE.AmbientLight && o.name !== DV_AMB_NAME && o.intensity > 0) {
       prevLights.current!.ambient.push({
@@ -184,8 +234,9 @@ function applyVision(
 
   if (prevEnv.current === null && scene.environment) {
     prevEnv.current = scene.environment;
-    scene.environment = null;
   }
+  scene.environment = null;
+  enableSceneFogMaterials(scene);
 
   if (
     !prevFog.current
@@ -195,7 +246,11 @@ function applyVision(
   ) {
     prevFog.current = scene.fog;
   }
-  scene.fog = null;
+  if (!ownFog.current) {
+    ownFog.current = new THREE.Fog('#000000', 200, 220);
+  }
+  scene.fog = ownFog.current;
+  scene.background = new THREE.Color('#000000');
   visionOn.current = true;
 }
 
@@ -225,7 +280,10 @@ function teardownVision(
     scene.environment = prevEnv.current;
     prevEnv.current = null;
   }
-  scene.fog = null;
+  if (ownFog.current && scene.fog === ownFog.current) {
+    scene.fog = prevFog.current;
+  }
   prevFog.current = null;
+  scene.background = new THREE.Color('#1e1e22');
   visionOn.current = false;
 }

@@ -104,8 +104,13 @@ function destinationVisible(token: TokenItem, map: MapItem, destX: number, destY
   if (!seen || seen.size === 0) return true;
 
   const local = mapLocalFromWorld(destX + token.width / 2, destY + token.height / 2, map);
-  const col = Math.floor(local.x / map.gridSize);
-  const row = Math.floor(local.y / map.gridSize);
+  const worldGrid = isModularMap(map);
+  const col = worldGrid
+    ? Math.floor((destX + token.width / 2) / map.gridSize)
+    : Math.floor(local.x / map.gridSize);
+  const row = worldGrid
+    ? Math.floor((destY + token.height / 2) / map.gridSize)
+    : Math.floor(local.y / map.gridSize);
   return seen.has(cellKey(col, row));
 }
 

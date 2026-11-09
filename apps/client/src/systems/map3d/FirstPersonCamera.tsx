@@ -33,6 +33,7 @@ import {
 import { setMapRaycastPaused } from './mapGroundRaycast';
 import { bakedGroundHeightSmooth, getMapCollisionGrid } from './mapCollisionGrid';
 import { useTokenDragMeasureStore } from '@/systems/scene/interaction/tokenDragMeasureStore';
+import { fpHardVisionActive } from './FirstPersonVisionFog';
 
 const EYE_CELLS = 1.1;
 /** Eye height eases on stairs; flat floor snaps. */
@@ -321,14 +322,18 @@ export function FirstPersonCamera() {
     const targetX = cx + fx * flat;
     const targetZ = cz + fz * flat;
 
-    const sky = 0x3a3f4a;
     gl.autoClear = true;
-    gl.setClearColor(sky, 1);
-    scene.fog = null;
-    if (!(scene.background instanceof THREE.Color)) {
-      scene.background = new THREE.Color(sky);
+    if (fpHardVisionActive()) {
+      gl.setClearColor(0x000000, 1);
     } else {
-      scene.background.setHex(sky);
+      const sky = 0x3a3f4a;
+      gl.setClearColor(sky, 1);
+      scene.fog = null;
+      if (!(scene.background instanceof THREE.Color)) {
+        scene.background = new THREE.Color(sky);
+      } else {
+        scene.background.setHex(sky);
+      }
     }
 
     sceneCameraRef.liveCamera = camera;

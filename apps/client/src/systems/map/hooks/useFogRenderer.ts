@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { useMapStore, cellKey } from '../store/mapStore';
 import { getActiveMap } from '@/systems/scene/store/itemStore';
+import { usesWorldFogGrid } from '../fogLos';
 import { useSessionStore } from '@/store/sessionStore';
 import { setFogVisibleForSession } from '@/systems/scene/fogActiveSync';
 import { sceneRefs, clientToWorld } from '@/systems/scene/sceneRefs';
@@ -54,8 +55,8 @@ export function useFogRenderer(appReady = false, interactionReady = false) {
       const cellSize = map.gridSize;
       const { x: wx, y: wy } = clientToWorld(clientX, clientY);
       const { x: localX, y: localY } = worldToMapLocal(wx, wy);
-      const cx = Math.floor(localX / cellSize);
-      const cy = Math.floor(localY / cellSize);
+      const cx = usesWorldFogGrid(map) ? Math.floor(wx / cellSize) : Math.floor(localX / cellSize);
+      const cy = usesWorldFogGrid(map) ? Math.floor(wy / cellSize) : Math.floor(localY / cellSize);
       const keys: string[] = [];
       for (let dx = -(fogBrushSize - 1); dx < fogBrushSize; dx++) {
         for (let dy = -(fogBrushSize - 1); dy < fogBrushSize; dy++) {

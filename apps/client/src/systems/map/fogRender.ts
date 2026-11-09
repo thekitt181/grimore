@@ -10,6 +10,8 @@ import {
   getVisionTokens,
   losPolygons,
   revealedCellsPastDungeonWalls,
+  usesWorldFogGrid,
+  worldToMapLocal,
 } from './fogLos';
 import { visionWalls } from './props/doorCollision';
 
@@ -167,15 +169,32 @@ export function paintFogCanvas(
     vWalls,
   );
   if (punchRevealed) {
+    const worldGrid = usesWorldFogGrid(map);
     for (const key of revealed) {
       const cell = parseCellKey(key);
       if (!cell) continue;
-      ctx.fillRect(
-        cell.x * gridSize,
-        cell.y * gridSize,
-        gridSize,
-        gridSize,
-      );
+      if (worldGrid) {
+        const x0 = cell.x * gridSize;
+        const y0 = cell.y * gridSize;
+        const corners = [
+          worldToMapLocal(x0, y0, map),
+          worldToMapLocal(x0 + gridSize, y0, map),
+          worldToMapLocal(x0 + gridSize, y0 + gridSize, map),
+          worldToMapLocal(x0, y0 + gridSize, map),
+        ];
+        ctx.beginPath();
+        ctx.moveTo(corners[0]!.x, corners[0]!.y);
+        for (let i = 1; i < corners.length; i++) ctx.lineTo(corners[i]!.x, corners[i]!.y);
+        ctx.closePath();
+        ctx.fill();
+      } else {
+        ctx.fillRect(
+          cell.x * gridSize,
+          cell.y * gridSize,
+          gridSize,
+          gridSize,
+        );
+      }
     }
   }
 

@@ -15,8 +15,11 @@ import {
 import { itemsWithDragLiveTransforms } from '@/systems/scene/interaction/dragLivePositions';
 import type { MapItem } from '@/systems/scene/types';
 import { SceneItemTransformGroup } from './TokenTransformGroup';
+import { isModularMap } from '@/systems/map/library/modularMapSnap';
 
 const FOG_Y = 0.1;
+/** Kenney floors sit above 0.1 — lift the overlay so 3D/FP fog is visible on kit meshes. */
+const MODULAR_FOG_Y = 10;
 /** Above map mesh (0) but below tokens (12+) so minis stay visible on lit squares. */
 const FOG_RENDER_ORDER = 11;
 
@@ -120,8 +123,9 @@ export function Map3DFogOfWar({ map }: { map: MapItem }) {
 
   if (!state.visible) return null;
 
+  const kit = isModularMap(map);
   return (
-    <SceneItemTransformGroup itemId={map.id} surfaceY={FOG_Y}>
+    <SceneItemTransformGroup itemId={map.id} surfaceY={kit ? MODULAR_FOG_Y : FOG_Y}>
       <mesh rotation={[-Math.PI / 2, 0, 0]} renderOrder={FOG_RENDER_ORDER}>
         <planeGeometry args={[map.width, map.height]} />
         <meshBasicMaterial
@@ -129,7 +133,7 @@ export function Map3DFogOfWar({ map }: { map: MapItem }) {
           map={texture}
           transparent
           opacity={state.isGM ? (map.visible ? 0.5 : 0.35) : 1}
-          depthTest={false}
+          depthTest={kit}
           depthWrite={false}
           toneMapped={false}
         />

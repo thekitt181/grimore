@@ -8,6 +8,7 @@ import {
 import type { Item, MapItem, TokenItem, WallSegment } from '@/systems/scene/types';
 import { cellKey } from './store/mapStore';
 import { getWalkPose, WALK_POSE_FRESH_MS } from '@/systems/scene/token/walkPoseBus';
+import { isModularMap } from './library/modularKits';
 
 export const DEFAULT_VISION_CELLS = 12;
 export const DEFAULT_VISION_FT = DEFAULT_VISION_CELLS * 5;
@@ -160,6 +161,16 @@ export function allMapWalls(map: MapItem): WallSegment[] {
   return [...(map.walls ?? []), ...mapBoundaryWalls(map.width, map.height)];
 }
 
+/** Kenney/KayKit pieces share one revealed-cell set — keys are world grid, not per-AABB. */
+export function usesWorldFogGrid(map: Pick<MapItem, 'modelUrl'>): boolean {
+  return isModularMap(map);
+}
+
+export function worldFogCell(worldX: number, worldY: number, gridSize: number): { x: number; y: number } {
+  const g = Math.max(1, gridSize);
+  return { x: Math.floor(worldX / g), y: Math.floor(worldY / g) };
+}
+
 /** Token center in map-local pixels (accounts for map rotation). */
 export function tokenMapOrigin(token: TokenItem, map: MapItem): Point {
   return worldToMapLocal(token.x + token.width / 2, token.y + token.height / 2, map);
@@ -234,11 +245,17 @@ export function revealedCellsPastDungeonWalls(
   const walls = wallsOverride ?? losWalls(map);
   const origins = tokens.map((token) => tokenMapOrigin(token, map));
   const kept = new Set<string>();
+  const worldGrid = usesWorldFogGrid(map);
   for (const key of revealedCells) {
     const cell = parseCellKey(key);
     if (!cell) continue;
-    const px = (cell.x + 0.5) * gridSize;
-    const py = (cell.y + 0.5) * gridSize;
+    let px = (cell.x + 0.5) * gridSize;
+    let py = (cell.y + 0.5) * gridSize;
+    if (worldGrid) {
+      const local = worldToMapLocal(px, py, map);
+      px = local.x;
+      py = local.y;
+    }
     if (origins.some((origin) => !wallBlocksPoint(origin, px, py, walls))) kept.add(key);
   }
   return kept;
@@ -448,6 +465,38 @@ function computeLosVisibleCellKeys(
     const facing = tokenFacingRad(token, map);
     const halfArc = visionArcRad(token) / 2;
 
+    if (usesWorldFogGrid(map)) {
+      const originW = mapLocalToWorld(origin.x, origin.y, map);
+      const x0 = Math.floor((originW.x - radiusPx) / gridSize);
+      const y0 = Math.floor((originW.y - radiusPx) / gridSize);
+      const x1 = Math.ceil((originW.x + radiusPx) / gridSize) - 1;
+      const y1 = Math.ceil((originW.y + radiusPx) / gridSize) - 1;
+      for (let cx = x0; cx <= x1; cx++) {
+        for (let cy = y0; cy <= y1; cy++) {
+          const samples = cellSamplePoints(cx, cy, gridSize).map((p) =>
+            worldToMapLocal(p.x, p.y, map),
+          );
+          if (samples.every((p) => p.x < 0 || p.y < 0 || p.x > map.width || p.y > map.height)) {
+            continue;
+          }
+          const visible = samples.some((p) =>
+            pointVisibleFromOrigin(
+              origin,
+              p.x,
+              p.y,
+              radiusPx,
+              facing,
+              halfArc,
+              directional,
+              walls,
+            ),
+          );
+          if (visible) cells.add(cellKey(cx, cy));
+        }
+      }
+      continue;
+    }
+
     const x0 = Math.max(0, Math.floor((origin.x - radiusPx) / gridSize));
     const y0 = Math.max(0, Math.floor((origin.y - radiusPx) / gridSize));
     const x1 = Math.min(cols - 1, Math.ceil((origin.x + radiusPx) / gridSize) - 1);
@@ -532,13 +581,25 @@ export function tokenOccupiedCellKeys(
   const maxX = cx + token.width / 2;
   const minY = cy - token.height / 2;
   const maxY = cy + token.height / 2;
+  const keys = new Set<string>();
+  if (usesWorldFogGrid(map)) {
+    const a = mapLocalToWorld(minX, minY, map);
+    const b = mapLocalToWorld(maxX, maxY, map);
+    const x0 = Math.floor(Math.min(a.x, b.x) / gridSize);
+    const y0 = Math.floor(Math.min(a.y, b.y) / gridSize);
+    const x1 = Math.floor(Math.max(a.x, b.x) / gridSize);
+    const y1 = Math.floor(Math.max(a.y, b.y) / gridSize);
+    for (let x = x0; x <= x1; x++) {
+      for (let y = y0; y <= y1; y++) keys.add(cellKey(x, y));
+    }
+    return keys;
+  }
   const cols = Math.ceil(map.width / gridSize);
   const rows = Math.ceil(map.height / gridSize);
   const x0 = Math.max(0, Math.floor(minX / gridSize));
   const y0 = Math.max(0, Math.floor(minY / gridSize));
   const x1 = Math.min(cols - 1, Math.floor(maxX / gridSize));
   const y1 = Math.min(rows - 1, Math.floor(maxY / gridSize));
-  const keys = new Set<string>();
   for (let x = x0; x <= x1; x++) {
     for (let y = y0; y <= y1; y++) {
       keys.add(cellKey(x, y));

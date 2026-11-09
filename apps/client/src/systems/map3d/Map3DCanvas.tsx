@@ -181,8 +181,8 @@ function Map3DSceneContent() {
             <Map3DWalls map={map} wallHeight={wallHeight} wallThickness={wallThickness} />
           )}
           <Map3DMapModel map={map} showGizmo={map.id === gizmoMapId && Boolean(map.modelUrl)} />
-          {/* Ground-plane FoW is top-down only; FP uses FirstPersonVisionFog. */}
-          {!firstPerson && !isModularMap(map) && <Map3DFogOfWar map={map} />}
+          {/* Orbit + FP: per-piece fog plane. Modular was skipped, so Kenney rooms stayed fully lit. */}
+          <Map3DFogOfWar map={map} />
           {!map.modelUrl && <MapPickGroup map={map} />}
         </group>
         )
@@ -194,7 +194,7 @@ function Map3DSceneContent() {
       <WallDebrisBurst />
       <FpPaintSampler />
       <Map3DImageLayer />
-      {firstPerson && <FirstPersonVisionFog key="fp-vision-v4" wallHeight={wallHeight} />}
+      {firstPerson && <FirstPersonVisionFog key="fp-vision-v6" wallHeight={wallHeight} />}
       {firstPerson && <FpTrapImpactSparks />}
       <FpTimeOfDay3D />
       <FpWeather3D />

@@ -244,12 +244,11 @@ function SceneBackground({ color }: { color: string }) {
 
 function SceneFog({ color, density }: { color: string; density: number }) {
   useFrame(({ scene }) => {
-    // Linear/exp fog in FP draws a black band across the top of the view.
+    if (fpHardVisionActive()) return;
     if (useFirstPersonStore.getState().enabled) {
       scene.fog = null;
       return;
     }
-    if (fpHardVisionActive()) return;
 
     if (density <= 0) {
       if (scene.fog instanceof THREE.FogExp2) scene.fog = null;

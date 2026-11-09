@@ -73,8 +73,6 @@ export function applyOrthographicCameraFromViewport(
   const useOrbit =
     projection === 'orbit' || (projection === 'auto' && viewMode === '3d');
 
-  // Always follow Pixi pan/zoom so the left 3D pane and right 2D editor stay aligned.
-  // (Per-token orbit swaps are disabled separately while the editor is open.)
   const { cx, cz, scale: s } = viewportGroundCenter(viewport, w, h);
   const halfW = w / (2 * s);
   const halfH = h / (2 * s);
@@ -92,11 +90,11 @@ export function applyOrthographicCameraFromViewport(
     camY = ORBIT_RADIUS * cosP;
     camZ = cz + ORBIT_RADIUS * sinP * cosA;
   } else {
-    // 2D map / GM 2D editor: tabletop view + manual mini orbit (right-drag when selected).
     const { view2dMiniOrbit } = useMapStore.getState();
+    const polar = TABLE_MINI_VIEW_POLAR;
     const azimuth = TABLE_MINI_VIEW_AZIMUTH + view2dMiniOrbit.azimuth;
-    const sinP = Math.sin(TABLE_MINI_VIEW_POLAR);
-    const cosP = Math.cos(TABLE_MINI_VIEW_POLAR);
+    const sinP = Math.sin(polar);
+    const cosP = Math.cos(polar);
     const sinA = Math.sin(azimuth);
     const cosA = Math.cos(azimuth);
     camX = cx + ORBIT_RADIUS * sinP * sinA;
