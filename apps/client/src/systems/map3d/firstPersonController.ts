@@ -25,9 +25,10 @@ import {
   syncOpenDoorPunches,
 } from './mapCollisionGrid';
 import { fpGlobal } from './fpGlobals';
+import { steerKitWalk } from './kitWalkSteer';
 
 /** Wall slide passes — keep low; baked mesh is O(1). */
-const MAX_SLIDES = 2;
+const MAX_SLIDES = 3;
 
 /** Reuse wall list for ~1 frame so displace doesn't rebuild every slide. */
 let wallsCache: {
@@ -339,10 +340,17 @@ export function controlFirstPersonMove(
   }
   fpGlobal.moveBlockedReason = null;
 
-  let remX = velX * dt;
-  let remY = velY * dt;
-  let outVelX = velX;
-  let outVelY = velY;
+  const body = fpWallBodyRadius(map);
+  const cx0 = firstPersonPose.x + token.width / 2;
+  const cy0 = firstPersonPose.y + token.height / 2;
+  const steered0 = steerKitWalk(cx0, cy0, velX * dt, velY * dt, body);
+  firstPersonPose.x = steered0.x - token.width / 2;
+  firstPersonPose.y = steered0.y - token.height / 2;
+
+  let remX = steered0.vx;
+  let remY = steered0.vy;
+  let outVelX = dt > 1e-6 ? steered0.vx / dt : 0;
+  let outVelY = dt > 1e-6 ? steered0.vy / dt : 0;
 
   if (limit !== null && map.gridSize > 0) {
     const maxPx = (limit / 5) * map.gridSize;
@@ -435,10 +443,12 @@ export function slideTokenFeet(
   dx: number,
   dy: number,
 ): { x: number; y: number } {
-  let x = fromX;
-  let y = fromY;
-  let remX = dx;
-  let remY = dy;
+  const body = fpWallBodyRadius(map);
+  const steered = steerKitWalk(fromX + token.width / 2, fromY + token.height / 2, dx, dy, body);
+  let x = steered.x - token.width / 2;
+  let y = steered.y - token.height / 2;
+  let remX = steered.vx;
+  let remY = steered.vy;
   for (let i = 0; i < MAX_SLIDES; i++) {
     const remLen = Math.hypot(remX, remY);
     if (remLen < 0.15) break;

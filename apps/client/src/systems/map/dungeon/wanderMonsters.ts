@@ -15,6 +15,7 @@ import { applyWalkPoseVisual } from '@/systems/scene/token/remotePoseApply';
 import type { ImageItem, Item, MapItem, TokenItem } from '@/systems/scene/types';
 import { tokenFeetBlocked } from '@/systems/map3d/firstPersonController';
 import { bakedWalkableAt } from '@/systems/map3d/mapCollisionGrid';
+import { wanderNavPath, wanderNavSnap, wanderNavWalkAt } from './wanderNavGrid';
 import { useFirstPersonStore } from '@/systems/map3d/firstPersonStore';
 import { mapLocalToWorld } from '@/systems/map/wallUtils';
 import { isModularFloorTile, isModularGate, isModularMap, isModularWall, MODULAR_ROOM_WALL_CELLS, pieceForUrl } from '@/systems/map/library/modularKits';
@@ -1332,6 +1333,7 @@ function wanderClearance(wx: number, wy: number, cell: number, map: MapItem): nu
 
 function wanderCellWalkable(wx: number, wy: number, cell: number): boolean {
   if (inDoorLane(wx, wy, cell)) return true;
+  if (wanderNavWalkAt(wx, wy)) return true;
   const floor = mapUnderTokenFeet(wx, wy) ?? mapNearTokenFeet(wx, wy, cell * 0.35);
   if (!floor || isModularWall(floor)) return false;
   if (wanderKenneyClearance(floor, wx, wy, cell) < cell * 0.2) return false;
@@ -1416,8 +1418,11 @@ function innerFloorGoal(map: MapItem): { x: number; y: number } {
       if (wanderCellWalkable(x, y, cell)) hits.push({ x, y });
     }
   }
-  if (hits.length > 0) return hits[Math.floor(Math.random() * hits.length)]!;
-  return wanderSafeStand(map, cell);
+  if (hits.length > 0) {
+    const pick = hits[Math.floor(Math.random() * hits.length)]!;
+    return wanderNavSnap(pick.x, pick.y);
+  }
+  return wanderNavSnap(wanderSafeStand(map, cell).x, wanderSafeStand(map, cell).y);
 }
 
 function navMaps(map: MapItem, dest: MapItem | undefined, items: Record<string, Item>): MapItem[] {
@@ -1475,6 +1480,8 @@ function wanderFindPath(
   cell: number,
   maps: MapItem[],
 ): Array<{ x: number; y: number }> | null {
+  const mapped = wanderNavPath(fromX, fromY, toX, toY);
+  if (mapped && mapped.length > 0) return mapped;
   if (maps.length === 0) return null;
   const step = Math.max(16, cell * 0.5);
   let minX = Infinity;
@@ -1663,10 +1670,13 @@ function wanderTryStep(
   const nx = token.x + dx;
   const ny = token.y + dy;
   if (Math.hypot(dx, dy) < 0.15) return null;
-  if (tokenFeetBlocked(token, map, token.x, token.y, nx, ny)) return null;
-  if (!wanderFeetOnFloor(token, nx, ny, cell)) return null;
   const wx = nx + token.width / 2;
   const wy = ny + token.height / 2;
+  if (!inDoorLane(wx, wy, cell) && !wanderNavWalkAt(wx, wy) && !wanderCellWalkable(wx, wy, cell)) {
+    return null;
+  }
+  if (tokenFeetBlocked(token, map, token.x, token.y, nx, ny)) return null;
+  if (!wanderFeetOnFloor(token, nx, ny, cell)) return null;
   if (!inDoorLane(wx, wy, cell) && wanderClearance(wx, wy, cell, map) < cell * 0.12) return null;
   return { x: nx, y: ny };
 }
@@ -1886,7 +1896,7 @@ function stepToken(token: TokenItem, now: number, dt: number): void {
   const step = Math.min(cell * 0.42, WALK_CELLS_PER_SEC * cell * dt);
   const huggingWall = !inPortal && wanderClearance(tx, ty, cell, map) < cell * 0.22;
   if (!wanderFeetOnFloor(live, live.x, live.y, cell) || huggingWall) {
-    const safe = bestClearStand(tx, ty, cell, map);
+    const safe = wanderNavSnap(tx, ty);
     const px = safe.x - live.width / 2;
     const py = safe.y - live.height / 2;
     st.feetX = px;
@@ -1925,7 +1935,7 @@ function stepToken(token: TokenItem, now: number, dt: number): void {
 
   st.stuckMs = (st.stuckMs ?? 0) + dt * 1000;
   if (st.stuckMs > 120) {
-    const safe = bestClearStand(tx, ty, cell, map);
+    const safe = wanderNavSnap(tx, ty);
     const dest = { x: safe.x - live.width / 2, y: safe.y - live.height / 2 };
     st.feetX = dest.x;
     st.feetY = dest.y;
