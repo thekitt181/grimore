@@ -276,10 +276,10 @@ async function hydrateSessionFromCache(socket: Socket, sessionId: string): Promi
   const sceneList = Array.isArray(sceneItems) ? sceneItems : null;
   const sceneLen = sceneList?.length ?? 0;
   const cacheLen = cachedItems?.length ?? 0;
-  // Live GM sync lands in memory/Redis before (or instead of) slow DB scene writes.
-  // Never prefer an empty DB scene over a non-empty cache — that blanked players.
+  // Live Redis/memory is the table. Prefer it at any length so a larger stale DB
+  // scene cannot restore deleted tokens or rearrange a map the GM already overwrote.
   const items: unknown[] =
-    cacheLen > 0 && cacheLen >= sceneLen
+    cacheLen > 0
       ? cachedItems!
       : sceneLen > 0
         ? sceneList!

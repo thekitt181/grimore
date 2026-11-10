@@ -36,6 +36,8 @@ function mergeMapItem(server: MapItem, local: MapItem): MapItem {
 export type MergeSceneOptions = {
   /** Keep local-only items absent from server (GM offline edits). Players should pass false. */
   keepLocalOnly?: boolean;
+  /** Table edits win over a stale server/scene snapshot (positions, HP, map). */
+  preferLocal?: boolean;
 };
 
 /** Prefer local map images/walls when server snapshot is stale or incomplete. */
@@ -46,29 +48,41 @@ export function mergeSceneItems(
   opts: MergeSceneOptions = {},
 ): Item[] {
   const keepLocalOnly = opts.keepLocalOnly !== false;
+  const preferLocal = opts.preferLocal === true;
   const localById = new Map(local.map((i) => [i.id, i]));
   const seen = new Set<string>();
   const merged: Item[] = [];
 
-  for (const item of server) {
+  const source = preferLocal ? local : server;
+  const otherById = preferLocal
+    ? new Map(server.map((i) => [i.id, i]))
+    : localById;
+
+  for (const item of source) {
     if (deletedIds.has(item.id)) continue;
     seen.add(item.id);
-    const loc = localById.get(item.id);
+    const loc = otherById.get(item.id);
     if (item.type === 'map' && loc?.type === 'map') {
       merged.push(mergeMapItem(item, loc));
     } else if (item.type === 'token' && loc?.type === 'token') {
-      const imageUrl = pickBackgroundUrl(loc.imageUrl ?? null, item.imageUrl ?? null);
-      const modelUrl = pickAssetUrl(loc.modelUrl ?? null, item.modelUrl ?? null);
+      const imageUrl = preferLocal
+        ? pickBackgroundUrl(item.imageUrl ?? null, loc.imageUrl ?? null)
+        : pickBackgroundUrl(loc.imageUrl ?? null, item.imageUrl ?? null);
+      const modelUrl = preferLocal
+        ? pickAssetUrl(item.modelUrl ?? null, loc.modelUrl ?? null)
+        : pickAssetUrl(loc.modelUrl ?? null, item.modelUrl ?? null);
       const mergedToken = { ...item } as typeof item;
       if (imageUrl) mergedToken.imageUrl = imageUrl;
       else delete mergedToken.imageUrl;
       if (modelUrl) mergedToken.modelUrl = modelUrl;
       else delete mergedToken.modelUrl;
-      if (loc.wandering != null) mergedToken.wandering = loc.wandering;
-      if (loc.wanderChosen != null) mergedToken.wanderChosen = loc.wanderChosen;
-      if (loc.wanderPath != null) mergedToken.wanderPath = loc.wanderPath;
-      if (loc.encounterGroupId != null) mergedToken.encounterGroupId = loc.encounterGroupId;
-      if (loc.monsterInt != null) mergedToken.monsterInt = loc.monsterInt;
+      if (!preferLocal) {
+        if (loc.wandering != null) mergedToken.wandering = loc.wandering;
+        if (loc.wanderChosen != null) mergedToken.wanderChosen = loc.wanderChosen;
+        if (loc.wanderPath != null) mergedToken.wanderPath = loc.wanderPath;
+        if (loc.encounterGroupId != null) mergedToken.encounterGroupId = loc.encounterGroupId;
+        if (loc.monsterInt != null) mergedToken.monsterInt = loc.monsterInt;
+      }
       merged.push(mergedToken);
     } else if (item.type === 'handout' && loc?.type === 'handout') {
       const imageUrl = pickBackgroundUrl(item.imageUrl ?? null, loc.imageUrl ?? null);
@@ -85,7 +99,11 @@ export function mergeSceneItems(
     }
   }
 
-  if (keepLocalOnly) {
+  if (preferLocal) {
+    for (const item of server) {
+      if (!seen.has(item.id) && !deletedIds.has(item.id)) merged.push(item);
+    }
+  } else if (keepLocalOnly) {
     for (const item of local) {
       if (!seen.has(item.id) && !deletedIds.has(item.id)) merged.push(item);
     }

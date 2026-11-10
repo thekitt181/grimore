@@ -9,6 +9,13 @@ let pushTimer: ReturnType<typeof setTimeout> | null = null;
 const pending = new Map<number, { hp: number; tempHp: number }>();
 /** Skip outbound push while applying HP pulled from DDB (avoids echo loop). */
 let suppressHpPushDepth = 0;
+/** Token ids the player/GM just edited — DDB pulls must not clobber for a few seconds. */
+const lastLocalHpWriteAt = new Map<string, number>();
+const LOCAL_HP_GUARD_MS = 12_000;
+
+export function markLocalHpWrite(tokenId: string): void {
+  lastLocalHpWriteAt.set(tokenId, Date.now());
+}
 
 function scheduleHpPush(ddbCharacterId: number, hp: number, tempHp: number): void {
   pending.set(ddbCharacterId, { hp, tempHp });
@@ -52,7 +59,25 @@ export function useDdbHpSync(): void {
 export function pullDdbHpToToken(
   tokenId: string,
   character: { hp: number; maxHp: number; tempHp: number; ac?: number; darkvisionFt?: number },
+  opts?: { force?: boolean },
 ): void {
+  if (!opts?.force) {
+    const wroteAt = lastLocalHpWriteAt.get(tokenId);
+    if (wroteAt != null && Date.now() - wroteAt < LOCAL_HP_GUARD_MS) return;
+  }
+
+  const existing = useItemStore.getState().items[tokenId];
+  const token = existing?.type === 'token' ? (existing as TokenItem) : null;
+  if (
+    token
+    && token.hp === character.hp
+    && token.maxHp === character.maxHp
+    && (token.tempHp ?? 0) === (character.tempHp ?? 0)
+    && (character.ac == null || character.ac <= 0 || token.ac === character.ac)
+  ) {
+    return;
+  }
+
   const patch: Partial<TokenItem> = {
     hp: character.hp,
     maxHp: character.maxHp,

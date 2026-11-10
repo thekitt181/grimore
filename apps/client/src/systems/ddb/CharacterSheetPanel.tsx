@@ -5,11 +5,12 @@ import type { GrimoireCharacter } from '@grimoire/shared';
 import type { TokenItem } from '@/systems/scene/types';
 import { useItemStore } from '@/systems/scene/store/itemStore';
 import { useDiceStore } from '@/systems/dice/diceStore';
-import { patchDdbDeathSaves, patchDdbHp, syncDdbCharacter } from './ddbApi';
+import { patchDdbDeathSaves, syncDdbCharacter } from './ddbApi';
+import { HpCommitInput } from './HpCommitInput';
 import { normalizeDeathSaves, type DeathSavesState } from './deathSaveRoll';
 import { DeathSaveTrack } from './DeathSaveTrack';
 import { parsePcActions } from './ddbActionParser';
-import { pullDdbHpToToken } from './useDdbHpSync';
+import { markLocalHpWrite, pullDdbHpToToken } from './useDdbHpSync';
 import { emitItemUpdate } from '@/systems/scene/sceneSync';
 import { useDdbStore } from './ddbStore';
 import { ddbPanelPosition, ddbPanelWidth } from './ddbTokenUtils';
@@ -58,17 +59,8 @@ export function CharacterSheetPanel({ token, onClose }: { token: TokenItem; onCl
   const syncMutation = useMutation({
     mutationFn: () => syncDdbCharacter(ddbId!),
     onSuccess: (ch) => {
-      console.log('[CharacterSheetPanel] Sync success! Character:', ch);
       void qc.setQueryData(['ddb', 'character', ddbId], ch);
-      pullDdbHpToToken(liveToken.id, ch);
-    },
-  });
-
-  const hpMutation = useMutation({
-    mutationFn: ({ hp, tempHp }: { hp: number; tempHp: number }) => patchDdbHp(ddbId!, hp, tempHp),
-    onSuccess: (result) => {
-      void qc.setQueryData(['ddb', 'character', ddbId], result.character);
-      pullDdbHpToToken(liveToken.id, result.character);
+      pullDdbHpToToken(liveToken.id, ch, { force: true });
     },
   });
 
@@ -113,12 +105,13 @@ export function CharacterSheetPanel({ token, onClose }: { token: TokenItem; onCl
   }
 
   function updateLocalHp(hp: number, tempHp: number) {
+    markLocalHpWrite(liveToken.id);
     const patch = { hp, tempHp };
     useItemStore.getState().updateItem(liveToken.id, patch);
     emitItemUpdate([{ id: liveToken.id, patch }]);
-    if (liveToken.syncHpToDdb) {
-      hpMutation.mutate({ hp, tempHp });
-    }
+    void qc.setQueryData(['ddb', 'character', ddbId], (old: GrimoireCharacter | undefined) =>
+      old ? { ...old, hp, tempHp } : old,
+    );
   }
 
   const { data: spellData } = useQuery({
@@ -248,26 +241,24 @@ function SheetBody({
         <div className="flex flex-wrap gap-3 items-center">
           <label className="flex items-center gap-1">
             HP
-            <input
-              type="number"
+            <HpCommitInput
               className="w-14 px-1 rounded"
               style={{ background: 'var(--color-bg-primary)', border: `1px solid ${BD}` }}
-              value={character.hp}
+              value={liveToken.hp}
               min={0}
               max={character.maxHp}
-              onChange={(e) => onHpChange(parseInt(e.target.value, 10) || 0, character.tempHp ?? 0)}
+              onCommit={(hp) => onHpChange(hp, liveToken.tempHp ?? 0)}
             />
             / {character.maxHp}
           </label>
           <label className="flex items-center gap-1">
             Temp
-            <input
-              type="number"
+            <HpCommitInput
               className="w-12 px-1 rounded"
               style={{ background: 'var(--color-bg-primary)', border: `1px solid ${BD}` }}
-              value={character.tempHp ?? 0}
+              value={liveToken.tempHp ?? 0}
               min={0}
-              onChange={(e) => onHpChange(character.hp, parseInt(e.target.value, 10) || 0)}
+              onCommit={(tempHp) => onHpChange(liveToken.hp, tempHp)}
             />
           </label>
           <span>AC {character.ac}</span>

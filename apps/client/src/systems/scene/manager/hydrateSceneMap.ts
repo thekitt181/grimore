@@ -38,6 +38,12 @@ export function hydrateSceneMap(scene: SceneRecord, pushSync = true): void {
   const store = useItemStore.getState();
   const maps = Object.values(store.items).filter((i): i is MapItem => i.type === 'map');
   const existing = maps.find((m) => m.backgroundUrl === scene.map!.imageUrl) ?? maps[0];
+  // Table maps (generated dungeon / Kenney GLB) already live in scene.items.
+  // Do not smash them back to the campaign GameMap image record.
+  if (existing && (existing.dungeon || existing.modelUrl)) {
+    store.setActiveMap(existing.id);
+    return;
+  }
   const next = mapRecordToItem(scene.map, existing);
   if (existing) {
     store.updateItem(existing.id, next);

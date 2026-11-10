@@ -195,7 +195,18 @@ function isEphemeralLiveScene(scene: SceneRecord): boolean {
   return scene.id.startsWith('session-live-');
 }
 
-export function applySceneBundle(scene: SceneRecord, transition: SceneChangePayload['transition'] = 'fade') {
+export function applySceneBundle(
+  scene: SceneRecord,
+  transition: SceneChangePayload['transition'] = 'fade',
+  opts?: { replaceTable?: boolean },
+) {
+  const prev = useSceneMediaStore.getState().activeScene;
+  const switching =
+    opts?.replaceTable === true
+    || !prev
+    || isEphemeralLiveScene(prev)
+    || prev.id !== scene.id;
+
   useSceneMediaStore.getState().setActiveScene(scene, transition);
   applyAtmosphere(scene);
   const media = buildMediaConfig(scene);
@@ -203,12 +214,13 @@ export function applySceneBundle(scene: SceneRecord, transition: SceneChangePayl
   applySceneMediaConfig(media);
 
   // Live media/weather patches carry empty items[] — never wipe the map with those.
+  // Same-scene echoes must not restore a stale DB snapshot over table edits.
   if (!isEphemeralLiveScene(scene)) {
-    if (Array.isArray(scene.items)) {
+    if (switching && Array.isArray(scene.items) && scene.items.length > 0) {
       useItemStore.getState().setItems(scene.items as any[], scene.activeMapId);
       ensureDungeonMapPropsForActiveMap();
     }
-    if (scene.fogData) {
+    if (switching && scene.fogData) {
       const fogJson = typeof scene.fogData === 'string'
         ? scene.fogData
         : JSON.stringify(scene.fogData);
@@ -282,8 +294,9 @@ export function useSceneMedia(sessionId: string | undefined) {
         applySceneMediaOnly(payload.scene);
         return;
       }
-      applySceneBundle(payload.scene, payload.transition);
-      if (payload.scene.map) hydrateSceneMap(payload.scene, false);
+      const switchingScene = !prev || isEphemeralLiveScene(prev) || prev.id !== payload.scene.id;
+      applySceneBundle(payload.scene, payload.transition, { replaceTable: switchingScene });
+      if (switchingScene && payload.scene.map) hydrateSceneMap(payload.scene, false);
     };
     socket.on('scene:change', onChange);
     return () => {
@@ -304,7 +317,7 @@ export function emitSceneChange(
   transition: SceneChangePayload['transition'] = 'fade',
   opts?: { hydrateMap?: boolean },
 ) {
-  applySceneBundle(scene, transition);
+  applySceneBundle(scene, transition, { replaceTable: true });
   if (opts?.hydrateMap !== false && scene.map) {
     hydrateSceneMap(scene, true);
   }

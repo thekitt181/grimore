@@ -181,16 +181,17 @@ export function MapCanvas() {
     requestSceneHydrate();
   }, [sessionId, myRole]);
 
-  // GM: push authoritative scene snapshot once per session so server + players match.
+  // GM: if the server never hydrates, push the live table after a delay so players are not blank.
   useEffect(() => {
     if (!sessionId || myRole !== 'GM' || gmScenePushedRef.current) return;
     const timer = setTimeout(() => {
+      if (initialSyncRef.current.received || gmScenePushedRef.current) return;
       const items = Object.values(useItemStore.getState().items) as Item[];
-      if (items.length === 0) return; // wait for local restore; userJoined / Sync scene still push later
+      if (items.length === 0) return;
       gmScenePushedRef.current = true;
       emitItemsSync(items);
       syncMapFocusToSession({ force: true });
-    }, 800);
+    }, 2500);
     return () => clearTimeout(timer);
   }, [sessionId, myRole, itemList.length]);
 
@@ -412,14 +413,14 @@ export function MapCanvas() {
         return;
       }
 
-      const mergeOpts = { keepLocalOnly: true };
+      const mergeOpts = { keepLocalOnly: true, preferLocal: true };
       const memoryItems = Object.values(useItemStore.getState().items) as Item[];
       const diskItems = loadItemsLocal(sessionId) ?? [];
       const deletedIds = loadDeletedIds(sessionId);
 
-      const localItems = diskItems.length > 0
+      const localItems = memoryItems.length > 0
         ? mergeSceneItems(diskItems, memoryItems, deletedIds, mergeOpts)
-        : memoryItems;
+        : diskItems;
       initialSyncRef.current.hadItems = serverItems.length > 0 || localItems.length > 0;
 
       if (serverItems.length > 0 || localItems.length > 0) {
@@ -435,11 +436,11 @@ export function MapCanvas() {
         ensureDungeonMapPropsForActiveMap();
         if (sessionId) persistItemsLocal(sessionId, merged);
         if (
-          serverItems.length === 0 &&
-          localItems.length > 0 &&
           !initialSyncRef.current.pushed
+          && !sameSceneItemSnapshot(serverItems, Object.fromEntries(merged.map((i) => [i.id, i])))
         ) {
           initialSyncRef.current.pushed = true;
+          gmScenePushedRef.current = true;
           emitItemsSync(merged);
         }
         return;

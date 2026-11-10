@@ -4,10 +4,11 @@ import type { TokenItem } from '@/systems/scene/types';
 import { useItemStore } from '@/systems/scene/store/itemStore';
 import { emitItemUpdate } from '@/systems/scene/sceneSync';
 import { applyTokenConditionsToCombatants } from '@/systems/initiative/initiativeTokenSync';
-import { patchDdbDeathSaves, patchDdbHp, syncDdbCharacter } from '@/systems/ddb/ddbApi';
+import { patchDdbDeathSaves, syncDdbCharacter } from '@/systems/ddb/ddbApi';
 import { DeathSaveTrack } from '@/systems/ddb/DeathSaveTrack';
 import { normalizeDeathSaves, type DeathSavesState } from '@/systems/ddb/deathSaveRoll';
-import { pullDdbHpToToken } from '@/systems/ddb/useDdbHpSync';
+import { markLocalHpWrite, pullDdbHpToToken } from '@/systems/ddb/useDdbHpSync';
+import { HpCommitInput } from '@/systems/ddb/HpCommitInput';
 import { useDdbStore } from '@/systems/ddb/ddbStore';
 import { BD, GOLD } from '../dmStyles';
 
@@ -34,15 +35,7 @@ export function PartyCharacterCard({ token }: { token: TokenItem }) {
     mutationFn: () => syncDdbCharacter(ddbId),
     onSuccess: (ch) => {
       void qc.setQueryData(['ddb', 'character', ddbId], ch);
-      pullDdbHpToToken(liveToken.id, ch);
-    },
-  });
-
-  const hpMutation = useMutation({
-    mutationFn: ({ hp, tempHp }: { hp: number; tempHp: number }) => patchDdbHp(ddbId, hp, tempHp),
-    onSuccess: (result) => {
-      void qc.setQueryData(['ddb', 'character', ddbId], result.character);
-      pullDdbHpToToken(liveToken.id, result.character);
+      pullDdbHpToToken(liveToken.id, ch, { force: true });
     },
   });
 
@@ -87,9 +80,12 @@ export function PartyCharacterCard({ token }: { token: TokenItem }) {
   }
 
   function updateHp(hp: number, tempHp: number) {
+    markLocalHpWrite(liveToken.id);
     useItemStore.getState().updateItem(liveToken.id, { hp, tempHp });
     emitItemUpdate([{ id: liveToken.id, patch: { hp, tempHp } }]);
-    if (liveToken.syncHpToDdb) hpMutation.mutate({ hp, tempHp });
+    void qc.setQueryData(['ddb', 'character', ddbId], (old: typeof character) =>
+      old ? { ...old, hp, tempHp } : old,
+    );
   }
 
   return (
@@ -102,8 +98,8 @@ export function PartyCharacterCard({ token }: { token: TokenItem }) {
           <div className="font-display text-sm truncate" style={{ color: GOLD }}>{liveToken.name}</div>
           {character && (
             <div className="text-[10px] opacity-70">
-              L{character.level} · HP {character.hp}/{character.maxHp}
-              {(character.tempHp ?? 0) > 0 ? ` +${character.tempHp}` : ''}
+              L{character.level} · HP {liveToken.hp}/{character.maxHp}
+              {(liveToken.tempHp ?? 0) > 0 ? ` +${liveToken.tempHp}` : ''}
             </div>
           )}
         </div>
@@ -134,26 +130,24 @@ export function PartyCharacterCard({ token }: { token: TokenItem }) {
           <div className="flex flex-wrap gap-2 items-center text-[10px]">
             <label className="flex items-center gap-1">
               HP
-              <input
-                type="number"
+              <HpCommitInput
                 className="w-12 px-1 rounded text-[10px]"
                 style={{ background: 'var(--color-bg-secondary)', border: `1px solid ${BD}` }}
-                value={character.hp}
+                value={liveToken.hp}
                 min={0}
                 max={character.maxHp}
-                onChange={(e) => updateHp(parseInt(e.target.value, 10) || 0, character.tempHp ?? 0)}
+                onCommit={(hp) => updateHp(hp, liveToken.tempHp ?? 0)}
               />
               / {character.maxHp}
             </label>
             <label className="flex items-center gap-1">
               Temp
-              <input
-                type="number"
+              <HpCommitInput
                 className="w-10 px-1 rounded text-[10px]"
                 style={{ background: 'var(--color-bg-secondary)', border: `1px solid ${BD}` }}
-                value={character.tempHp ?? 0}
+                value={liveToken.tempHp ?? 0}
                 min={0}
-                onChange={(e) => updateHp(character.hp, parseInt(e.target.value, 10) || 0)}
+                onCommit={(tempHp) => updateHp(liveToken.hp, tempHp)}
               />
             </label>
           </div>

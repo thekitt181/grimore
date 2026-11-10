@@ -23,19 +23,39 @@ function emitIfConnected(event: string, payload: Record<string, unknown>): boole
   return true;
 }
 
-/** Save locally on every edit; full server snapshot only when GM explicitly syncs. */
-function persistScene(fullSync = false) {
+let sceneSnapshotTimer: ReturnType<typeof setTimeout> | null = null;
+
+function emitSceneSnapshot(): void {
   const s = sid();
   if (!s) return;
-  persistItemsLocal(s, snapshotItems());
-
-  if (!fullSync) return;
   if (useSessionStore.getState().myRole !== 'GM') return;
   emitIfConnected('items:sync', {
     sessionId: s,
     items: snapshotItems(),
     activeMapId: useItemStore.getState().activeMapId,
   });
+}
+
+/** Save locally on every edit; debounce a full snapshot so the active scene is overwritten. */
+function persistScene(fullSync = false) {
+  const s = sid();
+  if (!s) return;
+  persistItemsLocal(s, snapshotItems());
+
+  if (useSessionStore.getState().myRole !== 'GM') return;
+  if (fullSync) {
+    if (sceneSnapshotTimer) {
+      clearTimeout(sceneSnapshotTimer);
+      sceneSnapshotTimer = null;
+    }
+    emitSceneSnapshot();
+    return;
+  }
+  if (sceneSnapshotTimer) clearTimeout(sceneSnapshotTimer);
+  sceneSnapshotTimer = setTimeout(() => {
+    sceneSnapshotTimer = null;
+    emitSceneSnapshot();
+  }, 1200);
 }
 
 export function emitItemAdd(item: Item) {

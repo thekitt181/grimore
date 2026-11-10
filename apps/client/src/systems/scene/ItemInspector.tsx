@@ -8,6 +8,8 @@ import { isHpHiddenFromPlayers } from './types';
 import { visionFeet, visionRadiusFromFeet } from '@/systems/map/fogLos';
 import { VisionFtInput } from '@/systems/map/VisionFtInput';
 import { applyTokenHpToCombatants } from '@/systems/initiative/initiativeTokenSync';
+import { markLocalHpWrite } from '@/systems/ddb/useDdbHpSync';
+import { HpCommitInput } from '@/systems/ddb/HpCommitInput';
 import { applyDamage, applyHeal, readTempHp } from '@/systems/initiative/hpUtils';
 import { deleteCurrentSelection } from './deleteSelection';
 import { playerCanRotateToken } from './token/clientTokenVisibility';
@@ -93,6 +95,7 @@ export function ItemInspector() {
           update={(p) => {
             update(single.id, p);
             if (p.hp !== undefined || p.maxHp !== undefined || p.tempHp !== undefined) {
+              markLocalHpWrite(single.id);
               applyTokenHpToCombatants(single.id, {
                 ...(p.hp !== undefined ? { hp: p.hp } : {}),
                 ...(p.maxHp !== undefined ? { maxHp: p.maxHp } : {}),
@@ -249,15 +252,15 @@ function TokenControls({
         />
       </Field>
       <Field label="HP">
-        <input type="number" className="input-stat" min={0} value={token.hp}
-          onChange={(e) => update({ hp: Math.max(0, Number(e.target.value)) })} />
+        <HpCommitInput className="input-stat" min={0} value={token.hp}
+          onCommit={(hp) => update({ hp })} />
         <span className="font-ui text-xs px-0.5" style={{ color: 'var(--color-text-secondary)' }}>/</span>
-        <input type="number" className="input-stat" min={1} value={token.maxHp}
-          onChange={(e) => update({ maxHp: Math.max(1, Number(e.target.value)) })} />
+        <HpCommitInput className="input-stat" min={1} value={token.maxHp}
+          onCommit={(maxHp) => update({ maxHp })} />
       </Field>
       <Field label="Temp">
-        <input type="number" className="input-stat" min={0} value={tempHp}
-          onChange={(e) => update({ tempHp: Math.max(0, Number(e.target.value)) })} />
+        <HpCommitInput className="input-stat" min={0} value={tempHp}
+          onCommit={(next) => update({ tempHp: next })} />
       </Field>
       <Field label="AC">
         <input type="number" className="input-stat" min={0} value={ac}

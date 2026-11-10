@@ -321,13 +321,12 @@ function adjustedRemovedHitPoints(raw: any, maxHp: number, removed: number): num
 }
 
 function computeCurrentHitPoints(raw: any, maxHp: number): number {
-  const removed =
-    pickNumber(
-      raw.removedHitPoints,
-      raw.damageTaken,
-      raw.hitPointInfo?.removed,
-      raw.hitPointsInfo?.removed,
-    ) ?? 0;
+  const removed = pickNumber(
+    raw.removedHitPoints,
+    raw.damageTaken,
+    raw.hitPointInfo?.removed,
+    raw.hitPointsInfo?.removed,
+  );
 
   const explicit = pickNumber(
     raw.currentHitPoints,
@@ -338,12 +337,18 @@ function computeCurrentHitPoints(raw: any, maxHp: number): number {
     raw.hitPointsInfo?.current,
   );
 
+  // D&D Beyond stores damage as removedHitPoints. A stale currentHitPoints
+  // field (often leftover max HP) must not win over that.
+  if (removed != null && maxHp > 0) {
+    return Math.max(0, maxHp - adjustedRemovedHitPoints(raw, maxHp, removed));
+  }
+
   if (explicit != null) {
     return Math.max(0, Math.min(explicit, maxHp));
   }
 
   if (maxHp > 0) {
-    return Math.max(0, maxHp - adjustedRemovedHitPoints(raw, maxHp, removed));
+    return Math.max(0, maxHp - adjustedRemovedHitPoints(raw, maxHp, removed ?? 0));
   }
 
   return Math.max(0, pickNumber(raw.hitPoints, raw.hp) ?? 0);
