@@ -29,6 +29,7 @@ function DdbLinkPanelBody() {
       setCobalt('');
       setError(null);
       void qc.invalidateQueries({ queryKey: ['ddb'] });
+      useDdbStore.getState().setLinkPanelOpen(false);
     },
     onError: (err: Error) => setError(err.message),
   });
@@ -49,8 +50,8 @@ function DdbLinkPanelBody() {
   return (
     <>
       <p className="font-ui text-[11px] mb-3" style={{ color: 'var(--color-text-secondary)' }}>
-        Powered by D&D Beyond. Players can link their own account to drop their character token on the map. Paste a Cobalt session token — see{' '}
-        <span style={{ color: GOLD }}>docs/DDB_SETUP.md</span>.
+        Link D&D Beyond so you can load your character token, sheet, and HP. Paste the{' '}
+        <strong>CobaltSession</strong> cookie from dndbeyond.com (DevTools → Application → Cookies). The token is stored encrypted.
       </p>
 
       {isLoading ? (

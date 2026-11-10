@@ -609,7 +609,7 @@ function DdbSidebarSection() {
     <ToolSection id="ddb" title="D&D Beyond">
       <div className="flex flex-wrap gap-1.5">
         <button type="button" className="btn-ghost text-xs py-1 flex-1" onClick={() => setImportModalOpen(true)}>
-          Import PC
+          Characters
         </button>
         <button type="button" className="btn-ghost text-xs py-1 flex-1" onClick={() => setEncounterPanelOpen(true)}>
           Encounters

@@ -18,7 +18,9 @@ export async function importCharacterToMap(
   existingTokenId?: string,
 ): Promise<TokenItem | null> {
   const map = getActiveMap();
-  if (!map) return null;
+  if (!map) {
+    throw new Error('No map on the table yet — wait for the GM to place one, then try again.');
+  }
 
   const { tokenDefaults } = await importDdbCharacterToken(ddbCharacterId);
   const imageUrl = resolveTokenImageUrl(tokenDefaults.imageUrl);
@@ -51,10 +53,10 @@ export async function importCharacterToMap(
   } else {
     const tokens = Object.values(useItemStore.getState().items).filter((i) => i.type === 'token');
     const count = tokens.length;
-    const col = count % 10;
-    const row = Math.floor(count / 10);
-    x = map.x + map.gridOffsetX + col * grid;
-    y = map.y + map.gridOffsetY + row * grid;
+    const col = count % 8;
+    const row = Math.floor(count / 8);
+    x = map.x + map.width / 2 - grid + col * grid;
+    y = map.y + map.height / 2 - grid + row * grid;
   }
 
   const sizeCells = tokenDefaults.sizeCells ?? 1;
@@ -74,6 +76,7 @@ export async function importCharacterToMap(
       };
       useItemStore.getState().updateItem(existingTokenId, patch);
       emitItemUpdate([{ id: existingTokenId, patch }]);
+      useItemStore.getState().select([existingTokenId]);
       return { ...existing, ...patch } as TokenItem;
     }
   }
@@ -108,5 +111,6 @@ export async function importCharacterToMap(
 
   useItemStore.getState().addItem(token);
   emitItemAdd(token);
+  useItemStore.getState().select([token.id]);
   return token;
 }

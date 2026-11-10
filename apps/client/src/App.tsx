@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useState } from 'react';
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { rememberReturnPath, signInHref } from '@/lib/authReturnPath';
 import { useGrimoireAuth } from '@/hooks/useGrimoireAuth';
 import { getAuthBearerToken, signOutAndClear } from '@/lib/auth-client';
 import { hydrateSessionAfterOAuth } from '@/lib/oauthHelpers';
@@ -16,6 +17,7 @@ import { ResetPasswordPage } from '@/pages/ResetPasswordPage';
 import { DdbImportJobBanner } from '@/systems/ddb/DdbImportJobBanner';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
+  const location = useLocation();
   const { isSignedIn, isLoaded } = useGrimoireAuth();
   const [apiReady, setApiReady] = useState(false);
   const [sessionInvalid, setSessionInvalid] = useState(false);
@@ -96,7 +98,9 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   }, [isLoaded, isSignedIn, serverWaking]);
 
   if (sessionInvalid) {
-    return <Navigate to="/sign-in" replace />;
+    const next = `${location.pathname}${location.search}`;
+    rememberReturnPath(next);
+    return <Navigate to={signInHref(next)} replace />;
   }
 
   if (!isLoaded || (isSignedIn && !apiReady)) {
@@ -115,7 +119,11 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
     );
   }
 
-  if (!isSignedIn) return <Navigate to="/sign-in" replace />;
+  if (!isSignedIn) {
+    const next = `${location.pathname}${location.search}`;
+    rememberReturnPath(next);
+    return <Navigate to={signInHref(next)} replace />;
+  }
   return (
     <>
       {serverWaking && (

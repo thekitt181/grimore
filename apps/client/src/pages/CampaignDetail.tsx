@@ -247,9 +247,9 @@ export function CampaignDetail() {
           </div>
 
           {/* Invite panel (GM only) */}
-          {isGM && id && (
+          {id && (
             <div className="space-y-4">
-              <InvitePanel campaignId={id} />
+              {isGM && <InvitePanel campaignId={id} />}
               <DdbLinkPanelEmbedded />
             </div>
           )}

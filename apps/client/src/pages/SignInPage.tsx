@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { consumeReturnPath, rememberReturnPath, signUpHref } from '@/lib/authReturnPath';
 import { authClient, getAuthBearerToken, signInWithGoogle } from '@/lib/auth-client';
 import { oauthErrorMessage } from '@/lib/oauthHelpers';
 import { useGoogleOAuthAvailable } from '@/hooks/useGoogleOAuthAvailable';
@@ -18,6 +19,7 @@ export function SignInPage() {
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);
+    rememberReturnPath(params.get('next'));
     if (params.get('oauth') !== 'error') return;
     setError(oauthErrorMessage(params.get('error'), params.get('error_description')));
     navigate('/sign-in', { replace: true, state: location.state });
@@ -34,7 +36,7 @@ export function SignInPage() {
         return;
       }
       await getAuthBearerToken({ skipCache: true });
-      navigate('/');
+      navigate(consumeReturnPath(location.search));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Sign in failed');
     } finally {
@@ -168,7 +170,7 @@ export function SignInPage() {
 
           <p className="text-center font-ui text-sm" style={{ color: 'var(--color-text-secondary)' }}>
             No account?{' '}
-            <Link to="/sign-up" style={{ color: 'var(--color-accent-gold)' }}>
+            <Link to={signUpHref(undefined, location.search)} style={{ color: 'var(--color-accent-gold)' }}>
               Sign up
             </Link>
           </p>

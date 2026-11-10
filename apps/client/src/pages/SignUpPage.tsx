@@ -1,11 +1,13 @@
-import { useState, type FormEvent } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useEffect, useState, type FormEvent } from 'react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { consumeReturnPath, rememberReturnPath, signInHref } from '@/lib/authReturnPath';
 import { authClient, getAuthBearerToken, signInWithGoogle } from '@/lib/auth-client';
 import { useGoogleOAuthAvailable } from '@/hooks/useGoogleOAuthAvailable';
 import { LogoMark } from '@/components/LogoMark';
 
 export function SignUpPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const googleOAuthAvailable = useGoogleOAuthAvailable();
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -13,6 +15,10 @@ export function SignUpPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
+
+  useEffect(() => {
+    rememberReturnPath(new URLSearchParams(location.search).get('next'));
+  }, [location.search]);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -29,7 +35,7 @@ export function SignUpPage() {
         return;
       }
       await getAuthBearerToken({ skipCache: true });
-      navigate('/');
+      navigate(consumeReturnPath(location.search));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Sign up failed');
     } finally {
@@ -170,7 +176,7 @@ export function SignUpPage() {
 
           <p className="text-center font-ui text-sm" style={{ color: 'var(--color-text-secondary)' }}>
             Already have an account?{' '}
-            <Link to="/sign-in" style={{ color: 'var(--color-accent-gold)' }}>
+            <Link to={signInHref(new URLSearchParams(location.search).get('next') ?? undefined)} style={{ color: 'var(--color-accent-gold)' }}>
               Sign in
             </Link>
           </p>

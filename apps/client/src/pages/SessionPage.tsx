@@ -312,6 +312,75 @@ export function SessionPage() {
     if (!isGM) setPanelOpen(false);
   }, [isGM, setPanelOpen]);
 
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key !== 'Escape') return;
+      if (e.defaultPrevented) return;
+      if (importModalOpen) {
+        setImportModalOpen(false);
+        e.preventDefault();
+        return;
+      }
+      if (linkPanelOpen) {
+        setLinkPanelOpen(false);
+        e.preventDefault();
+        return;
+      }
+      if (sheetToken) {
+        closeSheet();
+        e.preventDefault();
+        return;
+      }
+      if (pcActionsToken) {
+        closePcActions();
+        e.preventDefault();
+        return;
+      }
+      if (tokenActionsToken) {
+        closeTokenActions();
+        e.preventDefault();
+        return;
+      }
+      if (journalOpen) {
+        setJournalOpen(false);
+        e.preventDefault();
+        return;
+      }
+      if (showDice) {
+        setShowDice(false);
+        e.preventDefault();
+        return;
+      }
+      if (showQuests) {
+        setShowQuests(false);
+        e.preventDefault();
+        return;
+      }
+      if (showInitiative && !combatActive) {
+        setShowInitiative(false);
+        e.preventDefault();
+      }
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [
+    importModalOpen,
+    linkPanelOpen,
+    sheetToken,
+    pcActionsToken,
+    tokenActionsToken,
+    journalOpen,
+    showDice,
+    showQuests,
+    showInitiative,
+    combatActive,
+    setImportModalOpen,
+    setLinkPanelOpen,
+    closeSheet,
+    closePcActions,
+    closeTokenActions,
+  ]);
+
   // ── Loading / error states ─────────────────────────────────────────────────
   if (isLoading) {
     return (
@@ -375,7 +444,7 @@ export function SessionPage() {
               onClick={() => setImportModalOpen(true)}
               title="Load your D&D Beyond character onto the map"
             >
-              My D&D Beyond
+              My character
             </button>
           )}
           <div className="flex items-center gap-2">
@@ -439,18 +508,34 @@ export function SessionPage() {
           <SceneTransitionOverlay />
           <MobileDdbTokenBar />
 
-          {!isGM && !hasMapItems && !isConnected && (
+          {isGM && !hasMapItems && (
             <div
               className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 px-6 text-center pointer-events-none"
-              style={{ background: 'rgba(10, 10, 15, 0.85)' }}
+              style={{ background: 'rgba(10, 10, 15, 0.55)' }}
             >
               <p className="font-display text-lg animate-torch" style={{ color: 'var(--color-accent-gold)' }}>
-                Connecting to the table…
+                Empty table
               </p>
               <p className="font-ui text-sm max-w-sm" style={{ color: 'var(--color-text-secondary)' }}>
-                {isMobileClient()
-                  ? 'Mobile connections can take up to a minute while the server wakes up. The map will appear once you are live.'
-                  : 'Waiting for the live session link. The GM map will sync when you connect.'}
+                Place a map from MAPS on the right, or generate a 3D dungeon from the catalog. Players see a waiting screen until you do.
+              </p>
+            </div>
+          )}
+
+          {!isGM && !hasMapItems && (
+            <div
+              className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 px-6 text-center pointer-events-none"
+              style={{ background: 'rgba(10, 10, 15, 0.72)' }}
+            >
+              <p className="font-display text-lg animate-torch" style={{ color: 'var(--color-accent-gold)' }}>
+                {isConnected ? 'Waiting for a map…' : 'Connecting to the table…'}
+              </p>
+              <p className="font-ui text-sm max-w-sm" style={{ color: 'var(--color-text-secondary)' }}>
+                {!isConnected
+                  ? (isMobileClient()
+                    ? 'This can take a minute while the server wakes up. The map appears when you are live.'
+                    : 'Waiting for the live session. The map will sync when you connect.')
+                  : 'The GM has not put a map on the table yet. You can still open My character from the top bar.'}
               </p>
               {connectionError && (
                 <p className="font-ui text-xs" style={{ color: 'var(--color-accent-red-hot)' }}>
@@ -653,7 +738,7 @@ export function SessionPage() {
                       border: `1px solid ${importModalOpen ? 'var(--color-accent-gold)' : 'var(--color-border)'}`,
                       color: importModalOpen ? 'var(--color-accent-gold)' : 'var(--color-text-secondary)',
                     }}
-                    title="Load my D&D Beyond token"
+                    title="My character"
                   >
                     🧙
                   </button>

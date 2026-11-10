@@ -57,7 +57,7 @@ export function MobileSessionDock({
             active={false}
             label="My PC"
             icon="🧙"
-            title="Load my D&D Beyond token"
+            title="My character"
             onClick={onImportPc}
           />
         )}
