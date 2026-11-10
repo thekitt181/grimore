@@ -862,7 +862,7 @@ export function ItemContextMenu() {
         </>
       )}
 
-      {single?.type === 'token' && isDdbPcToken(single as TokenItem) && isGM && (
+      {single?.type === 'token' && isDdbPcToken(single as TokenItem) && (isGM || playerOwnsToken(single as TokenItem, myUserId)) && (
         <>
           <div className="gold-divider my-1" />
           <Btn label="⚔ Character actions" onClick={() => {
@@ -876,7 +876,9 @@ export function ItemContextMenu() {
         </>
       )}
 
-      {single?.type === 'token' && isGM && !(single as TokenItem).ddbCharacterId && (
+      {single?.type === 'token'
+        && !(single as TokenItem).ddbCharacterId
+        && (isGM || playerOwnsToken(single as TokenItem, myUserId)) && (
         <>
           <div className="gold-divider my-1" />
           <Btn label="🔗 Link D&D Beyond character" onClick={() => {

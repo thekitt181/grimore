@@ -22,13 +22,37 @@ import {
 import { enrichMonstersForImport } from './ddbMonsterFetch';
 import { getDdbAuthContext } from './ddbAuthContext';
 import { normalizeDdbMonsterToCompendium } from './ddbContentNormalize';
-import { coerceGrimoireCharacter, DDB_HOMEBREW_SOURCE_ID, type DdbLinkStatus, type GrimoireCharacter } from '@grimoire/shared';
+import {
+  coerceGrimoireCharacter,
+  DDB_HOMEBREW_SOURCE_ID,
+  type DdbCharacterSummary,
+  type DdbLinkStatus,
+  type GrimoireCharacter,
+} from '@grimoire/shared';
 import { DDB_NORMALIZER_VERSION } from './normalizerVersion';
 
 export async function getCobaltForUser(userId: string): Promise<string | null> {
   const conn = await readPrisma.ddbConnection.findUnique({ where: { userId } });
   if (!conn) return null;
   return decryptToken(conn.cobaltEncrypted);
+}
+
+/** Player's own DDB list, or the GM's campaign list when the player has not linked. */
+export async function listDdbCharactersForUser(
+  userId: string,
+  sessionId?: string,
+): Promise<DdbCharacterSummary[]> {
+  let cobalt = await getCobaltForUser(userId);
+  if (!cobalt && sessionId) {
+    const providerId = await resolveDdbProviderUserId(userId, sessionId);
+    cobalt = await getCobaltForUser(providerId);
+  }
+  if (!cobalt) {
+    throw new Error(
+      'D&D Beyond is not linked. Connect your account, or ask the GM to link D&D Beyond.',
+    );
+  }
+  return fetchDdbCharacterList(cobalt);
 }
 
 export async function linkDdbAccount(userId: string, cobalt: string): Promise<DdbLinkStatus> {

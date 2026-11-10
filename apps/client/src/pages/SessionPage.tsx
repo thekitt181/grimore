@@ -368,6 +368,16 @@ export function SessionPage() {
             </>
           )}
           <GameClockWidget sessionId={sessionInfo.id} isGM={isGM} />
+          {!isGM && (
+            <button
+              type="button"
+              className="btn-ghost text-xs py-1 px-2"
+              onClick={() => setImportModalOpen(true)}
+              title="Load your D&D Beyond character onto the map"
+            >
+              My D&D Beyond
+            </button>
+          )}
           <div className="flex items-center gap-2">
             <div className="flex items-center gap-1.5">
               <div
@@ -484,7 +494,7 @@ export function SessionPage() {
           {libraryPanelOpen && isGM && (
             <DdbLibraryPanel onClose={() => setLibraryPanelOpen(false)} />
           )}
-          {linkPanelOpen && isGM && (
+          {linkPanelOpen && (
             <DdbLinkPanel onClose={() => setLinkPanelOpen(false)} />
           )}
           {sceneManagerOpen && isGM && (
@@ -528,6 +538,7 @@ export function SessionPage() {
             onToggleInitiative={() => setShowInitiative((v) => !v)}
             onToggleDice={() => setShowDice((v) => !v)}
             onToggleQuests={() => setShowQuests((v) => !v)}
+            {...(!isGM ? { onImportPc: () => setImportModalOpen(true) } : {})}
           />
 
           {/* Bottom dock — inspector (center) + tool panels (right); hidden on mobile (use MobileSessionDock). */}
@@ -631,6 +642,20 @@ export function SessionPage() {
                     title="Compendium reference"
                   >
                     🐉
+                  </button>
+                )}
+                {!isGM && (
+                  <button
+                    onClick={() => setImportModalOpen(true)}
+                    className="w-10 h-10 rounded-lg flex items-center justify-center text-lg shadow-panel transition-all"
+                    style={{
+                      background: importModalOpen ? 'rgba(201,168,76,0.2)' : 'var(--color-bg-secondary)',
+                      border: `1px solid ${importModalOpen ? 'var(--color-accent-gold)' : 'var(--color-border)'}`,
+                      color: importModalOpen ? 'var(--color-accent-gold)' : 'var(--color-text-secondary)',
+                    }}
+                    title="Load my D&D Beyond token"
+                  >
+                    🧙
                   </button>
                 )}
                 <button

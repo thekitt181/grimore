@@ -4,7 +4,9 @@ import { DraggablePanel } from '@/components/DraggablePanel';
 import { fetchDdbCharacters, fetchDdbStatus } from './ddbApi';
 import { proxiedDdbImageUrl } from './ddbImageUrl';
 import { importCharacterToMap } from './importCharacter';
+import { useDdbStore } from './ddbStore';
 import type { TokenItem } from '@/systems/scene/types';
+import { useSessionStore } from '@/store/sessionStore';
 
 const GOLD = 'var(--color-accent-gold)';
 const BD = 'var(--color-border)';
@@ -21,16 +23,19 @@ export function CharacterImportModal({
   const [importing, setImporting] = useState<number | null>(null);
   const [manualId, setManualId] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const setLinkPanelOpen = useDdbStore((s) => s.setLinkPanelOpen);
+  const myRole = useSessionStore((s) => s.myRole);
+  const isPlayer = myRole !== 'GM';
 
   const { data: status } = useQuery({
     queryKey: ['ddb', 'status'],
     queryFn: fetchDdbStatus,
   });
 
-  const { data: characters, isLoading } = useQuery({
+  const { data: characters, isLoading, isError, error: listError } = useQuery({
     queryKey: ['ddb', 'characters'],
     queryFn: fetchDdbCharacters,
-    enabled: Boolean(status?.linked && status.valid),
+    retry: false,
   });
 
   async function handleImport(ddbCharacterId: number) {
@@ -47,7 +52,11 @@ export function CharacterImportModal({
     }
   }
 
-  const title = linkTokenId ? 'Link D&D Beyond character' : 'Import character to map';
+  const title = linkTokenId
+    ? 'Link D&D Beyond character'
+    : isPlayer
+      ? 'Load my D&D Beyond token'
+      : 'Import character to map';
 
   return (
     <DraggablePanel
@@ -60,47 +69,56 @@ export function CharacterImportModal({
       zIndex={150}
     >
       <div className="p-4 space-y-4">
-        {status?.linked && status.valid && (
-          <div
-            className="rounded px-3 py-2 space-y-2"
-            style={{ background: 'var(--color-bg-tertiary)', border: `1px solid ${BD}` }}
-          >
-            <p className="font-ui text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
-              Or import by character ID from your sheet URL bar
-              (dndbeyond.com/characters/<strong>12345678</strong>)
-            </p>
-            <div className="flex gap-2">
-              <input
-                type="text"
-                inputMode="numeric"
-                className="flex-1 rounded px-2 py-1 font-mono text-xs"
-                style={{ background: 'var(--color-bg-primary)', border: `1px solid ${BD}` }}
-                placeholder="Character ID"
-                value={manualId}
-                onChange={(e) => setManualId(e.target.value.replace(/\D/g, ''))}
-              />
-              <button
-                type="button"
-                className="btn-primary text-xs shrink-0"
-                disabled={!manualId || importing !== null}
-                onClick={() => void handleImport(parseInt(manualId, 10))}
-              >
-                Import
-              </button>
-            </div>
-          </div>
-        )}
-
-        {!status?.linked ? (
-          <p className="font-ui text-sm" style={{ color: 'var(--color-text-secondary)' }}>
-            Link your D&D Beyond account first (Account link in sidebar).
+        <div
+          className="rounded px-3 py-2 space-y-2"
+          style={{ background: 'var(--color-bg-tertiary)', border: `1px solid ${BD}` }}
+        >
+          <p className="font-ui text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
+            {isPlayer
+              ? 'Link your D&D Beyond account to pick from your characters, or paste the ID from your sheet URL (dndbeyond.com/characters/'
+              : 'Import by character ID from the sheet URL bar (dndbeyond.com/characters/'}
+            <strong>12345678</strong>).
           </p>
-        ) : !status.valid ? (
+          {isPlayer && (
+            <button
+              type="button"
+              className="btn-ghost text-xs w-full"
+              onClick={() => setLinkPanelOpen(true)}
+            >
+              {status?.linked ? 'D&D Beyond account' : 'Link my D&D Beyond account'}
+            </button>
+          )}
+          <div className="flex gap-2">
+            <input
+              type="text"
+              inputMode="numeric"
+              className="flex-1 rounded px-2 py-1 font-mono text-xs"
+              style={{ background: 'var(--color-bg-primary)', border: `1px solid ${BD}` }}
+              placeholder="Character ID"
+              value={manualId}
+              onChange={(e) => setManualId(e.target.value.replace(/\D/g, ''))}
+            />
+            <button
+              type="button"
+              className="btn-primary text-xs shrink-0"
+              disabled={!manualId || importing !== null}
+              onClick={() => void handleImport(parseInt(manualId, 10))}
+            >
+              {isPlayer ? 'Load' : 'Import'}
+            </button>
+          </div>
+        </div>
+
+        {status?.linked && !status.valid ? (
           <p className="font-ui text-sm" style={{ color: 'var(--color-accent-red-hot)' }}>
             Session expired — re-link your Cobalt token.
           </p>
         ) : isLoading ? (
           <p className="font-ui text-sm">Loading characters…</p>
+        ) : isError ? (
+          <p className="font-ui text-sm" style={{ color: 'var(--color-text-secondary)' }}>
+            {listError instanceof Error ? listError.message : 'Could not load character list. Use the ID field above.'}
+          </p>
         ) : !characters?.length ? (
           <div className="font-ui text-sm space-y-2" style={{ color: 'var(--color-text-secondary)' }}>
             <p>No characters were returned from D&D Beyond.</p>
@@ -139,7 +157,7 @@ export function CharacterImportModal({
                   disabled={importing === ch.ddbCharacterId}
                   onClick={() => void handleImport(ch.ddbCharacterId)}
                 >
-                  {importing === ch.ddbCharacterId ? '…' : linkTokenId ? 'Link' : 'Import'}
+                  {importing === ch.ddbCharacterId ? '…' : linkTokenId ? 'Link' : isPlayer ? 'Load' : 'Import'}
                 </button>
               </div>
             ))}

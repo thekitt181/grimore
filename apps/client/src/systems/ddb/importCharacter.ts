@@ -3,6 +3,7 @@ import { getActiveMap, useItemStore } from '@/systems/scene/store/itemStore';
 import { emitItemAdd, emitItemUpdate } from '@/systems/scene/sceneSync';
 import { snapPoint } from '@/systems/scene/snap';
 import type { TokenItem } from '@/systems/scene/types';
+import { useSessionStore } from '@/store/sessionStore';
 import { importDdbCharacterToken } from './ddbApi';
 import { resolveTokenImageUrl } from './ddbImageUrl';
 
@@ -22,6 +23,24 @@ export async function importCharacterToMap(
   const { tokenDefaults } = await importDdbCharacterToken(ddbCharacterId);
   const imageUrl = resolveTokenImageUrl(tokenDefaults.imageUrl);
   const grid = map.gridSize;
+  const { myUserId, myRole } = useSessionStore.getState();
+  const ownerId = tokenDefaults.ownerId ?? myUserId ?? undefined;
+
+  const alreadyOnTable = Object.values(useItemStore.getState().items).find(
+    (i): i is TokenItem => i.type === 'token' && i.ddbCharacterId === ddbCharacterId,
+  );
+  if (alreadyOnTable && !existingTokenId) {
+    existingTokenId = alreadyOnTable.id;
+  }
+  if (
+    alreadyOnTable
+    && myRole !== 'GM'
+    && alreadyOnTable.ownerId
+    && myUserId
+    && alreadyOnTable.ownerId !== myUserId
+  ) {
+    throw new Error('That character is already on the table for another player.');
+  }
 
   let x: number;
   let y: number;
@@ -48,6 +67,8 @@ export async function importCharacterToMap(
       const patch: Partial<TokenItem> = {
         ...tokenDefaults,
         ...(imageUrl ? { imageUrl } : {}),
+        ...(ownerId ? { ownerId } : {}),
+        isPc: true,
         width: existing.width,
         height: existing.height,
       };
@@ -81,7 +102,7 @@ export async function importCharacterToMap(
     ddbCharacterId: tokenDefaults.ddbCharacterId ?? ddbCharacterId,
     isPc: true,
     syncHpToDdb: tokenDefaults.syncHpToDdb ?? true,
-    ...(tokenDefaults.ownerId ? { ownerId: tokenDefaults.ownerId } : {}),
+    ...(ownerId ? { ownerId } : {}),
     ...(imageUrl ? { imageUrl } : {}),
   };
 

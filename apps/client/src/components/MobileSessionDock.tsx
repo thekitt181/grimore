@@ -11,6 +11,7 @@ export function MobileSessionDock({
   onToggleInitiative,
   onToggleDice,
   onToggleQuests,
+  onImportPc,
 }: {
   showInitiative: boolean;
   showDice: boolean;
@@ -18,6 +19,7 @@ export function MobileSessionDock({
   onToggleInitiative: () => void;
   onToggleDice: () => void;
   onToggleQuests: () => void;
+  onImportPc?: () => void;
 }) {
   return (
     <div
@@ -50,6 +52,15 @@ export function MobileSessionDock({
           title="Dice roller"
           onClick={onToggleDice}
         />
+        {onImportPc && (
+          <DockButton
+            active={false}
+            label="My PC"
+            icon="🧙"
+            title="Load my D&D Beyond token"
+            onClick={onImportPc}
+          />
+        )}
         <MapViewModeToggle variant="dock" />
       </div>
     </div>

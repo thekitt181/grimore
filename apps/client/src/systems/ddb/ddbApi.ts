@@ -48,8 +48,16 @@ export async function fetchDdbCampaigns(): Promise<DdbCampaignSummary[]> {
 }
 
 export async function fetchDdbCharacters(): Promise<DdbCharacterSummary[]> {
-  const { data } = await api.get<{ characters: DdbCharacterSummary[] }>('/ddb/characters');
-  return data.characters;
+  try {
+    const { data } = await api.get<{ characters: DdbCharacterSummary[] }>('/ddb/characters');
+    return data.characters;
+  } catch (err) {
+    if (axios.isAxiosError(err)) {
+      const msg = (err.response?.data as { error?: string } | undefined)?.error;
+      throw new Error(msg ?? 'Failed to load characters');
+    }
+    throw err;
+  }
 }
 
 export async function fetchDdbCharacter(id: number): Promise<GrimoireCharacter> {

@@ -49,7 +49,7 @@ function DdbLinkPanelBody() {
   return (
     <>
       <p className="font-ui text-[11px] mb-3" style={{ color: 'var(--color-text-secondary)' }}>
-        Powered by D&D Beyond. Link your account with a Cobalt session token — see{' '}
+        Powered by D&D Beyond. Players can link their own account to drop their character token on the map. Paste a Cobalt session token — see{' '}
         <span style={{ color: GOLD }}>docs/DDB_SETUP.md</span>.
       </p>
 

@@ -7,13 +7,13 @@ import { requireAuth, type AuthenticatedRequest } from '../middleware/auth';
 import { requireSessionMember } from '../middleware/requireSessionMember';
 import {
   fetchDdbCampaigns,
-  fetchDdbCharacterList,
   fetchDdbEncounters,
   resolveDdbEncounter,
   getCobaltForUser,
   getDdbStatus,
   getOrSyncCharacter,
   linkDdbAccount,
+  listDdbCharactersForUser,
   listDdbLibrarySources,
   browseDdbLibraryMonsters,
   previewDdbLibraryMonster,
@@ -150,12 +150,8 @@ router.get('/campaigns', requireAuth, async (req: AuthenticatedRequest, res) => 
 
 router.get('/characters', requireAuth, async (req: AuthenticatedRequest, res) => {
   try {
-    const cobalt = await getCobaltForUser(req.userId!);
-    if (!cobalt) {
-      res.status(400).json({ error: 'D&D Beyond account not linked' });
-      return;
-    }
-    const characters = await fetchDdbCharacterList(cobalt);
+    const sessionId = req.header('x-session-id') ?? undefined;
+    const characters = await listDdbCharactersForUser(req.userId!, sessionId);
     res.json({ characters });
   } catch (err) {
     res.status(400).json({ error: err instanceof Error ? err.message : 'Failed to load characters' });
@@ -199,7 +195,8 @@ router.post('/characters/:id/import-token', requireAuth, async (req: Authenticat
       res.status(400).json({ error: 'Invalid character id' });
       return;
     }
-    const character = await getOrSyncCharacter(req.userId!, id, true);
+    const sessionId = req.header('x-session-id') ?? undefined;
+    const character = await getOrSyncCharacter(req.userId!, id, true, sessionId);
     const dex = character.abilities.find((a) => a.name === 'DEX');
     res.json({
       character,
