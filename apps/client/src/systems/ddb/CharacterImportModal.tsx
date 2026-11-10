@@ -22,6 +22,7 @@ export function CharacterImportModal({
 }) {
   const [importing, setImporting] = useState<number | null>(null);
   const [manualId, setManualId] = useState('');
+  const [nameQuery, setNameQuery] = useState('');
   const [error, setError] = useState<string | null>(null);
   const setLinkPanelOpen = useDdbStore((s) => s.setLinkPanelOpen);
   const myRole = useSessionStore((s) => s.myRole);
@@ -51,6 +52,13 @@ export function CharacterImportModal({
       setImporting(null);
     }
   }
+
+  const nameNeedle = nameQuery.trim().toLowerCase();
+  const filteredCharacters = (characters ?? []).filter((ch) => {
+    if (!nameNeedle) return true;
+    const hay = `${ch.name} ${ch.classLabel ?? ''} ${ch.campaignName ?? ''}`.toLowerCase();
+    return hay.includes(nameNeedle);
+  });
 
   const title = linkTokenId
     ? 'Link D&D Beyond character'
@@ -128,39 +136,54 @@ export function CharacterImportModal({
           </div>
         ) : (
           <div className="space-y-2">
-            {characters.map((ch) => (
-              <div
-                key={ch.ddbCharacterId}
-                className="flex items-center gap-3 rounded px-3 py-2"
-                style={{ background: 'var(--color-bg-tertiary)', border: `1px solid ${BD}` }}
-              >
-                {ch.avatarUrl ? (
-                  <img src={proxiedDdbImageUrl(ch.avatarUrl)} alt="" className="w-10 h-10 rounded-full object-cover" />
-                ) : (
-                  <div
-                    className="w-10 h-10 rounded-full flex items-center justify-center text-lg"
-                    style={{ background: 'var(--color-bg-primary)' }}
-                  >
-                    🧙
-                  </div>
-                )}
-                <div className="flex-1 min-w-0">
-                  <div className="font-display text-xs truncate" style={{ color: GOLD }}>{ch.name}</div>
-                  <div className="font-ui text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
-                    Lvl {ch.level} {ch.classLabel}
-                    {ch.campaignName ? ` · ${ch.campaignName}` : ''}
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  className="btn-primary text-xs shrink-0"
-                  disabled={importing === ch.ddbCharacterId}
-                  onClick={() => void handleImport(ch.ddbCharacterId)}
+            <input
+              type="search"
+              className="w-full rounded px-2 py-1.5 font-ui text-xs"
+              style={{ background: 'var(--color-bg-primary)', border: `1px solid ${BD}` }}
+              placeholder="Search by character name…"
+              value={nameQuery}
+              onChange={(e) => setNameQuery(e.target.value)}
+              autoFocus
+            />
+            {filteredCharacters.length === 0 ? (
+              <p className="font-ui text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
+                No characters match “{nameQuery.trim()}”.
+              </p>
+            ) : (
+              filteredCharacters.map((ch) => (
+                <div
+                  key={ch.ddbCharacterId}
+                  className="flex items-center gap-3 rounded px-3 py-2"
+                  style={{ background: 'var(--color-bg-tertiary)', border: `1px solid ${BD}` }}
                 >
-                  {importing === ch.ddbCharacterId ? '…' : linkTokenId ? 'Link' : isPlayer ? 'Load' : 'Import'}
-                </button>
-              </div>
-            ))}
+                  {ch.avatarUrl ? (
+                    <img src={proxiedDdbImageUrl(ch.avatarUrl)} alt="" className="w-10 h-10 rounded-full object-cover" />
+                  ) : (
+                    <div
+                      className="w-10 h-10 rounded-full flex items-center justify-center text-lg"
+                      style={{ background: 'var(--color-bg-primary)' }}
+                    >
+                      🧙
+                    </div>
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <div className="font-display text-xs truncate" style={{ color: GOLD }}>{ch.name}</div>
+                    <div className="font-ui text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
+                      Lvl {ch.level} {ch.classLabel}
+                      {ch.campaignName ? ` · ${ch.campaignName}` : ''}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn-primary text-xs shrink-0"
+                    disabled={importing === ch.ddbCharacterId}
+                    onClick={() => void handleImport(ch.ddbCharacterId)}
+                  >
+                    {importing === ch.ddbCharacterId ? '…' : linkTokenId ? 'Link' : isPlayer ? 'Load' : 'Import'}
+                  </button>
+                </div>
+              ))
+            )}
           </div>
         )}
         {error && (
