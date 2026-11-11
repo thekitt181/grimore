@@ -4,7 +4,15 @@ import { decryptToken, encryptToken } from './encryption';
 import { normalizeCobaltToken, validateCobalt } from './cobaltAuth';
 import { extractCharacter } from './characterExtract';
 import { fetchDdbCampaigns, fetchDdbCharacterList } from './campaigns';
-import { pushHpToDdb, pushDeathSavesToDdb, type DdbDeathSavesPayload } from './characterUpdate';
+import {
+  pushHpToDdb,
+  pushDeathSavesToDdb,
+  pushRestToDdb,
+  pushCurrencyDeltaToDdb,
+  type DdbCoinPurse,
+  type DdbDeathSavesPayload,
+} from './characterUpdate';
+import { pushHandoutItemToDdb, type PushHandoutItemInput } from './characterInventoryPush';
 import { fetchDdbEncounters, resolveDdbEncounter, parseDdbEncounterId } from './encounters';
 import { fetchDdbCatalog } from './ddbSources';
 import { filterAccessibleSourceIds, invalidateAccessibleSourceCache, listAccessibleDdbSources } from './ddbAccessibleSources';
@@ -23,11 +31,13 @@ import { enrichMonstersForImport } from './ddbMonsterFetch';
 import { getDdbAuthContext } from './ddbAuthContext';
 import { normalizeDdbMonsterToCompendium } from './ddbContentNormalize';
 import {
+  applyRestToCharacter,
   coerceGrimoireCharacter,
   DDB_HOMEBREW_SOURCE_ID,
   type DdbCharacterSummary,
   type DdbLinkStatus,
   type GrimoireCharacter,
+  type RestKind,
 } from '@grimoire/shared';
 import { DDB_NORMALIZER_VERSION } from './normalizerVersion';
 
@@ -342,6 +352,155 @@ export async function patchCharacterDeathSaves(
   if (options?.hp != null) character.hp = options.hp;
   if (options?.tempHp != null) character.tempHp = options.tempHp;
   return { pushedToDdb, character };
+}
+
+async function persistCharacterSnapshot(
+  providerId: string,
+  ddbCharacterId: number,
+  character: GrimoireCharacter,
+): Promise<void> {
+  const snapshot = {
+    ...character,
+    ddbNormalizerVersion: DDB_NORMALIZER_VERSION,
+  } as unknown as Prisma.InputJsonValue;
+  await readPrisma.ddbCharacterCache.upsert({
+    where: { userId_ddbCharacterId: { userId: providerId, ddbCharacterId } },
+    create: {
+      userId: providerId,
+      ddbCharacterId,
+      name: character.name,
+      campaignId: character.campaignId ?? null,
+      snapshot,
+      updateId: character.updateId ?? 0,
+      lastSyncedAt: new Date(),
+    },
+    update: {
+      name: character.name,
+      campaignId: character.campaignId ?? null,
+      snapshot,
+      lastSyncedAt: new Date(),
+    },
+  });
+}
+
+export async function restCharacter(
+  userId: string,
+  ddbCharacterId: number,
+  kind: RestKind,
+  sessionId?: string,
+): Promise<{ pushedToDdb: boolean; character: GrimoireCharacter }> {
+  const providerId = await resolveDdbProviderUserId(userId, sessionId);
+  const cobalt = await getCobaltForUser(providerId);
+  if (!cobalt) throw new Error('D&D Beyond account not linked');
+
+  const pushedToDdb = await pushRestToDdb(cobalt, ddbCharacterId, kind);
+
+  let character = await getOrSyncCharacter(userId, ddbCharacterId, pushedToDdb, sessionId);
+  character = applyRestToCharacter(character, kind);
+  if (kind === 'long') {
+    if (userId === providerId) {
+      await pushHpToDdb(cobalt, ddbCharacterId, character.maxHp, 0);
+    }
+    character = { ...character, hp: character.maxHp, tempHp: 0 };
+  }
+  await persistCharacterSnapshot(providerId, ddbCharacterId, character);
+  return { pushedToDdb, character };
+}
+
+export async function giveInventoryItemToCharacter(
+  userId: string,
+  ddbCharacterId: number,
+  item: PushHandoutItemInput,
+  sessionId?: string,
+): Promise<{ ok: boolean; pushedToDdb: boolean; character: GrimoireCharacter; message: string }> {
+  const providerId = await resolveDdbProviderUserId(userId, sessionId);
+  const cobalt = await getCobaltForUser(providerId);
+  if (!cobalt) throw new Error('D&D Beyond account not linked');
+
+  const push = await pushHandoutItemToDdb(cobalt, ddbCharacterId, item);
+
+  let character = await getOrSyncCharacter(userId, ddbCharacterId, Boolean(push.ok), sessionId);
+  if (!push.ok) {
+    const qtyName = item.name;
+    character = {
+      ...character,
+      inventory: [
+        ...(character.inventory ?? []),
+        {
+          id: `loot-${Date.now()}`,
+          name: qtyName,
+          quantity: item.quantity && item.quantity > 1 ? item.quantity : 1,
+          description: item.description,
+          type: item.itemType,
+        },
+      ],
+    };
+    const cached = await readPrisma.ddbCharacterCache.findUnique({
+      where: { userId_ddbCharacterId: { userId: providerId, ddbCharacterId } },
+    });
+    if (cached) {
+      await readPrisma.ddbCharacterCache.update({
+        where: { id: cached.id },
+        data: {
+          snapshot: {
+            ...character,
+            ddbNormalizerVersion: DDB_NORMALIZER_VERSION,
+          } as unknown as Prisma.InputJsonValue,
+        },
+      });
+    }
+  }
+
+  return {
+    ok: true,
+    pushedToDdb: push.ok,
+    character,
+    message: push.ok
+      ? (push.message ?? 'Added to D&D Beyond inventory')
+      : `Saved on the sheet${push.message ? ` (${push.message})` : ''}`,
+  };
+}
+
+function formatCoinDelta(delta: Partial<DdbCoinPurse>): string {
+  const parts = (['pp', 'gp', 'ep', 'sp', 'cp'] as const)
+    .map((k) => {
+      const n = Math.floor(Number(delta[k] ?? 0) || 0);
+      return n > 0 ? `${n} ${k}` : null;
+    })
+    .filter((s): s is string => Boolean(s));
+  return parts.join(', ') || '0 gp';
+}
+
+export async function giveGoldToCharacter(
+  userId: string,
+  ddbCharacterId: number,
+  coins: number | Partial<DdbCoinPurse>,
+  sessionId?: string,
+): Promise<{ ok: boolean; pushedToDdb: boolean; character: GrimoireCharacter; message: string }> {
+  const providerId = await resolveDdbProviderUserId(userId, sessionId);
+  const cobalt = await getCobaltForUser(providerId);
+  if (!cobalt) throw new Error('D&D Beyond account not linked');
+
+  const delta: Partial<DdbCoinPurse> = typeof coins === 'number'
+    ? { gp: Math.max(0, Math.floor(coins)) }
+    : coins;
+  const total = (['cp', 'sp', 'ep', 'gp', 'pp'] as const)
+    .reduce((sum, k) => sum + Math.max(0, Math.floor(Number(delta[k] ?? 0) || 0)), 0);
+  const push = total > 0
+    ? await pushCurrencyDeltaToDdb(cobalt, ddbCharacterId, delta)
+    : { ok: false as const };
+  const character = await getOrSyncCharacter(userId, ddbCharacterId, push.ok, sessionId);
+  const label = formatCoinDelta(delta);
+  return {
+    ok: push.ok || total <= 0,
+    pushedToDdb: push.ok,
+    character,
+    message: push.ok
+      ? `Added ${label} to D&D Beyond currency.`
+      : total <= 0
+        ? 'No coins to add'
+        : (push.error ?? 'Could not add coins on D&D Beyond — check the linked account can edit this sheet.'),
+  };
 }
 
 async function requireDdbAuth(userId: string) {

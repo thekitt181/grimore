@@ -390,7 +390,6 @@ function Candle() {
       <Cyl args={[0.07, 0.08, 0.42, 10]} position={[0, 0.28, 0]} color="#e8e0d0" roughness={0.55} />
       <Cyl args={[0.09, 0.1, 0.08, 10]} position={[0, 0.05, 0]} color={IRON_DARK} metalness={0.4} />
       <FlameFlicker y={0.55} scale={0.55} />
-      <pointLight position={[0, 0.62, 0]} color={FLAME} intensity={1.4} distance={3.2} decay={2} />
     </group>
   );
 }
@@ -422,7 +421,6 @@ function Torch() {
       <Cyl args={[0.05, 0.06, 0.55, 8]} position={[0, 0.35, 0]} color={WOOD_DARK} />
       <Box args={[0.16, 0.12, 0.16]} position={[0, 0.62, 0]} color={IRON} metalness={0.45} />
       <FlameFlicker y={0.78} scale={1.1} />
-      <pointLight position={[0, 0.85, 0]} color={FLAME} intensity={2.2} distance={4.5} decay={2} />
     </group>
   );
 }
@@ -434,7 +432,6 @@ function Campfire() {
       <Box args={[0.5, 0.1, 0.12]} position={[0, 0.08, 0]} rotation={[0, -0.7, 0]} color={WOOD} />
       <Box args={[0.45, 0.1, 0.12]} position={[0, 0.14, 0]} rotation={[0, 1.1, 0]} color={WOOD_DARK} />
       <FlameFlicker y={0.42} scale={1.4} />
-      <pointLight position={[0, 0.5, 0]} color={FLAME} intensity={3.2} distance={6} decay={2} />
     </group>
   );
 }
@@ -447,13 +444,6 @@ function Altar({ lit }: { lit: number }) {
       {lit > 0.04 ? (
         <>
           <FlameFlicker y={0.62} scale={0.9 * (0.5 + lit * 0.5)} />
-          <pointLight
-            position={[0, 0.7, 0]}
-            color={FLAME}
-            intensity={1.8 * lit}
-            distance={4}
-            decay={2}
-          />
         </>
       ) : null}
     </group>

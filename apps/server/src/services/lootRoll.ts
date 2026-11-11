@@ -353,7 +353,11 @@ function resolveSource(sourceId: string, subjectName: string): LootSource {
   if (sourceId === 'this' || sourceId === 'any') {
     return knownSourceFromName(subjectName) ?? (sourceId === 'this' ? subjectSource(subjectName) : ANY_SOURCE);
   }
-  return sourceById(sourceId);
+  const known = SOURCES.find((source) => source.id === sourceId);
+  if (known) return known;
+  return knownSourceFromName(sourceId)
+    ?? knownSourceFromName(subjectName)
+    ?? subjectSource(subjectName || sourceId);
 }
 
 function formatCoins(gpValue: number, level: number | null, prefix: string): string {

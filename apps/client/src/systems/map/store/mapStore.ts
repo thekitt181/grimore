@@ -21,6 +21,7 @@ export type MapTool =
     | 'fog-reveal' | 'fog-hide'
     | 'wall'
     | 'measure'
+    | 'ping'
     | 'check-distance'
     | 'wander-path'
     | 'calibrate'
@@ -137,6 +138,8 @@ interface SceneState extends ActiveGrid {
   gmMovePlayerTokens: boolean;
   /** When false, only the GM can move tokens. */
   playersCanMoveTokens: boolean;
+  /** When false, players may only view corpse loot; GM hands it out. */
+  playersCanLoot: boolean;
 
   // Drawing tool settings
   drawColor: string;
@@ -157,6 +160,7 @@ interface SceneState extends ActiveGrid {
   setSyncPlayerViews: (enabled: boolean) => void;
   setGmMovePlayerTokens: (enabled: boolean) => void;
   setPlayersCanMoveTokens: (enabled: boolean) => void;
+  setPlayersCanLoot: (enabled: boolean) => void;
   setDrawColor: (color: string) => void;
   setDrawStroke: (stroke: number) => void;
   setTextFontSize: (size: number) => void;
@@ -261,6 +265,7 @@ export const useMapStore = create<SceneState>((set, get) => ({
   syncPlayerViews: false,
   gmMovePlayerTokens: true,
   playersCanMoveTokens: true,
+  playersCanLoot: false,
   drawColor:    '#c9a84c',
   drawStroke:   3,
   textFontSize: 18,
@@ -291,6 +296,7 @@ export const useMapStore = create<SceneState>((set, get) => ({
   setSyncPlayerViews: (syncPlayerViews) => set({ syncPlayerViews }),
   setGmMovePlayerTokens: (gmMovePlayerTokens) => set({ gmMovePlayerTokens }),
   setPlayersCanMoveTokens: (playersCanMoveTokens) => set({ playersCanMoveTokens }),
+  setPlayersCanLoot: (playersCanLoot) => set({ playersCanLoot }),
   setDrawColor:   (drawColor) => set({ drawColor }),
   setDrawStroke:  (drawStroke) => set({ drawStroke }),
   setTextFontSize:(textFontSize) => set({ textFontSize }),
@@ -497,6 +503,7 @@ export const useMapStore = create<SceneState>((set, get) => ({
       syncPlayerViews: false,
       gmMovePlayerTokens: true,
       playersCanMoveTokens: true,
+      playersCanLoot: false,
     }),
 }));
 

@@ -1,0 +1,3 @@
+Space low poly dice meshes by MotazCG (geometry only).
+https://www.cgtrader.com/free-3d-models/various/various-models/space-low-poly-dice
+Materials and baked textures are not used; face numbers and colours are Grimoire skins.

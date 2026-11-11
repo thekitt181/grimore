@@ -117,6 +117,52 @@ export async function patchDdbDeathSaves(
   return data;
 }
 
+export async function restDdbCharacter(
+  id: number,
+  kind: 'short' | 'long',
+): Promise<{ pushedToDdb: boolean; character: GrimoireCharacter }> {
+  const { data } = await api.post<{ pushedToDdb: boolean; character: GrimoireCharacter }>(
+    `/ddb/characters/${id}/rest`,
+    { kind },
+  );
+  return { ...data, character: coerceGrimoireCharacter(data.character) };
+}
+
+export async function giveDdbInventoryItem(
+  id: number,
+  item: { name: string; description?: string; itemType?: string; quantity?: number },
+): Promise<{ ok: boolean; pushedToDdb: boolean; character: GrimoireCharacter; message: string }> {
+  const { data } = await api.post<{
+    ok: boolean;
+    pushedToDdb: boolean;
+    character: GrimoireCharacter;
+    message: string;
+  }>(`/ddb/characters/${id}/give-item`, item);
+  return { ...data, character: coerceGrimoireCharacter(data.character) };
+}
+
+export type DdbCoinShare = {
+  cp?: number;
+  sp?: number;
+  ep?: number;
+  gp?: number;
+  pp?: number;
+};
+
+export async function giveDdbGold(
+  id: number,
+  coins: number | DdbCoinShare,
+): Promise<{ ok: boolean; pushedToDdb: boolean; character: GrimoireCharacter; message: string }> {
+  const body = typeof coins === 'number' ? { gp: coins } : coins;
+  const { data } = await api.post<{
+    ok: boolean;
+    pushedToDdb: boolean;
+    character: GrimoireCharacter;
+    message: string;
+  }>(`/ddb/characters/${id}/give-gold`, body);
+  return { ...data, character: coerceGrimoireCharacter(data.character) };
+}
+
 export async function patchDdbHp(
   id: number,
   hp: number,

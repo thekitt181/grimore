@@ -5,7 +5,7 @@ import { formatLimitedUses, type GrimoireCharacter } from '@grimoire/shared';
 import type { TokenItem } from '@/systems/scene/types';
 import { useItemStore } from '@/systems/scene/store/itemStore';
 import { useDiceStore } from '@/systems/dice/diceStore';
-import { patchDdbDeathSaves, syncDdbCharacter } from './ddbApi';
+import { fetchDdbCharacter, patchDdbDeathSaves, syncDdbCharacter } from './ddbApi';
 import { HpCommitInput } from './HpCommitInput';
 import { normalizeDeathSaves, type DeathSavesState } from './deathSaveRoll';
 import { DeathSaveTrack } from './DeathSaveTrack';
@@ -50,7 +50,7 @@ export function CharacterSheetPanel({ token, onClose }: { token: TokenItem; onCl
   const { data: character, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['ddb', 'character', ddbId],
     queryFn: async () => {
-      const ch = await syncDdbCharacter(ddbId!);
+      const ch = await fetchDdbCharacter(ddbId!);
       pullDdbHpToToken(liveToken.id, ch);
       return ch;
     },

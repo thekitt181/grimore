@@ -37,6 +37,7 @@ export interface PushHandoutItemInput {
   source?: string;
   isCustom?: boolean;
   ddbDefinitionId?: number;
+  quantity?: number;
 }
 
 export interface PushHandoutItemOptions {
@@ -370,6 +371,11 @@ function partyScopeFields(ddbCampaignId: number): Record<string, unknown> {
   };
 }
 
+function itemQuantity(item?: { quantity?: number }): number {
+  const n = Math.floor(Number(item?.quantity ?? 1));
+  return Number.isFinite(n) && n > 0 ? n : 1;
+}
+
 function equipmentEntry(
   characterId: number,
   fields: Record<string, unknown>,
@@ -438,7 +444,7 @@ function customItemPostBody(
     characterId,
     name: item.name.trim(),
     description: customItemDescription(item),
-    quantity: 1,
+    quantity: itemQuantity(item),
     cost: null,
     weight: null,
     notes: customItemNotes(item),
@@ -482,6 +488,7 @@ function flatOfficialPartyBody(
   definitionId: number,
   gameData: Record<string, unknown> | null,
   partyCampaignId: number,
+  quantity = 1,
 ): Record<string, unknown> {
   const entityTypeId = Number(gameData?.entityTypeId ?? 112130694);
   return {
@@ -489,7 +496,7 @@ function flatOfficialPartyBody(
     ...partyScopeFields(partyCampaignId),
     definitionId,
     entityTypeId: Number.isFinite(entityTypeId) && entityTypeId > 0 ? entityTypeId : 112130694,
-    quantity: 1,
+    quantity,
     equipped: false,
   };
 }
@@ -562,6 +569,7 @@ function officialItemBody(
   definitionId: number,
   gameData: Record<string, unknown> | null,
   partyCampaignId?: number,
+  quantity = 1,
 ): Record<string, unknown> {
   const entityTypeId = Number(gameData?.entityTypeId ?? 112130694);
   return inventoryPostBody(characterId, [
@@ -570,6 +578,7 @@ function officialItemBody(
       {
         entityId: definitionId,
         entityTypeId: Number.isFinite(entityTypeId) && entityTypeId > 0 ? entityTypeId : 112130694,
+        quantity,
       },
       partyCampaignId,
     ),
@@ -603,11 +612,12 @@ async function pushInventoryItem(
 
   if (definitionId) {
     const gameData = await resolveGameDataEntry(ctx, definitionId, gameDataCampaignId);
+    const qty = itemQuantity(item);
     const officialBodies: Record<string, unknown>[] = [
-      officialItemBody(characterId, definitionId, gameData, partyCampaignId),
+      officialItemBody(characterId, definitionId, gameData, partyCampaignId, qty),
     ];
     if (partyCampaignId) {
-      officialBodies.push(flatOfficialPartyBody(characterId, definitionId, gameData, partyCampaignId));
+      officialBodies.push(flatOfficialPartyBody(characterId, definitionId, gameData, partyCampaignId, qty));
     }
 
     let lastError = '';

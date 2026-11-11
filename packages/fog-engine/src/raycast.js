@@ -49,11 +49,9 @@ function collectAngles(origin, walls, bounds) {
         for (const c of corners)
             push(angleTo(origin, c));
     }
-    if (walls.length === 0 && !bounds) {
-        const steps = 72;
-        for (let i = 0; i < steps; i++) {
-            angles.push((2 * Math.PI * i) / steps);
-        }
+    const steps = 72;
+    for (let i = 0; i < steps; i++) {
+        angles.push((2 * Math.PI * i) / steps);
     }
     return angles;
 }

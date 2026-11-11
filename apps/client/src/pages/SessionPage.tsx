@@ -37,6 +37,7 @@ import { AoePlacementHint } from '@/systems/combat/AoePlacementHint';
 import { TokenMoveDistanceHint } from '@/systems/scene/interaction/TokenMoveDistanceHint';
 import { ClearMapAreasButton } from '@/systems/combat/ClearMapAreasButton';
 import { CombatResultToast } from '@/systems/combat/CombatResultToast';
+import { CorpseLootPanel } from '@/systems/combat/CorpseLootPanel';
 import { TokenActionsPanel } from '@/systems/combat/TokenActionsPanel';
 import { PcActionsPanel } from '@/systems/ddb/PcActionsPanel';
 import { CharacterSheetPanel } from '@/systems/ddb/CharacterSheetPanel';
@@ -537,6 +538,7 @@ export function SessionPage() {
 
           <RollToast />
           <CombatResultToast />
+          <CorpseLootPanel />
           <AttackTargetPicker />
           <AttackTargetHint />
           <SpellTargetHint />

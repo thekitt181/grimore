@@ -11,6 +11,7 @@ import {
 import { useSessionStore } from '@/store/sessionStore';
 import { useChatStore } from '@/store/chatStore';
 import { applySessionFogActive, bindFogActiveSocket, syncFogActiveToSession } from '@/systems/scene/fogActiveSync';
+import { bindLootPolicySocket, syncLootPolicyToSession } from '@/systems/combat/lootPolicySync';
 import { bindWallExtrudeSocket, syncWallExtrudeToSession } from '@/systems/map/wallExtrudeSync';
 import { bindDdbRollSocket } from '@/systems/ddb/bindDdbRollSocket';
 import type { ChatMessagePayload } from '@grimoire/shared';
@@ -109,9 +110,11 @@ export function useSocket(
       clearConnectionError();
       joinRoom();
       bindFogActiveSocket();
+      bindLootPolicySocket();
       bindWallExtrudeSocket();
       bindDdbRollSocket(true);
       syncFogActiveToSession();
+      syncLootPolicyToSession();
       syncWallExtrudeToSession();
     }
 
@@ -233,6 +236,7 @@ export function useSocket(
       socket.io.on('reconnect_failed', h.onReconnectFailed);
 
       bindFogActiveSocket();
+      bindLootPolicySocket();
       bindWallExtrudeSocket();
       bindDdbRollSocket(true);
     }

@@ -32,10 +32,11 @@ const DDB_RESET_LABEL: Record<number, string> = {
 };
 
 function ddbResetLabel(resetType: unknown, description: unknown): string | undefined {
-  const desc = typeof description === 'string' ? description.trim() : '';
-  if (desc) return desc;
   const n = Number(resetType);
-  return Number.isFinite(n) ? DDB_RESET_LABEL[n] : undefined;
+  const fromType = Number.isFinite(n) ? DDB_RESET_LABEL[n] : undefined;
+  if (fromType) return fromType;
+  const desc = typeof description === 'string' ? description.trim() : '';
+  return desc || undefined;
 }
 
 function extractLimitedUses(
@@ -43,7 +44,14 @@ function extractLimitedUses(
   ctx?: { abilities?: GrimoireAbility[]; proficiencyBonus?: number },
 ): Pick<GrimoireInventoryItem, 'usesMax' | 'usesUsed' | 'usesRemaining' | 'usesReset'> {
   const lu = source.limitedUse ?? source.definition?.limitedUse ?? null;
-  let max = Number(lu?.maxUses ?? lu?.maxUseCount ?? source.charges ?? source.definition?.charges ?? 0);
+  let max = Number(
+    lu?.maxUses
+    ?? lu?.maxNumberOfUses
+    ?? lu?.maxUseCount
+    ?? source.charges
+    ?? source.definition?.charges
+    ?? 0,
+  );
   if (!Number.isFinite(max)) max = 0;
 
   const statId = lu?.statModifierUsesId ?? lu?.statModifierUses;
@@ -60,7 +68,7 @@ function extractLimitedUses(
   }
 
   if (max <= 0) return {};
-  const usedRaw = Number(lu?.numberUsed ?? source.chargesUsed ?? 0);
+  const usedRaw = Number(lu?.numberUsed ?? lu?.numberOfUses ?? source.chargesUsed ?? 0);
   const used = Number.isFinite(usedRaw) ? Math.max(0, usedRaw) : 0;
   const remaining = Math.max(0, max - used);
   const reset = ddbResetLabel(lu?.resetType, lu?.resetTypeDescription ?? lu?.resetTypeName);
@@ -243,6 +251,56 @@ function formatSpellDuration(def: any, concentration: boolean): string | undefin
   return concentration ? `Concentration, up to ${span}` : span;
 }
 
+function addSpellSlot(out: GrimoireSpellSlots[], level: number, total: number, used: number): void {
+  if (!Number.isFinite(level) || level < 1 || level > 9) return;
+  if (!Number.isFinite(total) || total <= 0) return;
+  const spent = Number.isFinite(used) ? Math.max(0, Math.min(total, used)) : 0;
+  const existing = out.find((s) => s.level === level);
+  if (existing) {
+    existing.total = Math.max(existing.total, total);
+    existing.used = Math.max(existing.used, spent);
+    return;
+  }
+  out.push({ level, total, used: spent });
+}
+
+function ingestSpellSlotPool(out: GrimoireSpellSlots[], slots: unknown): void {
+  if (!slots) return;
+  if (Array.isArray(slots)) {
+    slots.forEach((s, i) => {
+      if (!s || typeof s !== 'object') return;
+      const row = s as Record<string, unknown>;
+      const level = Number(row.level ?? i);
+      const total = Number(row.max ?? row.total ?? row.available ?? 0);
+      const used = Number(row.used ?? row.numberUsed ?? 0);
+      addSpellSlot(out, level, total, used);
+    });
+    return;
+  }
+  if (typeof slots !== 'object') return;
+  for (const [key, s] of Object.entries(slots as Record<string, unknown>)) {
+    if (!s || typeof s !== 'object') continue;
+    const row = s as Record<string, unknown>;
+    const fromKey = Number(String(key).replace(/\D/g, '') || key);
+    const level = Number(row.level ?? fromKey);
+    const total = Number(row.max ?? row.total ?? row.available ?? 0);
+    const used = Number(row.used ?? row.numberUsed ?? 0);
+    addSpellSlot(out, level, total, used);
+  }
+}
+
+function parseSpellSlots(raw: any): GrimoireSpellSlots[] {
+  const out: GrimoireSpellSlots[] = [];
+  ingestSpellSlotPool(out, raw.spellSlots);
+  ingestSpellSlotPool(out, raw.slots);
+  ingestSpellSlotPool(out, raw.pactMagic);
+  for (const cls of raw.classes ?? []) {
+    ingestSpellSlotPool(out, cls?.spellSlots);
+    ingestSpellSlotPool(out, cls?.pactMagic);
+  }
+  return out.sort((a, b) => a.level - b.level);
+}
+
 function parseAoe(definition: any): { size: number; type: string } | undefined {
   const range = definition?.range ?? definition?.activation?.range;
   if (!range) return undefined;
@@ -329,25 +387,7 @@ export function normalizeCharacter(raw: any, ddbCharacterId: number): GrimoireCh
     });
   }
 
-  const spellSlots: GrimoireSpellSlots[] = (raw.classSpells ?? [])
-    .flatMap((c: any) => c.spells ?? [])
-    .length
-    ? []
-    : (raw.spellSlots ?? raw.slots ?? []).map((s: any, i: number) => ({
-        level: s.level ?? i + 1,
-        total: s.max ?? s.total ?? 0,
-        used: s.used ?? 0,
-      }));
-
-  if (spellSlots.length === 0 && raw.classes?.[0]?.spellSlots) {
-    const slots = raw.classes[0].spellSlots;
-    for (let i = 1; i <= 9; i++) {
-      const s = slots[`level${i}`] ?? slots[i];
-      if (s && (s.max > 0 || s.total > 0)) {
-        spellSlots.push({ level: i, total: s.max ?? s.total ?? 0, used: s.used ?? 0 });
-      }
-    }
-  }
+  const spellSlots = parseSpellSlots(raw);
 
   const inventory: GrimoireInventoryItem[] = (raw.inventory ?? []).map((item: any) =>
     normalizeInventoryItem(item),

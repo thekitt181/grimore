@@ -20,6 +20,7 @@ import type { ImageItem, Item, TokenItem } from '@/systems/scene/types';
 import { tokenFlyHeightFt } from '@/systems/combat/attackRange';
 import { firstPersonLook } from './firstPersonLook';
 import { poseForToken } from './firstPersonPose';
+import { AttachedSceneLight } from './ScenePointLight';
 
 bindPoseRelay(getSocket());
 
@@ -278,9 +279,13 @@ export function SceneItemTransformGroup({
     }
   }, 0);
 
+  const itemType = useItemStore((s) => s.items[itemId]?.type);
+  const attachLight = !displayOnly && (itemType === 'token' || itemType === 'image');
+
   return (
     <group ref={ref} {...(displayOnly ? {} : { name: feetObjectName(itemId) })}>
       {children}
+      {attachLight ? <AttachedSceneLight itemId={itemId} /> : null}
     </group>
   );
 }

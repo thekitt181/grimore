@@ -1,10 +1,11 @@
+import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { D5E_CONDITIONS } from '@grimoire/shared';
 import type { TokenItem } from '@/systems/scene/types';
 import { useItemStore } from '@/systems/scene/store/itemStore';
 import { emitItemUpdate } from '@/systems/scene/sceneSync';
-import { applyTokenConditionsToCombatants } from '@/systems/initiative/initiativeTokenSync';
-import { patchDdbDeathSaves, syncDdbCharacter } from '@/systems/ddb/ddbApi';
+import { applyConditionToToken, remainingRounds } from '@/systems/initiative/conditionDuration';
+import { fetchDdbCharacter, patchDdbDeathSaves, syncDdbCharacter } from '@/systems/ddb/ddbApi';
 import { DeathSaveTrack } from '@/systems/ddb/DeathSaveTrack';
 import { normalizeDeathSaves, type DeathSavesState } from '@/systems/ddb/deathSaveRoll';
 import { markLocalHpWrite, pullDdbHpToToken } from '@/systems/ddb/useDdbHpSync';
@@ -14,6 +15,7 @@ import { BD, GOLD } from '../dmStyles';
 
 export function PartyCharacterCard({ token }: { token: TokenItem }) {
   const qc = useQueryClient();
+  const [conditionRoundsInput, setConditionRoundsInput] = useState('3');
   const openSheet = useDdbStore((s) => s.openSheet);
   const ddbId = token.ddbCharacterId!;
   const liveToken = useItemStore((s) => {
@@ -24,7 +26,7 @@ export function PartyCharacterCard({ token }: { token: TokenItem }) {
   const { data: character, isLoading, isError, refetch } = useQuery({
     queryKey: ['ddb', 'character', ddbId],
     queryFn: async () => {
-      const ch = await syncDdbCharacter(ddbId);
+      const ch = await fetchDdbCharacter(ddbId);
       pullDdbHpToToken(liveToken.id, ch);
       return ch;
     },
@@ -52,13 +54,8 @@ export function PartyCharacterCard({ token }: { token: TokenItem }) {
   });
 
   function toggleTokenCondition(condition: string) {
-    const has = liveToken.conditions.includes(condition);
-    const conditions = has
-      ? liveToken.conditions.filter((c) => c !== condition)
-      : [...liveToken.conditions, condition];
-    useItemStore.getState().updateItem(liveToken.id, { conditions });
-    emitItemUpdate([{ id: liveToken.id, patch: { conditions } }]);
-    applyTokenConditionsToCombatants(liveToken.id, conditions);
+    const n = parseInt(conditionRoundsInput, 10);
+    applyConditionToToken(liveToken, condition, Number.isFinite(n) && n > 0 ? n : null);
   }
 
   function pushDeathSaves(deathSaves: DeathSavesState, hp?: number) {
@@ -195,14 +192,28 @@ export function PartyCharacterCard({ token }: { token: TokenItem }) {
 
           <div>
             <div className="text-[10px] opacity-70 mb-1">Map token conditions</div>
+            <label className="flex items-center gap-1 text-[9px] opacity-70 mb-1">
+              Rounds
+              <input
+                type="number"
+                min={0}
+                className="w-10 rounded px-1 py-0"
+                style={{ background: 'var(--color-bg-primary)', border: `1px solid ${BD}` }}
+                title="Applied when turning a condition on. Blank = until cleared."
+                value={conditionRoundsInput}
+                onChange={(e) => setConditionRoundsInput(e.target.value)}
+              />
+            </label>
             <div className="flex flex-wrap gap-0.5">
               {D5E_CONDITIONS.map((cond) => {
                 const on = liveToken.conditions.includes(cond);
+                const left = remainingRounds(liveToken.conditionRounds, cond);
                 return (
                   <button
                     key={cond}
                     type="button"
                     className="text-[9px] px-1 py-0.5 rounded"
+                    title={left ? `${cond} · ${left} rounds` : cond}
                     style={{
                       background: on ? 'rgba(201,168,76,0.2)' : 'transparent',
                       border: `1px solid ${on ? GOLD : BD}`,
@@ -210,7 +221,7 @@ export function PartyCharacterCard({ token }: { token: TokenItem }) {
                     }}
                     onClick={() => toggleTokenCondition(cond)}
                   >
-                    {cond}
+                    {cond}{left ? ` ${left}` : ''}
                   </button>
                 );
               })}

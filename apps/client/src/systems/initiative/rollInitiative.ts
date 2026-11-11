@@ -41,6 +41,7 @@ export function rollInitiativeFromTokens(): void {
         tempHp: readTempHp(token.tempHp),
         name: token.name,
         conditions: [...token.conditions],
+        conditionRounds: { ...(token.conditionRounds ?? {}) },
         isPlayer: Boolean(token.isPc || token.ownerId?.trim() || token.ddbCharacterId),
         hideHpFromPlayers: isHpHiddenFromPlayers(token),
       });
@@ -53,6 +54,7 @@ export function rollInitiativeFromTokens(): void {
         maxHp: token.maxHp,
         tempHp: readTempHp(token.tempHp),
         conditions: [...token.conditions],
+        conditionRounds: { ...(token.conditionRounds ?? {}) },
         tokenId: token.id,
         isPlayer: Boolean(token.isPc || token.ownerId?.trim() || token.ddbCharacterId),
         hideHpFromPlayers: isHpHiddenFromPlayers(token),

@@ -11,6 +11,7 @@ import {
   useDiceSkinStore,
   type DieCellLabel,
 } from './diceSkinStore';
+import { preloadSpaceDice, spaceDieGeometry, useSpaceDiceReady } from './spaceDieMeshes';
 
 /**
  * Cache of built die textures keyed by image + fit. Dice in a roll usually share
@@ -165,7 +166,11 @@ function DieMesh({
   const ref = useRef<THREE.Mesh>(null!);
   const start = useRef(performance.now() + index * 45);
   const kind = normalizeDieSides(sides);
-  const die = useMemo(() => buildNumberedDie(sides), [sides]);
+  const spaceReady = useSpaceDiceReady();
+  const die = useMemo(
+    () => buildNumberedDie(sides, spaceDieGeometry(sides)),
+    [sides, spaceReady],
+  );
   const { x, z, scale } = layout;
   const skin = useDiceSkinStore((s) => s.skinFor(sides));
   const imageFit = useDiceSkinStore((s) => s.imageFit);
@@ -312,6 +317,10 @@ function DiceScene({ spec }: { spec: DiceAnimationSpec }) {
 export function DiceTrayOverlay() {
   const spec = useDiceStore((s) => s.activeAnimation);
   const clearAnimation = useDiceStore((s) => s.clearAnimation);
+
+  useEffect(() => {
+    void preloadSpaceDice();
+  }, []);
 
   useEffect(() => {
     if (!spec) return;

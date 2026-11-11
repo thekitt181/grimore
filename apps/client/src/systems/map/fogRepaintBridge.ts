@@ -6,7 +6,8 @@ import { useMapStore } from '@/systems/map/store/mapStore';
 import { hasDragLivePositions } from '@/systems/scene/interaction/dragLivePositions';
 import { isItemDragActive } from '@/systems/scene/interaction/selectionDragState';
 import { isFogOverlayVisible } from '@/systems/scene/fogActiveSync';
-import type { TokenItem } from '@/systems/scene/types';
+import type { Item, TokenItem } from '@/systems/scene/types';
+import { itemLightSpec } from '@/systems/scene/sceneLights';
 
 type FogRepaintListener = () => void;
 
@@ -32,6 +33,19 @@ function tokenDrivesFog(it: TokenItem, visionIds: Set<string>): boolean {
   if (it.isPc) return true;
   if (it.ownerId) return true;
   return false;
+}
+
+function itemDrivesFog(it: Item, visionIds: Set<string>): boolean {
+  if (it.type === 'token' && tokenDrivesFog(it, visionIds)) return true;
+  return itemLightSpec(it) != null;
+}
+
+function lightItemIds(): Set<string> {
+  const ids = new Set<string>();
+  for (const it of Object.values(useItemStore.getState().items)) {
+    if (itemLightSpec(it)) ids.add(it.id);
+  }
+  return ids;
 }
 
 function scheduleSceneVisibilityUpdate(): void {
@@ -127,8 +141,9 @@ export function bindFogRepaintSubscriptions(): void {
     if (state.tick === prev.tick) return;
     if (!isFogOverlayVisible()) return;
     const vision = visionTokenIds();
-    if (vision.size === 0) return;
-    for (const id of vision) {
+    const watch = new Set([...vision, ...lightItemIds()]);
+    if (watch.size === 0) return;
+    for (const id of watch) {
       const a = state.byId[id];
       const b = prev.byId[id];
       if (!a && !b) continue;
@@ -156,13 +171,26 @@ export function bindFogRepaintSubscriptions(): void {
     for (const id of Object.keys(state.items)) {
       const it = state.items[id];
       const was = prev.items[id];
-      if (it?.type !== 'token' || was?.type !== 'token') continue;
-      if (it.ownerId !== was.ownerId || it.visible !== was.visible) {
+      if (!it || !was) {
+        scheduleSceneVisibilityUpdate();
+        return;
+      }
+      if (
+        it.lightOn !== was.lightOn
+        || it.lightBrightFt !== was.lightBrightFt
+        || it.lightDimFt !== was.lightDimFt
+        || it.visible !== was.visible
+      ) {
+        scheduleSceneVisibilityUpdate();
+        return;
+      }
+      if (it.type !== 'token' && it.type !== 'image') continue;
+      if (it.type === 'token' && was.type === 'token' && it.ownerId !== was.ownerId) {
         scheduleSceneVisibilityUpdate();
         return;
       }
       if (it.x === was.x && it.y === was.y && it.rotation === was.rotation) continue;
-      if (!isFogOverlayVisible() || tokenDrivesFog(it, vision)) {
+      if (!isFogOverlayVisible() || itemDrivesFog(it, vision)) {
         scheduleSceneVisibilityUpdate();
         return;
       }

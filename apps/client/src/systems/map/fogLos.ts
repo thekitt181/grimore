@@ -9,6 +9,11 @@ import type { Item, MapItem, TokenItem, WallSegment } from '@/systems/scene/type
 import { cellKey } from './store/mapStore';
 import { getWalkPose, WALK_POSE_FRESH_MS } from '@/systems/scene/token/walkPoseBus';
 import { isModularMap } from './library/modularKits';
+import {
+  collectSceneLights,
+  itemLightSpec,
+  type SceneLight,
+} from '@/systems/scene/sceneLights';
 
 export const DEFAULT_VISION_CELLS = 12;
 export const DEFAULT_VISION_FT = DEFAULT_VISION_CELLS * 5;
@@ -29,8 +34,11 @@ export function hasDarkvision(token: TokenItem): boolean {
  * otherwise torch (20 ft / 4 cells).
  */
 export function fpVisionCells(token: TokenItem): number {
-  if (hasDarkvision(token)) return Math.max(1, token.visionRadius ?? DEFAULT_VISION_CELLS);
-  return TORCH_VISION_CELLS;
+  let cells = 1;
+  if (hasDarkvision(token)) cells = Math.max(cells, token.visionRadius ?? DEFAULT_VISION_CELLS);
+  const carried = itemLightSpec(token);
+  if (carried) cells = Math.max(cells, Math.ceil(carried.totalFt / 5));
+  return cells;
 }
 
 /** Sight range in feet — 30 ft darkvision → 30, torch → 20. */
@@ -381,6 +389,104 @@ export function getVisionTokens(
     .map(withWalkVisionPose);
 }
 
+export function viewerCanSeeLight(
+  origin: Point,
+  light: SceneLight,
+  map: MapItem,
+  walls: LosWall[],
+): boolean {
+  const lo = worldToMapLocal(light.wx, light.wy, map);
+  return !wallBlocksPoint(origin, lo.x, lo.y, walls);
+}
+
+export function lightsVisibleToViewers(
+  map: MapItem,
+  items: Record<string, Item>,
+  viewers: TokenItem[],
+  walls: LosWall[],
+  punchAll = false,
+): SceneLight[] {
+  const lights = collectSceneLights(items, map);
+  if (punchAll) return lights;
+  if (viewers.length === 0) return [];
+  return lights.filter((light) =>
+    viewers.some((token) => viewerCanSeeLight(tokenMapOrigin(token, map), light, map, walls)),
+  );
+}
+
+export function lightLosPolygons(
+  map: MapItem,
+  items: Record<string, Item>,
+  viewers: TokenItem[],
+  walls: LosWall[],
+  punchAll = false,
+): { bright: Point[][]; dim: Point[][] } {
+  const grid = Math.max(1, map.gridSize);
+  const bright: Point[][] = [];
+  const dim: Point[][] = [];
+  for (const light of lightsVisibleToViewers(map, items, viewers, walls, punchAll)) {
+    const origin = worldToMapLocal(light.wx, light.wy, map);
+    const brightR = Math.max(grid * 0.5, (light.brightFt / 5) * grid);
+    const totalR = Math.max(brightR, (light.totalFt / 5) * grid);
+    bright.push(computeVisibilityPolygon(origin, walls, brightR));
+    if (totalR > brightR + 1) {
+      dim.push(computeVisibilityPolygon(origin, walls, totalR));
+    }
+  }
+  return { bright, dim };
+}
+
+export function addLightVisibleCells(
+  cells: Set<string>,
+  map: MapItem,
+  items: Record<string, Item>,
+  viewers: TokenItem[],
+  gridSize: number,
+  walls: LosWall[],
+): void {
+  const lights = lightsVisibleToViewers(map, items, viewers, walls, false);
+  if (lights.length === 0) return;
+  const cols = Math.ceil(map.width / gridSize);
+  const rows = Math.ceil(map.height / gridSize);
+  for (const light of lights) {
+    const origin = worldToMapLocal(light.wx, light.wy, map);
+    const radiusPx = Math.max(gridSize, (light.totalFt / 5) * gridSize);
+    if (usesWorldFogGrid(map)) {
+      const originW = mapLocalToWorld(origin.x, origin.y, map);
+      const x0 = Math.floor((originW.x - radiusPx) / gridSize);
+      const y0 = Math.floor((originW.y - radiusPx) / gridSize);
+      const x1 = Math.ceil((originW.x + radiusPx) / gridSize) - 1;
+      const y1 = Math.ceil((originW.y + radiusPx) / gridSize) - 1;
+      for (let cx = x0; cx <= x1; cx++) {
+        for (let cy = y0; cy <= y1; cy++) {
+          const samples = cellSamplePoints(cx, cy, gridSize).map((p) =>
+            worldToMapLocal(p.x, p.y, map),
+          );
+          if (samples.every((p) => p.x < 0 || p.y < 0 || p.x > map.width || p.y > map.height)) {
+            continue;
+          }
+          if (samples.some((p) => pointVisibleFromOrigin(origin, p.x, p.y, radiusPx, 0, Math.PI, false, walls))) {
+            cells.add(cellKey(cx, cy));
+          }
+        }
+      }
+      continue;
+    }
+    const x0 = Math.max(0, Math.floor((origin.x - radiusPx) / gridSize));
+    const y0 = Math.max(0, Math.floor((origin.y - radiusPx) / gridSize));
+    const x1 = Math.min(cols - 1, Math.ceil((origin.x + radiusPx) / gridSize) - 1);
+    const y1 = Math.min(rows - 1, Math.ceil((origin.y + radiusPx) / gridSize) - 1);
+    for (let cx = x0; cx <= x1; cx++) {
+      for (let cy = y0; cy <= y1; cy++) {
+        const samples = cellSamplePoints(cx, cy, gridSize);
+        if (samples.some((p) => pointVisibleFromOrigin(origin, p.x, p.y, radiusPx, 0, Math.PI, false, walls))) {
+          cells.add(cellKey(cx, cy));
+        }
+      }
+    }
+  }
+}
+
 /** Vision polygons clipped by drawn walls and the map boundary. */
 export function losPolygons(
   map: MapItem,
@@ -637,7 +743,9 @@ export function playerTokenLosCells(
 ): Set<string> {
   const tokens = getVisionTokens(items, selectedIds, false, userId, map);
   if (tokens.length === 0) return new Set();
-  return losVisibleCellKeys(map, tokens, gridSize, { directional: true });
+  const cells = losVisibleCellKeys(map, tokens, gridSize, { directional: true });
+  addLightVisibleCells(cells, map, items, tokens, gridSize, losWalls(map));
+  return cells;
 }
 
 /** Cells a player can see — only when they have a vision source (assigned or selected token). */
@@ -678,9 +786,11 @@ export function playerVisibleCells(
   gridSize: number,
 ): Set<string> {
   const tokens = getVisionTokens(items, selectedIds, false, userId, map);
-  const los = losVisibleCellKeys(map, tokens, gridSize, { directional: true });
+  const walls = losWalls(map);
+  const los = losVisibleCellKeys(map, tokens, gridSize, { directional: true, walls });
   const visible = new Set(revealedCellsPastDungeonWalls(map, revealedCells, tokens, gridSize));
   for (const k of los) visible.add(k);
+  addLightVisibleCells(visible, map, items, tokens, gridSize, walls);
   return visible;
 }
 
@@ -693,9 +803,11 @@ export function gmVisibleCells(
   gridSize: number,
 ): Set<string> {
   const tokens = getVisionTokens(items, selectedIds, true, null, map);
+  const walls = losWalls(map);
   const visible = new Set(revealedCellsPastDungeonWalls(map, revealedCells, tokens, gridSize));
-  for (const k of losVisibleCellKeys(map, tokens, gridSize, { directional: true })) {
+  for (const k of losVisibleCellKeys(map, tokens, gridSize, { directional: true, walls })) {
     visible.add(k);
   }
+  addLightVisibleCells(visible, map, items, tokens, gridSize, walls);
   return visible;
 }

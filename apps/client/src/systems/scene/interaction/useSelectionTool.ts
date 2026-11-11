@@ -71,6 +71,7 @@ import {
 } from '@/systems/map/props/dungeonProps';
 import { tryMapPropInteract } from '@/systems/map/props/fpPropInteract';
 import type { WallEndpoint } from '@/systems/map/wallUtils';
+import { ensureCorpseLoot, isWandererCorpseCandidate, useCorpseLootUi } from '@/systems/combat/corpseLoot';
 
 interface MoveState {
   ids: string[];
@@ -715,6 +716,7 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
       propClickOnly = null;
       propUnderTokenClickId = null;
       if (useMapStore.getState().activeTool === 'check-distance') return;
+      if (useMapStore.getState().activeTool === 'ping') return;
       if (e.button !== 0) return;
       if (isAoePlacementActive()) return;
       if (isSpellTargetPicking()) return;
@@ -1227,6 +1229,7 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
 
     function onUp(e: PointerEvent) {
       if (useMapStore.getState().activeTool === 'check-distance') return;
+      if (useMapStore.getState().activeTool === 'ping') return;
       const press = stairPress;
       stairPress = null;
       const stairClick = press && isGm() && Math.hypot(e.clientX - press.sx, e.clientY - press.sy) < 24
@@ -1306,9 +1309,15 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
               }
             }
           } else if (isClick && m.ids.length === 1) {
-            const gateIt = useItemStore.getState().items[m.ids[0]!];
-            if (gateIt?.type === 'map' && isModularGate(gateIt as MapItem)) {
-              tryMapPropInteract(gateIt as MapItem);
+            const clicked = useItemStore.getState().items[m.ids[0]!];
+            if (
+              clicked?.type === 'token'
+              && clicked.hp <= 0
+              && (clicked.corpseLoot || isWandererCorpseCandidate(clicked))
+            ) {
+              void ensureCorpseLoot(clicked.id).then(() => useCorpseLootUi.getState().open(clicked.id));
+            } else if (clicked?.type === 'map' && isModularGate(clicked as MapItem)) {
+              tryMapPropInteract(clicked as MapItem);
             }
           }
         }

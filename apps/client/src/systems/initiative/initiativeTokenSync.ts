@@ -4,6 +4,7 @@ import { useInitiativeStore, type Combatant } from '@/systems/map/store/initiati
 import { useItemStore } from '@/systems/scene/store/itemStore';
 import { emitItemUpdate } from '@/systems/scene/sceneSync';
 import { persistInitiativeLocal } from '@/systems/scene/sessionPersistence';
+import { maybeSpawnCorpse } from '@/systems/combat/corpseLoot';
 import type { TokenItem } from '@/systems/scene/types';
 import type { InitiativeSyncPayload } from '@grimoire/shared';
 import { readTempHp } from './hpUtils';
@@ -82,8 +83,10 @@ export function applyCombatantHpToToken(
   const nextTemp = updates.tempHp ?? readTempHp(item.tempHp);
   if (item.hp === nextHp && readTempHp(item.tempHp) === nextTemp) return;
 
+  const prevHp = item.hp;
   useItemStore.getState().updateItem(combatant.tokenId, updates);
   emitItemUpdate([{ id: combatant.tokenId, patch: updates }]);
+  if (updates.hp !== undefined) maybeSpawnCorpse(combatant.tokenId, prevHp, nextHp);
 }
 
 /** Push token HP changes to any linked initiative combatants. */
@@ -106,7 +109,9 @@ export function applyTokenHpToCombatants(
 
     if (hp === c.hp && maxHp === c.maxHp && tempHp === readTempHp(c.tempHp)) continue;
 
+    const prevHp = c.hp;
     store.updateCombatant(c.id, { hp, maxHp, tempHp });
+    maybeSpawnCorpse(tokenId, prevHp, hp);
     changed = true;
   }
 
@@ -114,7 +119,11 @@ export function applyTokenHpToCombatants(
 }
 
 /** Push token conditions to linked initiative combatants. */
-export function applyTokenConditionsToCombatants(tokenId: string, conditions: string[]): void {
+export function applyTokenConditionsToCombatants(
+  tokenId: string,
+  conditions: string[],
+  conditionRounds?: Record<string, number>,
+): void {
   const store = useInitiativeStore.getState();
   let changed = false;
 
@@ -123,8 +132,12 @@ export function applyTokenConditionsToCombatants(tokenId: string, conditions: st
     const same =
       c.conditions.length === conditions.length &&
       c.conditions.every((x, i) => x === conditions[i]);
-    if (same) continue;
-    store.updateCombatant(c.id, { conditions: [...conditions] });
+    const roundsSame = JSON.stringify(c.conditionRounds ?? {}) === JSON.stringify(conditionRounds ?? {});
+    if (same && roundsSame) continue;
+    store.updateCombatant(c.id, {
+      conditions: [...conditions],
+      ...(conditionRounds ? { conditionRounds: { ...conditionRounds } } : { conditionRounds: {} }),
+    });
     changed = true;
   }
 
@@ -138,11 +151,19 @@ export function applyCombatantConditionsToToken(combatant: Combatant): void {
   if (!item || item.type !== 'token') return;
 
   const conditions = combatant.conditions;
+  const conditionRounds = combatant.conditionRounds ?? {};
   const same =
     item.conditions.length === conditions.length &&
     item.conditions.every((x, i) => x === conditions[i]);
-  if (same) return;
+  const roundsSame = JSON.stringify(item.conditionRounds ?? {}) === JSON.stringify(conditionRounds);
+  if (same && roundsSame) return;
 
-  useItemStore.getState().updateItem(combatant.tokenId, { conditions: [...conditions] });
-  emitItemUpdate([{ id: combatant.tokenId, patch: { conditions: [...conditions] } }]);
+  useItemStore.getState().updateItem(combatant.tokenId, {
+    conditions: [...conditions],
+    conditionRounds,
+  });
+  emitItemUpdate([{
+    id: combatant.tokenId,
+    patch: { conditions: [...conditions], conditionRounds },
+  }]);
 }

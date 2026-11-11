@@ -28,6 +28,12 @@ export interface FogActivePayload {
   active: boolean;
 }
 
+/** GM toggles whether players may take corpse loot themselves (else view only). */
+export interface LootPlayerTakePayload {
+  sessionId: string;
+  playersCanLoot: boolean;
+}
+
 /** GM 3D wall extrude settings — players need these to see extruded walls. */
 export interface WallExtrudePayload {
   sessionId: string;
@@ -105,6 +111,18 @@ export interface MapFocusPayload {
   viewMode: '2d' | '3d';
   /** When true, clients fit the map to screen (Reset View / map select). */
   fitToMap?: boolean;
+}
+
+/** Ephemeral table ping — pulse at map world x/y; not persisted. */
+export interface MapPingPayload {
+  sessionId: string;
+  pingId: string;
+  x: number;
+  y: number;
+  userId: string;
+  userName: string;
+  /** Floating “Look here” callout on the pulse. */
+  lookHere: boolean;
 }
 
 // ─── Generic scene-item events (unified editor) ─────────────────────────────────
@@ -366,6 +384,8 @@ export interface InitiativeSyncPayload {
     maxHp: number;
     tempHp: number;
     conditions: string[];
+    /** Remaining rounds per condition name; omitted = until removed. */
+    conditionRounds?: Record<string, number>;
     tokenId?: string;
     isPlayer: boolean;
     hideHpFromPlayers?: boolean;
@@ -529,6 +549,7 @@ export interface ServerToClientEvents {
   'map:fogUpdate':        (payload: FogUpdatePayload)         => void;
   'fog:sync':             (payload: FogSyncPayload)          => void;
   'fog:active':           (payload: FogActivePayload)         => void;
+  'loot:player-take':     (payload: LootPlayerTakePayload)    => void;
   'map:wallExtrude':      (payload: WallExtrudePayload)       => void;
   'map:gridUpdate':       (payload: GridUpdatePayload)        => void;
   'map:mapMove':          (payload: MapMovePayload)           => void;
@@ -539,6 +560,7 @@ export interface ServerToClientEvents {
   'map:gridStyle':        (payload: MapGridStylePayload)      => void;
   'map:gridOffset':       (payload: MapGridOffsetPayload)     => void;
   'map:focus':            (payload: MapFocusPayload)          => void;
+  'map:ping':             (payload: MapPingPayload)           => void;
   'map:tokenConditions':  (payload: TokenConditionsPayload)   => void;
   'map:tokenAura':        (payload: TokenAuraPayload)         => void;
   'drawing:add':          (payload: DrawingAddPayload)        => void;
@@ -602,6 +624,7 @@ export interface ClientToServerEvents {
   'map:fogUpdate':        (payload: FogUpdatePayload)         => void;
   'fog:sync':             (payload: FogSyncPayload)          => void;
   'fog:active':           (payload: FogActivePayload)         => void;
+  'loot:player-take':     (payload: LootPlayerTakePayload)    => void;
   'map:wallExtrude':      (payload: WallExtrudePayload)       => void;
   'map:gridUpdate':       (payload: GridUpdatePayload)        => void;
   'map:mapMove':          (payload: MapMovePayload)           => void;
@@ -612,6 +635,7 @@ export interface ClientToServerEvents {
   'map:gridStyle':        (payload: MapGridStylePayload)      => void;
   'map:gridOffset':       (payload: MapGridOffsetPayload)     => void;
   'map:focus':            (payload: MapFocusPayload)          => void;
+  'map:ping':             (payload: MapPingPayload)           => void;
   'map:tokenConditions':  (payload: TokenConditionsPayload)   => void;
   'map:tokenAura':        (payload: TokenAuraPayload)         => void;
   'drawing:add':          (payload: DrawingAddPayload)        => void;

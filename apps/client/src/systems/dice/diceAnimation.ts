@@ -36,22 +36,46 @@ function inferDieSides(notation: string, results: number[]): number {
   return 20;
 }
 
+function smallestDieForValue(value: number): number {
+  if (value <= 4) return 4;
+  if (value <= 6) return 6;
+  if (value <= 8) return 8;
+  if (value <= 10) return 10;
+  if (value <= 12) return 12;
+  if (value <= 20) return 20;
+  return 100;
+}
+
 /** One mesh per die result — pad when notation under-reports pool size (common for DDB). */
-function resolveTrayFaces(notation: string, results: number[]): number[] {
+function resolveTrayFaces(
+  notation: string,
+  results: number[],
+  dieFaces?: number[],
+): number[] {
   const maxTrayDice = 24;
   const capped = Math.min(results.length, maxTrayDice);
   if (capped <= 0) return [];
 
-  let faces = expandDieFaces(notation);
+  if (dieFaces && dieFaces.length > 0) {
+    return Array.from({ length: capped }, (_, i) => {
+      const listed = dieFaces[i];
+      if (listed && listed >= 2) return listed;
+      return smallestDieForValue(results[i] ?? 1);
+    });
+  }
+
+  const faces = expandDieFaces(notation);
   if (faces.length >= capped) return faces.slice(0, capped);
+  if (faces.length === 1) return Array.from({ length: capped }, () => faces[0]!);
 
   const group = primaryDieGroup(notation);
-  if (group && group.count >= capped) {
+  if (group) {
     return Array.from({ length: capped }, () => group.sides);
   }
 
-  const sides = inferDieSides(notation, results);
-  return Array.from({ length: capped }, () => sides);
+  return Array.from({ length: capped }, (_, i) =>
+    smallestDieForValue(results[i] ?? inferDieSides(notation, results)),
+  );
 }
 
 function buildDroppedMask(values: number[], droppedResults: number[]): boolean[] {
@@ -70,7 +94,9 @@ function buildDroppedMask(values: number[], droppedResults: number[]): boolean[]
 /** Build 3D tray spec — advantage/disadvantage shows two d20s even though notation is 1d20. */
 export function buildDiceAnimationSpec(
   id: string,
-  roll: Pick<RollResult, 'notation' | 'results' | 'droppedResults' | 'rollMode'>,
+  roll: Pick<RollResult, 'notation' | 'results' | 'droppedResults' | 'rollMode'> & {
+    dieFaces?: number[];
+  },
 ): DiceAnimationSpec | null {
   if (roll.results.length === 0) return null;
 
@@ -85,7 +111,7 @@ export function buildDiceAnimationSpec(
     };
   }
 
-  const faces = resolveTrayFaces(roll.notation, roll.results);
+  const faces = resolveTrayFaces(roll.notation, roll.results, roll.dieFaces);
   const values = roll.results.slice(0, faces.length);
   return {
     id,

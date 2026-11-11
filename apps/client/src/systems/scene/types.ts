@@ -65,6 +65,12 @@ export interface BaseItem {
   visible: boolean;
   /** Optional owner (player tokens). */
   ownerId?: string;
+  /** When true, this piece emits light (torch, lantern, campfire, …). */
+  lightOn?: boolean;
+  /** Bright radius in feet (5e torch = 20). */
+  lightBrightFt?: number;
+  /** Additional dim radius in feet (5e torch = 20, so 40 ft total). */
+  lightDimFt?: number;
 }
 
 export interface MapItem extends BaseItem {
@@ -199,6 +205,19 @@ export interface TokenItem extends BaseItem {
   /** Armor Class (defaults to 10 when unset on legacy tokens). */
   ac?: number;
   conditions: string[];
+  /** Remaining combat rounds for each condition name. Missing = until removed. */
+  conditionRounds?: Record<string, number>;
+  /** Loot on a dead wanderer / monster. */
+  corpseLoot?: {
+    gold: number;
+    items: Array<{ name: string; quantity: number }>;
+    drops?: Array<
+      | { kind: 'currency'; label: string }
+      | { kind: 'item'; id?: string; name: string; type?: string; rarity?: string; source?: string }
+      | { kind: 'flavor'; name: string; detail?: string }
+    >;
+    claimed?: boolean;
+  };
   auraRadius?: number;  // in grid cells
   auraColor?: string;   // CSS hex
   /** Vision radius in grid cells (5ft per cell); UI uses feet. */

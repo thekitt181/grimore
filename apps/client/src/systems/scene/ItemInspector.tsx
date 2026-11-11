@@ -6,6 +6,7 @@ import { syncGridToMap } from './syncGridToMap';
 import type { ImageItem, Item, MapItem, TokenItem, TextItem, DrawItem } from './types';
 import { isHpHiddenFromPlayers } from './types';
 import { visionFeet, visionRadiusFromFeet } from '@/systems/map/fogLos';
+import { itemLightSpec, lightTogglePatch } from '@/systems/scene/sceneLights';
 import { VisionFtInput } from '@/systems/map/VisionFtInput';
 import { applyTokenHpToCombatants } from '@/systems/initiative/initiativeTokenSync';
 import { markLocalHpWrite } from '@/systems/ddb/useDdbHpSync';
@@ -113,6 +114,9 @@ export function ItemInspector() {
       {single?.type === 'token' && isGM && <TokenPropUnderControls token={single as TokenItem} />}
       {single?.type === 'image' && isGM && (
         <ImagePropPoseControls image={single as ImageItem} update={(p) => update(single.id, p)} />
+      )}
+      {single?.type === 'image' && isGM && (
+        <LightFields item={single} canEdit={!single.locked} update={(p) => update(single.id, p)} />
       )}
       {single?.type === 'image' && isGM && (
         <PropControls image={single as ImageItem} update={(p) => update(single.id, p)} />
@@ -276,6 +280,7 @@ function TokenControls({
           <span className="font-ui text-xs" style={{ color: 'var(--color-text-primary)' }}>{token.name}</span>
         </Field>
         <FlyHeightField token={token} canEdit={false} update={update} />
+        <LightFields item={token} canEdit={false} update={update} />
       </>
     );
   }
@@ -314,6 +319,7 @@ function TokenControls({
         />
       </Field>
       <FlyHeightField token={token} canEdit={canEditFly} update={update} />
+      <LightFields item={token} canEdit={canEditFly} update={update} />
       {token.ddbCharacterId && (
         <Field label="DDB">
           <button
@@ -347,6 +353,64 @@ function TokenControls({
             Reset rotation
           </button>
         </Field>
+      )}
+    </>
+  );
+}
+
+function LightFields({
+  item,
+  canEdit,
+  update,
+}: {
+  item: Item;
+  canEdit: boolean;
+  update: (p: Pick<Item, never> & {
+    lightOn?: boolean;
+    lightBrightFt?: number;
+    lightDimFt?: number;
+  }) => void;
+}) {
+  const spec = itemLightSpec(item);
+  const on = spec != null;
+  const bright = item.lightBrightFt ?? spec?.brightFt ?? 20;
+  const dim = item.lightDimFt ?? spec?.dimFt ?? 20;
+  return (
+    <>
+      <Field label="Light">
+        <button
+          type="button"
+          className="btn-ghost text-xs px-2 py-0.5 whitespace-nowrap"
+          disabled={!canEdit}
+          title="Bright / dim radii in feet (torch is 20 / 20)"
+          onClick={() => update(lightTogglePatch(item))}
+        >
+          {on ? 'On' : 'Off'}
+        </button>
+      </Field>
+      {canEdit && on && (
+        <>
+          <Field label="Bright (ft)">
+            <input
+              type="number"
+              className="input-stat"
+              min={0}
+              step={5}
+              value={bright}
+              onChange={(e) => update({ lightOn: true, lightBrightFt: Math.max(0, Number(e.target.value) || 0) })}
+            />
+          </Field>
+          <Field label="Dim (ft)">
+            <input
+              type="number"
+              className="input-stat"
+              min={0}
+              step={5}
+              value={dim}
+              onChange={(e) => update({ lightOn: true, lightDimFt: Math.max(0, Number(e.target.value) || 0) })}
+            />
+          </Field>
+        </>
       )}
     </>
   );

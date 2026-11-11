@@ -294,6 +294,8 @@ export interface DdbRollBridgePayload {
   isDamage: boolean;
   /** Individual die results from DDB (when available). */
   diceResults?: number[];
+  /** Sides per die in `diceResults` (d6, d20, …) when DDB sent die types. */
+  dieFaces?: number[];
   damageApplied?: number;
   /** D&D Beyond game-log message id — used to dedupe WS + HTTP poll delivery. */
   messageId?: string;

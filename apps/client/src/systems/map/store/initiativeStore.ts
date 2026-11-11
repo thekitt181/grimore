@@ -8,6 +8,7 @@ export interface Combatant {
   maxHp: number;
   tempHp: number;
   conditions: string[];
+  conditionRounds?: Record<string, number>;
   tokenId?: string;
   isPlayer: boolean;
   hideHpFromPlayers?: boolean;
@@ -132,6 +133,7 @@ export const useInitiativeStore = create<InitiativeState>((set, get) => ({
           && (c.hideHpFromPlayers ?? false) === (n.hideHpFromPlayers ?? false)
           && c.conditions.length === n.conditions.length
           && c.conditions.every((x, j) => x === n.conditions[j])
+          && JSON.stringify(c.conditionRounds ?? {}) === JSON.stringify(n.conditionRounds ?? {})
         );
       })
     ) {

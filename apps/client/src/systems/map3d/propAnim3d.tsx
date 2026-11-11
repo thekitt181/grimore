@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type ReactNode } from 'react';
+import { useRef, useState, type ReactNode } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import type { ImageItem } from '@/systems/scene/types';
@@ -11,7 +11,6 @@ import {
   propPlayDuration,
 } from '@/systems/map/props/propPose';
 
-const FLAME = '#ff8a2b';
 const lidRest = new WeakMap<THREE.Object3D, { x: number; y: number; z: number }>();
 
 function isLidObject(obj: THREE.Object3D): boolean {
@@ -55,7 +54,6 @@ function liveAmountFor(item: ImageItem): number {
 export function PropAnim3D({
   item,
   size,
-  light,
   driveGroup = true,
   children,
 }: {
@@ -67,7 +65,6 @@ export function PropAnim3D({
   children: ReactNode;
 }) {
   const rootRef = useRef<THREE.Group>(null);
-  const lightRef = useRef<THREE.PointLight>(null);
   const muzzleRef = useRef<THREE.PointLight>(null);
   const projectileRefs = useRef<(THREE.Mesh | null)[]>([]);
   const burstRef = useRef<THREE.Mesh>(null);
@@ -79,13 +76,6 @@ export function PropAnim3D({
   /** How far bolts travel in local +Z (into the room when wall-mounted). */
   const shootRange = s * 6.5;
   const shootCount = play === 'shoot' ? 5 : 0;
-
-  const lightBase = useMemo(() => {
-    if (light === 'campfire') return { y: s * 0.38, intensity: 3.4, distance: s * 7 };
-    if (light === 'torch') return { y: s * 0.72, intensity: 2.4, distance: s * 5.5 };
-    if (light === 'altar') return { y: s * 0.55, intensity: 1.9, distance: s * 4.5 };
-    return null;
-  }, [light, s]);
 
   useFrame(({ clock }) => {
     const root = rootRef.current;
@@ -238,36 +228,11 @@ export function PropAnim3D({
       muzzleRef.current.visible = false;
     }
 
-    const pl = lightRef.current;
-    if (pl && lightBase) {
-      let intensity = lightBase.intensity;
-      if (play === 'ignite') intensity *= p;
-      if (play === 'flicker' || (play === 'ignite' && p > 0.04)) {
-        const flicker =
-          0.82 + Math.sin(now * 9.2) * 0.1 + Math.sin(now * 14.1 + 1.7) * 0.08;
-        intensity *= flicker;
-        pl.position.y = lightBase.y + Math.sin(now * 7.5) * s * 0.012;
-      } else {
-        pl.position.y = lightBase.y;
-      }
-      pl.intensity = intensity;
-      pl.visible = intensity > 0.05;
-    }
   });
 
   return (
     <group ref={rootRef}>
       {children}
-      {lightBase ? (
-        <pointLight
-          ref={lightRef}
-          position={[0, lightBase.y, 0]}
-          color={FLAME}
-          intensity={lightBase.intensity}
-          distance={lightBase.distance}
-          decay={2}
-        />
-      ) : null}
       {play === 'shoot' ? (
         <>
           {Array.from({ length: shootCount }, (_, i) => (

@@ -7,10 +7,13 @@ import { PartyCharacterCard } from '../components/PartyCharacterCard';
 import { syncDdbCharacter } from '@/systems/ddb/ddbApi';
 import { pullDdbHpToToken } from '@/systems/ddb/useDdbHpSync';
 import { useDdbStore } from '@/systems/ddb/ddbStore';
+import { restParty } from '@/systems/ddb/restParty';
 
 export function PartyDdbTab() {
   const qc = useQueryClient();
   const [syncingAll, setSyncingAll] = useState(false);
+  const [resting, setResting] = useState<'short' | 'long' | null>(null);
+  const [restNote, setRestNote] = useState('');
   const [nameQuery, setNameQuery] = useState('');
   const pcTokens = useItemStore(
     useShallow((s) =>
@@ -39,6 +42,25 @@ export function PartyDdbTab() {
       /* cards show their own errors */
     } finally {
       setSyncingAll(false);
+    }
+  }
+
+  async function handleRest(kind: 'short' | 'long') {
+    if (resting) return;
+    setResting(kind);
+    setRestNote('');
+    try {
+      const result = await restParty(kind, qc);
+      const who = kind === 'short' ? 'Short rest' : 'Long rest';
+      setRestNote(
+        `${who}: ${result.ok} sheet${result.ok === 1 ? '' : 's'} reset`
+        + (result.pushed ? `, ${result.pushed} pushed to D&D Beyond` : '')
+        + (result.failed ? `, ${result.failed} failed` : ''),
+      );
+    } catch (err) {
+      setRestNote(err instanceof Error ? err.message : 'Rest failed');
+    } finally {
+      setResting(null);
     }
   }
 
@@ -74,6 +96,27 @@ export function PartyDdbTab() {
           {syncingAll ? 'Syncing…' : 'Sync All'}
         </button>
       </div>
+      <div className="flex gap-1">
+        <button
+          type="button"
+          className="btn-ghost text-[10px] px-2 py-1 flex-1"
+          disabled={Boolean(resting)}
+          onClick={() => void handleRest('short')}
+        >
+          {resting === 'short' ? 'Resting…' : 'Short rest'}
+        </button>
+        <button
+          type="button"
+          className="btn-primary text-[10px] px-2 py-1 flex-1"
+          disabled={Boolean(resting)}
+          onClick={() => void handleRest('long')}
+        >
+          {resting === 'long' ? 'Resting…' : 'Long rest'}
+        </button>
+      </div>
+      {restNote && (
+        <p className="font-ui text-[10px]" style={{ color: 'var(--color-accent-gold)' }}>{restNote}</p>
+      )}
       {pcTokens.length > 4 && (
         <input
           type="search"

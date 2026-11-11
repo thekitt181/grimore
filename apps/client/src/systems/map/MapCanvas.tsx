@@ -7,6 +7,9 @@ import { useFogRenderer } from './hooks/useFogRenderer';
 import { useMapFogOverlay } from './hooks/useMapFogOverlay';
 import { useMapMeasure } from './hooks/useMapMeasure';
 import { useCheckDistanceTool } from './hooks/useCheckDistanceTool';
+import { useMapPingTool } from './hooks/useMapPingTool';
+import { bindMapPingSocket } from './mapPingSync';
+import { MapPingOverlay } from './MapPingOverlay';
 import { useDrawingTool } from './hooks/useDrawingTool';
 import { useCalibrateGrid } from './hooks/useCalibrateGrid';
 import { useMapStore } from './store/mapStore';
@@ -31,6 +34,7 @@ import { applyFogData, emitFogSync, flushFogScene, hydrateFogFromServer, parseFo
 import { mergeFogIntoCells } from '@/systems/scene/fogMerge';
 import type { FogUpdatePayload } from '@grimoire/shared';
 import { bindFogActiveSocket, syncFogActiveToSession } from '@/systems/scene/fogActiveSync';
+import { bindLootPolicySocket, syncLootPolicyToSession } from '@/systems/combat/lootPolicySync';
 import { bindWallExtrudeSocket, syncWallExtrudeToSession } from '@/systems/map/wallExtrudeSync';
 import { bindFogRepaintSubscriptions } from '@/systems/map/fogRepaintBridge';
 import { bindMapFocusSocket, flushPendingMapFocus, focusSessionMap, syncMapFocusToSession } from '@/systems/map/mapFocusSync';
@@ -507,6 +511,7 @@ export function MapCanvas() {
         emitItemsSync(Object.values(useItemStore.getState().items) as Item[]);
         emitFogSync();
         syncFogActiveToSession();
+        syncLootPolicyToSession();
         syncWallExtrudeToSession();
         syncMapFocusToSession({ force: true });
       }, 600);
@@ -529,8 +534,10 @@ export function MapCanvas() {
       socket.on('fog:sync', onFogSync as any);
       socket.on('session:userJoined', onUserJoined as any);
       bindFogActiveSocket();
+      bindLootPolicySocket();
       bindWallExtrudeSocket();
       bindMapFocusSocket();
+      bindMapPingSocket();
       bindPropInteractSync(socket);
       bindStatMakerSync(socket);
     }
@@ -589,6 +596,7 @@ export function MapCanvas() {
   useFogRenderer(appReady, interactionReady);
   useMapMeasure(sceneRefs.measure, sceneRefs.world, interactionReady);
   useCheckDistanceTool(appReady, interactionReady);
+  useMapPingTool(appReady, interactionReady);
   useDrawingTool(appReady, interactionReady);
   useCalibrateGrid(appReady, interactionReady);
   useWallTool(appReady, interactionReady);
@@ -908,6 +916,7 @@ export function MapCanvas() {
       />
 
       <SpellScreenVfxOverlay />
+      <MapPingOverlay />
 
       <MapAtmosphereLayer />
       <SpellVfxLayer appReady={appReady} />

@@ -352,7 +352,7 @@ export function DiceSkinControls() {
             <DieSkinRow key={kind} kind={kind} />
           ))}
           <p className="font-ui text-[9px] leading-tight" style={{ color: 'var(--color-text-secondary)' }}>
-            d100 uses the d10 skin. Skins auto-save; use Save skins or a named preset to keep a set on this device.
+            d100 uses the d10 skin. Shapes are MotazCG space dice (mesh only); colour and image skins still apply. Skins auto-save; use Save skins or a named preset to keep a set on this device.
           </p>
           <button
             type="button"

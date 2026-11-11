@@ -7,7 +7,7 @@ import { TokenActionCard } from '@/systems/combat/TokenActionCard';
 import { useCasterToken } from '@/systems/combat/useCasterToken';
 import { useCombatStore } from '@/systems/combat/combatStore';
 import { compendiumSpellToParsedAction } from './statBlockParser';
-import { syncDdbCharacter } from '@/systems/ddb/ddbApi';
+import { fetchDdbCharacter } from '@/systems/ddb/ddbApi';
 
 export function SpellRollPanel({ spell }: { spell: CompendiumSpell }) {
   const caster = useCasterToken();
@@ -16,7 +16,7 @@ export function SpellRollPanel({ spell }: { spell: CompendiumSpell }) {
 
   const { data: casterCharacter } = useQuery({
     queryKey: ['ddb', 'character', caster?.ddbCharacterId],
-    queryFn: () => syncDdbCharacter(caster!.ddbCharacterId!),
+    queryFn: () => fetchDdbCharacter(caster!.ddbCharacterId!),
     enabled: Boolean(caster?.ddbCharacterId),
     staleTime: 60_000,
   });

@@ -36,6 +36,7 @@ import {
   FogUpdatePayload,
   FogSyncPayload,
   FogActivePayload,
+  LootPlayerTakePayload,
   WallExtrudePayload,
   MapMovePayload,
   MapResizePayload,
@@ -45,6 +46,7 @@ import {
   MapGridStylePayload,
   MapGridOffsetPayload,
   MapFocusPayload,
+  MapPingPayload,
   ItemAddPayload,
   ItemUpdatePayload,
   ItemRemovePayload,
@@ -194,6 +196,7 @@ function mergePlayerQuestTicks(previous: QuestBoard, incoming: QuestEntry[]): Qu
 }
 /** Per-session fog active flag (GM toggles off during prep). */
 const sessionFogActive = new Map<string, boolean>();
+const sessionPlayersCanLoot = new Map<string, boolean>();
 /** Per-session 3D wall extrude settings (so players see the same walls as the GM). */
 const sessionWallExtrude = new Map<string, Omit<WallExtrudePayload, 'sessionId'>>();
 /** Last GM map focus (active map + viewport) for joining players. */
@@ -423,11 +426,13 @@ export function initSocket(httpServer: HttpServer): Server {
         socket.data['role'] = role;
 
         const fogActive = sessionFogActive.get(sessionId) ?? false;
+        const playersCanLoot = sessionPlayersCanLoot.get(sessionId) ?? false;
         const wallExtrude = sessionWallExtrude.get(sessionId);
 
         // Fast ack — client shows Live before slower roster / DDB work.
         socket.emit('session:roomState', { users: [sessionUser], fogActive });
         socket.emit('fog:active', { sessionId, active: fogActive });
+        socket.emit('loot:player-take', { sessionId, playersCanLoot });
         if (wallExtrude) {
           socket.emit('map:wallExtrude', { sessionId, ...wallExtrude });
         }
@@ -806,6 +811,13 @@ export function initSocket(httpServer: HttpServer): Server {
       socket.emit('fog:active', payload);
     });
 
+    socket.on('loot:player-take', (payload: LootPlayerTakePayload) => {
+      if (socket.data['role'] !== 'GM') return;
+      sessionPlayersCanLoot.set(payload.sessionId, Boolean(payload.playersCanLoot));
+      socket.to(payload.sessionId).emit('loot:player-take', payload);
+      socket.emit('loot:player-take', payload);
+    });
+
     socket.on('map:wallExtrude', (payload: WallExtrudePayload) => {
       if (socket.data['role'] !== 'GM') return;
       if (!isJoinedSession(socket, payload.sessionId)) return;
@@ -859,6 +871,23 @@ export function initSocket(httpServer: HttpServer): Server {
       sessionMapFocus.set(payload.sessionId, payload);
       void setSessionMapFocus(payload.sessionId, JSON.stringify(payload));
       socket.to(payload.sessionId).emit('map:focus', payload);
+    });
+
+    socket.on('map:ping', (payload: MapPingPayload) => {
+      if (!isJoinedSession(socket, payload.sessionId)) return;
+      const x = Number(payload.x);
+      const y = Number(payload.y);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+      const ping: MapPingPayload = {
+        sessionId: payload.sessionId,
+        pingId: String(payload.pingId || '').slice(0, 64) || `${Date.now()}`,
+        x,
+        y,
+        userId: String(socket.data['userId'] ?? payload.userId ?? '').slice(0, 64),
+        userName: String(socket.data['username'] ?? payload.userName ?? 'Player').slice(0, 48),
+        lookHere: Boolean(payload.lookHere),
+      };
+      socket.to(payload.sessionId).emit('map:ping', ping);
     });
 
     socket.on('map:tokenConditions', (payload: TokenConditionsPayload) => {

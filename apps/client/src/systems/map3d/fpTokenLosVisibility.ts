@@ -1,4 +1,5 @@
 import {
+  addLightVisibleCells,
   fpVisionCells,
   isTokenVisibleToPlayer,
   losVisibleCellKeys,
@@ -85,10 +86,12 @@ export function getFpFogSeenCells(now = performance.now()): FpLosCache {
     (items[viewerBase.id] as TokenItem | undefined) ?? viewerBase,
   );
   const walls = visionWalls(map, items);
-  cache.seen = losVisibleCellKeys(map, [viewer], map.gridSize, {
+  const seen = losVisibleCellKeys(map, [viewer], map.gridSize, {
     directional: false,
     walls,
   });
+  addLightVisibleCells(seen, map, items, [viewer], map.gridSize, walls);
+  cache.seen = seen;
   cache.viewerId = viewer.id;
   return cache;
 }

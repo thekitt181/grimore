@@ -128,7 +128,11 @@ export function createDieGeometry(sides: number): THREE.BufferGeometry {
   return geo;
 }
 
-function baseSolid(kind: 4 | 6 | 8 | 10 | 12 | 20): THREE.BufferGeometry {
+function baseSolid(
+  kind: 4 | 6 | 8 | 10 | 12 | 20,
+  mesh?: THREE.BufferGeometry | null,
+): THREE.BufferGeometry {
+  if (mesh) return mesh.clone();
   switch (kind) {
     case 4:
       return new THREE.TetrahedronGeometry(0.52, 0);
@@ -192,8 +196,11 @@ function uprightFaceQuat(n: THREE.Vector3, u: THREE.Vector3, v: THREE.Vector3): 
  * faceCount + 1 (e.g. d6 → 7, d20 → 21), each face planar-projected into an atlas
  * cell. Returns an orient function that shows the rolled value upright at the front.
  */
-function buildStandardDie(kind: 4 | 6 | 8 | 10 | 12 | 20): NumberedDie {
-  const base = baseSolid(kind);
+function buildStandardDie(
+  kind: 4 | 6 | 8 | 10 | 12 | 20,
+  mesh?: THREE.BufferGeometry | null,
+): NumberedDie {
+  const base = baseSolid(kind, mesh);
   const g = base.index ? base.toNonIndexed() : base;
   const pos = g.getAttribute('position');
   const triCount = Math.floor(pos.count / 3);
@@ -357,8 +364,8 @@ function buildStandardDie(kind: 4 | 6 | 8 | 10 | 12 | 20): NumberedDie {
  * three vertex numbers at the corners, each rotated so it reads upright when its
  * vertex is the top apex. The roll is shown by rotating the matching vertex up.
  */
-function buildD4(): NumberedDie {
-  const base = new THREE.TetrahedronGeometry(0.52, 0);
+function buildD4(mesh?: THREE.BufferGeometry | null): NumberedDie {
+  const base = mesh?.clone() ?? new THREE.TetrahedronGeometry(0.52, 0);
   const g = base.index ? base.toNonIndexed() : base;
   const pos = g.getAttribute('position');
   const triCount = Math.floor(pos.count / 3);
@@ -437,9 +444,12 @@ function buildD4(): NumberedDie {
  * Build a procedurally-numbered die: a real shape with standard number placement.
  * The uploaded image only supplies colours/pattern; numbers are reconstructed here.
  */
-export function buildNumberedDie(sides: number): NumberedDie {
+export function buildNumberedDie(
+  sides: number,
+  mesh?: THREE.BufferGeometry | null,
+): NumberedDie {
   const kind = normalizeDieSides(sides);
-  return kind === 4 ? buildD4() : buildStandardDie(kind);
+  return kind === 4 ? buildD4(mesh) : buildStandardDie(kind, mesh);
 }
 
 export function dieColor(sides: number): string {

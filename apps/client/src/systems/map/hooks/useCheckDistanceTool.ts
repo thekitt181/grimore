@@ -22,12 +22,13 @@ export function useCheckDistanceTool(appReady: boolean, interactionReady: boolea
     if (!appReady || !interactionReady || activeTool !== 'check-distance') return;
     const el = getMapToolElement();
     if (!el) return;
+    const mapEl = el;
 
-    el.style.cursor = 'crosshair';
+    mapEl.style.cursor = 'crosshair';
 
     function onDown(e: PointerEvent) {
       if (e.button !== 0) return;
-      if (!overMap(el, e)) return;
+      if (!overMap(mapEl, e)) return;
       downRef.current = { x: e.clientX, y: e.clientY, pointerId: e.pointerId };
       e.preventDefault();
       e.stopImmediatePropagation();
@@ -37,7 +38,7 @@ export function useCheckDistanceTool(appReady: boolean, interactionReady: boolea
       const down = downRef.current;
       downRef.current = null;
       if (!down || e.pointerId !== down.pointerId) return;
-      if (!overMap(el, e)) return;
+      if (!overMap(mapEl, e)) return;
       e.preventDefault();
       e.stopImmediatePropagation();
       if (Math.hypot(e.clientX - down.x, e.clientY - down.y) > CLICK_SLOP_PX) return;

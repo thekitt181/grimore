@@ -8,6 +8,7 @@ import {
 import type { Item, MapItem } from '@/systems/scene/types';
 import {
   getVisionTokens,
+  lightLosPolygons,
   losPolygons,
   revealedCellsPastDungeonWalls,
   usesWorldFogGrid,
@@ -154,6 +155,28 @@ export function paintFogCanvas(
   ctx.globalCompositeOperation = 'destination-out';
 
   for (const poly of polys) {
+    ctx.beginPath();
+    appendPolygonPath(ctx, poly);
+    ctx.fill();
+  }
+
+  const lightPolys = lightLosPolygons(
+    map,
+    opts.items,
+    visionTokens,
+    vWalls,
+    opts.isGM && visionTokens.length === 0,
+  );
+  // Dim ring first (partial punch), then bright core (full punch).
+  for (const poly of lightPolys.dim) {
+    ctx.save();
+    ctx.globalAlpha = 0.55;
+    ctx.beginPath();
+    appendPolygonPath(ctx, poly);
+    ctx.fill();
+    ctx.restore();
+  }
+  for (const poly of lightPolys.bright) {
     ctx.beginPath();
     appendPolygonPath(ctx, poly);
     ctx.fill();

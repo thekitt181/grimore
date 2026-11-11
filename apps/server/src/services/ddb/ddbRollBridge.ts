@@ -46,7 +46,78 @@ interface ParsedDdbRoll {
   notation: string;
   total: number;
   diceResults: number[];
+  dieFaces: number[];
   isDamage: boolean;
+}
+
+const DDB_DIE_TYPE_ID: Record<number, number> = {
+  1: 4,
+  2: 6,
+  3: 8,
+  4: 10,
+  5: 12,
+  6: 20,
+  7: 100,
+  8: 100,
+};
+
+function sidesFromDieType(raw: unknown): number | null {
+  if (raw == null) return null;
+  const asText = String(raw);
+  const named = asText.match(/d(\d+)/i);
+  if (named) {
+    const n = parseInt(named[1]!, 10);
+    return Number.isFinite(n) && n >= 2 ? n : null;
+  }
+  const id = Number(raw);
+  if (Number.isFinite(id) && DDB_DIE_TYPE_ID[id]) return DDB_DIE_TYPE_ID[id]!;
+  return null;
+}
+
+function smallestDieForValue(value: number): number {
+  if (value <= 4) return 4;
+  if (value <= 6) return 6;
+  if (value <= 8) return 8;
+  if (value <= 10) return 10;
+  if (value <= 12) return 12;
+  if (value <= 20) return 20;
+  return 100;
+}
+
+function collectSetDice(sets: unknown[]): { values: number[]; faces: number[] } {
+  const values: number[] = [];
+  const faces: number[] = [];
+  for (const raw of sets) {
+    if (!raw || typeof raw !== 'object') continue;
+    const set = raw as Record<string, unknown>;
+    const setSides = sidesFromDieType(set.dieType ?? set.diceType ?? set.dieTypeId);
+    const dice = set.dice as unknown[] | undefined;
+    if (!Array.isArray(dice) || dice.length === 0) continue;
+    for (const dieRaw of dice) {
+      if (!dieRaw || typeof dieRaw !== 'object') continue;
+      const die = dieRaw as Record<string, unknown>;
+      const val = Number(die.dieValue ?? die.value);
+      if (!Number.isFinite(val)) continue;
+      const sides =
+        sidesFromDieType(die.dieType ?? die.dieTypeId) ?? setSides ?? smallestDieForValue(val);
+      values.push(val);
+      faces.push(sides);
+    }
+  }
+  return { values, faces };
+}
+
+function notationFromDice(faces: number[], constant: number): string {
+  if (faces.length === 0) return constant ? String(constant) : '';
+  const groups: Array<{ sides: number; count: number }> = [];
+  for (const sides of faces) {
+    const last = groups[groups.length - 1];
+    if (last && last.sides === sides) last.count += 1;
+    else groups.push({ sides, count: 1 });
+  }
+  const body = groups.map((g) => `${g.count}d${g.sides}`).join('+');
+  if (!constant) return body;
+  return `${body}${constant >= 0 ? '+' : ''}${constant}`;
 }
 
 function parseRollMessage(data: unknown): ParsedDdbRoll | null {
@@ -79,30 +150,37 @@ function parseRollMessage(data: unknown): ParsedDdbRoll | null {
   );
   const total = Number(result.total ?? roll.total ?? envelope.total ?? 0);
 
-  let notation = String(result.text ?? diceNotation.notation ?? roll.notation ?? '');
-  const diceResults: number[] = [];
+  const sets = (diceNotation.set ?? diceNotation.sets ?? roll.sets ?? []) as unknown[];
+  const fromSets = collectSetDice(sets);
+  const fromValues: number[] = [];
   const values = result.values as unknown[] | undefined;
   if (Array.isArray(values)) {
     for (const v of values) {
       const n = Number(v);
-      if (Number.isFinite(n)) diceResults.push(n);
-    }
-  }
-  const sets = (diceNotation.set ?? roll.sets ?? []) as unknown[];
-  for (const set of sets) {
-    if (!set || typeof set !== 'object') continue;
-    const dice = (set as Record<string, unknown>).dice as unknown[] | undefined;
-    if (!Array.isArray(dice)) continue;
-    for (const die of dice) {
-      if (!die || typeof die !== 'object') continue;
-      const val = Number((die as Record<string, unknown>).dieValue);
-      if (Number.isFinite(val)) diceResults.push(val);
+      if (Number.isFinite(n)) fromValues.push(n);
     }
   }
 
-  if (!notation && diceResults.length) {
-    notation = diceResults.join(' + ');
+  // Prefer the notation set (has die types). `result.values` is the same pool —
+  // concatenating both doubled every DDB roll into two dice.
+  const diceResults = fromSets.values.length > 0 ? fromSets.values : fromValues;
+  const dieFaces =
+    fromSets.faces.length === diceResults.length
+      ? fromSets.faces
+      : diceResults.map((v, i) => fromSets.faces[i] ?? smallestDieForValue(v));
+
+  const constant = Number(diceNotation.constant ?? result.constant ?? 0);
+  let notation = String(
+    diceNotation.notation
+      ?? roll.diceNotationStr
+      ?? envelope.diceNotationStr
+      ?? roll.notation
+      ?? '',
+  );
+  if (!/d\d+/i.test(notation)) {
+    notation = notationFromDice(dieFaces, Number.isFinite(constant) ? constant : 0);
   }
+  if (!notation && diceResults.length) notation = diceResults.join(' + ');
   if (!notation && total) notation = String(total);
 
   const lower = `${label} ${notation}`.toLowerCase();
@@ -117,6 +195,7 @@ function parseRollMessage(data: unknown): ParsedDdbRoll | null {
     notation,
     total: Number.isFinite(total) ? total : diceResults.reduce((a, b) => a + b, 0),
     diceResults,
+    dieFaces,
     isDamage,
   };
 }
@@ -139,6 +218,7 @@ function toPayload(
     total: parsed.total,
     isDamage: parsed.isDamage,
     diceResults: parsed.diceResults,
+    dieFaces: parsed.dieFaces,
     ...(messageId ? { messageId } : {}),
   };
 }

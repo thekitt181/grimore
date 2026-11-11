@@ -13,7 +13,6 @@ import { useSessionStore } from '@/store/sessionStore';
 import {
   applyCombatantHpToToken,
   syncInitiativeToServer,
-  applyCombatantConditionsToToken,
 } from './initiativeTokenSync';
 import { applyDamage, applyHeal, readTempHp } from './hpUtils';
 import { rollInitiativeFromTokens } from './rollInitiative';
@@ -21,6 +20,7 @@ import { ActiveEffectsPanel } from '@/systems/spells/ActiveEffectsPanel';
 import { SpellsWithEffectsPanel } from '@/systems/spells/SpellsWithEffectsPanel';
 import { onTokenTookDamageForConcentration } from '@/systems/spells/concentrationManager';
 import { syncInitiativeRoundToAllPlayerStats } from '@/systems/stats/statMaker';
+import { applyConditionToCombatant, remainingRounds, tickCombatantConditionTurn } from './conditionDuration';
 
 const CONDITIONS = [
   'Blinded', 'Charmed', 'Deafened', 'Frightened', 'Grappled', 'Incapacitated',
@@ -58,6 +58,7 @@ export function InitiativeTracker({ onClose }: { onClose: () => void }) {
   const [linkTokenId, setLinkTokenId] = useState('');
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [effectsTab, setEffectsTab] = useState<'active' | 'spells'>('active');
+  const [conditionRoundsInput, setConditionRoundsInput] = useState('3');
 
   function handleAdd() {
     if (!newName.trim()) return;
@@ -74,6 +75,7 @@ export function InitiativeTracker({ onClose }: { onClose: () => void }) {
       maxHp:      linked?.maxHp ?? newHp,
       tempHp:     readTempHp(linked?.tempHp),
       conditions: linked ? [...linked.conditions] : [],
+      ...(linked?.conditionRounds ? { conditionRounds: { ...linked.conditionRounds } } : {}),
       isPlayer:   newIsPlayer,
       hideHpFromPlayers: linked ? isHpHiddenFromPlayers(linked) : false,
       ...(linkTokenId ? { tokenId: linkTokenId } : {}),
@@ -85,6 +87,11 @@ export function InitiativeTracker({ onClose }: { onClose: () => void }) {
   }
 
   function handleNext() {
+    const state = useInitiativeStore.getState();
+    if (state.isActive) {
+      const current = state.combatants[state.currentIndex];
+      if (current) tickCombatantConditionTurn(current);
+    }
     nextTurn();
     syncToServer();
     syncInitiativeRoundToAllPlayerStats(useInitiativeStore.getState().round);
@@ -128,13 +135,13 @@ export function InitiativeTracker({ onClose }: { onClose: () => void }) {
     syncToServer();
   }
 
+  function parsedDuration(): number | null {
+    const n = parseInt(conditionRoundsInput, 10);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  }
+
   function toggleCombatantCondition(combatant: Combatant, condition: string) {
-    const has = combatant.conditions.includes(condition);
-    const conditions = has
-      ? combatant.conditions.filter((x) => x !== condition)
-      : [...combatant.conditions, condition];
-    updateCombatant(combatant.id, { conditions });
-    applyCombatantConditionsToToken({ ...combatant, conditions });
+    applyConditionToCombatant(combatant, condition, parsedDuration());
     syncToServer();
   }
 
@@ -176,6 +183,18 @@ export function InitiativeTracker({ onClose }: { onClose: () => void }) {
           >
             🎲 Roll Initiative ({tokenCount} token{tokenCount === 1 ? '' : 's'})
           </button>
+          <label className="font-ui flex items-center gap-1" style={{ fontSize: 9, color: 'var(--color-text-secondary)' }}>
+            Condition rounds
+            <input
+              type="number"
+              min={0}
+              className="input-dark w-10 py-0 px-1"
+              style={{ fontSize: 10 }}
+              title="Applied when you turn a condition on. Blank = until cleared. Counts down at the end of that combatant’s turn."
+              value={conditionRoundsInput}
+              onChange={(e) => setConditionRoundsInput(e.target.value)}
+            />
+          </label>
         </div>
       )}
 
@@ -314,15 +333,16 @@ export function InitiativeTracker({ onClose }: { onClose: () => void }) {
                     </div>
                   )}
                   {(c.conditions.length > 0 || isGM) && (
-                    <div className="flex flex-wrap gap-0.5 mt-1">
+                    <div className="flex flex-wrap gap-0.5 mt-1 items-center">
                       {isGM
                         ? CONDITIONS.map((cond) => {
                             const on = c.conditions.includes(cond);
+                            const left = remainingRounds(c.conditionRounds, cond);
                             return (
                               <button
                                 key={cond}
                                 type="button"
-                                title={cond}
+                                title={left ? `${cond} · ${left} rounds` : cond}
                                 onClick={() => toggleCombatantCondition(c, cond)}
                                 className="font-ui rounded px-1 py-0"
                                 style={{
@@ -332,11 +352,13 @@ export function InitiativeTracker({ onClose }: { onClose: () => void }) {
                                   border: `1px solid ${on ? GOLD : BD}`,
                                 }}
                               >
-                                {cond.slice(0, 3)}
+                                {cond.slice(0, 3)}{left ? ` ${left}` : ''}
                               </button>
                             );
                           })
-                        : c.conditions.map((cond) => (
+                        : c.conditions.map((cond) => {
+                            const left = remainingRounds(c.conditionRounds, cond);
+                            return (
                             <span
                               key={cond}
                               className="font-ui rounded px-1 py-0"
@@ -346,11 +368,12 @@ export function InitiativeTracker({ onClose }: { onClose: () => void }) {
                                 color: GOLD,
                                 border: `1px solid ${GOLD}`,
                               }}
-                              title={cond}
+                              title={left ? `${cond} · ${left} rounds` : cond}
                             >
-                              {cond.slice(0, 3)}
+                              {cond.slice(0, 3)}{left ? ` ${left}` : ''}
                             </span>
-                          ))}
+                            );
+                          })}
                     </div>
                   )}
                 </div>

@@ -146,7 +146,7 @@ export function expandDieFaces(notation: string): number[] {
     if (!Number.isFinite(count) || !Number.isFinite(sides) || sides < 2) continue;
     for (let i = 0; i < count; i++) faces.push(sides);
   }
-  return faces.length ? faces : [20];
+  return faces;
 }
 
 export function buildDicePayload(

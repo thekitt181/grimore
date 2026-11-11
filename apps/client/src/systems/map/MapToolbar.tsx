@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useMapStore, type MapTool, type WallMode } from './store/mapStore';
+import { useMapPingStore } from './mapPingStore';
 import { useItemStore, getActiveMap } from '@/systems/scene/store/itemStore';
 import { useSessionStore } from '@/store/sessionStore';
 import { resetSessionMapView, syncMapFocusToSession } from '@/systems/map/mapFocusSync';
@@ -7,6 +8,7 @@ import { resyncMapDisplay } from '@/systems/map/resyncMapDisplay';
 import { emitItemUpdate, emitItemRemove, emitItemsSync } from '@/systems/scene/sceneSync';
 import { clsx } from 'clsx';
 import { setFogVisibleForSession } from '@/systems/scene/fogActiveSync';
+import { setPlayersCanLootForSession } from '@/systems/combat/lootPolicySync';
 import { emitWallExtrudeToSession } from '@/systems/map/wallExtrudeSync';
 import { DRAW_COLOR_PRESETS, DEFAULT_TEXT_FONT_SIZE, MAX_TEXT_FONT_SIZE, MIN_TEXT_FONT_SIZE } from './drawColors';
 import { MapViewModeToggle } from './MapViewModeToggle';
@@ -28,6 +30,7 @@ const GM_TOOLS: ToolDef[] = [
   { id: 'pan',       label: 'Pan',     icon: '✋',  title: 'Pan the map (middle-mouse or this tool)' },
   { id: 'wall',      label: 'Wall',    icon: '🧱', title: 'Wall tool — freehand, rect, circle & eraser appear below' },
   { id: 'measure',   label: 'Measure', icon: '📏', title: 'Measure distance' },
+  { id: 'ping',      label: 'Ping',    icon: '◉',  title: 'Table ping — click so everyone sees a pulse. Shift+click (or Look here) adds a callout. Hold G+click from any tool.' },
   { id: 'calibrate', label: 'Calibrate', icon: '⊹', title: 'Calibrate grid — drag a rectangle over one cell' },
 ];
 
@@ -35,6 +38,7 @@ const PLAYER_TOOLS: ToolDef[] = [
   { id: 'select',  label: 'Select',  icon: '↖',  title: 'Select & move tokens' },
   { id: 'pan',     label: 'Pan',     icon: '✋',  title: 'Pan the map (pinch to zoom)' },
   { id: 'measure', label: 'Measure', icon: '📏', title: 'Measure distance' },
+  { id: 'ping',    label: 'Ping',    icon: '◉',  title: 'Table ping — tap the map so everyone sees a pulse. Hold G+click, or enable Look here for a callout.' },
 ];
 
 const WALL_TOOLS: Array<{ id: WallMode; label: string; icon: string; title: string }> = [
@@ -88,6 +92,7 @@ export function MapToolbar() {
   const syncPlayerViews = useMapStore((s) => s.syncPlayerViews);
   const gmMovePlayerTokens = useMapStore((s) => s.gmMovePlayerTokens);
   const playersCanMoveTokens = useMapStore((s) => s.playersCanMoveTokens);
+  const playersCanLoot = useMapStore((s) => s.playersCanLoot);
   const setSyncPlayerViews = useMapStore((s) => s.setSyncPlayerViews);
   const setGmMovePlayerTokens = useMapStore((s) => s.setGmMovePlayerTokens);
   const setPlayersCanMoveTokens = useMapStore((s) => s.setPlayersCanMoveTokens);
@@ -100,6 +105,9 @@ export function MapToolbar() {
 
   const [showDrawPanel, setShowDrawPanel] = useState(false);
   const checkDistOpen = activeTool === 'check-distance';
+  const pingOpen = activeTool === 'ping';
+  const lookHereDefault = useMapPingStore((s) => s.lookHereDefault);
+  const setLookHereDefault = useMapPingStore((s) => s.setLookHereDefault);
   const isDrawTool = DRAW_TOOLS.some((t) => t.id === activeTool);
   const isWallTool = activeTool === 'wall';
 
@@ -354,6 +362,17 @@ export function MapToolbar() {
                 )}
               >
                 Plr move
+              </button>
+              <button
+                type="button"
+                title={playersCanLoot ? 'Players can take corpse loot: ON' : 'Players can only view corpse loot'}
+                onClick={() => setPlayersCanLootForSession(!playersCanLoot)}
+                className={clsx(
+                  'w-full rounded py-0.5 font-ui text-[7px] leading-tight transition-all',
+                  playersCanLoot ? ACTIVE_BTN : 'text-[#8a8075] hover:text-[#e8e0d0] hover:bg-[#1c1c28]',
+                )}
+              >
+                Plr loot
               </button>
             </div>
           </>
@@ -612,6 +631,34 @@ export function MapToolbar() {
         </div>
       )}
 
+      {pingOpen && (
+        <div
+          className="self-start p-2 rounded-lg shadow-panel font-ui"
+          style={{
+            background: 'var(--color-bg-secondary)',
+            border: '1px solid var(--color-border)',
+            width: 148,
+          }}
+        >
+          <p className="text-[10px] mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>
+            Click the map. Hold G+click from any tool.
+          </p>
+          <label
+            className="flex items-center gap-1.5 text-[10px] cursor-pointer"
+            style={{ color: 'var(--color-accent-gold)' }}
+          >
+            <input
+              type="checkbox"
+              checked={lookHereDefault}
+              onChange={(e) => setLookHereDefault(e.target.checked)}
+            />
+            Look here
+          </label>
+          <p className="text-[9px] mt-1" style={{ color: 'var(--color-text-secondary)' }}>
+            Shift+click also adds the callout.
+          </p>
+        </div>
+      )}
       {checkDistOpen && <CheckDistancePanel onClose={() => setTool('select')} />}
     </div>
   );

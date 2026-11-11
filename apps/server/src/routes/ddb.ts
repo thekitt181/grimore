@@ -24,6 +24,9 @@ import {
   finishDdbLibraryImportSession,
   patchCharacterHp,
   patchCharacterDeathSaves,
+  restCharacter,
+  giveInventoryItemToCharacter,
+  giveGoldToCharacter,
   unlinkDdbAccount,
 } from '../services/ddb/ddbService';
 import {
@@ -64,6 +67,25 @@ const hpSchema = z.object({
   hp: z.number().int().min(0),
   tempHp: z.number().int().min(0).default(0),
   maxHp: z.number().int().min(1).optional(),
+});
+const restSchema = z.object({
+  kind: z.enum(['short', 'long']),
+});
+const giveItemSchema = z.object({
+  name: z.string().min(1).max(120),
+  description: z.string().max(2000).optional(),
+  itemType: z.string().max(80).optional(),
+  quantity: z.number().int().min(1).max(9_999).optional(),
+});
+const coinAmt = z.number().int().min(0).max(1_000_000);
+const giveGoldSchema = z.object({
+  gp: coinAmt.optional(),
+  sp: coinAmt.optional(),
+  ep: coinAmt.optional(),
+  cp: coinAmt.optional(),
+  pp: coinAmt.optional(),
+}).refine((v) => (v.gp ?? 0) + (v.sp ?? 0) + (v.ep ?? 0) + (v.cp ?? 0) + (v.pp ?? 0) > 0, {
+  message: 'Need at least 1 coin',
 });
 const deathSaveSchema = z.object({
   successes: z.number().int().min(0).max(3),
@@ -219,6 +241,76 @@ router.post('/characters/:id/import-token', requireAuth, async (req: Authenticat
     });
   } catch (err) {
     res.status(400).json({ error: err instanceof Error ? err.message : 'Import failed' });
+  }
+});
+
+router.post('/characters/:id/rest', requireAuth, async (req: AuthenticatedRequest, res) => {
+  try {
+    const id = parseInt(req.params['id'] ?? '', 10);
+    if (!Number.isFinite(id)) {
+      res.status(400).json({ error: 'Invalid character id' });
+      return;
+    }
+    const parsed = restSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: 'Invalid rest payload' });
+      return;
+    }
+    const sessionId = req.header('x-session-id') ?? undefined;
+    const result = await restCharacter(req.userId!, id, parsed.data.kind, sessionId);
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: err instanceof Error ? err.message : 'Rest failed' });
+  }
+});
+
+router.post('/characters/:id/give-item', requireAuth, async (req: AuthenticatedRequest, res) => {
+  try {
+    const id = parseInt(req.params['id'] ?? '', 10);
+    if (!Number.isFinite(id)) {
+      res.status(400).json({ error: 'Invalid character id' });
+      return;
+    }
+    const parsed = giveItemSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: 'Invalid item payload' });
+      return;
+    }
+    const sessionId = req.header('x-session-id') ?? undefined;
+    const result = await giveInventoryItemToCharacter(
+      req.userId!,
+      id,
+      {
+        name: parsed.data.name,
+        ...(parsed.data.description ? { description: parsed.data.description } : {}),
+        ...(parsed.data.itemType ? { itemType: parsed.data.itemType } : {}),
+        ...(parsed.data.quantity ? { quantity: parsed.data.quantity } : {}),
+      },
+      sessionId,
+    );
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: err instanceof Error ? err.message : 'Give item failed' });
+  }
+});
+
+router.post('/characters/:id/give-gold', requireAuth, async (req: AuthenticatedRequest, res) => {
+  try {
+    const id = parseInt(req.params['id'] ?? '', 10);
+    if (!Number.isFinite(id)) {
+      res.status(400).json({ error: 'Invalid character id' });
+      return;
+    }
+    const parsed = giveGoldSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: 'Invalid gold payload' });
+      return;
+    }
+    const sessionId = req.header('x-session-id') ?? undefined;
+    const result = await giveGoldToCharacter(req.userId!, id, parsed.data, sessionId);
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: err instanceof Error ? err.message : 'Give gold failed' });
   }
 });
 

@@ -1,9 +1,17 @@
 import { useEffect, useRef } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
-import { getActiveMap } from '@/systems/scene/store/itemStore';
 import { isFogOverlayVisible } from '@/systems/scene/fogActiveSync';
-import { fpVisionRadiusPx, hasDarkvision } from '@/systems/map/fogLos';
+import {
+  fpVisionRadiusPx,
+  hasDarkvision,
+  lightsVisibleToViewers,
+  tokenMapOrigin,
+  worldToMapLocal,
+} from '@/systems/map/fogLos';
+import { visionWalls } from '@/systems/map/props/doorCollision';
+import { GRIMOIRE_LIGHT_NAME } from '@/systems/scene/sceneLights';
+import { getActiveMap, useItemStore } from '@/systems/scene/store/itemStore';
 import { getActiveTimeOfDay } from '@/systems/scene/media/sceneMediaStore';
 import { useFirstPersonStore } from './firstPersonStore';
 import { resolveFirstPersonToken } from './resolveFirstPersonToken';
@@ -105,13 +113,26 @@ export function FirstPersonVisionFog(_props: { wallHeight: number }) {
     const token = resolveFirstPersonToken();
     const map = getActiveMap();
     const grid = map?.gridSize || 96;
-    const radiusPx = token ? fpVisionRadiusPx(token, grid) : grid * 6;
+    let radiusPx = token ? fpVisionRadiusPx(token, grid) : grid * 6;
     const dv = token ? hasDarkvision(token) : getActiveTimeOfDay() === 'midnight';
+    const items = useItemStore.getState().items;
+    const walls = map ? visionWalls(map, items) : [];
+    const lights = map && token
+      ? lightsVisibleToViewers(map, items, [token], walls)
+      : [];
+    if (map && token && lights.length > 0) {
+      const origin = tokenMapOrigin(token, map);
+      for (const light of lights) {
+        const lo = worldToMapLocal(light.wx, light.wy, map);
+        const reach = Math.hypot(lo.x - origin.x, lo.y - origin.y) + (light.totalFt / 5) * grid;
+        radiusPx = Math.max(radiusPx, reach);
+      }
+    }
 
     if (fill) {
       fill.visible = true;
       fill.color.set(dv ? '#e8eef8' : '#ffe2b0');
-      fill.intensity = dv ? 2.4 : 2.8;
+      fill.intensity = lights.length > 0 ? (dv ? 0.45 : 0.18) : (dv ? 2.4 : 0.12);
     }
 
     const fog = ownFog.current;
@@ -162,6 +183,7 @@ function purgeOrphanVisionPointLights(scene: THREE.Scene) {
   const kill: THREE.PointLight[] = [];
   scene.traverse((o) => {
     if (!(o instanceof THREE.PointLight)) return;
+    if (o.name === GRIMOIRE_LIGHT_NAME) return;
     if (o.decay === 0 && o.distance >= 80) kill.push(o);
   });
   for (const light of kill) {
@@ -180,6 +202,7 @@ function muteWorldLights(
   for (const a of prevLights.current.ambient) a.light.intensity = 0;
   for (const d of prevLights.current.dirs) d.light.intensity = 0;
   for (const p of prevLights.current.points) {
+    if (p.light.name === GRIMOIRE_LIGHT_NAME) continue;
     p.light.intensity = 0;
     p.light.visible = false;
   }
@@ -223,7 +246,7 @@ function applyVision(
         dirs.push({ light: o, intensity: o.intensity });
         o.intensity = 0;
       }
-      if (o instanceof THREE.PointLight) {
+      if (o instanceof THREE.PointLight && o.name !== GRIMOIRE_LIGHT_NAME) {
         points.push({ light: o, intensity: o.intensity, visible: o.visible });
         o.intensity = 0;
         o.visible = false;

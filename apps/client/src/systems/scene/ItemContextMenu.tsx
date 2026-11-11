@@ -12,7 +12,10 @@ import type { HandoutInventoryTarget, SessionUser } from '@grimoire/shared';
 import type { ImageItem, Item, MapItem, TokenItem, HandoutItem } from './types';
 import { isHpHiddenFromPlayers } from './types';
 import { visionFeet, visionRadiusFromFeet } from '@/systems/map/fogLos';
-import { applyTokenHpToCombatants, applyTokenConditionsToCombatants } from '@/systems/initiative/initiativeTokenSync';
+import { itemLightSpec, lightTogglePatch } from '@/systems/scene/sceneLights';
+import { applyTokenHpToCombatants } from '@/systems/initiative/initiativeTokenSync';
+import { applyConditionToToken, remainingRounds } from '@/systems/initiative/conditionDuration';
+import { maybeSpawnCorpse, useCorpseLootUi } from '@/systems/combat/corpseLoot';
 import { useCombatStore } from '@/systems/combat/combatStore';
 import { useDdbStore } from '@/systems/ddb/ddbStore';
 import { applyDamage, applyHeal, readTempHp } from '@/systems/initiative/hpUtils';
@@ -573,6 +576,15 @@ export function ItemContextMenu() {
         )}
         {rotToken && (
           <>
+            <Btn
+              label={itemLightSpec(rotToken) ? '🕯 Torch off' : '🕯 Torch on (20 / 20)'}
+              onClick={() => {
+                const patch = lightTogglePatch(rotToken);
+                useItemStore.getState().updateItems([{ id: rotToken.id, patch }]);
+                emitItemUpdate([{ id: rotToken.id, patch }]);
+                close();
+              }}
+            />
             <Btn label="⟲ Rotate left (45°)" onClick={() => rotateToken(rotToken.id, -45)} />
             <Btn label="⟳ Rotate right (45°)" onClick={() => rotateToken(rotToken.id, 45)} />
             <Btn
@@ -693,6 +705,29 @@ export function ItemContextMenu() {
       <div className="gold-divider my-1" />
 
       <Btn label={allLocked ? '🔓 Unlock' : '🔒 Lock'} onClick={toggleLock} />
+      {isGM && selected.some((i) => i.type === 'token' || i.type === 'image') && (
+        <Btn
+          label={
+            selected.filter((i) => i.type === 'token' || i.type === 'image').every((i) => itemLightSpec(i))
+              ? '🕯 Lights off'
+              : '🕯 Lights on'
+          }
+          onClick={() => {
+            const turnOff = selected
+              .filter((i) => i.type === 'token' || i.type === 'image')
+              .every((i) => itemLightSpec(i));
+            const updates = selected
+              .filter((i) => i.type === 'token' || i.type === 'image')
+              .map((i) => ({
+                id: i.id,
+                patch: turnOff ? { lightOn: false } : lightTogglePatch({ ...i, lightOn: false }),
+              }));
+            useItemStore.getState().updateItems(updates);
+            emitItemUpdate(updates);
+            close();
+          }}
+        />
+      )}
       {isGM && <Btn label={allHidden ? '👁 Show to players' : '🙈 Hide from players'} onClick={toggleHide} />}
       <Btn label="⧉ Duplicate" onClick={duplicate} />
       <Btn label="📋 Copy" onClick={copy} />
@@ -816,6 +851,19 @@ export function ItemContextMenu() {
           <Btn label="⟲ Rotate left (45°)" onClick={() => { rotateToken(single.id, -45); close(); }} />
           <Btn label="⟳ Rotate right (45°)" onClick={() => { rotateToken(single.id, 45); close(); }} />
           <Btn label="↺ Reset rotation" onClick={() => { resetTokenRotation(single.id); close(); }} />
+        </>
+      )}
+
+      {single?.type === 'token' && (single as TokenItem).hp <= 0 && (single as TokenItem).corpseLoot && (
+        <>
+          <div className="gold-divider my-1" />
+          <Btn
+            label={(single as TokenItem).corpseLoot?.claimed ? 'Loot (empty)' : 'Loot corpse'}
+            onClick={() => {
+              useCorpseLootUi.getState().open(single.id);
+              close();
+            }}
+          />
         </>
       )}
 
@@ -1533,6 +1581,7 @@ function StatField({
 function TokenExtras({ token }: { token: TokenItem }) {
   const [hoveredCondition, setHoveredCondition] = useState<string | null>(null);
   const [tipPos, setTipPos] = useState({ x: 0, y: 0 });
+  const [conditionRoundsInput, setConditionRoundsInput] = useState('3');
 
   function showConditionTip(e: ReactMouseEvent<HTMLButtonElement>, label: string) {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -1560,14 +1609,11 @@ function TokenExtras({ token }: { token: TokenItem }) {
         ...(patch.tempHp !== undefined ? { tempHp: patch.tempHp } : {}),
       });
     }
-    if (patch.conditions !== undefined) {
-      applyTokenConditionsToCombatants(token.id, patch.conditions);
-    }
+    if (patch.hp !== undefined) maybeSpawnCorpse(token.id, token.hp, patch.hp);
   }
   function toggleCondition(c: string) {
-    const has = token.conditions.includes(c);
-    const conditions = has ? token.conditions.filter((x) => x !== c) : [...token.conditions, c];
-    update({ conditions });
+    const n = parseInt(conditionRoundsInput, 10);
+    applyConditionToToken(token, c, Number.isFinite(n) && n > 0 ? n : null);
   }
 
   return (
@@ -1629,14 +1675,26 @@ function TokenExtras({ token }: { token: TokenItem }) {
         {isHpHiddenFromPlayers(token) ? '👁 Show HP bar to players' : '🙈 Hide HP bar from players'}
       </button>
 
-      <div className="px-3 py-1 font-ui text-xs" style={{ color: 'var(--color-text-secondary)' }}>Conditions</div>
+      <div className="px-3 py-1 font-ui text-xs flex items-center justify-between gap-1" style={{ color: 'var(--color-text-secondary)' }}>
+        <span>Conditions</span>
+        <input
+          type="number"
+          min={0}
+          className="input-dark w-10 py-0 px-1 text-xs"
+          title="Rounds when applying (blank = until cleared)"
+          value={conditionRoundsInput}
+          onChange={(e) => setConditionRoundsInput(e.target.value)}
+          onKeyDown={(e) => e.stopPropagation()}
+        />
+      </div>
       <div className="px-2 pb-1 flex flex-wrap gap-1">
         {CONDITIONS.map((c) => {
           const on = token.conditions.includes(c);
+          const left = remainingRounds(token.conditionRounds, c);
           return (
             <button key={c} onClick={() => toggleCondition(c)}
-              title={c}
-              onMouseEnter={(e) => showConditionTip(e, c)}
+              title={left ? `${c} · ${left} rounds` : c}
+              onMouseEnter={(e) => showConditionTip(e, left ? `${c} · ${left} rnd` : c)}
               onMouseLeave={hideConditionTip}
               className="text-xs px-1.5 py-0.5 rounded font-ui"
               style={{
@@ -1644,7 +1702,7 @@ function TokenExtras({ token }: { token: TokenItem }) {
                 color: on ? 'var(--color-accent-gold)' : 'var(--color-text-secondary)',
                 border: `1px solid ${on ? 'var(--color-accent-gold)' : 'var(--color-border)'}`,
               }}>
-              {c.slice(0, 4)}
+              {c.slice(0, 4)}{left ? ` ${left}` : ''}
             </button>
           );
         })}

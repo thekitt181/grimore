@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import type { TokenItem } from '@/systems/scene/types';
 import { DraggablePanel } from '@/components/DraggablePanel';
-import { syncDdbCharacter } from './ddbApi';
+import { fetchDdbCharacter } from './ddbApi';
 import { pullDdbHpToToken } from './useDdbHpSync';
 import { parsePcActions } from './ddbActionParser';
 import { useCombatStore } from '@/systems/combat/combatStore';
@@ -21,7 +21,7 @@ export function PcActionsPanel({ token, onClose }: { token: TokenItem; onClose: 
   const { data: character, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['ddb', 'character', ddbId],
     queryFn: async () => {
-      const ch = await syncDdbCharacter(ddbId);
+      const ch = await fetchDdbCharacter(ddbId);
       pullDdbHpToToken(token.id, ch);
       return ch;
     },
