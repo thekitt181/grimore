@@ -23,7 +23,7 @@ export function serializeHandout(row: Handout): HandoutRecord {
   };
 }
 
-export function serializeReceipt(row: HandoutReceipt): HandoutReceiptRecord {
+export function serializeReceipt(row: HandoutReceipt, recipientName?: string): HandoutReceiptRecord {
   return {
     id: row.id,
     handoutId: row.handoutId,
@@ -37,6 +37,7 @@ export function serializeReceipt(row: HandoutReceipt): HandoutReceiptRecord {
     compendiumItemId: row.compendiumItemId,
     ddbDefinitionId: row.ddbDefinitionId,
     receivedAt: row.receivedAt.toISOString(),
+    ...(recipientName ? { recipientName } : {}),
   };
 }
 
@@ -78,7 +79,24 @@ export async function listUserHandoutJournal(userId: string, campaignId: string)
     },
     orderBy: { receivedAt: 'desc' },
   });
-  return rows.map(serializeReceipt);
+  return rows.map((row) => serializeReceipt(row));
+}
+
+/** GM view: every receipt in the campaign, labeled with the recipient username. */
+export async function listCampaignHandoutJournal(campaignId: string): Promise<HandoutReceiptRecord[]> {
+  const rows = await readPrisma.handoutReceipt.findMany({
+    where: { handout: { campaignId } },
+    orderBy: { receivedAt: 'desc' },
+  });
+  const userIds = [...new Set(rows.map((r) => r.userId))];
+  const users = userIds.length
+    ? await readPrisma.user.findMany({
+        where: { id: { in: userIds } },
+        select: { id: true, username: true },
+      })
+    : [];
+  const nameById = new Map(users.map((u) => [u.id, u.username]));
+  return rows.map((row) => serializeReceipt(row, nameById.get(row.userId) ?? 'Player'));
 }
 
 export type HandoutWriteInput = {

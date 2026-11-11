@@ -41,4 +41,6 @@ export interface HandoutReceiptRecord {
   compendiumItemId: string | null;
   ddbDefinitionId: number | null;
   receivedAt: string;
+  /** Present on GM campaign journal — who received this copy. */
+  recipientName?: string;
 }

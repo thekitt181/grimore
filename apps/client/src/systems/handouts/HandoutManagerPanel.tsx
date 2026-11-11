@@ -11,6 +11,7 @@ import {
   revealCampaignHandout,
   updateCampaignHandout,
 } from './handoutApi';
+import { useHandoutJournalStore } from './handoutJournalStore';
 
 const HANDOUT_TYPES: Array<{ id: HandoutType; label: string }> = [
   { id: 'TEXT', label: 'Text note' },
@@ -140,6 +141,7 @@ export function HandoutManagerPanel({ campaignId, sessionId, onClose }: HandoutM
         return;
       }
       await revealCampaignHandout(handout.id, sessionId, targets);
+      void useHandoutJournalStore.getState().loadJournal(campaignId);
       setMessage(`Revealed "${handout.title}"`);
     } catch (err) {
       setMessage(err instanceof Error ? err.message : 'Reveal failed');

@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import { DraggablePanel } from '@/components/DraggablePanel';
-import type { GrimoireCharacter } from '@grimoire/shared';
+import { formatLimitedUses, type GrimoireCharacter } from '@grimoire/shared';
 import type { TokenItem } from '@/systems/scene/types';
 import { useItemStore } from '@/systems/scene/store/itemStore';
 import { useDiceStore } from '@/systems/dice/diceStore';
@@ -19,6 +19,8 @@ import { searchSpells } from '@/systems/compendium/compendiumApi';
 import { useCombatStore } from '@/systems/combat/combatStore';
 import { PanelAttackResult, PanelTargetPicker } from '@/systems/combat/TokenPanelCombatFlow';
 import { TokenActionCard } from '@/systems/combat/TokenActionCard';
+import { ActionTabList } from '@/systems/combat/ActionTabList';
+import { useHandoutViewerStore } from '@/systems/compendium/handoutViewerStore';
 
 const GOLD = 'var(--color-accent-gold)';
 const BD = 'var(--color-border)';
@@ -53,7 +55,9 @@ export function CharacterSheetPanel({ token, onClose }: { token: TokenItem; onCl
       return ch;
     },
     enabled: Boolean(ddbId),
-    staleTime: 30_000,
+    staleTime: 0,
+    refetchInterval: 12_000,
+    refetchIntervalInBackground: false,
   });
 
   const syncMutation = useMutation({
@@ -186,13 +190,13 @@ function SheetBody({
   const roller = liveToken.name;
   const targetPick = useCombatStore((s) => s.targetPick);
   const parsedCombat = parsePcActions(character, lookup);
-  const spells = character.spells ?? [];
+  const tabActions = [...parsedCombat.attacks, ...parsedCombat.spells, ...parsedCombat.features];
+  const openContent = useHandoutViewerStore((s) => s.openContent);
   const spellSlots = character.spellSlots ?? [];
   const inventory = character.inventory ?? [];
   const abilities = character.abilities ?? [];
   const skills = character.skills ?? [];
   const saves = character.saves ?? [];
-  const features = character.features ?? [];
   const feats = character.feats ?? [];
   const conditions = character.conditions ?? [];
   const resistances = character.damageResistances ?? [];
@@ -399,73 +403,63 @@ function SheetBody({
         </Section>
       )}
 
-      {parsedCombat.attacks.length > 0 && (
-        <Section title="Weapon attacks">
-          {parsedCombat.attacks.map((parsed) => (
-            <div key={parsed.name} className="flex items-center justify-between gap-2 py-0.5">
-              <span className="truncate min-w-0">
-                <span style={{ color: GOLD }}>{parsed.name}</span>
-                {parsed.damages[0] ? (
-                  <span className="opacity-70"> · {parsed.damages[0].dice} {parsed.damages[0].type}</span>
-                ) : null}
-              </span>
-              <RollChip
-                label={`${roller} · ${parsed.name} attack`}
-                mod={parsed.toHit ?? 0}
-                compact
-                actorTokenId={liveToken.id}
-              />
-            </div>
-          ))}
-        </Section>
-      )}
-
-      {features.length > 0 && (
-        <Section title="Class features & actions">
-          {features.slice(0, 25).map((f) => (
-            <div key={f.id} className="py-1 border-b border-white/5 last:border-0">
-              <div style={{ color: GOLD }}>{f.name}</div>
-              {f.description && (
-                <div className="opacity-70 text-[10px] leading-snug mt-0.5">{stripHtml(f.description)}</div>
-              )}
-            </div>
-          ))}
-          {features.length > 25 && (
-            <div className="opacity-60">+{features.length - 25} more</div>
-          )}
-        </Section>
-      )}
-
-      {parsedCombat.spells.length > 0 && (
-        <Section title="Spells">
-          <div className="space-y-1">
-            {parsedCombat.spells.map((action) => (
+      {tabActions.length > 0 && (
+        <Section title="Actions">
+          <ActionTabList
+            actions={tabActions}
+            renderUse={(action) => (
               <TokenActionCard
-                key={action.name}
                 action={action}
                 token={liveToken}
                 isActivePick={activePickName === action.name}
-                compact
+                detailsOnly
               />
-            ))}
-          </div>
-          {spells.length > parsedCombat.spells.length && (
-            <p className="font-ui text-[10px] mt-1 opacity-60">
-              +{spells.length - parsedCombat.spells.length} unprepared spells hidden
-            </p>
-          )}
+            )}
+          />
         </Section>
       )}
 
       {inventory.length > 0 && (
         <Section title="Inventory">
-          {inventory.map((i) => (
-            <div key={i.id} className="py-0.5 truncate">
-              {i.equipped ? '⚔ ' : ''}
-              {i.name}
-              {i.quantity > 1 ? ` ×${i.quantity}` : ''}
-            </div>
-          ))}
+          {inventory.map((i) => {
+            const uses = formatLimitedUses(i);
+            return (
+              <button
+                key={i.id}
+                type="button"
+                className="w-full text-left py-1 border-b border-white/5 last:border-0"
+                onClick={() => openContent({
+                  title: i.name,
+                  description: i.description?.trim()
+                    || (i.equipped ? 'Equipped on D&D Beyond.' : 'On the D&D Beyond character sheet.'),
+                  ...(i.imageUrl ? { imageUrl: i.imageUrl } : {}),
+                  ...(i.type ? { itemType: i.type } : {}),
+                  ...(i.rarity ? { rarity: i.rarity } : {}),
+                  source: 'D&D Beyond',
+                  handoutType: 'ITEM_CARD',
+                  ...(i.quantity > 1 ? { quantity: i.quantity } : {}),
+                  ...(i.usesMax && i.usesMax > 0
+                    ? {
+                        usesMax: i.usesMax,
+                        usesRemaining: i.usesRemaining ?? i.usesMax,
+                        ...(i.usesReset ? { usesReset: i.usesReset } : {}),
+                      }
+                    : {}),
+                })}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="truncate">
+                    {i.equipped ? '⚔ ' : ''}
+                    {i.name}
+                    {i.quantity > 1 ? ` ×${i.quantity}` : ''}
+                  </span>
+                  {uses && (
+                    <span className="shrink-0 text-[10px]" style={{ color: GOLD }}>{uses}</span>
+                  )}
+                </div>
+              </button>
+            );
+          })}
         </Section>
       )}
     </>

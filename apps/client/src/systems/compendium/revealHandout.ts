@@ -21,10 +21,16 @@ export interface RevealHandoutResult {
 }
 
 function refreshJournalAfterReveal(receipts: HandoutReceiptRecord[]): void {
-  const { campaignId, myUserId } = useSessionStore.getState();
+  const { campaignId, myUserId, myRole, connectedUsers } = useSessionStore.getState();
   const journal = useHandoutJournalStore.getState();
+  const gmSeesAll = myRole === 'GM';
+  const nameById = new Map(connectedUsers.map((u) => [u.id, u.username]));
   for (const receipt of receipts) {
-    if (receipt.userId === myUserId) journal.upsertEntry(receipt);
+    if (!gmSeesAll && receipt.userId !== myUserId) continue;
+    journal.upsertEntry({
+      ...receipt,
+      recipientName: receipt.recipientName ?? nameById.get(receipt.userId) ?? 'Player',
+    });
   }
   if (campaignId) void journal.loadJournal(campaignId);
 }

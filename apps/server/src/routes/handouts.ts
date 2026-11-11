@@ -13,6 +13,7 @@ import {
   getHandout,
   getReceipt,
   listCampaignHandouts,
+  listCampaignHandoutJournal,
   listUserHandoutJournal,
   revealHandoutToUsers,
   resolveRevealTargets,
@@ -324,7 +325,9 @@ router.get('/campaigns/:campaignId/handout-journal', requireAuth, async (req: Au
     }
     const journal = await withDbTimeout(
       HANDOUT_DB_TIMEOUT_MS,
-      () => listUserHandoutJournal(userId, campaignId),
+      () => (member.isGM
+        ? listCampaignHandoutJournal(campaignId)
+        : listUserHandoutJournal(userId, campaignId)),
       'handouts.journal',
     );
     res.json({ journal });

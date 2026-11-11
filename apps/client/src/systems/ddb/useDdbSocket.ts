@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { useGrimoireAuth } from '@/hooks/useGrimoireAuth';
 import type { DdbCharacterSyncPayload, DdbHpUpdatePayload } from '@grimoire/shared';
 import { getSocket } from '@/lib/socket';
@@ -18,6 +19,7 @@ const POLL_MS_CONNECTED = 12_000;
 
 export function useDdbSocket(): void {
   const { isLoaded, isSignedIn, getToken } = useGrimoireAuth();
+  const qc = useQueryClient();
   const sessionId = useSessionStore((s) => s.sessionId);
   const campaignId = useSessionStore((s) => s.campaignId);
   const isConnected = useSessionStore((s) => s.isConnected);
@@ -75,10 +77,7 @@ export function useDdbSocket(): void {
 
     const onSync = (payload: DdbCharacterSyncPayload) => {
       if (payload.sessionId !== sessionId) return;
-      const tokens = Object.values(useItemStore.getState().items).filter(
-        (i) => i.type === 'token' && i.ddbCharacterId === payload.ddbCharacterId,
-      );
-      void tokens;
+      void qc.invalidateQueries({ queryKey: ['ddb', 'character', payload.ddbCharacterId] });
     };
 
     const onHpUpdate = (payload: DdbHpUpdatePayload) => {
@@ -102,5 +101,5 @@ export function useDdbSocket(): void {
       socket.off('ddb:characterSync', onSync);
       socket.off('character:hpUpdate', onHpUpdate);
     };
-  }, [sessionId, campaignId, rollBridgeNonce, isConnected, isLoaded, isSignedIn, getToken]);
+  }, [sessionId, campaignId, rollBridgeNonce, isConnected, isLoaded, isSignedIn, getToken, qc]);
 }

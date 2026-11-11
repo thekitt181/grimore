@@ -1,3 +1,5 @@
+import { cleanStatBlockText } from './actionDetail';
+
 /** Parsed stat-block roll data (ported from Owlbear popover.js). */
 
 export interface AbilityScore {
@@ -140,7 +142,7 @@ export interface ActionRange {
 export interface ParsedAction {
   name: string;
   originalText: string;
-  section: 'traits' | 'actions' | 'reactions' | 'legendary';
+  section: 'traits' | 'actions' | 'bonus' | 'reactions' | 'legendary' | 'lair';
   isTrait: boolean;
   toHit?: number;
   range?: ActionRange;
@@ -152,6 +154,18 @@ export interface ParsedAction {
   isSpellcastingBlock?: boolean;
   /** Parent spellcasting action name when expanded from a roster. */
   spellParent?: string;
+  /** PC prepared/cantrip spell — shown on the Spells tab. */
+  isSpell?: boolean;
+  spellLevel?: number;
+  spellSchool?: string;
+  spellCastingTime?: string;
+  spellRangeText?: string;
+  spellComponents?: string;
+  spellDuration?: string;
+  spellRitual?: boolean;
+  usesMax?: number;
+  usesRemaining?: number;
+  usesReset?: string;
 }
 
 export interface SpellLookupData {
@@ -804,10 +818,26 @@ function expandSpellAction(
   return action;
 }
 
+function isStatBlockFieldName(name: string): boolean {
+  return /^(Speed|Skills|Senses|Languages|Challenge|Saving Throws|Damage Immunities|Condition Immunities|Damage Resistances|Damage Vulnerabilities|Armor Class|Hit Points|Proficiency Bonus|Challenge Rating)\b/i.test(name.trim());
+}
+
+function parseActionSectionHeader(line: string): ParsedAction['section'] | null {
+  const h = line.replace(/[.!:]+$/g, '').trim().toUpperCase();
+  if (h === 'TRAITS' || h === 'SPECIAL TRAITS') return 'traits';
+  if (h === 'ACTIONS') return 'actions';
+  if (h === 'BONUS ACTIONS' || h === 'BONUS ACTION') return 'bonus';
+  if (h === 'REACTIONS' || h === 'REACTION') return 'reactions';
+  if (h === 'LEGENDARY ACTIONS' || h === 'LEGENDARY ACTION') return 'legendary';
+  if (h === 'LAIR ACTIONS' || h === 'LAIR ACTION') return 'lair';
+  if (h === 'MYTHIC ACTIONS') return 'legendary';
+  return null;
+}
+
 export function parseMonsterActions(description: string, lookup?: SpellLookup): ParsedAction[] {
   if (!description) return [];
 
-  const text = description.replace(/\r\n/g, '\n');
+  const text = cleanStatBlockText(description);
   const globalSaveDC = (text.match(/spell save DC (\d+)/i) || [])[1];
   let globalToHit = (text.match(/([+-]\d+)\s*to\s*hit\s*with\s*spell/i) || [])[1];
 
@@ -826,6 +856,7 @@ export function parseMonsterActions(description: string, lookup?: SpellLookup): 
   const ignoredHeaders = new Set([
     'Speed', 'Skills', 'Senses', 'Languages', 'Challenge', 'Saving Throws',
     'Damage Immunities', 'Condition Immunities', 'Damage Resistances', 'Damage Vulnerabilities',
+    'Armor Class', 'Hit Points', 'Proficiency Bonus', 'Challenge Rating',
   ]);
   let hasSeenActionHeader = false;
 
@@ -833,9 +864,12 @@ export function parseMonsterActions(description: string, lookup?: SpellLookup): 
     const trimmed = line.trim();
     if (!trimmed) continue;
 
-    if (trimmed === 'ACTIONS') { section = 'actions'; hasSeenActionHeader = true; continue; }
-    if (trimmed === 'LEGENDARY ACTIONS') { section = 'legendary'; hasSeenActionHeader = true; continue; }
-    if (trimmed === 'REACTIONS') { section = 'reactions'; hasSeenActionHeader = true; continue; }
+    const header = parseActionSectionHeader(trimmed);
+    if (header) {
+      section = header;
+      if (header !== 'traits') hasSeenActionHeader = true;
+      continue;
+    }
 
     if (trimmed.includes('CREATURE CODEX') || trimmed.includes('TOME OF BEASTS') || /^\d+$/.test(trimmed)) {
       if (hasSeenActionHeader) {
@@ -850,6 +884,7 @@ export function parseMonsterActions(description: string, lookup?: SpellLookup): 
       const name = startMatch[1]!.trim();
       if (
         ignoredHeaders.has(name) ||
+        isStatBlockFieldName(name) ||
         name.startsWith('STR') || name.startsWith('DEX') ||
         name.includes('spell save DC') ||
         /^(Strength|Dexterity|Constitution|Intelligence|Wisdom|Charisma)\s*\(/.test(name)

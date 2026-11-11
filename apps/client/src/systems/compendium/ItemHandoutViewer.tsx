@@ -78,7 +78,10 @@ export function ItemHandoutViewer() {
 
   if (!content) return null;
 
-  const meta = [content.itemType, content.rarity, content.source].filter(Boolean).join(' · ');
+  const usesLabel = content.usesMax != null && content.usesMax > 0
+    ? `${content.usesRemaining ?? content.usesMax}/${content.usesMax} uses`
+    : null;
+  const meta = [content.itemType, content.rarity, content.source, usesLabel].filter(Boolean).join(' · ');
   const isItemCard = content.handoutType === 'ITEM_CARD' && Boolean(content.receiptId);
   const isCustomItem = Boolean(content.isCustom);
 
@@ -181,6 +184,29 @@ export function ItemHandoutViewer() {
         {...(content.animate && revealed ? { className: 'handout-reveal-panel' } : {})}
       >
         <div className="p-4 space-y-3">
+          {content.usesMax != null && content.usesMax > 0 && (
+            <div
+              className="rounded-lg px-3 py-2"
+              style={{
+                background: 'rgba(201,168,76,0.12)',
+                border: '1px solid var(--color-accent-gold)',
+              }}
+            >
+              <p className="font-display text-sm" style={{ color: 'var(--color-accent-gold)' }}>
+                {content.usesRemaining ?? content.usesMax}/{content.usesMax} uses left
+              </p>
+              {content.usesReset && (
+                <p className="font-ui text-[10px] mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+                  Recovers on {content.usesReset}
+                </p>
+              )}
+            </div>
+          )}
+          {content.quantity != null && content.quantity > 1 && (
+            <p className="font-ui text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+              Quantity ×{content.quantity}
+            </p>
+          )}
           {content.imageUrl && (
             <img
               src={content.imageUrl}

@@ -175,7 +175,7 @@ function hasAttackRange(action: any): boolean {
   return pickNumber(range.range, range.reach, range.rangeValue, range.aoeSize) != null;
 }
 function isClassFeatureAction(name: string): boolean {
-  return /maneuver|second wind|action surge|tactical mind|tactical shift|know your enemy|friend of the sea|superiority dice|primeval awareness|favored foe|extra attack|banishing arrow|piercing arrow|seeking arrow|curving shot|ever-ready shot|magic arrow|arcane shot/i.test(
+  return /maneuver|second wind|action surge|tactical mind|tactical shift|know your enemy|friend of the sea|superiority dice|primeval awareness|favored foe|extra attack|banishing arrow|piercing arrow|seeking arrow|curving shot|ever-ready shot|magic arrow|arcane shot|bardic|inspiration|countercharm|song of rest|cutting words|font of inspiration|tandem footwork/i.test(
     name,
   );
 }

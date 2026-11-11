@@ -14,6 +14,10 @@ export interface HandoutViewerContent {
   isCustom?: boolean;
   handoutType?: HandoutType;
   animate?: boolean;
+  quantity?: number;
+  usesRemaining?: number;
+  usesMax?: number;
+  usesReset?: string;
 }
 
 interface HandoutViewerState {

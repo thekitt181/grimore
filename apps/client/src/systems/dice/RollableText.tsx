@@ -1,4 +1,5 @@
 import { Fragment, useMemo } from 'react';
+import { cleanStatBlockText } from '@/systems/compendium/actionDetail';
 import { RollButton } from './RollButton';
 
 const DICE_PATTERN = /(\d+d\d+(?:\s*[+-]\s*\d+)?)/gi;
@@ -11,20 +12,21 @@ interface RollableTextProps {
 /** Renders plain text with inline clickable dice expressions. */
 export function RollableText({ text, className = '' }: RollableTextProps) {
   const parts = useMemo(() => {
-    if (!text) return [];
+    const cleaned = cleanStatBlockText(text);
+    if (!cleaned) return [];
     const segments: Array<{ type: 'text' | 'dice'; value: string }> = [];
     let lastIndex = 0;
     const re = new RegExp(DICE_PATTERN.source, 'gi');
     let match: RegExpExecArray | null;
-    while ((match = re.exec(text)) !== null) {
+    while ((match = re.exec(cleaned)) !== null) {
       if (match.index > lastIndex) {
-        segments.push({ type: 'text', value: text.slice(lastIndex, match.index) });
+        segments.push({ type: 'text', value: cleaned.slice(lastIndex, match.index) });
       }
       segments.push({ type: 'dice', value: match[1]! });
       lastIndex = match.index + match[0].length;
     }
-    if (lastIndex < text.length) {
-      segments.push({ type: 'text', value: text.slice(lastIndex) });
+    if (lastIndex < cleaned.length) {
+      segments.push({ type: 'text', value: cleaned.slice(lastIndex) });
     }
     return segments;
   }, [text]);
@@ -33,12 +35,13 @@ export function RollableText({ text, className = '' }: RollableTextProps) {
 
   const hasDice = parts.some((p) => p.type === 'dice');
   if (!hasDice) {
+    const cleaned = parts.map((p) => p.value).join('');
     return (
       <pre
         className={`font-ui text-xs whitespace-pre-wrap leading-relaxed ${className}`}
         style={{ color: 'var(--color-text-primary)' }}
       >
-        {text}
+        {cleaned}
       </pre>
     );
   }

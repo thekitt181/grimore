@@ -42,6 +42,13 @@ export interface GrimoireSpell {
   prepared: boolean;
   ritual?: boolean;
   concentration?: boolean;
+  alwaysPrepared?: boolean;
+  description?: string;
+  school?: string;
+  castingTime?: string;
+  rangeText?: string;
+  components?: string;
+  durationText?: string;
 }
 
 export interface GrimoireSpellSlots {
@@ -57,12 +64,37 @@ export interface GrimoireInventoryItem {
   weight?: number;
   equipped?: boolean;
   type?: string;
+  rarity?: string;
+  description?: string;
+  imageUrl?: string;
+  usesMax?: number;
+  usesUsed?: number;
+  usesRemaining?: number;
+  /** Short Rest, Long Rest, Dawn, etc. */
+  usesReset?: string;
 }
+
+export type FeatureActivation = 'action' | 'bonus' | 'reaction' | 'legendary' | 'lair' | 'special';
 
 export interface GrimoireFeature {
   id: string;
   name: string;
   description?: string;
+  activation?: FeatureActivation;
+  usesMax?: number;
+  usesUsed?: number;
+  usesRemaining?: number;
+  usesReset?: string;
+}
+
+export function formatLimitedUses(u: {
+  usesMax?: number;
+  usesRemaining?: number;
+  usesReset?: string;
+}): string | null {
+  if (!u.usesMax || u.usesMax <= 0) return null;
+  const left = u.usesRemaining ?? u.usesMax;
+  return u.usesReset ? `${left}/${u.usesMax} left · ${u.usesReset}` : `${left}/${u.usesMax} left`;
 }
 
 export interface GrimoireCharacter {

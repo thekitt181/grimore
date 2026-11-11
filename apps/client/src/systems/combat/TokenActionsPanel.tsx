@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { ActionTabList } from '@/systems/combat/ActionTabList';
 import { useQuery } from '@tanstack/react-query';
 import type { TokenItem } from '@/systems/scene/types';
 import { DraggablePanel } from '@/components/DraggablePanel';
@@ -66,34 +67,13 @@ export function TokenActionsPanel({ token, onClose }: { token: TokenItem; onClos
     });
   }, [monster?.description, monster?.cr, lookup, abilities]);
 
-  const grouped = useMemo(() => {
-    const g = {
-      actions: [] as ParsedAction[],
-      reactions: [] as ParsedAction[],
-      legendary: [] as ParsedAction[],
-      spellcasting: [] as ParsedAction[],
-      spellAttacks: [] as ParsedAction[],
-    };
-    for (const action of actions) {
-      if (action.isSpellcastingBlock) {
-        g.spellcasting.push(action);
-        continue;
-      }
-      if (action.spellParent) {
-        g.spellAttacks.push(action);
-        continue;
-      }
-      if (action.toHit === undefined && action.damages.length === 0) continue;
-      if (action.section === 'legendary') g.legendary.push(action);
-      else if (action.section === 'reactions') g.reactions.push(action);
-      else g.actions.push(action);
-    }
-    return g;
-  }, [actions]);
-
-  const allCombat = useMemo(
-    () => [...grouped.actions, ...grouped.legendary, ...grouped.reactions],
-    [grouped],
+  const spellcasting = useMemo(
+    () => actions.filter((action) => action.isSpellcastingBlock),
+    [actions],
+  );
+  const tabActions = useMemo(
+    () => actions.filter((action) => !action.isSpellcastingBlock && !action.spellParent),
+    [actions],
   );
 
   const dexMod = abilities.find((a) => a.name === 'DEX')?.mod;
@@ -128,7 +108,7 @@ export function TokenActionsPanel({ token, onClose }: { token: TokenItem; onClos
       subtitle={`AC ${token.ac ?? 10} · ${token.hp}/${token.maxHp} HP`}
       onClose={onClose}
       defaultPosition={{ x: Math.max(16, window.innerWidth - 340), y: 80 }}
-      width={300}
+      width={320}
       maxHeight="calc(100vh - 100px)"
       zIndex={160}
     >
@@ -193,21 +173,29 @@ export function TokenActionsPanel({ token, onClose }: { token: TokenItem; onClos
               </div>
             )}
 
-            {allCombat.length === 0 && (
+            {tabActions.length === 0 && spellcasting.length === 0 && (
               <p className="font-ui text-xs text-center py-4" style={{ color: 'var(--color-text-secondary)' }}>
                 No parsed attacks on this stat block
               </p>
             )}
 
-            <ActionSection title="Actions" items={grouped.actions} />
-            <ActionSection title="Legendary" items={grouped.legendary} />
-            <ActionSection title="Reactions" items={grouped.reactions} />
-            {grouped.spellcasting.length > 0 && (
+            <ActionTabList
+              actions={tabActions}
+              renderUse={(action) => (
+                <TokenActionCard
+                  action={action}
+                  token={token}
+                  isActivePick={activePickName === action.name}
+                  detailsOnly
+                />
+              )}
+            />
+            {spellcasting.length > 0 && (
               <div className="space-y-1.5">
                 <h4 className="font-display text-[10px] tracking-wide uppercase px-0.5" style={{ color: 'var(--color-text-secondary)' }}>
                   Spellcasting
                 </h4>
-                {grouped.spellcasting.map((block, i) => (
+                {spellcasting.map((block, i) => (
                   <SpellcastingCard
                     key={`${block.name}-${i}`}
                     block={block}

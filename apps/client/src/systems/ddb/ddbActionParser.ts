@@ -1,5 +1,11 @@
-import { normalizeDiceNotation, type GrimoireAttack, type GrimoireCharacter, type GrimoireSpell } from '@grimoire/shared';
-import { stripHtmlText } from '@/systems/compendium/actionDetail';
+import {
+  normalizeDiceNotation,
+  type GrimoireAttack,
+  type GrimoireCharacter,
+  type GrimoireFeature,
+  type GrimoireSpell,
+} from '@grimoire/shared';
+import { htmlToEntryText, stripHtmlText } from '@/systems/compendium/actionDetail';
 import {
   parseActionDamages,
   parseActionRange,
@@ -212,12 +218,24 @@ export function spellToParsedAction(
   const isSaveArea = Boolean(saveStat && damages.length > 0 && aoe && !isAttackSpell);
   const toHit = isAttackSpell && !isSaveArea ? resolveSpellToHit(spell, character, isAttackSpell) : undefined;
   const range = spellRange(Boolean(toHit !== undefined), aoe);
+  const detail = htmlToEntryText(spell.description ?? data?.description ?? '');
+  const originalText = detail && detail.toLowerCase() !== spell.name.toLowerCase()
+    ? detail
+    : spell.name;
 
   return {
     name: spell.name,
-    originalText: spell.name,
+    originalText,
     section: 'actions',
     isTrait: false,
+    isSpell: true,
+    spellLevel: spell.level,
+    ...(spell.school ? { spellSchool: spell.school } : {}),
+    ...(spell.castingTime ? { spellCastingTime: spell.castingTime } : {}),
+    ...(spell.rangeText ? { spellRangeText: spell.rangeText } : {}),
+    ...(spell.components ? { spellComponents: spell.components } : {}),
+    ...(spell.durationText ? { spellDuration: spell.durationText } : {}),
+    ...(spell.ritual ? { spellRitual: true } : {}),
     ...(toHit !== undefined ? { toHit } : {}),
     ...(range ? { range } : {}),
     ...(save ? { save } : {}),
@@ -231,6 +249,32 @@ export function spellToParsedAction(
         }]
       : [],
     isSpellcastingBlock: false,
+  };
+}
+
+function featureSection(feature: GrimoireFeature, text: string): ParsedAction['section'] {
+  if (feature.activation === 'bonus') return 'bonus';
+  if (feature.activation === 'reaction') return 'reactions';
+  if (feature.activation === 'legendary') return 'legendary';
+  if (feature.activation === 'lair') return 'lair';
+  if (feature.activation === 'action') return 'actions';
+  const blob = `${feature.name} ${text}`;
+  if (/\bas a bonus action\b|bonus action/i.test(blob)) return 'bonus';
+  if (/\bas a reaction\b/i.test(blob)) return 'reactions';
+  return 'traits';
+}
+
+function featureLooksLikeAttack(text: string): boolean {
+  return /\b(melee|ranged)\s+(weapon|spell)\s+attack\b/i.test(text)
+    || (/\bto hit\b/i.test(text) && /\b(reach|range)\s+\d+/i.test(text));
+}
+
+function usesFromFeature(feature: GrimoireFeature): Pick<ParsedAction, 'usesMax' | 'usesRemaining' | 'usesReset'> {
+  if (!feature.usesMax || feature.usesMax <= 0) return {};
+  return {
+    usesMax: feature.usesMax,
+    usesRemaining: feature.usesRemaining ?? feature.usesMax,
+    ...(feature.usesReset ? { usesReset: feature.usesReset } : {}),
   };
 }
 
@@ -268,18 +312,21 @@ export function parsePcActions(
   });
 
   const spells = character.spells
-    .filter((s) => s.prepared || s.level === 0)
+    .filter((s) => s.prepared || s.alwaysPrepared || s.level === 0)
+    .sort((a, b) => a.level - b.level || a.name.localeCompare(b.name))
     .map((s) => spellToParsedAction(s, character, lookup));
   const featureActions: ParsedAction[] = [];
   const features: ParsedAction[] = [];
 
   for (const f of character.features) {
     const originalText = stripHtmlText(f.description ?? f.name);
+    const section = featureSection(f, originalText);
+    const uses = usesFromFeature(f);
     const range = parseActionRange(originalText);
     const damages = parseActionDamages(originalText, range, f.name);
-    const parsedToHit = parseActionToHit(originalText);
 
-    if (damages.length > 0 || parsedToHit !== undefined) {
+    if (featureLooksLikeAttack(originalText)) {
+      const parsedToHit = parseActionToHit(originalText);
       const pseudoAttack: GrimoireAttack = {
         id: f.id,
         name: f.name,
@@ -292,7 +339,8 @@ export function parsePcActions(
       rollable.damages = damages.length > 0 ? damages : rollable.damages;
       rollable.range = range;
       rollable.isTrait = false;
-      rollable.section = 'actions';
+      rollable.section = section === 'traits' ? 'actions' : section;
+      Object.assign(rollable, uses);
       featureActions.push(rollable);
       continue;
     }
@@ -300,13 +348,14 @@ export function parsePcActions(
     features.push({
       name: f.name,
       originalText,
-      section: 'traits',
-      isTrait: true,
-      damages: [] as ActionDamage[],
+      section,
+      isTrait: section === 'traits',
+      damages,
       spells: [] as ParsedAction['spells'],
       isSpellcastingBlock: false,
+      ...uses,
     });
   }
 
-  return { attacks: [...attacks, ...featureActions], spells, features };
+  return { attacks, spells, features: [...featureActions, ...features] };
 }

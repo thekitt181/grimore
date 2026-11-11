@@ -20,12 +20,15 @@ export function TokenActionCard({
   token,
   isActivePick,
   compact = false,
+  detailsOnly = false,
   onShowDetails,
 }: {
   action: ParsedAction;
   token: TokenItem;
   isActivePick: boolean;
   compact?: boolean;
+  /** Roll / AoE controls only — name lives in the parent row. */
+  detailsOnly?: boolean;
   /** Opens a floating detail panel (features / traits). */
   onShowDetails?: () => void;
 }) {
@@ -34,6 +37,7 @@ export function TokenActionCard({
     action.toHit !== undefined || action.damages.length > 0 || action.spells.some((s) => s.dice) || isSaveArea;
 
   if (!hasRolls) {
+    if (detailsOnly) return null;
     const description = action.originalText !== action.name ? action.originalText : undefined;
     const clickable = Boolean(onShowDetails);
     return (
@@ -68,29 +72,38 @@ export function TokenActionCard({
 
   return (
     <div
-      className={`rounded ${compact ? 'px-1.5 py-1' : 'px-2 py-1.5'} space-y-1.5 transition-all`}
+      className={`rounded ${detailsOnly ? 'px-0 py-0' : compact ? 'px-1.5 py-1' : 'px-2 py-1.5'} space-y-1.5 transition-all`}
       style={{
-        background: isActivePick ? 'rgba(201,168,76,0.1)' : 'var(--color-bg-primary)',
-        border: `1px solid ${isActivePick ? GOLD : BD}`,
+        background: detailsOnly
+          ? 'transparent'
+          : isActivePick ? 'rgba(201,168,76,0.1)' : 'var(--color-bg-primary)',
+        border: detailsOnly ? 'none' : `1px solid ${isActivePick ? GOLD : BD}`,
       }}
     >
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0">
-          <span className={`font-display ${compact ? 'text-[10px]' : 'text-xs'} leading-tight block`} style={{ color: GOLD }}>
-            {action.name}
-          </span>
-          {action.range && action.range.kind !== 'unknown' && (
-            <span className="font-ui text-[9px] block mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
-              {formatActionRangeLabel(action.range)}
+      {!detailsOnly && (
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <span className={`font-display ${compact ? 'text-[10px]' : 'text-xs'} leading-tight block`} style={{ color: GOLD }}>
+              {action.name}
+            </span>
+            {action.range && action.range.kind !== 'unknown' && (
+              <span className="font-ui text-[9px] block mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+                {formatActionRangeLabel(action.range)}
+              </span>
+            )}
+          </div>
+          {action.save && (
+            <span className="font-ui text-[9px] shrink-0 px-1 py-0.5 rounded" style={{ color: '#fca5a5', border: '1px solid #ef4444' }}>
+              DC {action.save.dc} {action.save.stat}
             </span>
           )}
         </div>
-        {action.save && (
-          <span className="font-ui text-[9px] shrink-0 px-1 py-0.5 rounded" style={{ color: '#fca5a5', border: '1px solid #ef4444' }}>
-            DC {action.save.dc} {action.save.stat}
-          </span>
-        )}
-      </div>
+      )}
+      {detailsOnly && action.range && action.range.kind !== 'unknown' && (
+        <span className="font-ui text-[9px] block" style={{ color: 'var(--color-text-secondary)' }}>
+          {formatActionRangeLabel(action.range)}
+        </span>
+      )}
 
       {action.toHit !== undefined && (
         <div className="space-y-1">
