@@ -46,7 +46,7 @@ export function getServerOrigin(): string {
   return '';
 }
 
-/** REST API base path. Dev uses Vite proxy (/api → localhost:3001). */
+/** REST API base path. Dev uses Vite proxy (/api → 127.0.0.1:3001). */
 export function getApiBaseUrl(): string {
   const configured = configuredServerOrigin();
   if (configured) return `${configured}/api`;

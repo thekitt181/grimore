@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { D5E_CONDITIONS } from '@grimoire/shared';
+import { D5E_CONDITIONS, formatItemMarketLine, resolveItemMarketPrice } from '@grimoire/shared';
 import type { TokenItem } from '@/systems/scene/types';
 import { useItemStore } from '@/systems/scene/store/itemStore';
 import { emitItemUpdate } from '@/systems/scene/sceneSync';
@@ -232,11 +232,21 @@ export function PartyCharacterCard({ token }: { token: TokenItem }) {
             <div>
               <div className="text-[10px] opacity-70 mb-1">Inventory (DDB)</div>
               <div className="max-h-24 overflow-y-auto space-y-0.5">
-                {character.inventory.slice(0, 12).map((item) => (
-                  <div key={item.id} className="text-[10px] truncate opacity-85">
-                    {item.equipped ? '⚔ ' : ''}{item.name}{item.quantity > 1 ? ` ×${item.quantity}` : ''}
-                  </div>
-                ))}
+                {character.inventory.slice(0, 12).map((item) => {
+                  const price = resolveItemMarketPrice({
+                    name: item.name,
+                    ...(item.type ? { type: item.type } : {}),
+                    ...(item.rarity ? { rarity: item.rarity } : {}),
+                    ...(item.description ? { description: item.description } : {}),
+                    ...(item.costGp != null ? { listedGp: item.costGp } : {}),
+                  });
+                  return (
+                    <div key={item.id} className="text-[10px] truncate opacity-85">
+                      {item.equipped ? '⚔ ' : ''}{item.name}{item.quantity > 1 ? ` ×${item.quantity}` : ''}
+                      {price ? ` · ${formatItemMarketLine(price)}` : ''}
+                    </div>
+                  );
+                })}
                 {character.inventory.length > 12 && (
                   <div className="text-[9px] opacity-50">+{character.inventory.length - 12} more — open Sheet</div>
                 )}

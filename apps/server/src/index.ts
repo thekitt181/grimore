@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { execSync } from 'child_process';
 import fs from 'fs';
 import http from 'http';
 import express from 'express';
@@ -49,6 +50,8 @@ const app = express();
 const httpServer = http.createServer(app);
 
 const PORT = parseInt(process.env['PORT'] ?? '3001', 10);
+/** IPv4 so the Vite proxy can always reach 127.0.0.1:PORT (Windows `localhost` is often ::1). */
+const LISTEN_HOST = process.env['HOST'] ?? '0.0.0.0';
 const clientOrigins = getClientOrigins();
 
 let servicesReady = false;
@@ -167,7 +170,7 @@ app.use('/api/session-media', express.static(sessionMediaRoot, {
 
 app.use('/api', (req, res, next) => {
   if (!servicesReady) {
-    res.status(503).json({ error: 'Server is starting — retry shortly' });
+    res.status(503).json({ error: 'Server is starting — retry shortly', retry: true });
     return;
   }
   next();
@@ -260,37 +263,133 @@ function scheduleResumeImportJobs(): void {
   }, delayMs);
 }
 
+function isRenderHost(): boolean {
+  return process.env['RENDER'] === 'true' || Boolean(process.env['RENDER_SERVICE_ID']);
+}
+
+function pidsListeningOn(port: number): number[] {
+  try {
+    if (process.platform === 'win32') {
+      const out = execSync(`netstat -ano | findstr :${port}`, {
+        encoding: 'utf8',
+        shell: true,
+      });
+      const pids = new Set<number>();
+      for (const line of out.split(/\r?\n/)) {
+        if (!line.includes('LISTENING')) continue;
+        const parts = line.trim().split(/\s+/);
+        const local = parts[1] ?? '';
+        const bound = local.includes(']:')
+          ? local.slice(local.lastIndexOf(']:') + 2)
+          : local.slice(local.lastIndexOf(':') + 1);
+        if (Number(bound) !== port) continue;
+        const pid = Number(parts[parts.length - 1]);
+        if (Number.isFinite(pid) && pid > 0) pids.add(pid);
+      }
+      return [...pids];
+    }
+    const out = execSync(`lsof -ti tcp:${port} -sTCP:LISTEN`, { encoding: 'utf8' });
+    return out
+      .split(/\s+/)
+      .map(Number)
+      .filter((n) => Number.isFinite(n) && n > 0);
+  } catch {
+    return [];
+  }
+}
+
+async function portHasHealthyApi(port: number): Promise<boolean> {
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/health`, { signal: AbortSignal.timeout(1200) });
+    if (!res.ok) return false;
+    const data = (await res.json()) as { ready?: boolean };
+    return data.ready === true;
+  } catch {
+    return false;
+  }
+}
+
+function freeDevPort(port: number): void {
+  const self = process.pid;
+  for (const pid of pidsListeningOn(port)) {
+    if (pid === self) continue;
+    try {
+      if (process.platform === 'win32') {
+        execSync(`taskkill /F /PID ${pid}`, { stdio: 'ignore', shell: true });
+      } else {
+        process.kill(pid, 'SIGKILL');
+      }
+      console.warn(`[Server] Freed port ${port} (killed pid ${pid})`);
+    } catch {
+      /* best effort */
+    }
+  }
+}
+
 function start() {
   let listenAttempts = 0;
+  let listenRetry: ReturnType<typeof setTimeout> | null = null;
   const MAX_LISTEN_ATTEMPTS = 6;
 
+  const tryListen = () => {
+    if (httpServer.listening) return;
+    httpServer.listen(PORT, LISTEN_HOST);
+  };
+
+  const scheduleListenRetry = (delayMs: number) => {
+    if (listenRetry || httpServer.listening) return;
+    listenRetry = setTimeout(() => {
+      listenRetry = null;
+      tryListen();
+    }, delayMs);
+  };
+
   httpServer.on('error', (err: NodeJS.ErrnoException) => {
-    if (err.code === 'EADDRINUSE' && listenAttempts < MAX_LISTEN_ATTEMPTS) {
-      listenAttempts += 1;
-      console.warn(
-        `[Server] Port ${PORT} is in use — retrying in 2s (${listenAttempts}/${MAX_LISTEN_ATTEMPTS})…`,
-      );
-      setTimeout(() => {
-        httpServer.listen(PORT);
-      }, 2000);
-      return;
-    }
-    if (err.code === 'EADDRINUSE') {
-      console.error(
-        `[Server] Port ${PORT} is still in use after ${MAX_LISTEN_ATTEMPTS} attempts. Run: pnpm dev:kill-ports`,
-      );
+    void (async () => {
+      if (err.code === 'EADDRINUSE') {
+        if (httpServer.listening) return;
+        listenAttempts += 1;
+        if (isRenderHost()) {
+          if (listenAttempts < MAX_LISTEN_ATTEMPTS) {
+            console.warn(
+              `[Server] Port ${PORT} is in use — retrying in 2s (${listenAttempts}/${MAX_LISTEN_ATTEMPTS})…`,
+            );
+            scheduleListenRetry(2000);
+            return;
+          }
+          console.error(
+            `[Server] Port ${PORT} is still in use after ${MAX_LISTEN_ATTEMPTS} attempts.`,
+          );
+          process.exit(1);
+          return;
+        }
+        if (await portHasHealthyApi(PORT)) {
+          console.warn(`[Server] Port ${PORT} already has a healthy API — not killing it`);
+          scheduleListenRetry(5000);
+          return;
+        }
+        if (listenAttempts === 1 || listenAttempts % 4 === 0) {
+          freeDevPort(PORT);
+        }
+        console.warn(`[Server] Port ${PORT} is in use — waiting to bind (${listenAttempts})…`);
+        scheduleListenRetry(1000);
+        return;
+      }
+      console.error('[Server] HTTP error:', err);
       process.exit(1);
-    }
-    console.error('[Server] HTTP error:', err);
-    process.exit(1);
+    })();
   });
 
   httpServer.keepAliveTimeout = 120_000;
   httpServer.headersTimeout = 125_000;
 
-  httpServer.listen(PORT, () => {
+  httpServer.listen(PORT, LISTEN_HOST, () => {
+    if (listenRetry) {
+      clearTimeout(listenRetry);
+      listenRetry = null;
+    }
     listenAttempts = 0;
-    console.log(`[Server] GrimoireVTT listening on port ${PORT}`);
+    console.log(`[Server] GrimoireVTT listening on ${LISTEN_HOST}:${PORT}`);
     console.log(`[Server] Allowed client origins: ${clientOrigins.join(', ')}`);
     console.log(`[Server] Public app URL (invites): ${getPrimaryClientUrl()}`);
     if (process.env['NODE_ENV'] === 'production') {

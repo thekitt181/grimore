@@ -12,6 +12,7 @@ import { extractDeathSaves, extractDefenses, extractFeats } from './traitsExtrac
 import {
   normalizeAbilityName,
   normalizeDiceNotation,
+  parseListedGp,
   type FeatureActivation,
   type GrimoireAbility,
   type GrimoireCharacter,
@@ -143,6 +144,7 @@ function normalizeInventoryItem(item: any): GrimoireInventoryItem {
   const imageUrl = def.avatarUrl ?? def.largeAvatarUrl ?? undefined;
   const weight = item.weight ?? def.weight;
   const uses = extractLimitedUses(item);
+  const costGp = parseListedGp(def.cost ?? def.value ?? item.cost ?? item.value);
 
   return {
     id: String(item.id ?? item.definitionId ?? item.name),
@@ -154,6 +156,7 @@ function normalizeInventoryItem(item: any): GrimoireInventoryItem {
     ...(fullText ? { description: fullText } : {}),
     ...(typeof imageUrl === 'string' && imageUrl ? { imageUrl } : {}),
     ...(typeof weight === 'number' ? { weight } : {}),
+    ...(costGp != null ? { costGp } : {}),
     ...uses,
   };
 }

@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import { DraggablePanel } from '@/components/DraggablePanel';
-import { formatLimitedUses, type GrimoireCharacter } from '@grimoire/shared';
+import { formatLimitedUses, formatItemMarketLine, resolveItemMarketPrice, type GrimoireCharacter } from '@grimoire/shared';
 import type { TokenItem } from '@/systems/scene/types';
 import { useItemStore } from '@/systems/scene/store/itemStore';
 import { useDiceStore } from '@/systems/dice/diceStore';
@@ -423,6 +423,13 @@ function SheetBody({
         <Section title="Inventory">
           {inventory.map((i) => {
             const uses = formatLimitedUses(i);
+            const price = resolveItemMarketPrice({
+              name: i.name,
+              ...(i.type ? { type: i.type } : {}),
+              ...(i.rarity ? { rarity: i.rarity } : {}),
+              ...(i.description ? { description: i.description } : {}),
+              ...(i.costGp != null ? { listedGp: i.costGp } : {}),
+            });
             return (
               <button
                 key={i.id}
@@ -438,6 +445,7 @@ function SheetBody({
                   source: 'D&D Beyond',
                   handoutType: 'ITEM_CARD',
                   ...(i.quantity > 1 ? { quantity: i.quantity } : {}),
+                  ...(i.costGp != null ? { listedGp: i.costGp } : {}),
                   ...(i.usesMax && i.usesMax > 0
                     ? {
                         usesMax: i.usesMax,
@@ -457,6 +465,9 @@ function SheetBody({
                     <span className="shrink-0 text-[10px]" style={{ color: GOLD }}>{uses}</span>
                   )}
                 </div>
+                {price && (
+                  <div className="text-[10px]" style={{ color: GOLD }}>{formatItemMarketLine(price)}</div>
+                )}
               </button>
             );
           })}

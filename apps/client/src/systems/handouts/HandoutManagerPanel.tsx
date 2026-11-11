@@ -12,6 +12,7 @@ import {
   updateCampaignHandout,
 } from './handoutApi';
 import { useHandoutJournalStore } from './handoutJournalStore';
+import { ItemMarketPrice } from '@/systems/compendium/ItemMarketPrice';
 
 const HANDOUT_TYPES: Array<{ id: HandoutType; label: string }> = [
   { id: 'TEXT', label: 'Text note' },
@@ -308,6 +309,15 @@ export function HandoutManagerPanel({ campaignId, sessionId, onClose }: HandoutM
                 <input className="input w-full text-xs" placeholder="Item name" value={itemName} onChange={(e) => setItemName(e.target.value)} />
                 <input className="input w-full text-xs" placeholder="Type (e.g. Wondrous Item)" value={itemType} onChange={(e) => setItemType(e.target.value)} />
                 <input className="input w-full text-xs" placeholder="Rarity" value={itemRarity} onChange={(e) => setItemRarity(e.target.value)} />
+                <ItemMarketPrice
+                  className="font-ui text-[10px]"
+                  query={{
+                    name: itemName || title,
+                    ...(itemType ? { type: itemType } : {}),
+                    ...(itemRarity ? { rarity: itemRarity } : {}),
+                    ...(content ? { description: content } : {}),
+                  }}
+                />
                 <input className="input w-full text-xs" placeholder="Source book" value={itemSource} onChange={(e) => setItemSource(e.target.value)} />
                 <label className="flex items-center gap-2 font-ui text-xs">
                   <input type="checkbox" checked={itemIsCustom} onChange={(e) => setItemIsCustom(e.target.checked)} />

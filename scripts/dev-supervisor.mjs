@@ -11,7 +11,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
 const SUPERVISOR_PORT = Number(process.env.GRIMOIRE_DEV_SUPERVISOR_PORT ?? 3099);
 const SERVER_RESTART_DELAY_MS = 2000;
-const RESTART_COOLDOWN_MS = 8000;
+const RESTART_COOLDOWN_MS = 20_000;
 
 /** @type {import('node:child_process').ChildProcess | null} */
 let serverProcess = null;
@@ -29,17 +29,22 @@ function log(tag, message) {
 function freePort(port) {
   try {
     if (process.platform === 'win32') {
-      const out = execSync(`netstat -ano | findstr :${port}`, { encoding: 'utf8' });
+      const out = execSync(`netstat -ano | findstr :${port}`, { encoding: 'utf8', shell: true });
       const pids = new Set();
       for (const line of out.split(/\r?\n/)) {
         if (!line.includes('LISTENING')) continue;
         const parts = line.trim().split(/\s+/);
+        const local = parts[1] ?? '';
+        const bound = local.includes(']:')
+          ? local.slice(local.lastIndexOf(']:') + 2)
+          : local.slice(local.lastIndexOf(':') + 1);
+        if (Number(bound) !== port) continue;
         const pid = Number(parts[parts.length - 1]);
         if (Number.isFinite(pid) && pid > 0) pids.add(pid);
       }
       for (const pid of pids) {
         try {
-          execSync(`taskkill /F /PID ${pid}`, { stdio: 'ignore' });
+          execSync(`taskkill /F /PID ${pid}`, { stdio: 'ignore', shell: true });
         } catch {
           /* best effort */
         }
@@ -52,8 +57,22 @@ function freePort(port) {
   }
 }
 
-function spawnServer() {
+async function apiHealthOk() {
+  try {
+    const res = await fetch('http://127.0.0.1:3001/health', { signal: AbortSignal.timeout(1500) });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+async function spawnServer() {
   if (shuttingDown) return;
+
+  if (await apiHealthOk()) {
+    log('supervisor', 'API already healthy on :3001 — leaving it running');
+    return;
+  }
 
   freePort(3001);
 
@@ -84,10 +103,14 @@ function spawnServer() {
   });
 }
 
-function restartServer(trigger = 'manual') {
+async function restartServer(trigger = 'manual') {
   const now = Date.now();
   if (now - lastRestartAt < RESTART_COOLDOWN_MS) {
     log('supervisor', `Restart skipped (${trigger}) — cooldown active`);
+    return false;
+  }
+  if (await apiHealthOk()) {
+    log('supervisor', `Restart skipped (${trigger}) — API healthy`);
     return false;
   }
   lastRestartAt = now;
@@ -98,7 +121,7 @@ function restartServer(trigger = 'manual') {
   }
 
   log('supervisor', `Restarting API server (${trigger})…`);
-  spawnServer();
+  await spawnServer();
   return true;
 }
 
@@ -149,9 +172,10 @@ const controlServer = http.createServer((req, res) => {
   const url = req.url ?? '';
 
   if (req.method === 'POST' && url === '/restart-server') {
-    const restarted = restartServer('proxy ECONNREFUSED');
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ ok: true, restarted }));
+    void restartServer('proxy').then((restarted) => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, restarted }));
+    });
     return;
   }
 

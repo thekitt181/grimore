@@ -1,4 +1,5 @@
 import type { CompendiumItem } from '@grimoire/shared';
+import { formatGpAmount, resolveItemMarketPrice } from '@grimoire/shared';
 import { isLikelyValidItem } from '@grimoire/monster-dex';
 import { detectItemRarity, type LootRarity } from './lootRoll';
 
@@ -269,10 +270,7 @@ function rollInt(min: number, max: number): number {
 }
 
 function formatCost(gp: number): string {
-  const amount = Math.max(0.01, gp);
-  if (amount >= 1) return `${Math.round(amount).toLocaleString('en-US')} gp`;
-  if (amount >= 0.1) return `${Math.max(1, Math.round(amount * 10))} sp`;
-  return `${Math.max(1, Math.round(amount * 100))} cp`;
+  return formatGpAmount(Math.max(0.01, gp));
 }
 
 function isShopItem(item: CompendiumItem): boolean {
@@ -358,8 +356,14 @@ function pickVisit(items: CompendiumItem[], kind: ShopKind, count: number): Comp
 }
 
 function priceItem(item: CompendiumItem, scale: number): number {
+  const official = resolveItemMarketPrice({
+    name: item.name,
+    type: item.type,
+    ...(item.rarity ? { rarity: item.rarity } : {}),
+    ...(item.description ? { description: item.description } : {}),
+  });
+  if (official) return Math.max(0.01, official.buyGp * scale);
   const rarity = detectItemRarity(item);
-  if (/^potion of healing$/i.test(item.name.trim())) return 50 * scale;
   if (!rarity) return rollInt(2, 30) * scale;
   const [min, max] = BANDS[rarity];
   const rolled = rollInt(min, max);

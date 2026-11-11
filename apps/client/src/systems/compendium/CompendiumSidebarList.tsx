@@ -3,7 +3,7 @@ import axios from 'axios';
 import { useGrimoireAuth, useGrimoireSignOut } from '@/hooks/useGrimoireAuth';
 import { useInfiniteQuery, useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import type { CompendiumItem, CompendiumMonster, CompendiumSource, CompendiumSpell } from '@grimoire/shared';
-import { isHomebrewEntry } from '@grimoire/shared';
+import { formatItemMarketLine, isHomebrewEntry, resolveItemMarketPrice } from '@grimoire/shared';
 import { deleteItem, deleteMonster, deleteSpell, fetchSources, lockCompendiumSource, searchItems, searchMonsters, searchSpells, unlockCompendiumSource } from './compendiumApi';
 import {
   applyCompendiumLockPolicy,
@@ -31,6 +31,16 @@ function compendiumQueryRetry(failureCount: number, error: unknown): boolean {
   if (isApiDbBusyError(error)) return failureCount < 4;
   if (isApiAuthError(error)) return false;
   return failureCount < 1;
+}
+
+function itemPriceSub(item: CompendiumItem): { sub: string } | Record<string, never> {
+  const price = resolveItemMarketPrice({
+    name: item.name,
+    type: item.type,
+    ...(item.rarity ? { rarity: item.rarity } : {}),
+    ...(item.description ? { description: item.description } : {}),
+  });
+  return price ? { sub: formatItemMarketLine(price) } : {};
 }
 
 function browseBtnStyle(active: boolean): CSSProperties {
@@ -610,6 +620,7 @@ export function CompendiumSidebarList({ onMinimize }: { onMinimize?: () => void 
           <EntryRow
             key={item.id}
             name={item.name}
+            {...itemPriceSub(item)}
             showHomebrew={isHomebrewEntry(item.isCustom, item.source)}
             showDraft={Boolean(item.isDraft)}
             selected={item.id === selectedItemId}

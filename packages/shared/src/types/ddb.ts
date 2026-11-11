@@ -61,6 +61,8 @@ export interface GrimoireInventoryItem {
   name: string;
   quantity: number;
   weight?: number;
+  /** Listed D&D Beyond / PHB cost in gold pieces. */
+  costGp?: number;
   equipped?: boolean;
   type?: string;
   rarity?: string;

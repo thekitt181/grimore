@@ -32,7 +32,8 @@ export function SignInPage() {
     try {
       const { error: signInError } = await authClient.signIn.email({ email, password });
       if (signInError) {
-        setError(signInError.message ?? 'Sign in failed');
+        const detail = signInError.message?.trim();
+        setError(detail && detail.toLowerCase() !== 'failed to fetch' ? detail : 'Sign in failed — the API may still be starting. Try again in a few seconds.');
         return;
       }
       await getAuthBearerToken({ skipCache: true });

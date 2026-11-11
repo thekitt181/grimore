@@ -4,6 +4,7 @@ import { DraggablePanel } from '@/components/DraggablePanel';
 import { useItemStore } from '@/systems/scene/store/itemStore';
 import type { TokenItem } from '@/systems/scene/types';
 import { useSessionStore } from '@/store/sessionStore';
+import { formatItemMarketLine, resolveItemMarketPrice } from '@grimoire/shared';
 import type { LootDrop } from '@/systems/compendium/compendiumApi';
 import { rollLoot } from '@/systems/compendium/compendiumApi';
 import { guessLootSource, LOOT_SOURCES } from '@/systems/compendium/LootRoller';
@@ -46,7 +47,14 @@ function dropTitle(drop: LootDrop): string {
 }
 
 function dropNote(drop: LootDrop): string {
-  if (drop.kind === 'item') return [drop.rarity, drop.type].filter(Boolean).join(' · ') || 'Codex item';
+  if (drop.kind === 'item') {
+    const price = resolveItemMarketPrice({
+      name: drop.name,
+      type: drop.type,
+      ...(drop.rarity ? { rarity: drop.rarity } : {}),
+    });
+    return [drop.rarity, drop.type, price ? formatItemMarketLine(price) : null].filter(Boolean).join(' · ') || 'Codex item';
+  }
   if (drop.kind === 'flavor') return 'Flavor';
   return 'Coins';
 }

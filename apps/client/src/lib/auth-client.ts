@@ -24,11 +24,30 @@ export function setBearerToken(token: string | null): void {
   else localStorage.removeItem(BEARER_TOKEN_KEY);
 }
 
+async function authFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  const delays = [300, 600, 1000, 1600, 2500, 4000];
+  let last: Response | undefined;
+  for (let i = 0; i <= delays.length; i += 1) {
+    last = await fetch(input, init);
+    if (last.status !== 502 && last.status !== 503 && last.status !== 504) return last;
+    const data = await last.clone().json().catch(() => null) as { retry?: boolean; error?: string } | null;
+    const retry =
+      last.status === 502
+      || last.status === 504
+      || data?.retry === true
+      || /starting|busy|unavailable/i.test(String(data?.error ?? ''));
+    if (!retry || i === delays.length) return last;
+    await new Promise((r) => setTimeout(r, delays[i]!));
+  }
+  return last!;
+}
+
 export const authClient = createAuthClient({
   baseURL: getServerOrigin(),
   plugins: [dashClient()] as never[],
   fetchOptions: {
     credentials: 'include',
+    customFetchImpl: authFetch,
     auth: {
       type: 'Bearer',
       token: () => getBearerToken() || undefined,

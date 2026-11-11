@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { formatItemMarketLine, resolveItemMarketPrice } from '@grimoire/shared';
 import type { LootDrop } from './compendiumApi';
 import { rollLoot } from './compendiumApi';
 import { placeLootDrops } from './placeLoot';
@@ -61,7 +62,14 @@ function dropTitle(drop: LootDrop): string {
 }
 
 function dropNote(drop: LootDrop): string {
-  if (drop.kind === 'item') return [drop.rarity, drop.type].filter(Boolean).join(' · ') || 'Codex item';
+  if (drop.kind === 'item') {
+    const price = resolveItemMarketPrice({
+      name: drop.name,
+      type: drop.type,
+      ...(drop.rarity ? { rarity: drop.rarity } : {}),
+    });
+    return [drop.rarity, drop.type, price ? formatItemMarketLine(price) : null].filter(Boolean).join(' · ') || 'Codex item';
+  }
   if (drop.kind === 'flavor') return 'Flavor';
   return 'Coins';
 }

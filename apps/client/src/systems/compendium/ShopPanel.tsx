@@ -5,6 +5,7 @@ import { ToolSection } from '@/systems/map/ToolSection';
 import { RollableText } from '@/systems/dice/RollableText';
 import { getItem, rollShop, type ShopLine, type ShopStock } from './compendiumApi';
 import { placeShopPurchases } from './placeLoot';
+import { ItemMarketPrice } from './ItemMarketPrice';
 
 function lineKey(section: string, line: ShopLine): string {
   return `${section}:${line.id ?? line.name}`;
@@ -197,8 +198,17 @@ export function ShopPanel() {
             >
               <p className="font-display text-xs" style={{ color: 'var(--color-accent-gold)' }}>{openLine.name}</p>
               <p className="font-ui text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
-                {[detail?.type, detail?.rarity, openLine.cost].filter(Boolean).join(' · ')}
+                {[detail?.type, detail?.rarity, `Asking ${openLine.cost}`].filter(Boolean).join(' · ')}
               </p>
+              <ItemMarketPrice
+                className="font-ui text-[10px]"
+                query={{
+                  name: openLine.name,
+                  ...(detail?.type ? { type: detail.type } : {}),
+                  ...(detail?.rarity ? { rarity: detail.rarity } : {}),
+                  ...(detail?.description ? { description: detail.description } : {}),
+                }}
+              />
               {detailBusy ? (
                 <p className="font-ui text-xs" style={{ color: 'var(--color-text-secondary)' }}>Loading details…</p>
               ) : (

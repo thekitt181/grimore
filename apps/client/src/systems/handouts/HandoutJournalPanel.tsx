@@ -8,6 +8,7 @@ import { useSessionStore } from '@/store/sessionStore';
 import { useItemStore } from '@/systems/scene/store/itemStore';
 import { syncDdbCharacter } from '@/systems/ddb/ddbApi';
 import type { HandoutReceiptRecord, GrimoireInventoryItem } from '@grimoire/shared';
+import { formatItemMarketLine, resolveItemMarketPrice } from '@grimoire/shared';
 import type { TokenItem } from '@/systems/scene/types';
 
 const GOLD = 'var(--color-accent-gold)';
@@ -290,11 +291,19 @@ export function HandoutJournalPanel({ campaignId, onClose }: HandoutJournalPanel
                   const usesLeft = item.usesMax && item.usesMax > 0
                     ? `${item.usesRemaining ?? item.usesMax}/${item.usesMax} left`
                     : null;
+                  const price = resolveItemMarketPrice({
+                    name: item.name,
+                    ...(item.type ? { type: item.type } : {}),
+                    ...(item.rarity ? { rarity: item.rarity } : {}),
+                    ...(item.description ? { description: item.description } : {}),
+                    ...(item.costGp != null ? { listedGp: item.costGp } : {}),
+                  });
                   const meta = [
                     item.type,
                     item.rarity,
                     item.equipped ? 'equipped' : null,
                     usesLeft,
+                    price ? formatItemMarketLine(price) : null,
                   ].filter(Boolean).join(' · ');
                   return (
                     <li key={item.id}>
@@ -312,6 +321,7 @@ export function HandoutJournalPanel({ campaignId, onClose }: HandoutJournalPanel
                           source: 'D&D Beyond',
                           handoutType: 'ITEM_CARD',
                           ...(item.quantity > 1 ? { quantity: item.quantity } : {}),
+                          ...(item.costGp != null ? { listedGp: item.costGp } : {}),
                           ...(item.usesMax && item.usesMax > 0
                             ? {
                                 usesMax: item.usesMax,
@@ -359,6 +369,17 @@ export function HandoutJournalPanel({ campaignId, onClose }: HandoutJournalPanel
                           <p className="font-display text-sm" style={{ color: 'var(--color-text-primary)' }}>
                             {entry.title}
                           </p>
+                          {(() => {
+                            const price = resolveItemMarketPrice({
+                              name: entry.title,
+                              ...(entry.itemMeta?.itemType ? { type: entry.itemMeta.itemType } : {}),
+                              ...(entry.itemMeta?.rarity ? { rarity: entry.itemMeta.rarity } : {}),
+                              ...(entry.content ? { description: entry.content } : {}),
+                            });
+                            return price ? (
+                              <p className="font-ui text-[10px]" style={{ color: GOLD }}>{formatItemMarketLine(price)}</p>
+                            ) : null;
+                          })()}
                           <p className="font-ui text-[10px] mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
                             {new Date(entry.receivedAt).toLocaleString()}
                           </p>

@@ -9,6 +9,7 @@ import { addHandoutReceiptToInventory, type HandoutInventoryManualFallback } fro
 import { useSessionStore } from '@/store/sessionStore';
 import type { HandoutInventoryTarget } from '@grimoire/shared';
 import { extractApiError } from '@/lib/apiError';
+import { ItemMarketPrice } from './ItemMarketPrice';
 
 export function ItemHandoutViewer() {
   const content = useHandoutViewerStore((s) => s.content);
@@ -207,6 +208,15 @@ export function ItemHandoutViewer() {
               Quantity ×{content.quantity}
             </p>
           )}
+          <ItemMarketPrice
+            query={{
+              name: content.title,
+              ...(content.itemType ? { type: content.itemType } : {}),
+              ...(content.rarity ? { rarity: content.rarity } : {}),
+              ...(content.description ? { description: content.description } : {}),
+              ...(content.listedGp != null ? { listedGp: content.listedGp } : {}),
+            }}
+          />
           {content.imageUrl && (
             <img
               src={content.imageUrl}

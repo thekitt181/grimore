@@ -8,6 +8,7 @@ import { saveItem, saveMonster, saveSpell, deleteItem, deleteMonster, deleteSpel
 import { useCompendiumUiStore } from './compendiumStore';
 import { resolveReplaceSaveSource } from './compendiumSaveSource';
 import { CompendiumImageEditor } from './CompendiumImageEditor';
+import { ItemMarketPrice } from './ItemMarketPrice';
 import { MonsterRollPanel } from './MonsterRollPanel';
 import { SpellRollPanel } from './SpellRollPanel';
 
@@ -380,6 +381,14 @@ export function ItemStatBlock({
           <span style={{ color: '#60a5fa' }}> · homebrew</span>
         )}
       </p>
+      <ItemMarketPrice
+        query={{
+          name: item.name,
+          type: item.type,
+          ...(item.rarity ? { rarity: item.rarity } : {}),
+          ...(item.description ? { description: item.description } : {}),
+        }}
+      />
       <CompendiumImageEditor
         kind="item"
         entryId={item.id}

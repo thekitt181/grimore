@@ -18,6 +18,7 @@ export interface HandoutViewerContent {
   usesRemaining?: number;
   usesMax?: number;
   usesReset?: string;
+  listedGp?: number;
 }
 
 interface HandoutViewerState {
