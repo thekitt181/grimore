@@ -64,7 +64,7 @@ function actionInfoText(action: ParsedAction): string {
   return body;
 }
 
-function SpellStat({ label, value }: { label: string; value?: string }) {
+function SpellStat({ label, value }: { label: string; value?: string | undefined }) {
   if (!value) return <div />;
   return (
     <div>
