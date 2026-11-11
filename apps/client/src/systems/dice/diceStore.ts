@@ -200,7 +200,7 @@ export const useDiceStore = create<DiceState>((set, get) => ({
         results,
         droppedResults: [],
         rollMode: 'normal',
-        dieFaces: payload.dieFaces,
+        ...(payload.dieFaces ? { dieFaces: payload.dieFaces } : {}),
       });
       if (spec) set({ activeAnimation: spec });
     } else if (payload.total) {

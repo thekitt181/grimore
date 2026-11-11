@@ -93,9 +93,27 @@ function coinTotal(share: Partial<CoinShare>): number {
     .reduce((sum, k) => sum + Math.max(0, share[k] ?? 0), 0);
 }
 
-export function corpseDrops(loot: CorpseLoot | undefined): LootDrop[] {
+type SceneCorpseLoot = NonNullable<TokenItem['corpseLoot']>;
+type SceneDrop = NonNullable<SceneCorpseLoot['drops']>[number];
+
+function normalizeDrop(drop: SceneDrop): LootDrop {
+  if (drop.kind === 'currency') return { kind: 'currency', label: drop.label };
+  if (drop.kind === 'item') {
+    return {
+      kind: 'item',
+      id: drop.id ?? '',
+      name: drop.name,
+      type: drop.type ?? '',
+      ...(drop.rarity ? { rarity: drop.rarity } : {}),
+      ...(drop.source ? { source: drop.source } : {}),
+    };
+  }
+  return { kind: 'flavor', name: drop.name, detail: drop.detail ?? '' };
+}
+
+export function corpseDrops(loot: TokenItem['corpseLoot'] | CorpseLoot | undefined): LootDrop[] {
   if (!loot) return [];
-  if (loot.drops && loot.drops.length > 0) return loot.drops;
+  if (loot.drops && loot.drops.length > 0) return loot.drops.map(normalizeDrop);
   const out: LootDrop[] = [];
   if (loot.gold > 0) out.push({ kind: 'currency', label: `${loot.gold} gp` });
   for (const it of loot.items ?? []) {
