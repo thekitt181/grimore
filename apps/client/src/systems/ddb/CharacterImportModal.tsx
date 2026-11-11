@@ -238,7 +238,7 @@ function CharacterRow({
   onPick,
 }: {
   ch: DdbCharacterSummary;
-  onTable?: TokenItem;
+  onTable?: TokenItem | undefined;
   importing: boolean;
   busy: boolean;
   actionLabel: string;

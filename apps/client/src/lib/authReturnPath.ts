@@ -9,7 +9,7 @@ export function sanitizeReturnPath(raw: string | null | undefined): string | nul
   return path;
 }
 
-export function rememberReturnPath(path: string): void {
+export function rememberReturnPath(path: string | null | undefined): void {
   const safe = sanitizeReturnPath(path);
   if (!safe) return;
   try {
