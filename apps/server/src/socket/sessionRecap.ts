@@ -43,15 +43,21 @@ function scheduleSync(io: RecapServer, sessionId: string): void {
   syncWait.set(sessionId, t);
 }
 
+function scriptSpeakerName(characterName: string | undefined, fallback: string): string {
+  const fromToken = (characterName ?? '').replace(/\s+/g, ' ').trim().slice(0, 80);
+  return fromToken || fallback;
+}
+
 export function bindSessionRecapHandlers(io: RecapServer, socket: RecapSocket): void {
-  socket.on('voice:transcript', ({ sessionId, text }) => {
+  socket.on('voice:transcript', ({ sessionId, text, characterName }) => {
     if (socket.data['sessionId'] !== sessionId) return;
     const cleaned = cleanRecapUtterance(text ?? '');
     if (!cleaned) return;
+    const fallback = (socket.data['username'] as string) || 'Player';
     const line: RecapLine = {
       id: randomUUID(),
       userId: (socket.data['userId'] as string) || '',
-      username: (socket.data['username'] as string) || 'Player',
+      username: scriptSpeakerName(characterName, fallback),
       text: cleaned,
       at: Date.now(),
     };

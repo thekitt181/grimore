@@ -580,6 +580,12 @@ export interface VoiceSpeakingPayload {
   speaking: boolean;
 }
 
+export interface VoiceTranscriptOutPayload {
+  sessionId: string;
+  text: string;
+  characterName?: string;
+}
+
 export interface VoiceTranscriptPayload {
   sessionId: string;
   line: RecapLine;
@@ -690,7 +696,7 @@ export interface ClientToServerEvents {
   'voice:signal':         (payload: VoiceSignalOutPayload) => void;
   'voice:mute':           (payload: { sessionId: string; muted: boolean }) => void;
   'voice:speaking':       (payload: { sessionId: string; speaking: boolean }) => void;
-  'voice:transcript':     (payload: { sessionId: string; text: string }) => void;
+  'voice:transcript':     (payload: VoiceTranscriptOutPayload) => void;
   'recap:request':        (payload: { sessionId: string }) => void;
   'recap:publish':        (payload: { sessionId: string; published: boolean }) => void;
   'recap:clear':          (payload: { sessionId: string }) => void;
