@@ -272,7 +272,7 @@ function pidsListeningOn(port: number): number[] {
     if (process.platform === 'win32') {
       const out = execSync(`netstat -ano | findstr :${port}`, {
         encoding: 'utf8',
-        shell: true,
+        shell: 'cmd.exe',
       });
       const pids = new Set<number>();
       for (const line of out.split(/\r?\n/)) {
@@ -315,7 +315,7 @@ function freeDevPort(port: number): void {
     if (pid === self) continue;
     try {
       if (process.platform === 'win32') {
-        execSync(`taskkill /F /PID ${pid}`, { stdio: 'ignore', shell: true });
+        execSync(`taskkill /F /PID ${pid}`, { stdio: 'ignore', shell: 'cmd.exe' });
       } else {
         process.kill(pid, 'SIGKILL');
       }
