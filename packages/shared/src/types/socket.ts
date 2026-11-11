@@ -1,3 +1,4 @@
+import type { RecapLine, SessionRecapDoc } from '../sessionRecap';
 import type { SessionUser } from './user';
 import type { DdbCharacterSyncPayload, DdbHpUpdatePayload, DdbRollBridgePayload } from './ddb';
 import type { CatalogRebuildProgress } from './compendium';
@@ -513,6 +514,83 @@ export interface UserLeftPayload {
   userId: string;
 }
 
+/** In-session voice (WebRTC mesh, Socket.io signaling). */
+export interface VoicePeerInfo {
+  socketId: string;
+  userId: string;
+  username: string;
+  muted: boolean;
+}
+
+export interface VoiceIceServer {
+  urls: string | string[];
+  username?: string;
+  credential?: string;
+}
+
+export type VoiceSignalData =
+  | { kind: 'offer'; sdp: string }
+  | { kind: 'answer'; sdp: string }
+  | { kind: 'ice'; candidate: string; sdpMid: string | null; sdpMLineIndex: number | null };
+
+export interface VoiceJoinPayload {
+  sessionId: string;
+}
+
+export interface VoiceLeavePayload {
+  sessionId: string;
+}
+
+export interface VoicePeersPayload {
+  sessionId: string;
+  selfSocketId: string;
+  peers: VoicePeerInfo[];
+  iceServers: VoiceIceServer[];
+}
+
+export interface VoicePeerJoinedPayload {
+  sessionId: string;
+  peer: VoicePeerInfo;
+}
+
+export interface VoicePeerLeftPayload {
+  sessionId: string;
+  socketId: string;
+}
+
+export interface VoiceSignalOutPayload {
+  sessionId: string;
+  toSocketId: string;
+  data: VoiceSignalData;
+}
+
+export interface VoiceSignalPayload extends VoiceSignalOutPayload {
+  fromSocketId: string;
+}
+
+export interface VoiceMutePayload {
+  sessionId: string;
+  socketId: string;
+  muted: boolean;
+}
+
+export interface VoiceSpeakingPayload {
+  sessionId: string;
+  userId: string;
+  speaking: boolean;
+}
+
+export interface VoiceTranscriptPayload {
+  sessionId: string;
+  line: RecapLine;
+}
+
+export interface RecapSyncPayload {
+  sessionId: string;
+  recap: SessionRecapDoc;
+  lines: RecapLine[];
+}
+
 // ─── Typed socket event map ───────────────────────────────────────────────────
 
 export interface CompendiumUpdatedPayload {
@@ -581,6 +659,14 @@ export interface ServerToClientEvents {
   'model:request':        (payload: ModelAssetRequestPayload) => void;
   'model:chunk':          (payload: ModelAssetChunkPayload)   => void;
   'session:roomState':    (payload: { users: SessionUser[]; fogActive?: boolean }) => void;
+  'voice:peers':          (payload: VoicePeersPayload) => void;
+  'voice:peer-joined':    (payload: VoicePeerJoinedPayload) => void;
+  'voice:peer-left':      (payload: VoicePeerLeftPayload) => void;
+  'voice:signal':         (payload: VoiceSignalPayload) => void;
+  'voice:mute':           (payload: VoiceMutePayload) => void;
+  'voice:speaking':       (payload: VoiceSpeakingPayload) => void;
+  'voice:transcript':     (payload: VoiceTranscriptPayload) => void;
+  'recap:sync':           (payload: RecapSyncPayload) => void;
   'compendium:updated':   (payload: CompendiumUpdatedPayload) => void;
   'compendium:catalog-rebuild': (payload: CompendiumCatalogRebuildPayload) => void;
   'ddb:roll':             (payload: DdbRollBridgePayload) => void;
@@ -599,6 +685,15 @@ export interface ClientToServerEvents {
   'session:join':         (payload: { sessionId: string; campaignId: string }) => void;
   'session:leave':        (payload: { sessionId: string }) => void;
   'session:requestHydrate': (payload: { sessionId: string }) => void;
+  'voice:join':           (payload: VoiceJoinPayload) => void;
+  'voice:leave':          (payload: VoiceLeavePayload) => void;
+  'voice:signal':         (payload: VoiceSignalOutPayload) => void;
+  'voice:mute':           (payload: { sessionId: string; muted: boolean }) => void;
+  'voice:speaking':       (payload: { sessionId: string; speaking: boolean }) => void;
+  'voice:transcript':     (payload: { sessionId: string; text: string }) => void;
+  'recap:request':        (payload: { sessionId: string }) => void;
+  'recap:publish':        (payload: { sessionId: string; published: boolean }) => void;
+  'recap:clear':          (payload: { sessionId: string }) => void;
   'model:request':        (payload: ModelAssetRequestPayload) => void;
   'model:chunk':          (payload: ModelAssetChunkPayload)   => void;
   'item:add':             (payload: ItemAddPayload)           => void;

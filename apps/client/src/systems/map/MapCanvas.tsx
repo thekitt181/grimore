@@ -10,6 +10,7 @@ import { useCheckDistanceTool } from './hooks/useCheckDistanceTool';
 import { useMapPingTool } from './hooks/useMapPingTool';
 import { bindMapPingSocket } from './mapPingSync';
 import { MapPingOverlay } from './MapPingOverlay';
+import { TokenVoicePulseOverlay } from '@/systems/voice/TokenVoicePulseOverlay';
 import { useDrawingTool } from './hooks/useDrawingTool';
 import { useCalibrateGrid } from './hooks/useCalibrateGrid';
 import { useMapStore } from './store/mapStore';
@@ -917,6 +918,7 @@ export function MapCanvas() {
 
       <SpellScreenVfxOverlay />
       <MapPingOverlay />
+      <TokenVoicePulseOverlay />
 
       <MapAtmosphereLayer />
       <SpellVfxLayer appReady={appReady} />

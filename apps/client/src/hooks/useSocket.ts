@@ -14,6 +14,8 @@ import { applySessionFogActive, bindFogActiveSocket, syncFogActiveToSession } fr
 import { bindLootPolicySocket, syncLootPolicyToSession } from '@/systems/combat/lootPolicySync';
 import { bindWallExtrudeSocket, syncWallExtrudeToSession } from '@/systems/map/wallExtrudeSync';
 import { bindDdbRollSocket } from '@/systems/ddb/bindDdbRollSocket';
+import { bindVoiceSocket, rejoinVoiceAfterSocketUp } from '@/systems/voice/voiceEngine';
+import { bindRecapSocket, requestSessionRecap } from '@/systems/voice/voiceScribe';
 import type { ChatMessagePayload } from '@grimoire/shared';
 import type { SessionUser } from '@grimoire/shared';
 
@@ -113,6 +115,10 @@ export function useSocket(
       bindLootPolicySocket();
       bindWallExtrudeSocket();
       bindDdbRollSocket(true);
+      bindVoiceSocket();
+      bindRecapSocket();
+      rejoinVoiceAfterSocketUp();
+      requestSessionRecap();
       syncFogActiveToSession();
       syncLootPolicyToSession();
       syncWallExtrudeToSession();
@@ -239,6 +245,8 @@ export function useSocket(
       bindLootPolicySocket();
       bindWallExtrudeSocket();
       bindDdbRollSocket(true);
+      bindVoiceSocket();
+      bindRecapSocket();
     }
 
     configureSocketSession({

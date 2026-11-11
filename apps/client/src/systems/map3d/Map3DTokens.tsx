@@ -20,6 +20,7 @@ import { useFirstPersonStore } from './firstPersonStore';
 import { isTokenVisibleInFpFog } from './fpTokenLosVisibility';
 import { resolveTokenModelUrl } from './defaultTokenModel';
 import { tokenFlyHeightFt, tokenFlyLabel } from '@/systems/combat/attackRange';
+import { useVoiceStore } from '@/systems/voice/voiceStore';
 
 function tokenDisplayName(token: TokenItem): string {
   return tokenFlyLabel(token.name, tokenFlyHeightFt(token));
@@ -51,6 +52,32 @@ const MODEL_FACING_YAW_3D = Math.PI;
 const MODEL_2D_IMPORT_YAW = Math.PI + TABLE_MINI_VIEW_AZIMUTH_OFFSET;
 /** Tip the mini so a top-down 2D camera still reads depth / facing. */
 const MODEL_2D_DISPLAY_PITCH = -0.58;
+
+function TokenSpeakPulse({ token, radius }: { token: TokenItem; radius: number }) {
+  const owner = token.ownerId?.trim() ?? '';
+  const speaking = useVoiceStore((s) => Boolean(owner && s.speakingByUserId[owner]));
+  const matRef = useRef<THREE.MeshBasicMaterial>(null);
+  useFrame(({ clock }) => {
+    const m = matRef.current;
+    if (!m || !speaking) return;
+    const t = 0.5 + 0.5 * Math.sin(clock.elapsedTime * 7);
+    m.opacity = 0.35 + t * 0.5;
+  });
+  if (!speaking) return null;
+  return (
+    <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 1.35, 0]} renderOrder={49}>
+      <ringGeometry args={[radius * 1.05, radius * 1.2, 40]} />
+      <meshBasicMaterial
+        ref={matRef}
+        color="#c9a84c"
+        transparent
+        depthTest={false}
+        depthWrite={false}
+        toneMapped={false}
+      />
+    </mesh>
+  );
+}
 
 function parseBorderColor(hex: string | undefined): string {
   if (!hex) return '#c9a84c';
@@ -202,6 +229,7 @@ function Token2DFlat({
     >
       <group ref={modelRootRef} scale={[stretchX, 1, stretchZ]}>
         {!displayOnly ? <TokenMapBeacon token={token} footprint={targetSize} /> : null}
+        {!displayOnly ? <TokenSpeakPulse token={token} radius={baseRadius} /> : null}
         {displayOnly ? (
           <group rotation={[-Math.PI / 2, 0, 0]}>
             <mesh renderOrder={30}>
@@ -314,6 +342,7 @@ function Token3DModel({
       displayOnly={displayOnly}
     >
       {!displayOnly ? <TokenMapBeacon token={token} footprint={targetSize} /> : null}
+      {!displayOnly ? <TokenSpeakPulse token={token} radius={baseRadius} /> : null}
       {view2d && (
         <MiniaturePedestal radius={baseRadius} borderColor={borderColor} />
       )}
@@ -419,6 +448,7 @@ function Token3DMesh({
     >
       <group ref={modelRootRef} scale={[stretchX, 1, stretchZ]}>
       {!displayOnly ? <TokenMapBeacon token={token} footprint={targetSize} /> : null}
+      {!displayOnly ? <TokenSpeakPulse token={token} radius={radius} /> : null}
       <mesh position={[0, baseHeightMesh / 2, 0]} castShadow receiveShadow={false} renderOrder={10}>
         <cylinderGeometry args={[radius, radius * 1.05, baseHeightMesh, 32]} />
         <meshStandardMaterial color="#2a2018" roughness={0.7} metalness={0.25} />

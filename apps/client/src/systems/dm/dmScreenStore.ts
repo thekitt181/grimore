@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
-export type DmScreenTab = 'party' | 'conditions' | 'encounters' | 'notes' | 'rolls';
+export type DmScreenTab = 'party' | 'conditions' | 'encounters' | 'notes' | 'recap' | 'rolls';
 
 interface DmScreenState {
   open: boolean;

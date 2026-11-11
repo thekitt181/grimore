@@ -9,12 +9,14 @@ import { ConditionsRefTab } from './tabs/ConditionsRefTab';
 import { EncounterTab } from './tabs/EncounterTab';
 import { DmNotesTab } from './tabs/DmNotesTab';
 import { SecretRollsTab } from './tabs/SecretRollsTab';
+import { SessionRecapBody } from '@/systems/voice/SessionRecapPanel';
 
 const TABS: { id: DmScreenTab; label: string }[] = [
   { id: 'party', label: 'Party' },
   { id: 'conditions', label: 'Conditions' },
   { id: 'encounters', label: 'Encounters' },
   { id: 'notes', label: 'Notes' },
+  { id: 'recap', label: 'Recap' },
   { id: 'rolls', label: 'Secret rolls' },
 ];
 
@@ -26,7 +28,7 @@ export function DmScreenPanel({ onClose }: { onClose: () => void }) {
   return (
     <DraggablePanel
       title="DM Screen"
-      subtitle="Party · conditions · encounters · notes"
+      subtitle="Party · conditions · encounters · notes · recap"
       onClose={onClose}
       defaultPosition={
         isMobileClient()
@@ -61,6 +63,7 @@ export function DmScreenPanel({ onClose }: { onClose: () => void }) {
           {tab === 'notes' && !sessionId && (
             <p style={{ color: 'var(--color-text-secondary)' }}>Join a session to save notes.</p>
           )}
+          {tab === 'recap' && <SessionRecapBody />}
           {tab === 'rolls' && <SecretRollsTab />}
         </div>
       </div>

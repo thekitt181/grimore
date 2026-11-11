@@ -1,5 +1,8 @@
 import { MapViewModeToggle } from '@/systems/map/MapViewModeToggle';
 import { QuestDock } from '@/systems/quests/QuestDock';
+import { joinVoice, leaveVoice, setVoiceMuted } from '@/systems/voice/voiceEngine';
+import { useVoiceStore } from '@/systems/voice/voiceStore';
+import { useSessionRecapStore } from '@/systems/voice/sessionRecapStore';
 
 const GOLD = 'var(--color-accent-gold)';
 const BD = 'var(--color-border)';
@@ -21,6 +24,12 @@ export function MobileSessionDock({
   onToggleQuests: () => void;
   onImportPc?: () => void;
 }) {
+  const inVoice = useVoiceStore((s) => s.joined);
+  const muted = useVoiceStore((s) => s.muted);
+  const joining = useVoiceStore((s) => s.joining);
+  const recapOpen = useSessionRecapStore((s) => s.open);
+  const toggleRecap = useSessionRecapStore((s) => s.toggleOpen);
+
   return (
     <div
       className="fixed z-[60] flex flex-col items-end gap-2 pointer-events-auto md:hidden"
@@ -52,6 +61,13 @@ export function MobileSessionDock({
           title="Dice roller"
           onClick={onToggleDice}
         />
+        <DockButton
+          active={recapOpen}
+          label="Recap"
+          icon="📝"
+          title="Session recap"
+          onClick={() => toggleRecap()}
+        />
         {onImportPc && (
           <DockButton
             active={false}
@@ -59,6 +75,32 @@ export function MobileSessionDock({
             icon="🧙"
             title="My character"
             onClick={onImportPc}
+          />
+        )}
+        {inVoice ? (
+          <>
+            <DockButton
+              active={!muted}
+              label={muted ? 'Unmute' : 'Mute'}
+              icon={muted ? '🔇' : '🎤'}
+              title={muted ? 'Unmute' : 'Mute mic'}
+              onClick={() => setVoiceMuted(!muted)}
+            />
+            <DockButton
+              active={true}
+              label="Hang up"
+              icon="📵"
+              title="Leave voice"
+              onClick={() => leaveVoice()}
+            />
+          </>
+        ) : (
+          <DockButton
+            active={false}
+            label={joining ? '…' : 'Voice'}
+            icon="🎙"
+            title="Join table voice"
+            onClick={() => void joinVoice()}
           />
         )}
         <MapViewModeToggle variant="dock" />

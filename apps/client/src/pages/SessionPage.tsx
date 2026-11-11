@@ -63,6 +63,8 @@ import { ItemHandoutViewer } from '@/systems/compendium/ItemHandoutViewer';
 import { useHandoutRevealSocket } from '@/systems/compendium/useHandoutRevealSocket';
 import { HandoutManagerPanel } from '@/systems/handouts/HandoutManagerPanel';
 import { HandoutJournalPanel } from '@/systems/handouts/HandoutJournalPanel';
+import { SessionRecapPanel } from '@/systems/voice/SessionRecapPanel';
+import { useSessionRecapStore } from '@/systems/voice/sessionRecapStore';
 import { useHandoutJournalStore } from '@/systems/handouts/handoutJournalStore';
 import { useCompendiumSyncPoll } from '@/systems/compendium/useCompendiumSync';
 import { useCompendiumAuthRecovery } from '@/systems/compendium/useCompendiumAuthRecovery';
@@ -85,6 +87,7 @@ import { SceneTransitionOverlay } from '@/systems/scene/media/SceneAtmosphere';
 import { FpLookLayer } from '@/systems/map3d/FpLookLayer';
 import { FpTrapImpactHud } from '@/systems/map3d/FpTrapImpact';
 import { SessionMediaBar } from '@/systems/scene/media/SessionMediaBar';
+import { VoiceBar } from '@/systems/voice/VoiceBar';
 import { MobileAudioUnlockBanner } from '@/systems/scene/media/MobileAudioUnlockBanner';
 import { GameClockWidget } from '@/systems/scene/media/GameClockWidget';
 import { SessionSceneBar } from '@/systems/scene/manager/SessionSceneBar';
@@ -124,6 +127,8 @@ export function SessionPage() {
   const [showQuests, setShowQuests] = useState(false);
   const [handoutManagerOpen, setHandoutManagerOpen] = useState(false);
   const [journalOpen, setJournalOpen] = useState(false);
+  const recapOpen = useSessionRecapStore((s) => s.open);
+  const setRecapOpen = useSessionRecapStore((s) => s.setOpen);
   const loadHandoutJournal = useHandoutJournalStore((s) => s.loadJournal);
   const panelOpen = useCompendiumUiStore((s) => s.panelOpen);
   const setPanelOpen = useCompendiumUiStore((s) => s.setPanelOpen);
@@ -347,6 +352,11 @@ export function SessionPage() {
         e.preventDefault();
         return;
       }
+      if (useSessionRecapStore.getState().open) {
+        useSessionRecapStore.getState().setOpen(false);
+        e.preventDefault();
+        return;
+      }
       if (showDice) {
         setShowDice(false);
         e.preventDefault();
@@ -371,6 +381,7 @@ export function SessionPage() {
     pcActionsToken,
     tokenActionsToken,
     journalOpen,
+    recapOpen,
     showDice,
     showQuests,
     showInitiative,
@@ -437,6 +448,7 @@ export function SessionPage() {
               <SessionMediaBar sessionId={sessionInfo.id} isGM={isGM} />
             </>
           )}
+          <VoiceBar />
           <GameClockWidget sessionId={sessionInfo.id} isGM={isGM} />
           {!isGM && (
             <button
@@ -584,6 +596,9 @@ export function SessionPage() {
               onClose={() => setJournalOpen(false)}
             />
           )}
+          {recapOpen && (
+            <SessionRecapPanel onClose={() => setRecapOpen(false)} />
+          )}
           {importModalOpen && (
             <CharacterImportModal
               {...(importLinkTokenId ? { linkTokenId: importLinkTokenId } : {})}
@@ -656,6 +671,18 @@ export function SessionPage() {
                     📜
                   </button>
                 )}
+                <button
+                  onClick={() => setRecapOpen(!recapOpen)}
+                  className="w-10 h-10 rounded-lg flex items-center justify-center text-lg shadow-panel transition-all"
+                  style={{
+                    background: recapOpen ? 'rgba(201,168,76,0.2)' : 'var(--color-bg-secondary)',
+                    border: `1px solid ${recapOpen ? 'var(--color-accent-gold)' : 'var(--color-border)'}`,
+                    color: recapOpen ? 'var(--color-accent-gold)' : 'var(--color-text-secondary)',
+                  }}
+                  title="Session recap from table voice"
+                >
+                  📝
+                </button>
                 <button
                   onClick={() => setJournalOpen(!journalOpen)}
                   className="w-10 h-10 rounded-lg flex items-center justify-center text-lg shadow-panel transition-all"

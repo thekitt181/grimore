@@ -7,3 +7,4 @@ export * from './spellDuration';
 export * from './concentrationRules';
 export * from './artQuery';
 export * from './restCharacter';
+export * from './sessionRecap';

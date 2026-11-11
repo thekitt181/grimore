@@ -81,6 +81,8 @@ import { startRollBridge, stopRollBridge, isRollBridgeActive, resolveRollBridgeU
 import { persistSessionFogCache } from '../lib/fogSessionCache';
 import { isClientOriginAllowed } from '../lib/clientOrigins';
 import { cacheItemAdd, cacheItemRemove, cacheItemUpdate } from '../lib/sessionItemsCache';
+import { bindVoiceSocketHandlers, dropSocketFromVoice } from './voiceChat';
+import { bindSessionRecapHandlers } from './sessionRecap';
 
 /** Last quest board, so a player tick cannot add or rename quests. */
 interface QuestBoard {
@@ -390,6 +392,8 @@ export function initSocket(httpServer: HttpServer): Server {
     const username = socket.data['username'] as string;
 
     console.log(`[Socket] User ${username} (${userId}) connected`);
+    bindVoiceSocketHandlers(io, socket);
+    bindSessionRecapHandlers(io, socket);
 
     // ── Join session room ────────────────────────────────────────────────────
     socket.on('session:join', async ({ sessionId, campaignId }) => {
@@ -517,6 +521,7 @@ export function initSocket(httpServer: HttpServer): Server {
     });
 
     socket.on('session:leave', ({ sessionId }) => {
+      dropSocketFromVoice(io, socket);
       socket.leave(sessionId);
       socket.to(sessionId).emit('session:userLeft', { sessionId, userId });
     });
@@ -1118,6 +1123,7 @@ export function initSocket(httpServer: HttpServer): Server {
 
     // ── Disconnect ───────────────────────────────────────────────────────────
     socket.on('disconnect', () => {
+      dropSocketFromVoice(io, socket);
       const sessionId = socket.data['sessionId'] as string | undefined;
       if (sessionId) {
         if (!userHasOtherSocketInRoom(io, sessionId, userId, socket.id)) {
