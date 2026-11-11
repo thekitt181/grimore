@@ -15,6 +15,7 @@ export function toolOwnsMapPointer(activeTool: string): boolean {
   if (
     activeTool === 'wall'
     || activeTool === 'measure'
+    || activeTool === 'check-distance'
     || activeTool === 'wander-path'
     || activeTool === 'calibrate'
     || activeTool === 'eraser'

@@ -17,6 +17,43 @@ export interface AttackRangeEval {
 
 const FEET_PER_CELL = 5;
 
+export function tokenFlyHeightFt(token: Pick<TokenItem, 'flyHeightFt'>): number {
+  const n = token.flyHeightFt;
+  return typeof n === 'number' && Number.isFinite(n) ? Math.max(0, n) : 0;
+}
+
+export function tokenFlyLabel(name: string, flyHeightFt: number): string {
+  if (flyHeightFt <= 0) return name;
+  return `${name}  ↑${Math.round(flyHeightFt)} ft`;
+}
+
+export interface TokenDistanceBreakdown {
+  mapFt: number;
+  heightFt: number;
+  distanceFt: number;
+}
+
+export function tokenDistanceBreakdown(
+  a: TokenItem,
+  b: TokenItem,
+  gridSize = getMapGridSize(),
+): TokenDistanceBreakdown {
+  const ac = itemCenter(a);
+  const tc = itemCenter(b);
+  const distPx = Math.hypot(tc.cx - ac.cx, tc.cy - ac.cy);
+  const centerFeet = (distPx / gridSize) * FEET_PER_CELL;
+  const aRadius = (Math.min(a.width, a.height) / 2 / gridSize) * FEET_PER_CELL;
+  const bRadius = (Math.min(b.width, b.height) / 2 / gridSize) * FEET_PER_CELL;
+  const mapFt = Math.max(0, centerFeet - aRadius - bRadius);
+  const heightFt = Math.abs(tokenFlyHeightFt(a) - tokenFlyHeightFt(b));
+  const distanceFt = Math.hypot(mapFt, heightFt);
+  return {
+    mapFt: Math.round(mapFt),
+    heightFt: Math.round(heightFt),
+    distanceFt: Math.round(distanceFt),
+  };
+}
+
 export function getMapGridSize(): number {
   return getActiveMap()?.gridSize ?? 70;
 }
@@ -37,13 +74,7 @@ export function tokenDistanceFeet(
   target: TokenItem,
   gridSize = getMapGridSize(),
 ): number {
-  const ac = itemCenter(attacker);
-  const tc = itemCenter(target);
-  const distPx = Math.hypot(tc.cx - ac.cx, tc.cy - ac.cy);
-  const centerFeet = (distPx / gridSize) * FEET_PER_CELL;
-  const aRadius = (Math.min(attacker.width, attacker.height) / 2 / gridSize) * FEET_PER_CELL;
-  const bRadius = (Math.min(target.width, target.height) / 2 / gridSize) * FEET_PER_CELL;
-  return Math.max(0, Math.round(centerFeet - aRadius - bRadius));
+  return tokenDistanceBreakdown(attacker, target, gridSize).distanceFt;
 }
 
 /** True if any other token is within 5 ft of the attacker (ranged-in-melee rule). */

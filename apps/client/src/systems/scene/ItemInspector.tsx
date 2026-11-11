@@ -52,7 +52,9 @@ export function ItemInspector() {
   const isGM = myRole === 'GM';
 
   const selected = selectedIds.map((id) => items[id]).filter(Boolean) as Item[];
-  if (!isGM || (selected.length === 0 && selectedWallIndices.length === 0)) return null;
+  const playerTokens = selected.filter((i): i is TokenItem => i.type === 'token');
+  if (selected.length === 0 && selectedWallIndices.length === 0) return null;
+  if (!isGM && playerTokens.length !== 1) return null;
 
   function update(id: string, patch: Partial<Item>) {
     useItemStore.getState().updateItem(id, patch);
@@ -87,7 +89,7 @@ export function ItemInspector() {
       </span>
 
       {/* Type-specific */}
-      {single?.type === 'map' && isGM && <MapControls map={single as MapItem} update={(p) => update(single.id, p)} />}
+      {isGM && single?.type === 'map' && <MapControls map={single as MapItem} update={(p) => update(single.id, p)} />}
       {single?.type === 'token' && (
         <TokenControls
           token={single as TokenItem}
@@ -115,32 +117,66 @@ export function ItemInspector() {
       {single?.type === 'image' && isGM && (
         <PropControls image={single as ImageItem} update={(p) => update(single.id, p)} />
       )}
-      {single?.type === 'text' && <TextControls t={single as TextItem} update={(p) => update(single.id, p)} />}
-      {single?.type === 'drawing' && <DrawControls d={single as DrawItem} update={(p) => update(single.id, p)} />}
+      {isGM && single?.type === 'text' && <TextControls t={single as TextItem} update={(p) => update(single.id, p)} />}
+      {isGM && single?.type === 'drawing' && <DrawControls d={single as DrawItem} update={(p) => update(single.id, p)} />}
 
-      {(single || selected.length > 1) && (
+      {isGM && (single || selected.length > 1) && (
         <div className="w-px h-6" style={{ background: 'var(--color-border)' }} />
       )}
 
       {/* Common actions */}
-      {selected.length > 0 && (
+      {isGM && selected.length > 0 && (
         <>
           <button title="Lock" className="text-sm px-1.5 py-0.5 rounded transition-colors"
             style={{ color: allLocked ? 'var(--color-accent-gold)' : 'var(--color-text-secondary)' }}
             onClick={() => patchAll({ locked: !allLocked } as Partial<Item>)}>
             {allLocked ? '🔒' : '🔓'}
           </button>
-          {isGM && (
-            <button title="Hide from players" className="text-sm px-1.5 py-0.5 rounded transition-colors"
-              style={{ color: allHidden ? 'var(--color-accent-gold)' : 'var(--color-text-secondary)' }}
-              onClick={() => patchAll({ visible: allHidden } as Partial<Item>)}>
-              {allHidden ? '🙈' : '👁'}
-            </button>
-          )}
+          <button title="Hide from players" className="text-sm px-1.5 py-0.5 rounded transition-colors"
+            style={{ color: allHidden ? 'var(--color-accent-gold)' : 'var(--color-text-secondary)' }}
+            onClick={() => patchAll({ visible: allHidden } as Partial<Item>)}>
+            {allHidden ? '🙈' : '👁'}
+          </button>
         </>
       )}
-      <button title="Delete (Del)" className="text-sm px-1.5 py-0.5 rounded" style={{ color: 'var(--color-accent-red-hot)' }} onClick={del}>🗑</button>
+      {isGM && (
+        <button title="Delete (Del)" className="text-sm px-1.5 py-0.5 rounded" style={{ color: 'var(--color-accent-red-hot)' }} onClick={del}>🗑</button>
+      )}
     </div>
+  );
+}
+
+function FlyHeightField({
+  token,
+  canEdit,
+  update,
+}: {
+  token: TokenItem;
+  canEdit: boolean;
+  update: (p: Partial<TokenItem>) => void;
+}) {
+  const h = token.flyHeightFt ?? 0;
+  return (
+    <Field label="Fly (ft)">
+      {canEdit ? (
+        <input
+          type="number"
+          className="input-stat"
+          min={0}
+          step={5}
+          title="Height above the map. Distance uses both map range and this height."
+          value={h}
+          onChange={(e) => {
+            const n = Math.max(0, Number(e.target.value) || 0);
+            update({ flyHeightFt: n });
+          }}
+        />
+      ) : (
+        <span className="font-ui text-xs tabular-nums" style={{ color: 'var(--color-text-primary)' }}>
+          {h}
+        </span>
+      )}
+    </Field>
   );
 }
 
@@ -231,11 +267,16 @@ function TokenControls({
   const showResetRotation = (isGM || canRotate) && !token.locked;
   const modelUrl = resolveTokenModelUrl(token);
 
+  const canEditFly = (isGM || canRotate) && !token.locked;
+
   if (!isGM && isMonster) {
     return (
-      <Field label="Name">
-        <span className="font-ui text-xs" style={{ color: 'var(--color-text-primary)' }}>{token.name}</span>
-      </Field>
+      <>
+        <Field label="Name">
+          <span className="font-ui text-xs" style={{ color: 'var(--color-text-primary)' }}>{token.name}</span>
+        </Field>
+        <FlyHeightField token={token} canEdit={false} update={update} />
+      </>
     );
   }
 
@@ -272,6 +313,7 @@ function TokenControls({
           onChangeFt={(ft) => update({ visionRadius: visionRadiusFromFeet(ft) })}
         />
       </Field>
+      <FlyHeightField token={token} canEdit={canEditFly} update={update} />
       {token.ddbCharacterId && (
         <Field label="DDB">
           <button

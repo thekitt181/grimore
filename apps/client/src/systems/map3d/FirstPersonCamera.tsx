@@ -34,6 +34,7 @@ import { setMapRaycastPaused } from './mapGroundRaycast';
 import { bakedGroundHeightSmooth, getMapCollisionGrid } from './mapCollisionGrid';
 import { useTokenDragMeasureStore } from '@/systems/scene/interaction/tokenDragMeasureStore';
 import { fpHardVisionActive } from './FirstPersonVisionFog';
+import { tokenFlyHeightFt } from '@/systems/combat/attackRange';
 
 const EYE_CELLS = 1.1;
 /** Eye height eases on stairs; flat floor snaps. */
@@ -290,7 +291,8 @@ export function FirstPersonCamera() {
         frameDt,
       );
     }
-    const targetEye = firstPersonMotion.groundY + eyeOffset;
+    const flyY = (tokenFlyHeightFt(token) / 5) * grid;
+    const targetEye = firstPersonMotion.groundY + eyeOffset + flyY;
     if (!Number.isFinite(firstPersonMotion.eyeY)) {
       firstPersonMotion.eyeY = targetEye;
     } else if (Math.abs(targetEye - firstPersonMotion.eyeY) < EYE_SNAP_DELTA) {

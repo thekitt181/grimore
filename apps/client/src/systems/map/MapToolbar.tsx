@@ -14,6 +14,8 @@ import { useImageWallScan } from '@/systems/map3d/useImageWallScan';
 import { MAP_SURFACE_STYLE_OPTIONS } from '@/systems/map3d/mapSurfaceStyles';
 import { DOOR_STYLE_GROUPS, DOOR_SURFACE_STYLES } from '@/systems/map3d/doorSurfaceStyles';
 import { resumeFirstPersonMoveAfterMapFocus } from '@/systems/map3d/useFirstPersonControls';
+import { CheckDistancePanel } from './CheckDistancePanel';
+import { snapSelectedTokensToGrid } from '@/systems/scene/token/snapSelectedTokens';
 
 function pushWallExtrudeSoon() {
   setTimeout(() => emitWallExtrudeToSession(), 0);
@@ -97,6 +99,7 @@ export function MapToolbar() {
   const tools = isGM ? GM_TOOLS : PLAYER_TOOLS;
 
   const [showDrawPanel, setShowDrawPanel] = useState(false);
+  const checkDistOpen = activeTool === 'check-distance';
   const isDrawTool = DRAW_TOOLS.some((t) => t.id === activeTool);
   const isWallTool = activeTool === 'wall';
 
@@ -153,6 +156,27 @@ export function MapToolbar() {
           </button>
         ))}
 
+        <button
+          type="button"
+          title="Check distance — click a token to see range to every other token"
+          onClick={() => {
+            setShowDrawPanel(false);
+            if (checkDistOpen) {
+              setTool('select');
+              return;
+            }
+            setTool('check-distance');
+            useItemStore.getState().select([], 'set');
+            useItemStore.getState().clearWallSelection();
+          }}
+          className={clsx(
+            'w-9 h-9 rounded flex flex-col items-center justify-center font-ui transition-all',
+            checkDistOpen ? ACTIVE_BTN : 'text-[#8a8075] hover:text-[#e8e0d0] hover:bg-[#1c1c28]',
+          )}
+        >
+          <span className="text-[9px] font-bold tracking-wide leading-tight">Dist</span>
+        </button>
+
         {isGM && isWallTool && (
           <>
             <div className="gold-divider my-1" />
@@ -190,8 +214,12 @@ export function MapToolbar() {
 
         {/* Snap to grid */}
         <button
-          title={snapToGrid ? 'Snap to grid: ON' : 'Snap to grid: OFF'}
-          onClick={() => setSnap(!snapToGrid)}
+          title={snapToGrid ? 'Snap to grid: ON' : 'Snap to grid: OFF — click to snap selected tokens'}
+          onClick={() => {
+            const next = !snapToGrid;
+            setSnap(next);
+            if (next) snapSelectedTokensToGrid();
+          }}
           className={clsx(BTN, snapToGrid && ACTIVE_BTN)}
         >
           🧲
@@ -583,6 +611,8 @@ export function MapToolbar() {
           )}
         </div>
       )}
+
+      {checkDistOpen && <CheckDistancePanel onClose={() => setTool('select')} />}
     </div>
   );
 }

@@ -17,6 +17,7 @@ import { resolveItemBounds } from './sceneItemBounds';
 import { getActiveMap } from '@/systems/scene/store/itemStore';
 import { mapUnderTokenFeet } from '@/systems/scene/hitTest';
 import type { ImageItem, Item, TokenItem } from '@/systems/scene/types';
+import { tokenFlyHeightFt } from '@/systems/combat/attackRange';
 import { firstPersonLook } from './firstPersonLook';
 import { poseForToken } from './firstPersonPose';
 
@@ -218,6 +219,14 @@ export function SceneItemTransformGroup({
       if (wallLift !== 0) yBase += wallLift;
     } else {
       yBase = surfaceY + wallLift;
+    }
+
+    if (item.type === 'token') {
+      const flyFt = tokenFlyHeightFt(item as TokenItem);
+      if (flyFt > 0) {
+        const gs = getActiveMap()?.gridSize ?? 70;
+        yBase += (flyFt / 5) * gs;
+      }
     }
 
     const sx = scaleBaseWidth ?? baseWidth;

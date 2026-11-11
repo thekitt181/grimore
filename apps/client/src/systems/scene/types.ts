@@ -231,6 +231,8 @@ export interface TokenItem extends BaseItem {
   isPc?: boolean;
   /** Push HP changes to D&D Beyond when linked. */
   syncHpToDdb?: boolean;
+  /** Altitude above the map in feet (flying). 0 = on the ground. */
+  flyHeightFt?: number;
 }
 
 /** Compendium item card placed on the map (GM reveals to players). */

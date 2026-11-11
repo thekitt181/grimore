@@ -2,12 +2,12 @@ import { useRef } from 'react';
 import { Html } from '@react-three/drei';
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
-import { getMapGridSize } from '@/systems/combat/attackRange';
+import { getMapGridSize, tokenFlyHeightFt } from '@/systems/combat/attackRange';
 import { useItemStore } from '@/systems/scene/store/itemStore';
 import { useLiveTransformStore } from '@/systems/scene/store/liveTransformStore';
 import { useFirstPersonStore } from './firstPersonStore';
 import { resolveItemBounds } from './sceneItemBounds';
-import type { Item } from '@/systems/scene/types';
+import type { Item, TokenItem } from '@/systems/scene/types';
 
 const REF_FOOTPRINT = 70;
 const FEET_PER_CELL = 5;
@@ -21,12 +21,14 @@ function boundsDistanceFeet(
   a: { cx: number; cz: number; width: number; height: number },
   b: { cx: number; cz: number; width: number; height: number },
   gridSize: number,
+  heightFt: number,
 ): number {
   const distPx = Math.hypot(b.cx - a.cx, b.cz - a.cz);
   const centerFeet = (distPx / gridSize) * FEET_PER_CELL;
   const aR = (Math.min(a.width, a.height) / 2 / gridSize) * FEET_PER_CELL;
   const bR = (Math.min(b.width, b.height) / 2 / gridSize) * FEET_PER_CELL;
-  return Math.max(0, Math.round(centerFeet - aR - bR));
+  const mapFt = Math.max(0, centerFeet - aR - bR);
+  return Math.round(Math.hypot(mapFt, heightFt));
 }
 
 /**
@@ -75,7 +77,10 @@ export function TokenFpDistanceLabel({
     const liveById = useLiveTransformStore.getState().byId;
     const a = resolveItemBounds(viewer as Item, liveById[viewerId]);
     const b = resolveItemBounds(target as Item, liveById[tokenId]);
-    const feet = boundsDistanceFeet(a, b, getMapGridSize());
+    const heightFt = Math.abs(
+      tokenFlyHeightFt(viewer as TokenItem) - tokenFlyHeightFt(target as TokenItem),
+    );
+    const feet = boundsDistanceFeet(a, b, getMapGridSize(), heightFt);
 
     if (lastFeet.current !== feet) {
       lastFeet.current = feet;

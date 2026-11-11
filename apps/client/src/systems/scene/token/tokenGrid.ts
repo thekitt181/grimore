@@ -35,6 +35,24 @@ export function gridCellOrigin(
   };
 }
 
+/** Snap a token's top-left so its footprint sits on grid cells. */
+export function snapTokenPosition(
+  token: Pick<TokenItem, 'width' | 'height' | 'sizeCells'>,
+  x: number,
+  y: number,
+  map?: MapItem | null,
+): { x: number; y: number; gridCol: number; gridRow: number } {
+  const sizeCells = token.sizeCells || 1;
+  const { gridCol, gridRow } = worldToGridColRow(
+    x + token.width / 2,
+    y + token.height / 2,
+    sizeCells,
+    map,
+  );
+  const origin = gridCellOrigin(gridCol, gridRow, map);
+  return { x: origin.x, y: origin.y, gridCol, gridRow };
+}
+
 /** Top-left world position for a token whose footprint starts at the given cell. */
 export function tokenBoundsFromGrid(
   token: Pick<TokenItem, 'sizeCells'>,

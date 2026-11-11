@@ -14,12 +14,12 @@ import { sceneRefs, pickSceneItem, getMapInteractionEl } from '../sceneRefs';
 import { resolveItemBounds } from '@/systems/map3d/sceneItemBounds';
 import { pointerToMapWorld } from '@/systems/map3d/screenToGround';
 import { groundHeightAt } from '@/systems/map3d/mapGroundRaycast';
-import { worldToGridColRow } from '@/systems/scene/token/tokenGrid';
+import { snapTokenPosition, worldToGridColRow } from '@/systems/scene/token/tokenGrid';
 import { emitTokenMove } from '@/systems/scene/token/tokenSync';
 import { hitTest, hitTestMap, itemIntersectsRect, mapUnderTokenFeet } from '../hitTest';
 import { clearWalkPose } from '@/systems/scene/token/walkPoseBus';
 import { isTokenMoveClick } from '../token/tokenMovePick';
-import { gridInfoForMap, snapPoint } from '../snap';
+import { snapPoint } from '../snap';
 import {
   footprintPx,
   isModularGate,
@@ -306,7 +306,7 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
       const modularInDrag = dragItems.some(
         (it) => it?.type === 'map' && isModularMap(it as MapItem),
       );
-      // Snap maps/drawings during drag; tokens snap on release for smooth motion.
+      // Snap maps/drawings during drag; tokens snap to cells below.
       if (snap && current.ids.length && !tokenOnly && !modularInDrag) {
         const lead = current.ids[0]!;
         const o = current.origins.get(lead)!;
@@ -318,6 +318,20 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
       if (tokenOnly && current.ids.length === 1) {
         const gridSize = getActiveMap()?.gridSize ?? 70;
         ({ dx, dy } = clampDragToMoveBudget(current.ids[0]!, dx, dy, gridSize));
+      }
+
+      if (snap && tokenOnly && current.ids.length) {
+        const lead = current.ids[0]!;
+        const o = current.origins.get(lead)!;
+        const it = useItemStore.getState().items[lead];
+        if (it?.type === 'token') {
+          let nx = o.x + dx;
+          let ny = o.y + dy;
+          const host = mapUnderTokenFeet(nx + it.width / 2, ny + it.height / 2) ?? getActiveMap();
+          const snapped = snapTokenPosition(it, nx, ny, host);
+          dx = snapped.x - o.x;
+          dy = snapped.y - o.y;
+        }
       }
 
       const layer = sceneRefs.items.current;
@@ -700,6 +714,7 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
       propClickId = null;
       propClickOnly = null;
       propUnderTokenClickId = null;
+      if (useMapStore.getState().activeTool === 'check-distance') return;
       if (e.button !== 0) return;
       if (isAoePlacementActive()) return;
       if (isSpellTargetPicking()) return;
@@ -1211,6 +1226,7 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
     }
 
     function onUp(e: PointerEvent) {
+      if (useMapStore.getState().activeTool === 'check-distance') return;
       const press = stairPress;
       stairPress = null;
       const stairClick = press && isGm() && Math.hypot(e.clientX - press.sx, e.clientY - press.sy) < 24
@@ -1315,6 +1331,19 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
           const gridSize = getActiveMap()?.gridSize ?? 70;
           ({ dx, dy } = clampDragToMoveBudget(m.ids[0]!, dx, dy, gridSize));
         }
+        if (!isClick && snap && moveIncludesOnlyTokens(m.ids) && m.ids.length) {
+          const lead = m.ids[0]!;
+          const o = m.origins.get(lead)!;
+          const it = useItemStore.getState().items[lead];
+          if (it?.type === 'token') {
+            const nx = o.x + dx;
+            const ny = o.y + dy;
+            const host = mapUnderTokenFeet(nx + it.width / 2, ny + it.height / 2) ?? getActiveMap();
+            const snapped = snapTokenPosition(it, nx, ny, host);
+            dx = snapped.x - o.x;
+            dy = snapped.y - o.y;
+          }
+        }
         const patches = m.ids.map((id) => {
           const o = m.origins.get(id)!;
           let nx = o.x + dx;
@@ -1403,19 +1432,15 @@ export function useSelectionTool(appReady: boolean, interactionReady = false) {
               }
               let x = p.x;
               let y = p.y;
-              if (snap && p.host) {
-                const g = gridInfoForMap(p.host);
-                const ox = g.originX + g.offsetX;
-                const oy = g.originY + g.offsetY;
-                x = Math.round((p.x - ox) / g.gridSize) * g.gridSize + ox;
-                y = Math.round((p.y - oy) / g.gridSize) * g.gridSize + oy;
+              let gridCol = p.gridCol;
+              let gridRow = p.gridRow;
+              if (snap) {
+                const snapped = snapTokenPosition(it, x, y, p.host ?? getActiveMap());
+                x = snapped.x;
+                y = snapped.y;
+                gridCol = snapped.gridCol;
+                gridRow = snapped.gridRow;
               }
-              const { gridCol, gridRow } = worldToGridColRow(
-                x + it.width / 2,
-                y + it.height / 2,
-                it.sizeCells,
-                p.host,
-              );
               emitTokenMove(p.id, gridCol, gridRow, x, y);
               if (p.host) useItemStore.getState().setActiveMap(p.host.id);
               clearWalkPose(p.id);

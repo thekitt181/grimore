@@ -58,6 +58,7 @@ export function useItemRenderer(
 ) {
   const items   = useItemStore((s) => s.items);
   const selectedIds = useItemStore((s) => s.selectedIds);
+  const checkDistanceFromId = useMapStore((s) => s.checkDistanceFromId);
   const activeMapId = useItemStore((s) => s.activeMapId);
   const selectedWallIndices = useItemStore((s) => s.selectedWallIndices);
   const myRole  = useSessionStore((s) => s.myRole);
@@ -119,7 +120,9 @@ export function useItemRenderer(
     const ctx: RenderContext = {
       gm,
       viewMode,
-      selectedIds,
+      selectedIds: activeTool === 'check-distance'
+        ? (checkDistanceFromId ? [checkDistanceFromId] : [])
+        : selectedIds,
       pixiTokenFallback,
       gm2dEditor,
       hasModelMaps,
@@ -316,6 +319,7 @@ export function useItemRenderer(
   }, [
     items,
     selectedIds,
+    checkDistanceFromId,
     activeMapId,
     selectedWallIndices,
     myRole,

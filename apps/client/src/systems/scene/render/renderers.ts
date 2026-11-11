@@ -9,6 +9,7 @@ import { mountPropAnimation } from '@/systems/map/props/propAnimation';
 
 import { getTokenRenderType, tokenHidesPixiBody } from '../token/tokenRenderType';
 import { tokenDisc } from '../token/tokenGrid';
+import { tokenFlyHeightFt, tokenFlyLabel } from '@/systems/combat/attackRange';
 
 export interface RenderContext {
   gm: boolean;
@@ -29,13 +30,13 @@ function cssHex(hex: string): number { return parseInt(hex.replace('#', ''), 16)
 
 /** Base token visuals (image, aura, name) — stable during combat HP changes. */
 export function tokenBaseVisualSignature(item: TokenItem): string {
-  return `${item.name}|${item.imageUrl ?? ''}|${item.modelUrl ?? ''}|${item.width}|${item.height}|${item.sizeCells}|${item.auraRadius ?? 0}|${item.auraColor ?? ''}|${item.renderType ?? ''}|${item.borderColour ?? ''}`;
+  return `${item.name}|${item.imageUrl ?? ''}|${item.modelUrl ?? ''}|${item.width}|${item.height}|${item.sizeCells}|${item.auraRadius ?? 0}|${item.auraColor ?? ''}|${item.renderType ?? ''}|${item.borderColour ?? ''}|${item.flyHeightFt ?? 0}`;
 }
 
 /** HP, conditions, and turn ring — cheap to patch without rebuilding the whole token. */
 export function tokenOverlayVisualSignature(item: TokenItem, ctx: RenderContext): string {
   const selected = ctx.selectedIds?.includes(item.id) ?? false;
-  return `${item.hp}|${item.maxHp}|${item.tempHp ?? 0}|${item.conditions.join(',')}|${ctx.activeTurnItemId === item.id}|${selected}|${ctx.gm}|${item.hideHpFromPlayers ?? ''}`;
+  return `${item.hp}|${item.maxHp}|${item.tempHp ?? 0}|${item.conditions.join(',')}|${ctx.activeTurnItemId === item.id}|${selected}|${ctx.gm}|${item.hideHpFromPlayers ?? ''}|${item.flyHeightFt ?? 0}`;
 }
 
 /** A signature of the visual-relevant fields so we can skip needless rebuilds. */
@@ -286,7 +287,7 @@ function renderTokenBase(c: Container, item: TokenItem, ctx: RenderContext) {
   }
 
   if (!hidePixiBody) {
-    addTokenNameLabel(c, item.name, cx, cy, radius);
+    addTokenNameLabel(c, tokenFlyLabel(item.name, tokenFlyHeightFt(item)), cx, cy, radius);
   }
 }
 

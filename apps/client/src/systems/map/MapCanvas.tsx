@@ -6,6 +6,7 @@ import { useMapViewport, fitMapToScreen, fitMapItemToScreen, applyViewport, sync
 import { useFogRenderer } from './hooks/useFogRenderer';
 import { useMapFogOverlay } from './hooks/useMapFogOverlay';
 import { useMapMeasure } from './hooks/useMapMeasure';
+import { useCheckDistanceTool } from './hooks/useCheckDistanceTool';
 import { useDrawingTool } from './hooks/useDrawingTool';
 import { useCalibrateGrid } from './hooks/useCalibrateGrid';
 import { useMapStore } from './store/mapStore';
@@ -587,6 +588,7 @@ export function MapCanvas() {
   usePixiSelectionGizmo(appReady);
   useFogRenderer(appReady, interactionReady);
   useMapMeasure(sceneRefs.measure, sceneRefs.world, interactionReady);
+  useCheckDistanceTool(appReady, interactionReady);
   useDrawingTool(appReady, interactionReady);
   useCalibrateGrid(appReady, interactionReady);
   useWallTool(appReady, interactionReady);

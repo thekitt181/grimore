@@ -17,13 +17,14 @@ import { clampView2dMiniOrbitAzimuth } from '@/systems/map3d/tableMiniOrbit';
 export type GridType = 'square' | 'hex';
 
 export type MapTool =
-  | 'select' | 'pan'
-  | 'fog-reveal' | 'fog-hide'
-  | 'wall'
-  | 'measure'
-  | 'wander-path'
-  | 'calibrate'
-  | 'draw-freehand' | 'draw-rect' | 'draw-circle' | 'draw-arrow' | 'text' | 'eraser';
+    | 'select' | 'pan'
+    | 'fog-reveal' | 'fog-hide'
+    | 'wall'
+    | 'measure'
+    | 'check-distance'
+    | 'wander-path'
+    | 'calibrate'
+    | 'draw-freehand' | 'draw-rect' | 'draw-circle' | 'draw-arrow' | 'text' | 'eraser';
 
 export type MapViewMode = '2d' | '3d';
 
@@ -85,6 +86,8 @@ export interface ActiveGrid {
 
 interface SceneState extends ActiveGrid {
   activeTool: MapTool;
+  /** Origin token for Dist — distances to every other token are from this one. */
+  checkDistanceFromId: string | null;
   viewport: MapViewport;
 
   /** 2D Pixi canvas vs 3D orbit view (React Three Fiber). */
@@ -145,6 +148,7 @@ interface SceneState extends ActiveGrid {
 
   // ── Actions ────────────────────────────────────────────────────────────────
   setTool: (tool: MapTool) => void;
+  setCheckDistanceFrom: (id: string | null) => void;
   setWallMode: (mode: WallMode) => void;
   setViewport: (vp: MapViewport) => void;
   setFogBrushSize: (size: number) => void;
@@ -230,6 +234,7 @@ export const useMapStore = create<SceneState>((set, get) => ({
   ...DEFAULT_GRID,
 
   activeTool:   'select',
+  checkDistanceFromId: null,
   wallMode:     'freehand',
   viewport:     { x: 0, y: 0, scale: 1 },
   viewMode:     '2d',
@@ -268,8 +273,10 @@ export const useMapStore = create<SceneState>((set, get) => ({
         activeTool,
         fogEnabled,
         sessionFogActive: fogTool ? true : s.sessionFogActive,
+        checkDistanceFromId: activeTool === 'check-distance' ? s.checkDistanceFromId : null,
       };
     }),
+  setCheckDistanceFrom: (id) => set({ checkDistanceFromId: id }),
   setWallMode: (wallMode) => set({ wallMode }),
   setViewport:    (viewport) => set({ viewport }),
   setFogBrushSize:(fogBrushSize) => set({ fogBrushSize }),
@@ -465,6 +472,7 @@ export const useMapStore = create<SceneState>((set, get) => ({
     set({
       ...DEFAULT_GRID,
       activeTool: 'select',
+      checkDistanceFromId: null,
       wallMode: 'freehand',
       viewport: { x: 0, y: 0, scale: 1 },
       viewMode: '2d',

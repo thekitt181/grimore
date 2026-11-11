@@ -19,6 +19,11 @@ import { tokenDisc, tokenZoomBoost } from '@/systems/scene/token/tokenGrid';
 import { useFirstPersonStore } from './firstPersonStore';
 import { isTokenVisibleInFpFog } from './fpTokenLosVisibility';
 import { resolveTokenModelUrl } from './defaultTokenModel';
+import { tokenFlyHeightFt, tokenFlyLabel } from '@/systems/combat/attackRange';
+
+function tokenDisplayName(token: TokenItem): string {
+  return tokenFlyLabel(token.name, tokenFlyHeightFt(token));
+}
 
 /** Hide tokens outside FP LOS when table fog is on (same rules as 2D fog). */
 function FpLosTokenGate({
@@ -238,7 +243,7 @@ function Token2DFlat({
                 </mesh>
               ) : null}
             </group>
-            <TokenNameLabel name={token.name} footprint={targetSize} />
+            <TokenNameLabel name={tokenDisplayName(token)} footprint={targetSize} />
             <TokenHpBar tokenId={token.id} footprint={targetSize} />
             <TokenConditionDots tokenId={token.id} radius={radius} y={portraitY + faceR + 0.25} />
             {activeTurn && (
@@ -330,7 +335,7 @@ function Token3DModel({
           tokenRender2d={view2d}
           {...(displayOnly ? {} : { itemId: token.id })}
         />
-        <TokenNameLabel name={token.name} footprint={targetSize} />
+        <TokenNameLabel name={tokenDisplayName(token)} footprint={targetSize} />
         <TokenHpBar tokenId={token.id} footprint={targetSize} />
         <TokenConditionDots tokenId={token.id} radius={baseRadius} y={view2d ? 0.35 : 0.25} />
 
@@ -434,7 +439,7 @@ function Token3DMesh({
         <meshStandardMaterial color="#c9a84c" roughness={0.4} metalness={0.6} />
       </mesh>
 
-      <TokenNameLabel name={token.name} footprint={targetSize} />
+      <TokenNameLabel name={tokenDisplayName(token)} footprint={targetSize} />
       <TokenHpBar tokenId={token.id} footprint={targetSize} />
       <TokenConditionDots tokenId={token.id} radius={radius} y={yTop + 0.3} />
 
