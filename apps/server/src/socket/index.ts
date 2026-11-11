@@ -11,6 +11,7 @@ import {
   getRoomUsers,
   getSessionFog,
   getSessionItems,
+  parseSessionItemsCache,
   getSessionMapFocus,
   getSessionSpellEffects,
   getSessionQuests,
@@ -223,6 +224,7 @@ async function hydrateSessionFromCache(socket: Socket, sessionId: string): Promi
   let sceneItems: unknown[] | undefined;
   let sceneFogData: unknown;
   let sceneActiveMapId: string | null | undefined;
+  let sceneUpdatedAt = 0;
 
   if (gameSession?.activeSceneId) {
     const activeScene = await readPrisma.scene.findUnique({
@@ -232,6 +234,7 @@ async function hydrateSessionFromCache(socket: Socket, sessionId: string): Promi
       sceneItems = Array.isArray(activeScene.items) ? activeScene.items : [];
       sceneFogData = activeScene.fogData;
       sceneActiveMapId = activeScene.activeMapId;
+      sceneUpdatedAt = activeScene.updatedAt?.getTime?.() ?? 0;
     }
   }
 
@@ -265,25 +268,21 @@ async function hydrateSessionFromCache(socket: Socket, sessionId: string): Promi
     if (mapFocus) socket.emit('map:focus', mapFocus);
   };
 
-  let cachedItems: unknown[] | null = null;
-  if (cachedItemsRaw) {
-    try {
-      const parsed = JSON.parse(cachedItemsRaw) as unknown;
-      if (Array.isArray(parsed)) cachedItems = parsed;
-    } catch { /* ignore corrupt cache */ }
-  }
+  const cached = parseSessionItemsCache(cachedItemsRaw);
 
   const sceneList = Array.isArray(sceneItems) ? sceneItems : null;
   const sceneLen = sceneList?.length ?? 0;
-  const cacheLen = cachedItems?.length ?? 0;
-  // Live Redis/memory is the table. Prefer it at any length so a larger stale DB
-  // scene cannot restore deleted tokens or rearrange a map the GM already overwrote.
+  const cacheItems = cached.items;
+  const cacheLen = cacheItems?.length ?? 0;
+  const cacheAt = cached.at;
+  // Prefer the newer snapshot. Untimestamped Redis (at=0) loses to a saved scene so
+  // a deleted dungeon sitting in cache cannot beat the DB table the GM already cleaned.
   const items: unknown[] =
-    cacheLen > 0
-      ? cachedItems!
+    cacheLen > 0 && cacheAt >= sceneUpdatedAt
+      ? cacheItems!
       : sceneLen > 0
         ? sceneList!
-        : (cachedItems ?? sceneList ?? []);
+        : (cacheItems ?? sceneList ?? []);
 
   const activeMapId = sceneActiveMapId ?? mapFocus?.mapId ?? null;
 

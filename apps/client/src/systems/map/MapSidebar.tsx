@@ -2,7 +2,8 @@ import { useRef, useState, type ReactNode } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { v4 as uuidv4 } from 'uuid';
 import { useItemStore, getActiveMap } from '@/systems/scene/store/itemStore';
-import { emitItemAdd, emitItemUpdate, emitItemRemove } from '@/systems/scene/sceneSync';
+import { emitItemAdd, emitItemUpdate, emitItemRemove, emitItemsSync } from '@/systems/scene/sceneSync';
+import { resolveTokenPortraitUrl } from '@/lib/textureLoader';
 import { syncGridToMap } from '@/systems/scene/syncGridToMap';
 import type { MapItem, TokenItem, GridType } from '@/systems/scene/types';
 import {
@@ -205,7 +206,7 @@ export function MapSidebar() {
         {compendiumCollapsed ? (
           <div
             className="flex flex-col min-h-0 shrink-0 overflow-hidden"
-            style={{ width: MAP_SIDEBAR_COLUMN_WIDTH }}
+            style={{ width: MAP_SIDEBAR_RAIL_WIDTH }}
           >
             <SidebarColumnRail label="Compendium" onExpand={() => setCompendiumCollapsed(false)} />
           </div>
@@ -269,7 +270,7 @@ function GMSidebarContent() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   function applyBackground(url: string, w: number, h: number) {
-    applyMapAsset({ backgroundUrl: url, width: w, height: h });
+    applyMapAsset({ backgroundUrl: resolveTokenPortraitUrl(url), width: w, height: h });
   }
 
   function applyModel(
@@ -301,6 +302,8 @@ function GMSidebarContent() {
       const fullPatch: Partial<MapItem> = { ...patch, ...gridDefaults };
       useItemStore.getState().updateItem(map.id, fullPatch);
       emitItemUpdate([{ id: map.id, patch: fullPatch }]);
+      emitItemsSync(Object.values(useItemStore.getState().items));
+      focusSessionMap(map.id, { fitToMap: true, select: false });
     } else {
       const m: MapItem = {
         id: mapId ?? uuidv4(), type: 'map', x: 0, y: 0, rotation: 0, width: patch.width, height: patch.height,
@@ -311,6 +314,8 @@ function GMSidebarContent() {
       };
       useItemStore.getState().addItem(m);
       emitItemAdd(m);
+      emitItemsSync(Object.values(useItemStore.getState().items));
+      focusSessionMap(m.id, { fitToMap: true, select: false });
     }
   }
 

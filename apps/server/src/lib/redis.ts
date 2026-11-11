@@ -486,10 +486,36 @@ export async function getSessionFog(sessionId: string): Promise<string | null> {
   return fromRedis;
 }
 
+export function parseSessionItemsCache(raw: string | null): { items: unknown[] | null; at: number } {
+  if (!raw) return { items: null, at: 0 };
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (Array.isArray(parsed)) return { items: parsed, at: 0 };
+    if (parsed && typeof parsed === 'object' && Array.isArray((parsed as { items?: unknown }).items)) {
+      const obj = parsed as { items: unknown[]; at?: number };
+      return { items: obj.items, at: typeof obj.at === 'number' ? obj.at : 0 };
+    }
+  } catch {
+    /* ignore */
+  }
+  return { items: null, at: 0 };
+}
+
 export async function setSessionItems(sessionId: string, itemsData: string): Promise<void> {
-  memorySet(`items:${sessionId}`, itemsData);
+  let wrapped = itemsData;
+  try {
+    const parsed = JSON.parse(itemsData) as unknown;
+    if (Array.isArray(parsed)) {
+      wrapped = JSON.stringify({ at: Date.now(), items: parsed });
+    } else if (parsed && typeof parsed === 'object' && Array.isArray((parsed as { items?: unknown }).items)) {
+      wrapped = JSON.stringify({ at: Date.now(), items: (parsed as { items: unknown[] }).items });
+    }
+  } catch {
+    /* keep raw */
+  }
+  memorySet(`items:${sessionId}`, wrapped);
   await safeRedis(undefined, (client) =>
-    client.setex(`items:${sessionId}`, SESSION_TTL, itemsData),
+    client.setex(`items:${sessionId}`, SESSION_TTL, wrapped),
   );
 }
 

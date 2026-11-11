@@ -34,6 +34,10 @@ function scopedKey(prefix: string, sessionId: string): string {
 export function persistItemsLocal(sessionId: string, items: Item[]): void {
   try {
     localStorage.setItem(scopedKey(ITEMS_PREFIX, sessionId), JSON.stringify(items));
+    // Unscoped key is a pre-auth ghost — empty scoped writes used to skip it and reload deleted dungeons.
+    if (useSessionStore.getState().myUserId) {
+      localStorage.removeItem(`${ITEMS_PREFIX}${sessionId}`);
+    }
   } catch {
     /* quota / private mode */
   }
@@ -55,14 +59,15 @@ export function clearItemsLocal(sessionId: string): void {
 export function loadItemsLocal(sessionId: string): Item[] | null {
   try {
     const userId = useSessionStore.getState().myUserId;
+    // Never fall back to the unscoped key once we know the user — that cache is the deleted dungeon.
     const keys = userId
-      ? [scopedKey(ITEMS_PREFIX, sessionId), `${ITEMS_PREFIX}${sessionId}`]
+      ? [scopedKey(ITEMS_PREFIX, sessionId)]
       : [`${ITEMS_PREFIX}${sessionId}`];
     for (const key of keys) {
       const raw = localStorage.getItem(key);
       if (!raw) continue;
       const list = JSON.parse(raw) as Item[];
-      if (!Array.isArray(list) || list.length === 0) continue;
+      if (!Array.isArray(list)) continue;
       return sanitizePersistedItems(list);
     }
     return null;

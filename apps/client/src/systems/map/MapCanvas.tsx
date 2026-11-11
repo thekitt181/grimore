@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Container, Application } from 'pixi.js';
 import { v4 as uuidv4 } from 'uuid';
 import { usePixiApp } from './hooks/usePixiApp';
-import { useMapViewport, fitMapToScreen, applyViewport, syncMapGridFromItem } from './hooks/useMapViewport';
+import { useMapViewport, fitMapToScreen, fitMapItemToScreen, applyViewport, syncMapGridFromItem } from './hooks/useMapViewport';
 import { useFogRenderer } from './hooks/useFogRenderer';
 import { useMapFogOverlay } from './hooks/useMapFogOverlay';
 import { useMapMeasure } from './hooks/useMapMeasure';
@@ -166,8 +166,9 @@ export function MapCanvas() {
     if (!sessionId || myRole !== 'GM') return;
     if (Object.keys(useItemStore.getState().items).length > 0) return;
 
-    const localItems = loadItemsLocal(sessionId);
-    if (localItems) {
+    const deletedIds = loadDeletedIds(sessionId);
+    const localItems = (loadItemsLocal(sessionId) ?? []).filter((i) => !deletedIds.has(i.id));
+    if (localItems.length > 0) {
       useItemStore.getState().setItems(localItems);
     } else {
       useItemStore.getState().addItem(createDefaultMap());
@@ -372,9 +373,26 @@ export function MapCanvas() {
         }
         return;
       }
+      const before = useItemStore.getState().items;
+      const missing = patches.some((p) => !before[p.id]);
       useItemStore.getState().updateItems(patches);
       useLiveTransformStore.getState().clear(patches.map((p) => p.id));
       persistLocal();
+      if (useSessionStore.getState().myRole === 'PLAYER') {
+        if (missing) requestSceneHydrate();
+        const mapPatch = patches.find((p) => {
+          const it = useItemStore.getState().items[p.id];
+          return it?.type === 'map' && (p.patch as Partial<MapItem>).backgroundUrl != null;
+        });
+        if (mapPatch) {
+          const map = useItemStore.getState().items[mapPatch.id];
+          const app = sceneRefs.app.current;
+          const world = sceneRefs.world.current;
+          if (map?.type === 'map' && app && world) {
+            requestAnimationFrame(() => fitMapItemToScreen(app, world, map as MapItem));
+          }
+        }
+      }
     });
     const onRemove = forSession((payload: { sessionId?: string; ids: string[] }) => {
       addDeletedIds(sessionId, payload.ids);
@@ -413,7 +431,7 @@ export function MapCanvas() {
         return;
       }
 
-      const mergeOpts = { keepLocalOnly: true, preferLocal: true };
+      const mergeOpts = { keepLocalOnly: serverItems.length === 0, preferLocal: true };
       const memoryItems = Object.values(useItemStore.getState().items) as Item[];
       const diskItems = loadItemsLocal(sessionId) ?? [];
       const deletedIds = loadDeletedIds(sessionId);

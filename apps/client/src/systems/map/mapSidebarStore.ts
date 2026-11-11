@@ -16,13 +16,13 @@ export const useMapSidebarStore = create<MapSidebarState>()(
     (set) => ({
       sidebarCollapsed: false,
       gmPanelCollapsed: false,
-      compendiumCollapsed: false,
+      compendiumCollapsed: true,
       setSidebarCollapsed: (sidebarCollapsed) => set({ sidebarCollapsed }),
       toggleSidebarCollapsed: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
       setGmPanelCollapsed: (gmPanelCollapsed) => set({ gmPanelCollapsed }),
       setCompendiumCollapsed: (compendiumCollapsed) => set({ compendiumCollapsed }),
     }),
-    { name: 'grimoire-map-sidebar' },
+    { name: 'grimoire-map-sidebar-v2' },
   ),
 );
 
@@ -36,8 +36,6 @@ export function mapSidebarWidth(
 ): number {
   if (sidebarCollapsed) return MAP_SIDEBAR_RAIL_WIDTH;
   const gmW = gmPanelCollapsed ? MAP_SIDEBAR_RAIL_WIDTH : MAP_SIDEBAR_COLUMN_WIDTH;
-  // Reserve full compendium column width when minimized so the map does not expand.
-  void compendiumCollapsed;
-  const compW = MAP_SIDEBAR_COLUMN_WIDTH;
+  const compW = compendiumCollapsed ? MAP_SIDEBAR_RAIL_WIDTH : MAP_SIDEBAR_COLUMN_WIDTH;
   return gmW + compW;
 }

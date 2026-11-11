@@ -1,17 +1,12 @@
-import { getSessionItems, setSessionItems } from './redis';
+import { getSessionItems, parseSessionItemsCache, setSessionItems } from './redis';
 import type { ItemAddPayload, ItemRemovePayload, ItemUpdatePayload } from '@grimoire/shared';
 
 type CachedItem = Record<string, unknown> & { id?: string };
 
 async function loadCachedItems(sessionId: string): Promise<CachedItem[]> {
   const raw = await getSessionItems(sessionId);
-  if (!raw) return [];
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    return Array.isArray(parsed) ? (parsed as CachedItem[]) : [];
-  } catch {
-    return [];
-  }
+  const parsed = parseSessionItemsCache(raw).items;
+  return Array.isArray(parsed) ? (parsed as CachedItem[]) : [];
 }
 
 async function saveCachedItems(sessionId: string, items: CachedItem[]): Promise<void> {

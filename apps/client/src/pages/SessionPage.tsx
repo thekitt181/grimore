@@ -129,8 +129,8 @@ export function SessionPage() {
   const tokenActionsToken = useCombatStore((s) => s.tokenActionsToken);
   const closeTokenActions = useCombatStore((s) => s.closeTokenActions);
   const isGM = myRole === 'GM';
-  const hasMapItems = useItemStore((s) =>
-    Object.values(s.items).some((i) => i.type === 'map'),
+  const hasTable = useItemStore((s) =>
+    Object.values(s.items).some((i) => i.type === 'map' || i.type === 'token'),
   );
 
   useCompendiumSyncPoll(socketReady);
@@ -508,34 +508,18 @@ export function SessionPage() {
           <SceneTransitionOverlay />
           <MobileDdbTokenBar />
 
-          {isGM && !hasMapItems && (
-            <div
-              className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 px-6 text-center pointer-events-none"
-              style={{ background: 'rgba(10, 10, 15, 0.55)' }}
-            >
-              <p className="font-display text-lg animate-torch" style={{ color: 'var(--color-accent-gold)' }}>
-                Empty table
-              </p>
-              <p className="font-ui text-sm max-w-sm" style={{ color: 'var(--color-text-secondary)' }}>
-                Place a map from MAPS on the right, or generate a 3D dungeon from the catalog. Players see a waiting screen until you do.
-              </p>
-            </div>
-          )}
-
-          {!isGM && !hasMapItems && (
+          {!isGM && !hasTable && !isConnected && (
             <div
               className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 px-6 text-center pointer-events-none"
               style={{ background: 'rgba(10, 10, 15, 0.72)' }}
             >
               <p className="font-display text-lg animate-torch" style={{ color: 'var(--color-accent-gold)' }}>
-                {isConnected ? 'Waiting for a map…' : 'Connecting to the table…'}
+                Connecting to the table…
               </p>
               <p className="font-ui text-sm max-w-sm" style={{ color: 'var(--color-text-secondary)' }}>
-                {!isConnected
-                  ? (isMobileClient()
-                    ? 'This can take a minute while the server wakes up. The map appears when you are live.'
-                    : 'Waiting for the live session. The map will sync when you connect.')
-                  : 'The GM has not put a map on the table yet. You can still open My character from the top bar.'}
+                {isMobileClient()
+                  ? 'This can take a minute while the server wakes up. The map appears when you are live.'
+                  : 'Waiting for the live session. The map will sync when you connect.'}
               </p>
               {connectionError && (
                 <p className="font-ui text-xs" style={{ color: 'var(--color-accent-red-hot)' }}>

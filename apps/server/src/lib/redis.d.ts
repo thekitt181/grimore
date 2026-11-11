@@ -9,4 +9,5 @@ export declare function setSessionFog(sessionId: string, fogData: string): Promi
 export declare function getSessionFog(sessionId: string): Promise<string | null>;
 export declare function setSessionItems(sessionId: string, itemsData: string): Promise<void>;
 export declare function getSessionItems(sessionId: string): Promise<string | null>;
+export declare function parseSessionItemsCache(raw: string | null): { items: unknown[] | null; at: number };
 //# sourceMappingURL=redis.d.ts.map
