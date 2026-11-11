@@ -44,7 +44,6 @@ export interface GrimoireSpell {
   concentration?: boolean;
   alwaysPrepared?: boolean;
   description?: string;
-  school?: string;
   castingTime?: string;
   rangeText?: string;
   components?: string;
