@@ -548,9 +548,17 @@ function renderDrawing(c: Container, item: DrawItem) {
 
 /** Floor spray as a flat polyline for GM awareness on the 2D map. */
 function renderSurfaceDecal(c: Container, item: SurfaceDecalItem) {
-  if (item.surface !== 'floor' || item.points.length < 4) return;
   const g = new Graphics();
   const color = cssHex(item.color);
+  if (item.mark === 'scorch') {
+    const rx = Math.max(8, item.width / 2);
+    const ry = Math.max(8, item.height / 2);
+    g.ellipse(item.width / 2, item.height / 2, rx, ry);
+    g.fill({ color, alpha: 0.72 });
+    c.addChild(g);
+    return;
+  }
+  if (item.surface !== 'floor' || item.points.length < 4) return;
   g.setStrokeStyle({ width: Math.max(1, item.stroke), color, alpha: 0.85 });
   g.moveTo(item.points[0]!, item.points[1]!);
   for (let i = 2; i < item.points.length - 1; i += 2) {

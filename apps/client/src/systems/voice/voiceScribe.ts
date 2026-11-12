@@ -4,6 +4,7 @@ import { useSessionStore } from '@/store/sessionStore';
 import { useItemStore } from '@/systems/scene/store/itemStore';
 import type { TokenItem } from '@/systems/scene/types';
 import { useSessionRecapStore } from './sessionRecapStore';
+import { tryVoiceMapFx } from './voiceMapFx';
 
 type BrowserSpeechRecognition = {
   continuous: boolean;
@@ -73,6 +74,7 @@ function emitUtterance(text: string): void {
     text: cleaned,
     ...(characterName ? { characterName } : {}),
   });
+  tryVoiceMapFx(cleaned);
 }
 
 export function speechScribeAvailable(): boolean {

@@ -763,13 +763,16 @@ export function rollLootFromItems(
   const drops: LootDrop[] = [];
   const from = subjectName.trim() || source.label;
   const motifFlavor = motifScraps(motifParts, extras);
+  const creatureFlavor = creatureParts.flatMap((part) => part.flavor);
   const allFlavor = motifFlavor.length > 0
-    ? [...motifFlavor, ...creatureParts.flatMap((part) => part.flavor)]
+    ? [...motifFlavor, ...creatureFlavor]
     : source.flavor;
 
   let themeSeq = 0;
   const pushFlavor = (preferMotif: boolean) => {
-    const pool = preferMotif && motifFlavor.length > 0 ? motifFlavor : allFlavor;
+    const pool = preferMotif && motifFlavor.length > 0
+      ? motifFlavor
+      : (!preferMotif && creatureFlavor.length > 0 ? creatureFlavor : allFlavor);
     const fresh = pool.filter((name) => !usedFlavor.has(name));
     const name = pickIndex(fresh.length > 0 ? fresh : pool);
     if (!name) return false;
@@ -835,26 +838,39 @@ export function rollLootFromItems(
 
   const itemChance = Math.max(0.12, 1 - source.flavorChance - source.coinChance);
   const hasMotif = motifKeywords.length > 0;
+  const mixed = hasMotif && creatureParts.length > 0;
+  const creatureCoin = creatureParts[0]?.coinPrefix;
+  const motifCoin = motifParts[0]?.coinPrefix ?? source.coinPrefix;
 
   for (let i = 0; i < count; i += 1) {
     const roll = Math.random();
-    if (hasMotif) {
-      const forceCatalog = count >= 2 && i === 0;
-      const forceThemeItem = count >= 2 && i === 1;
-      if (forceCatalog) {
+    if (mixed) {
+      const dragonSlot = count >= 2 && i === 0;
+      const deleriumSlot = count >= 2 && i === 1;
+      if (dragonSlot) {
+        if (pushItem(tryCreatureItem()) || pushFlavor(false)) continue;
+      } else if (deleriumSlot) {
         if (pushItem(tryReflavorItem(), true) || pushItem(tryMotifItem()) || pushThemeItem()) continue;
-      } else if (forceThemeItem) {
+      } else if (roll < 0.28) {
+        if (pushItem(tryCreatureItem()) || pushFlavor(false)) continue;
+      } else if (roll < 0.46) {
+        if (pushItem(tryReflavorItem(), true) || pushThemeItem()) continue;
+      } else if (roll < 0.6) {
         if (pushItem(tryMotifItem()) || pushThemeItem()) continue;
-      } else if (roll < 0.36) {
-        if (pushItem(tryReflavorItem(), true) || pushItem(tryMotifItem())) continue;
-      } else if (roll < 0.54) {
-        if (pushItem(tryMotifItem()) || pushThemeItem()) continue;
-      } else if (roll < 0.7) {
-        if (pushThemeItem()) continue;
+      } else if (roll < 0.72) {
+        if (pushFlavor(false)) continue;
       } else if (roll < 0.84) {
         if (pushFlavor(true)) continue;
-      } else if (roll < 0.93) {
-        if (pushItem(tryCreatureItem(), true) || pushThemeItem()) continue;
+      }
+    } else if (hasMotif) {
+      if (roll < 0.28) {
+        if (pushItem(tryMotifItem()) || pushThemeItem()) continue;
+      } else if (roll < 0.46) {
+        if (pushItem(tryReflavorItem(), true) || pushThemeItem()) continue;
+      } else if (roll < 0.62) {
+        if (pushThemeItem()) continue;
+      } else if (roll < 0.78) {
+        if (pushFlavor(true)) continue;
       }
     } else if (roll < source.flavorChance) {
       if (pushFlavor(false)) continue;
@@ -864,7 +880,7 @@ export function rollLootFromItems(
       if (pushItem(item) || (source.keywords.length > 0 && source.id !== 'this' && pushFlavor(false))) continue;
     }
     const gp = Math.max(1, Math.round(rollInt(tier.gpMin, tier.gpMax) * source.gpScale));
-    const coinPrefix = motifParts[0]?.coinPrefix ?? source.coinPrefix;
+    const coinPrefix = mixed && creatureCoin && Math.random() < 0.5 ? creatureCoin : motifCoin;
     drops.push({ kind: 'currency', label: formatCoins(gp, level, coinPrefix) });
   }
 

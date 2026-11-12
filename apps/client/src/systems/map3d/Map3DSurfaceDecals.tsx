@@ -47,6 +47,68 @@ function wallWorldPoints(item: SurfaceDecalItem, map: MapItem | undefined): [num
   return pts;
 }
 
+function scorchPose(item: SurfaceDecalItem, map: MapItem | undefined) {
+  const pts = item.surface === 'floor' ? floorWorldPoints(item) : wallWorldPoints(item, map);
+  if (pts.length < 3) return null;
+  let cx = 0;
+  let cy = 0;
+  let cz = 0;
+  for (const p of pts) {
+    cx += p[0];
+    cy += p[1];
+    cz += p[2];
+  }
+  const n = pts.length;
+  cx /= n;
+  cy /= n;
+  cz /= n;
+  let r = 8;
+  for (const p of pts) {
+    r = Math.max(r, Math.hypot(p[0] - cx, p[1] - cy, p[2] - cz));
+  }
+  let nx = 0;
+  let nz = 1;
+  if (item.surface === 'wall' && item.wallA && item.wallB) {
+    const dx = item.wallB.x - item.wallA.x;
+    const dy = item.wallB.y - item.wallA.y;
+    const len = Math.hypot(dx, dy) || 1;
+    nx = -dy / len;
+    nz = dx / len;
+  }
+  return { cx, cy, cz, r, nx, nz, wall: item.surface === 'wall' };
+}
+
+function ScorchBlob({ item, map }: { item: SurfaceDecalItem; map: MapItem | undefined }) {
+  const pose = useMemo(() => scorchPose(item, map), [item, map]);
+  const quat = useMemo(() => {
+    const q = new THREE.Quaternion();
+    if (!pose) return q;
+    if (pose.wall) {
+      q.setFromUnitVectors(new THREE.Vector3(0, 0, 1), new THREE.Vector3(pose.nx, 0, pose.nz).normalize());
+    } else {
+      q.setFromEuler(new THREE.Euler(-Math.PI / 2, 0, 0));
+    }
+    return q;
+  }, [pose]);
+  if (!pose) return null;
+  return (
+    <group position={[pose.cx, pose.cy, pose.cz]} quaternion={quat} renderOrder={21}>
+      <mesh>
+        <circleGeometry args={[pose.r, 28]} />
+        <meshBasicMaterial color="#2a1a12" transparent opacity={0.88} depthTest={false} side={THREE.DoubleSide} />
+      </mesh>
+      <mesh>
+        <circleGeometry args={[pose.r * 0.55, 22]} />
+        <meshBasicMaterial color="#0a0706" transparent opacity={0.92} depthTest={false} side={THREE.DoubleSide} />
+      </mesh>
+      <mesh>
+        <ringGeometry args={[pose.r * 0.72, pose.r * 0.98, 28]} />
+        <meshBasicMaterial color="#c45a12" transparent opacity={0.35} depthTest={false} side={THREE.DoubleSide} />
+      </mesh>
+    </group>
+  );
+}
+
 function DecalRibbon({ item, map }: { item: SurfaceDecalItem; map: MapItem | undefined }) {
   const points = useMemo(() => {
     if (item.surface === 'floor') return floorWorldPoints(item);
@@ -282,7 +344,9 @@ export function Map3DSurfaceDecals() {
   return (
     <group>
       {decals.map((d) => (
-        <DecalRibbon key={d.id} item={d} map={mapsById.get(d.mapId)} />
+        d.mark === 'scorch'
+          ? <ScorchBlob key={d.id} item={d} map={mapsById.get(d.mapId)} />
+          : <DecalRibbon key={d.id} item={d} map={mapsById.get(d.mapId)} />
       ))}
       <LiveSprayPreview />
       <LiveBreachPreview />

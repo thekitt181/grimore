@@ -361,6 +361,8 @@ export interface SurfaceDecalItem extends BaseItem {
   wallIndex?: number;
   wallA?: WallPoint;
   wallB?: WallPoint;
+  /** Filled burn / blast mark (voice or combat FX). */
+  mark?: 'scorch';
 }
 
 export interface TextItem extends BaseItem {
