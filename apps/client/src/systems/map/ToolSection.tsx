@@ -1,4 +1,4 @@
-import { useSyncExternalStore, type ReactNode } from 'react';
+import { useEffect, useSyncExternalStore, type ReactNode } from 'react';
 
 const STORAGE_KEY = 'grimoire-tool-sections';
 
@@ -46,16 +46,34 @@ function useCollapsed(id: string): boolean {
   );
 }
 
+function expandSection(id: string) {
+  if (!collapsedIds.has(id)) return;
+  const next = new Set(collapsedIds);
+  next.delete(id);
+  collapsedIds = next;
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify([...next]));
+  } catch {
+    // private mode can reject storage
+  }
+  emit();
+}
+
 export function ToolSection({
   id,
   title,
   children,
+  startOpen = false,
 }: {
   id: string;
   title: ReactNode;
   children: ReactNode;
+  startOpen?: boolean;
 }) {
   const collapsed = useCollapsed(id);
+  useEffect(() => {
+    if (startOpen) expandSection(id);
+  }, [id, startOpen]);
 
   return (
     <div className={`panel ${collapsed ? '!py-2.5' : 'space-y-2'}`}>

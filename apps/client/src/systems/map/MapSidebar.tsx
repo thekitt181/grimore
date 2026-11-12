@@ -477,10 +477,9 @@ function GMSidebarContent() {
         </p>
       </ToolSection>
 
+      <LootPanel />
       <ModularKitPanel onPlace={placeKitPiece} />
       <MapLibraryPanel onUse={(map) => applyBackground(map.imageUrl, map.width, map.height)} />
-
-      <LootPanel />
       <ShopPanel />
       <NpcCodexPanel />
       <ModularGeneratorPanel />

@@ -3,7 +3,6 @@ import { formatItemMarketLine, resolveItemMarketPrice } from '@grimoire/shared';
 import type { LootDrop } from './compendiumApi';
 import { rollLoot } from './compendiumApi';
 import { placeLootDrops } from './placeLoot';
-import { LootDefaultsFields } from '@/systems/combat/LootDefaultsFields';
 import { useMapStore } from '@/systems/map/store/mapStore';
 
 export const LOOT_SOURCES: Array<{ id: string; label: string }> = [
@@ -165,7 +164,6 @@ export function LootRoller({
           ))}
         </select>
       </label>
-      <LootDefaultsFields />
       <button
         type="button"
         className="btn-primary w-full text-xs py-1.5"
