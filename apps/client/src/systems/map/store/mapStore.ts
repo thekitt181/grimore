@@ -140,6 +140,10 @@ interface SceneState extends ActiveGrid {
   playersCanMoveTokens: boolean;
   /** When false, players may only view corpse loot; GM hands it out. */
   playersCanLoot: boolean;
+  /** Preset party level for the next loot roll; null = any. */
+  lootLevel: number | null;
+  lootMin: number;
+  lootMax: number;
 
   // Drawing tool settings
   drawColor: string;
@@ -161,6 +165,7 @@ interface SceneState extends ActiveGrid {
   setGmMovePlayerTokens: (enabled: boolean) => void;
   setPlayersCanMoveTokens: (enabled: boolean) => void;
   setPlayersCanLoot: (enabled: boolean) => void;
+  setLootDefaults: (patch: { lootLevel?: number | null; lootMin?: number; lootMax?: number }) => void;
   setDrawColor: (color: string) => void;
   setDrawStroke: (stroke: number) => void;
   setTextFontSize: (size: number) => void;
@@ -266,6 +271,9 @@ export const useMapStore = create<SceneState>((set, get) => ({
   gmMovePlayerTokens: true,
   playersCanMoveTokens: true,
   playersCanLoot: false,
+  lootLevel: null,
+  lootMin: 1,
+  lootMax: 6,
   drawColor:    '#c9a84c',
   drawStroke:   3,
   textFontSize: 18,
@@ -297,6 +305,11 @@ export const useMapStore = create<SceneState>((set, get) => ({
   setGmMovePlayerTokens: (gmMovePlayerTokens) => set({ gmMovePlayerTokens }),
   setPlayersCanMoveTokens: (playersCanMoveTokens) => set({ playersCanMoveTokens }),
   setPlayersCanLoot: (playersCanLoot) => set({ playersCanLoot }),
+  setLootDefaults: (patch) => set((s) => ({
+    lootLevel: patch.lootLevel !== undefined ? patch.lootLevel : s.lootLevel,
+    lootMin: patch.lootMin !== undefined ? patch.lootMin : s.lootMin,
+    lootMax: patch.lootMax !== undefined ? patch.lootMax : s.lootMax,
+  })),
   setDrawColor:   (drawColor) => set({ drawColor }),
   setDrawStroke:  (drawStroke) => set({ drawStroke }),
   setTextFontSize:(textFontSize) => set({ textFontSize }),
@@ -504,6 +517,9 @@ export const useMapStore = create<SceneState>((set, get) => ({
       gmMovePlayerTokens: true,
       playersCanMoveTokens: true,
       playersCanLoot: false,
+      lootLevel: null,
+      lootMin: 1,
+      lootMax: 6,
     }),
 }));
 

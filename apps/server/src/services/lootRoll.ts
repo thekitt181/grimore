@@ -150,6 +150,106 @@ const SOURCES: LootSource[] = [
     coinPrefix: 'Scorched coins',
   },
   {
+    id: 'delerium',
+    label: 'Delerium',
+    keywords: ['delerium', 'delirium', 'crystal', 'shard', 'prism', 'warped', 'alien', 'purple'],
+    flavor: ['Humming crystal shard', 'Warped purple splinter', 'Prismatic dust', 'Fractured delerium chip', 'Glow-veined pebble', 'Cracked alien geode'],
+    flavorChance: 0.4,
+    coinChance: 0.22,
+    gpScale: 2,
+    coinPrefix: 'Strange crystal-trade coins',
+  },
+  {
+    id: 'ruby',
+    label: 'Ruby',
+    keywords: ['ruby', 'crimson', 'garnet', 'bloodstone'],
+    flavor: ['Chipped ruby', 'Crimson cabochon', 'Blood-red glass bead', 'Garnet chip'],
+    flavorChance: 0.35,
+    coinChance: 0.28,
+    gpScale: 1.8,
+    coinPrefix: 'Ruby-stained coins',
+  },
+  {
+    id: 'emerald',
+    label: 'Emerald',
+    keywords: ['emerald', 'jade', 'malachite'],
+    flavor: ['Emerald flake', 'Jade bead', 'Green glass cabochon', 'Malachite chip'],
+    flavorChance: 0.35,
+    coinChance: 0.28,
+    gpScale: 1.8,
+    coinPrefix: 'Green-gem coins',
+  },
+  {
+    id: 'topaz',
+    label: 'Topaz',
+    keywords: ['topaz', 'topex', 'citrine', 'amber'],
+    flavor: ['Topaz chip', 'Amber bead', 'Honey-gold crystal', 'Citrine splinter'],
+    flavorChance: 0.35,
+    coinChance: 0.28,
+    gpScale: 1.6,
+    coinPrefix: 'Topaz-trade coins',
+  },
+  {
+    id: 'sapphire',
+    label: 'Sapphire',
+    keywords: ['sapphire', 'azure', 'lapis'],
+    flavor: ['Sapphire chip', 'Azure bead', 'Lapis shard'],
+    flavorChance: 0.35,
+    coinChance: 0.28,
+    gpScale: 1.8,
+    coinPrefix: 'Sapphire-trade coins',
+  },
+  {
+    id: 'diamond',
+    label: 'Diamond',
+    keywords: ['diamond', 'adamant'],
+    flavor: ['Diamond dust pinch', 'Clear crystal chip', 'Adamant flake'],
+    flavorChance: 0.3,
+    coinChance: 0.32,
+    gpScale: 2.4,
+    coinPrefix: 'Diamond-trade coins',
+  },
+  {
+    id: 'gold',
+    label: 'Gold',
+    keywords: ['gold', 'golden', 'gilded', 'aurum'],
+    flavor: ['Gold nugget', 'Gilded scale', 'Bent gold ring', 'Gold thread'],
+    flavorChance: 0.28,
+    coinChance: 0.45,
+    gpScale: 2,
+    coinPrefix: 'Gold coins',
+  },
+  {
+    id: 'fire',
+    label: 'Fire',
+    keywords: ['fire', 'flame', 'flaming', 'inferno', 'magma', 'lava', 'burning', 'scorched', 'ember'],
+    flavor: ['Cooling ember', 'Scorched scale', 'Cinder in a vial', 'Heat-warped coin', 'Charcoal charm'],
+    flavorChance: 0.42,
+    coinChance: 0.22,
+    gpScale: 1.3,
+    coinPrefix: 'Heat-warped coins',
+  },
+  {
+    id: 'ice',
+    label: 'Ice',
+    keywords: ['ice', 'frost', 'frozen', 'cold', 'winter', 'glacial', 'rime'],
+    flavor: ['Rime crystal', 'Frosted scale', 'Never-melt ice chip', 'Cold-iron nail', 'Snow-glass bead'],
+    flavorChance: 0.42,
+    coinChance: 0.22,
+    gpScale: 1.3,
+    coinPrefix: 'Frost-rimed coins',
+  },
+  {
+    id: 'lightning',
+    label: 'Lightning',
+    keywords: ['lightning', 'storm', 'thunder', 'shocking', 'spark'],
+    flavor: ['Static-charged scale', 'Storm-glass bead', 'Scorched copper wire', 'Thunderstone chip'],
+    flavorChance: 0.4,
+    coinChance: 0.22,
+    gpScale: 1.3,
+    coinPrefix: 'Storm-pitted coins',
+  },
+  {
     id: 'beast',
     label: 'Beast',
     keywords: ['hide', 'pelt', 'fang', 'claw', 'fur'],
@@ -297,7 +397,7 @@ function sourceById(id: string): LootSource {
 
 const SOURCE_ALIASES: Array<[RegExp, string]> = [
   [/hoard/, 'dragon-hoard'],
-  [/dragon|wyrm|drake/, 'dragon'],
+  [/\b(dragon|wyrm|drake)s?\b/, 'dragon'],
   [/skeleton|skeletal/, 'skeleton'],
   [/zombie|ghoul|wight/, 'zombie'],
   [/ghost|spectre|specter|wraith|banshee/, 'corpse'],
@@ -307,30 +407,80 @@ const SOURCE_ALIASES: Array<[RegExp, string]> = [
   [/cult|acolyte|priest/, 'cultist'],
   [/chest|coffer|trunk|crate|strongbox/, 'chest'],
   [/mimic/, 'mimic'],
-  [/wolf|bear|beast|spider|rat|boar|owlbear|hydra|beast/, 'beast'],
+  [/wolf|bear|beast|spider|rat|boar|owlbear|hydra/, 'beast'],
   [/corpse|body|remains|cadaver/, 'corpse'],
+  [/\b(delerium|delirium)\b/, 'delerium'],
+  [/\brub(y|ies)\b/, 'ruby'],
+  [/\bemeralds?\b/, 'emerald'],
+  [/\b(topaz|topex|citrine)\b/, 'topaz'],
+  [/\bsapphires?\b/, 'sapphire'],
+  [/\bdiamonds?\b/, 'diamond'],
+  [/\bgold(en|ed)?\b|\bgilded\b/, 'gold'],
+  [/\b(fire|flame|flaming|inferno|magma|lava|ember)s?\b/, 'fire'],
+  [/\b(ice|frost|frozen|glacial|rime|winter)\b/, 'ice'],
+  [/\b(lightning|thunder|storm|shocking)\b/, 'lightning'],
 ];
 
-function knownSourceFromName(name: string): LootSource | null {
+const NAME_STOPWORDS = new Set([
+  'ancient', 'adult', 'young', 'wyrmling', 'greater', 'lesser', 'huge', 'large',
+  'medium', 'small', 'tiny', 'giant', 'the', 'and', 'from', 'with', 'that',
+  'this', 'into', 'over', 'under', 'very', 'named', 'type', 'kind', 'elder',
+]);
+
+function sourcesFromText(name: string): LootSource[] {
   const text = name.toLowerCase();
+  if (!text.trim()) return [];
+  const found: LootSource[] = [];
+  const seen = new Set<string>();
   for (const [pattern, id] of SOURCE_ALIASES) {
-    if (pattern.test(text)) return sourceById(id);
+    if (!pattern.test(text) || seen.has(id)) continue;
+    seen.add(id);
+    const source = sourceById(id);
+    if (source.id !== 'any') found.push(source);
   }
-  return null;
+  return found;
+}
+
+function nameTokens(name: string): string[] {
+  return name
+    .toLowerCase()
+    .replace(/['’]/g, '')
+    .split(/[^a-z0-9]+/)
+    .filter((word) => word.length >= 3 && !NAME_STOPWORDS.has(word));
+}
+
+function leftoverKeywords(name: string, already: string[]): string[] {
+  const used = new Set(already.map((word) => word.toLowerCase()));
+  return nameTokens(name).filter((word) => !used.has(word));
+}
+
+function mergeSources(parts: LootSource[], extraKeywords: string[] = []): LootSource {
+  if (parts.length === 0) return ANY_SOURCE;
+  const keywords = [...new Set([...parts.flatMap((part) => part.keywords), ...extraKeywords])];
+  if (parts.length === 1 && extraKeywords.length === 0) return parts[0]!;
+  const labels = [...new Set([
+    ...parts.map((part) => part.label),
+    ...extraKeywords.map((word) => word[0]!.toUpperCase() + word.slice(1)),
+  ])];
+  const richest = parts.reduce((best, part) => (part.gpScale > best.gpScale ? part : best), parts[0]!);
+  return {
+    id: parts.map((part) => part.id).join('+'),
+    label: labels.join(' + '),
+    keywords,
+    flavor: parts.flatMap((part) => part.flavor),
+    flavorChance: parts.reduce((sum, part) => sum + part.flavorChance, 0) / parts.length,
+    coinChance: parts.reduce((sum, part) => sum + part.coinChance, 0) / parts.length,
+    gpScale: richest.gpScale,
+    coinPrefix: richest.coinPrefix,
+  };
 }
 
 function subjectSource(subjectName: string): LootSource {
-  const known = knownSourceFromName(subjectName);
-  if (known) return known;
-  const words = subjectName
-    .toLowerCase()
-    .split(/[^a-z0-9]+/)
-    .filter((word) => word.length > 3)
-    .slice(0, 6);
+  const words = leftoverKeywords(subjectName, []);
   const label = subjectName.trim().slice(0, 40) || 'This';
   return {
     id: 'this',
-    label,
+    label: words.length > 0 ? words.map((word) => word[0]!.toUpperCase() + word.slice(1)).join(' + ') : label,
     keywords: words,
     flavor: [
       `Scrap from the ${label}`,
@@ -349,15 +499,32 @@ function subjectSource(subjectName: string): LootSource {
   };
 }
 
-function resolveSource(sourceId: string, subjectName: string): LootSource {
-  if (sourceId === 'this' || sourceId === 'any') {
-    return knownSourceFromName(subjectName) ?? (sourceId === 'this' ? subjectSource(subjectName) : ANY_SOURCE);
+function resolveSourceParts(sourceId: string, subjectName: string): LootSource[] {
+  const selected = sourceId === 'this' || sourceId === 'any' || !sourceId
+    ? []
+    : SOURCES.find((source) => source.id === sourceId)
+      ? [sourceById(sourceId)]
+      : sourcesFromText(sourceId);
+  const fromName = sourcesFromText(subjectName);
+  const seen = new Set<string>();
+  const parts: LootSource[] = [];
+  for (const source of [...selected, ...fromName]) {
+    if (seen.has(source.id)) continue;
+    seen.add(source.id);
+    parts.push(source);
   }
-  const known = SOURCES.find((source) => source.id === sourceId);
-  if (known) return known;
-  return knownSourceFromName(sourceId)
-    ?? knownSourceFromName(subjectName)
-    ?? subjectSource(subjectName || sourceId);
+  return parts;
+}
+
+function resolveSource(sourceId: string, subjectName: string): LootSource {
+  const parts = resolveSourceParts(sourceId, subjectName);
+  const extras = leftoverKeywords(
+    subjectName || sourceId,
+    parts.flatMap((part) => part.keywords),
+  );
+  if (parts.length > 0) return mergeSources(parts, extras);
+  if (sourceId === 'any' && !subjectName.trim()) return ANY_SOURCE;
+  return subjectSource(subjectName || sourceId);
 }
 
 function formatCoins(gpValue: number, level: number | null, prefix: string): string {
@@ -405,10 +572,25 @@ function fitsRarity(item: CompendiumItem, tier: LootTier): boolean {
   return tier.pools.some((pool) => (pool.rarity == null ? rarity == null : rarity === pool.rarity));
 }
 
+function keywordVariants(word: string): string[] {
+  const w = word.toLowerCase();
+  const out = [w];
+  if (w.endsWith('ies') && w.length > 4) out.push(`${w.slice(0, -3)}y`);
+  else if (w.endsWith('ses') && w.length > 4) out.push(w.slice(0, -2));
+  else if (w.endsWith('s') && !w.endsWith('ss') && w.length > 3) out.push(w.slice(0, -1));
+  return [...new Set(out)];
+}
+
 function matchesKeywords(item: CompendiumItem, keywords: string[]): boolean {
   if (keywords.length === 0) return false;
-  const blob = `${item.name} ${item.type}`.toLowerCase();
-  return keywords.some((word) => new RegExp(`\\b${word}\\b`).test(blob));
+  const blob = `${item.name} ${item.type} ${item.description ?? ''}`.toLowerCase().slice(0, 900);
+  return keywords.some((word) => keywordVariants(word).some((variant) => {
+    try {
+      return new RegExp(`\\b${variant}\\b`).test(blob);
+    } catch {
+      return blob.includes(variant);
+    }
+  }));
 }
 
 function pickThemedItem(
@@ -416,10 +598,26 @@ function pickThemedItem(
   tier: LootTier,
   keywords: string[],
   used: Set<string>,
+  keywordGroups: string[][] = [],
 ): CompendiumItem | null {
   const available = candidates.filter((item) => !used.has(item.id) && fitsRarity(item, tier));
-  if (keywords.length > 0) {
-    return pickIndex(available.filter((item) => matchesKeywords(item, keywords))) ?? null;
+  const groups = (keywordGroups.length > 0 ? keywordGroups : [keywords])
+    .filter((group) => group.length > 0);
+  if (groups.length > 0) {
+    const order = [...groups];
+    for (let i = order.length - 1; i > 0; i -= 1) {
+      const j = rollInt(0, i);
+      const swap = order[i]!;
+      order[i] = order[j]!;
+      order[j] = swap;
+    }
+    for (const group of order) {
+      const hit = pickIndex(available.filter((item) => matchesKeywords(item, group)));
+      if (hit) return hit;
+    }
+    const anyTheme = pickIndex(available.filter((item) => matchesKeywords(item, groups.flat())));
+    if (anyTheme) return anyTheme;
+    return null;
   }
   const pools = tier.pools
     .map((pool) => ({
@@ -445,7 +643,18 @@ export function rollLootFromItems(
   const low = Math.min(20, Math.max(1, Math.floor(Math.min(minCount, maxCount))));
   const high = Math.min(20, Math.max(low, Math.floor(Math.max(minCount, maxCount))));
   const tier = level == null ? ANY_TIER : tierForLevel(level);
-  const source = resolveSource(sourceId, subjectName);
+  const sourceParts = resolveSourceParts(sourceId, subjectName);
+  const extras = leftoverKeywords(
+    subjectName || (sourceId === 'this' || sourceId === 'any' ? '' : sourceId),
+    sourceParts.flatMap((part) => part.keywords),
+  );
+  const source = sourceParts.length > 0
+    ? mergeSources(sourceParts, extras)
+    : resolveSource(sourceId, subjectName);
+  const keywordGroups = [
+    ...sourceParts.map((part) => part.keywords),
+    ...extras.map((word) => [word]),
+  ];
   const count = rollInt(low, high);
   const candidates = items.filter(isLootCandidate);
   const used = new Set<string>();
@@ -467,8 +676,8 @@ export function rollLootFromItems(
     if (roll < source.flavorChance) {
       if (pushFlavor()) continue;
     } else if (roll < source.flavorChance + itemChance) {
-      let item = pickThemedItem(candidates, tier, source.keywords, used);
-      if (!item && source.id === 'this') {
+      let item = pickThemedItem(candidates, tier, source.keywords, used, keywordGroups);
+      if (!item && (source.id === 'this' || source.id.includes('+'))) {
         item = pickThemedItem(candidates, tier, [], used);
       }
       if (item) {

@@ -443,7 +443,7 @@ router.get('/loot', ...auth, async (req: AuthenticatedRequest, res) => {
   const min = Number(req.query['min']);
   const max = Number(req.query['max']);
   const source = typeof req.query['source'] === 'string' ? req.query['source'].trim().slice(0, 40) : 'any';
-  const name = typeof req.query['name'] === 'string' ? req.query['name'].trim().slice(0, 80) : '';
+  const name = typeof req.query['name'] === 'string' ? req.query['name'].trim().slice(0, 160) : '';
   if (!Number.isFinite(min) || !Number.isFinite(max)) {
     res.status(400).json({ error: 'Min and max are required' });
     return;

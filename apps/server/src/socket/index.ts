@@ -198,7 +198,40 @@ function mergePlayerQuestTicks(previous: QuestBoard, incoming: QuestEntry[]): Qu
 }
 /** Per-session fog active flag (GM toggles off during prep). */
 const sessionFogActive = new Map<string, boolean>();
-const sessionPlayersCanLoot = new Map<string, boolean>();
+type SessionLootPolicy = {
+  playersCanLoot: boolean;
+  lootLevel: number | null;
+  lootMin: number;
+  lootMax: number;
+};
+const sessionLootPolicy = new Map<string, SessionLootPolicy>();
+const DEFAULT_LOOT_POLICY: SessionLootPolicy = {
+  playersCanLoot: false,
+  lootLevel: null,
+  lootMin: 1,
+  lootMax: 6,
+};
+
+function clampLootInt(value: number, fallback: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) return fallback;
+  return Math.min(max, Math.max(min, Math.floor(value)));
+}
+
+function mergeLootPolicy(payload: LootPlayerTakePayload, prev?: SessionLootPolicy): SessionLootPolicy {
+  const base = prev ?? DEFAULT_LOOT_POLICY;
+  const lootMin = payload.lootMin != null ? clampLootInt(payload.lootMin, base.lootMin, 1, 20) : base.lootMin;
+  const lootMax = payload.lootMax != null ? clampLootInt(payload.lootMax, base.lootMax, 1, 20) : base.lootMax;
+  let lootLevel = base.lootLevel;
+  if (payload.lootLevel !== undefined) {
+    lootLevel = payload.lootLevel == null ? null : clampLootInt(payload.lootLevel, 1, 1, 20);
+  }
+  return {
+    playersCanLoot: Boolean(payload.playersCanLoot),
+    lootLevel,
+    lootMin: Math.min(lootMin, lootMax),
+    lootMax: Math.max(lootMin, lootMax),
+  };
+}
 /** Per-session 3D wall extrude settings (so players see the same walls as the GM). */
 const sessionWallExtrude = new Map<string, Omit<WallExtrudePayload, 'sessionId'>>();
 /** Last GM map focus (active map + viewport) for joining players. */
@@ -430,13 +463,13 @@ export function initSocket(httpServer: HttpServer): Server {
         socket.data['role'] = role;
 
         const fogActive = sessionFogActive.get(sessionId) ?? false;
-        const playersCanLoot = sessionPlayersCanLoot.get(sessionId) ?? false;
+        const lootPolicy = sessionLootPolicy.get(sessionId) ?? DEFAULT_LOOT_POLICY;
         const wallExtrude = sessionWallExtrude.get(sessionId);
 
         // Fast ack — client shows Live before slower roster / DDB work.
         socket.emit('session:roomState', { users: [sessionUser], fogActive });
         socket.emit('fog:active', { sessionId, active: fogActive });
-        socket.emit('loot:player-take', { sessionId, playersCanLoot });
+        socket.emit('loot:player-take', { sessionId, ...lootPolicy });
         if (wallExtrude) {
           socket.emit('map:wallExtrude', { sessionId, ...wallExtrude });
         }
@@ -818,9 +851,11 @@ export function initSocket(httpServer: HttpServer): Server {
 
     socket.on('loot:player-take', (payload: LootPlayerTakePayload) => {
       if (socket.data['role'] !== 'GM') return;
-      sessionPlayersCanLoot.set(payload.sessionId, Boolean(payload.playersCanLoot));
-      socket.to(payload.sessionId).emit('loot:player-take', payload);
-      socket.emit('loot:player-take', payload);
+      const next = mergeLootPolicy(payload, sessionLootPolicy.get(payload.sessionId));
+      sessionLootPolicy.set(payload.sessionId, next);
+      const out: LootPlayerTakePayload = { sessionId: payload.sessionId, ...next };
+      socket.to(payload.sessionId).emit('loot:player-take', out);
+      socket.emit('loot:player-take', out);
     });
 
     socket.on('map:wallExtrude', (payload: WallExtrudePayload) => {

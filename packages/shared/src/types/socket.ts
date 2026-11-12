@@ -33,6 +33,10 @@ export interface FogActivePayload {
 export interface LootPlayerTakePayload {
   sessionId: string;
   playersCanLoot: boolean;
+  /** Blank / omit = any level. */
+  lootLevel?: number | null;
+  lootMin?: number;
+  lootMax?: number;
 }
 
 /** GM 3D wall extrude settings — players need these to see extruded walls. */

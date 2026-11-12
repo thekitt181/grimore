@@ -9,6 +9,7 @@ import { emitItemUpdate, emitItemRemove, emitItemsSync } from '@/systems/scene/s
 import { clsx } from 'clsx';
 import { setFogVisibleForSession } from '@/systems/scene/fogActiveSync';
 import { setPlayersCanLootForSession } from '@/systems/combat/lootPolicySync';
+import { LootDefaultsFields } from '@/systems/combat/LootDefaultsFields';
 import { emitWallExtrudeToSession } from '@/systems/map/wallExtrudeSync';
 import { DRAW_COLOR_PRESETS, DEFAULT_TEXT_FONT_SIZE, MAX_TEXT_FONT_SIZE, MIN_TEXT_FONT_SIZE } from './drawColors';
 import { MapViewModeToggle } from './MapViewModeToggle';
@@ -378,6 +379,18 @@ export function MapToolbar() {
           </>
         )}
       </div>
+
+      {isGM && (
+        <div
+          className="flex flex-col gap-1 p-1.5 rounded-lg shadow-panel ml-1"
+          style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)', width: 88 }}
+        >
+          <span className="font-ui text-[9px] tracking-wide" style={{ color: 'var(--color-accent-gold)' }}>
+            LOOT
+          </span>
+          <LootDefaultsFields compact />
+        </div>
+      )}
 
       {viewMode === '3d' && isGM && (
         <div

@@ -8,9 +8,9 @@ import { formatItemMarketLine, resolveItemMarketPrice } from '@grimoire/shared';
 import type { LootDrop } from '@/systems/compendium/compendiumApi';
 import { rollLoot } from '@/systems/compendium/compendiumApi';
 import { guessLootSource, LOOT_SOURCES } from '@/systems/compendium/LootRoller';
-import { partyLevelFromTokens } from '@/systems/combat/partyLevel';
 import { useMapStore } from '@/systems/map/store/mapStore';
-import { setPlayersCanLootForSession } from '@/systems/combat/lootPolicySync';
+import { LootDefaultsFields } from '@/systems/combat/LootDefaultsFields';
+import { setLootDefaultsForSession, setPlayersCanLootForSession } from '@/systems/combat/lootPolicySync';
 import {
   corpseDrops,
   setCorpseLootDrops,
@@ -33,11 +33,6 @@ function nextKey(): string {
 }
 
 function clampLevel(value: number): number {
-  if (!Number.isFinite(value)) return 1;
-  return Math.min(20, Math.max(1, Math.floor(value)));
-}
-
-function clampCount(value: number): number {
   if (!Number.isFinite(value)) return 1;
   return Math.min(20, Math.max(1, Math.floor(value)));
 }
@@ -78,10 +73,10 @@ export function CorpseLootPanel() {
   const [msg, setMsg] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [summary, setSummary] = useState<string | null>(null);
-  const [levelText, setLevelText] = useState('');
-  const [minCount, setMinCount] = useState(1);
-  const [maxCount, setMaxCount] = useState(6);
   const [source, setSource] = useState('this');
+  const lootLevel = useMapStore((s) => s.lootLevel);
+  const lootMin = useMapStore((s) => s.lootMin);
+  const lootMax = useMapStore((s) => s.lootMax);
   const [current, setCurrent] = useState<HeldDrop[]>([]);
   const [picked, setPicked] = useState<Record<string, boolean>>({});
   const [kept, setKept] = useState<HeldDrop[]>([]);
@@ -94,7 +89,6 @@ export function CorpseLootPanel() {
   const pcs = useItemStore((s) =>
     Object.values(s.items).filter((i): i is TokenItem => i.type === 'token' && Boolean(i.ddbCharacterId)),
   );
-  const suggested = partyLevelFromTokens();
   const fromCr = token ? crLevel(token) : null;
 
   useEffect(() => {
@@ -103,9 +97,6 @@ export function CorpseLootPanel() {
     setError(null);
     setSummary(null);
     setSource(guessLootSource(token.name));
-    setLevelText(fromCr != null ? String(fromCr) : suggested != null ? String(suggested) : '');
-    setMinCount(1);
-    setMaxCount(6);
     setKept([]);
     setPicked({});
     setSplitIds({});
@@ -117,8 +108,8 @@ export function CorpseLootPanel() {
   if (!token || token.hp > 0 || !token.corpseLoot) return null;
   const loot = token.corpseLoot;
   const claimed = Boolean(loot.claimed);
-  const low = Math.min(minCount, maxCount);
-  const high = Math.max(minCount, maxCount);
+  const low = Math.min(lootMin, lootMax);
+  const high = Math.max(lootMin, lootMax);
   const checked = current.filter((row) => picked[row.key]);
   const selected = [...kept, ...checked];
   const ready = selected.length;
@@ -140,8 +131,7 @@ export function CorpseLootPanel() {
     setError(null);
     setMsg('');
     try {
-      const trimmed = levelText.trim();
-      const level = trimmed === '' ? undefined : clampLevel(Number(trimmed));
+      const level = lootLevel ?? undefined;
       const next = await rollLoot({
         min: low,
         max: high,
@@ -277,62 +267,17 @@ export function CorpseLootPanel() {
                     ))}
                   </select>
                 </label>
-                <label className="block space-y-1">
-                  <span className="uppercase tracking-wider text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
-                    Party level
-                  </span>
-                  <input
-                    className="input-dark w-full text-xs py-1"
-                    inputMode="numeric"
-                    placeholder="Blank for any level"
-                    value={levelText}
-                    onChange={(event) => setLevelText(event.target.value.replace(/[^\d]/g, '').slice(0, 2))}
-                  />
-                </label>
-                {suggested != null && levelText !== String(suggested) && (
-                  <button
-                    type="button"
-                    className="text-xs text-left"
-                    style={{ color: GOLD }}
-                    onClick={() => setLevelText(String(suggested))}
-                  >
-                    Use party average ({suggested})
-                  </button>
-                )}
-                {fromCr != null && levelText !== String(fromCr) && (
+                <LootDefaultsFields />
+                {fromCr != null && lootLevel !== fromCr && (
                   <button
                     type="button"
                     className="text-xs text-left block"
                     style={{ color: GOLD }}
-                    onClick={() => setLevelText(String(fromCr))}
+                    onClick={() => setLootDefaultsForSession({ lootLevel: fromCr })}
                   >
                     Use creature CR ({fromCr})
                   </button>
                 )}
-                <div className="flex gap-2">
-                  <label className="flex-1 space-y-1">
-                    <span className="uppercase tracking-wider text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>Min</span>
-                    <input
-                      className="input-dark w-full text-xs py-1"
-                      type="number"
-                      min={1}
-                      max={20}
-                      value={minCount}
-                      onChange={(event) => setMinCount(clampCount(Number(event.target.value)))}
-                    />
-                  </label>
-                  <label className="flex-1 space-y-1">
-                    <span className="uppercase tracking-wider text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>Max</span>
-                    <input
-                      className="input-dark w-full text-xs py-1"
-                      type="number"
-                      min={1}
-                      max={20}
-                      value={maxCount}
-                      onChange={(event) => setMaxCount(clampCount(Number(event.target.value)))}
-                    />
-                  </label>
-                </div>
                 <button
                   type="button"
                   className="btn-primary w-full text-xs py-1.5"

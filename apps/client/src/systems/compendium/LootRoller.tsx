@@ -3,7 +3,8 @@ import { formatItemMarketLine, resolveItemMarketPrice } from '@grimoire/shared';
 import type { LootDrop } from './compendiumApi';
 import { rollLoot } from './compendiumApi';
 import { placeLootDrops } from './placeLoot';
-import { partyLevelFromTokens } from '@/systems/combat/partyLevel';
+import { LootDefaultsFields } from '@/systems/combat/LootDefaultsFields';
+import { useMapStore } from '@/systems/map/store/mapStore';
 
 export const LOOT_SOURCES: Array<{ id: string; label: string }> = [
   { id: 'this', label: 'This' },
@@ -16,46 +17,26 @@ export const LOOT_SOURCES: Array<{ id: string; label: string }> = [
   { id: 'chest', label: 'Chest' },
   { id: 'dragon', label: 'Dragon' },
   { id: 'dragon-hoard', label: 'Dragon hoard' },
+  { id: 'delerium', label: 'Delerium' },
+  { id: 'ruby', label: 'Ruby' },
+  { id: 'emerald', label: 'Emerald' },
+  { id: 'topaz', label: 'Topaz' },
+  { id: 'sapphire', label: 'Sapphire' },
+  { id: 'diamond', label: 'Diamond' },
+  { id: 'gold', label: 'Gold' },
+  { id: 'fire', label: 'Fire' },
+  { id: 'ice', label: 'Ice' },
+  { id: 'lightning', label: 'Lightning' },
   { id: 'beast', label: 'Beast' },
   { id: 'mimic', label: 'Mimic' },
   { id: 'corpse', label: 'Corpse' },
   { id: 'any', label: 'Anything' },
 ];
 
-const SOURCE_GUESSES: Array<[RegExp, string]> = [
-  [/hoard/, 'dragon-hoard'],
-  [/dragon|wyrm|drake/, 'dragon'],
-  [/skeleton|skeletal/, 'skeleton'],
-  [/zombie|ghoul|wight/, 'zombie'],
-  [/ghost|spectre|specter|wraith|banshee/, 'corpse'],
-  [/goblin|kobold/, 'goblin'],
-  [/bandit|thug|brigand|highwayman|robber|pirate/, 'bandit'],
-  [/\borc\b|hobgoblin/, 'orc'],
-  [/cult|acolyte|priest/, 'cultist'],
-  [/chest|coffer|trunk|crate|strongbox/, 'chest'],
-  [/mimic/, 'mimic'],
-  [/wolf|bear|beast|spider|rat|boar|owlbear/, 'beast'],
-  [/corpse|body|remains|cadaver/, 'corpse'],
-];
-
+/** Always use the creature's own name. Extra dropdown tables are optional overrides. */
 export function guessLootSource(name: string): string {
-  const text = name.toLowerCase();
-  for (const [pattern, id] of SOURCE_GUESSES) {
-    if (pattern.test(text)) return id;
-  }
   return name.trim() ? 'this' : 'any';
 }
-
-function clampLevel(value: number): number {
-  if (!Number.isFinite(value)) return 1;
-  return Math.min(20, Math.max(1, Math.floor(value)));
-}
-
-function clampCount(value: number): number {
-  if (!Number.isFinite(value)) return 1;
-  return Math.min(20, Math.max(1, Math.floor(value)));
-}
-
 
 function dropTitle(drop: LootDrop): string {
   return drop.kind === 'currency' ? drop.label : drop.name;
@@ -94,9 +75,6 @@ export function LootRoller({
   targetName?: string;
   onDone?: () => void;
 }) {
-  const [levelText, setLevelText] = useState('');
-  const [minCount, setMinCount] = useState(1);
-  const [maxCount, setMaxCount] = useState(6);
   const [source, setSource] = useState(() => guessLootSource(targetName));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -104,10 +82,12 @@ export function LootRoller({
   const [current, setCurrent] = useState<HeldDrop[]>([]);
   const [picked, setPicked] = useState<Record<string, boolean>>({});
   const [kept, setKept] = useState<HeldDrop[]>([]);
-  const suggested = partyLevelFromTokens();
+  const lootLevel = useMapStore((s) => s.lootLevel);
+  const lootMin = useMapStore((s) => s.lootMin);
+  const lootMax = useMapStore((s) => s.lootMax);
 
-  const low = Math.min(minCount, maxCount);
-  const high = Math.max(minCount, maxCount);
+  const low = Math.min(lootMin, lootMax);
+  const high = Math.max(lootMin, lootMax);
   const checked = current.filter((row) => picked[row.key]);
   const ready = kept.length + checked.length;
 
@@ -121,8 +101,7 @@ export function LootRoller({
     setBusy(true);
     setError(null);
     try {
-      const trimmed = levelText.trim();
-      const level = trimmed === '' ? undefined : clampLevel(Number(trimmed));
+      const level = lootLevel ?? undefined;
       const next = await rollLoot({
         min: low,
         max: high,
@@ -186,52 +165,7 @@ export function LootRoller({
           ))}
         </select>
       </label>
-      <label className="block space-y-1">
-        <span className="font-ui text-[10px] uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>
-          Party level
-        </span>
-        <input
-          className="input-dark w-full text-xs py-1"
-          inputMode="numeric"
-          placeholder="Blank for any level"
-          value={levelText}
-          onChange={(event) => setLevelText(event.target.value.replace(/[^\d]/g, '').slice(0, 2))}
-        />
-      </label>
-      {suggested != null && levelText !== String(suggested) && (
-        <button
-          type="button"
-          className="font-ui text-xs text-left"
-          style={{ color: 'var(--color-accent-gold)' }}
-          onClick={() => setLevelText(String(suggested))}
-        >
-          Use party average ({suggested})
-        </button>
-      )}
-      <div className="flex gap-2">
-        <label className="flex-1 space-y-1">
-          <span className="font-ui text-[10px] uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>Min</span>
-          <input
-            className="input-dark w-full text-xs py-1"
-            type="number"
-            min={1}
-            max={20}
-            value={minCount}
-            onChange={(event) => setMinCount(clampCount(Number(event.target.value)))}
-          />
-        </label>
-        <label className="flex-1 space-y-1">
-          <span className="font-ui text-[10px] uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>Max</span>
-          <input
-            className="input-dark w-full text-xs py-1"
-            type="number"
-            min={1}
-            max={20}
-            value={maxCount}
-            onChange={(event) => setMaxCount(clampCount(Number(event.target.value)))}
-          />
-        </label>
-      </div>
+      <LootDefaultsFields />
       <button
         type="button"
         className="btn-primary w-full text-xs py-1.5"
@@ -292,7 +226,7 @@ export function LootRoller({
         </button>
       </div>
       <p className="font-ui text-xs leading-snug" style={{ color: 'var(--color-text-secondary)' }}>
-        Drops stay tied to that source: a skeleton gives bones and burial scraps, a hoard gives coins and treasure, a goblin gives junk it was carrying. Tick what you want, reroll the rest, then summon it around {targetName || 'the map'}. Blank level uses any rarity. Loot stays hidden until you reveal it.
+        Loot follows the monster's name, not a fixed list — every word (beholder, umber hulk, ruby dragon, delerium) pulls matching treasure. Tick what you want, reroll the rest, then summon it around {targetName || 'the map'}. Blank level uses any rarity. Loot stays hidden until you reveal it.
       </p>
     </div>
   );
