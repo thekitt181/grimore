@@ -15,6 +15,8 @@ export interface LootItemDrop {
   type: string;
   rarity?: string;
   source?: string;
+  /** Original catalog name when this is a reflavored D&D item. */
+  reflavoredFrom?: string;
 }
 
 export interface LootFlavorDrop {
@@ -152,8 +154,19 @@ const SOURCES: LootSource[] = [
   {
     id: 'delerium',
     label: 'Delerium',
-    keywords: ['delerium', 'delirium', 'crystal', 'shard', 'prism', 'warped', 'alien', 'purple'],
-    flavor: ['Humming crystal shard', 'Warped purple splinter', 'Prismatic dust', 'Fractured delerium chip', 'Glow-veined pebble', 'Cracked alien geode'],
+    keywords: ['delerium', 'delirium', 'dererium', 'crystal', 'shard', 'prism', 'warped', 'alien', 'purple'],
+    flavor: [
+      'Humming delerium shard',
+      'Fractured delerium crystal',
+      'Vial of delerium dust',
+      'Warped purple delerium splinter',
+      'Glow-veined delerium chip',
+      'Cracked delerium geode',
+      'Delerium-tainted scale',
+      'Prismatic delerium needle',
+      'Sealed delerium fragment',
+      'Alien crystal of delerium',
+    ],
     flavorChance: 0.4,
     coinChance: 0.22,
     gpScale: 2,
@@ -409,7 +422,7 @@ const SOURCE_ALIASES: Array<[RegExp, string]> = [
   [/mimic/, 'mimic'],
   [/wolf|bear|beast|spider|rat|boar|owlbear|hydra/, 'beast'],
   [/corpse|body|remains|cadaver/, 'corpse'],
-  [/\b(delerium|delirium)\b/, 'delerium'],
+  [/\b(delerium|delirium|dererium)\b/, 'delerium'],
   [/\brub(y|ies)\b/, 'ruby'],
   [/\bemeralds?\b/, 'emerald'],
   [/\b(topaz|topex|citrine)\b/, 'topaz'],
@@ -420,6 +433,40 @@ const SOURCE_ALIASES: Array<[RegExp, string]> = [
   [/\b(ice|frost|frozen|glacial|rime|winter)\b/, 'ice'],
   [/\b(lightning|thunder|storm|shocking)\b/, 'lightning'],
 ];
+
+const MOTIF_SOURCE_IDS = new Set([
+  'delerium', 'ruby', 'emerald', 'topaz', 'sapphire', 'diamond', 'gold',
+  'fire', 'ice', 'lightning',
+]);
+
+function isMotifSource(source: LootSource): boolean {
+  return MOTIF_SOURCE_IDS.has(source.id);
+}
+
+function capitalizeWord(word: string): string {
+  return word ? word[0]!.toUpperCase() + word.slice(1) : word;
+}
+
+function motifScraps(parts: LootSource[], extras: string[]): string[] {
+  const labels = [
+    ...parts.filter(isMotifSource).map((part) => part.label),
+    ...extras.map(capitalizeWord),
+  ];
+  const scraps = labels.flatMap((label) => {
+    const lower = label.toLowerCase();
+    return [
+      `${label} shard`,
+      `Fractured ${lower} crystal`,
+      `Vial of ${lower} dust`,
+      `Glow-veined ${lower} chip`,
+      `Raw ${lower} fragment`,
+      `${label}-tainted scale`,
+      `Humming ${lower} geode`,
+      `Sealed ${lower} splinter`,
+    ];
+  });
+  return [...scraps, ...parts.filter(isMotifSource).flatMap((part) => part.flavor)];
+}
 
 const NAME_STOPWORDS = new Set([
   'ancient', 'adult', 'young', 'wyrmling', 'greater', 'lesser', 'huge', 'large',
@@ -555,16 +602,59 @@ function formatCoins(gpValue: number, level: number | null, prefix: string): str
   return `${prefix}: ${coins}`;
 }
 
-function toItemDrop(item: CompendiumItem): LootItemDrop {
+function rarityForTier(tier: LootTier): LootRarity | undefined {
+  const named = tier.pools.map((pool) => pool.rarity).filter((rarity): rarity is LootRarity => rarity != null);
+  return named.length > 0 ? pickIndex(named) : undefined;
+}
+
+function toItemDrop(item: CompendiumItem, nameOverride?: string): LootItemDrop {
   const rarity = item.rarity?.trim() || detectItemRarity(item) || undefined;
+  const name = nameOverride?.trim() || item.name;
   return {
     kind: 'item',
     id: item.id,
-    name: item.name,
+    name,
     type: item.type,
     ...(rarity ? { rarity } : {}),
     ...(item.source ? { source: item.source } : {}),
+    ...(name !== item.name ? { reflavoredFrom: item.name } : {}),
   };
+}
+
+function escapeRe(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+const GEAR_RE = /armor|armour|weapon|wondrous|ring|staff|wand|rod|shield|mail|cloak|boots|helm|gauntlet|amulet|belt|plate|leather|scale mail|sword|axe|bow|mace|hammer|spear/i;
+
+function isGearItem(item: CompendiumItem): boolean {
+  return GEAR_RE.test(`${item.name} ${item.type}`);
+}
+
+function reflavorItemName(name: string, motif: string, identity: string[]): string {
+  const motifName = capitalizeWord(motif.trim());
+  if (!motifName || !name.trim()) return name;
+  const tokens = [...new Set(identity.map((word) => word.toLowerCase()).filter((word) => word.length >= 3))]
+    .sort((a, b) => b.length - a.length);
+  let next = name;
+  const phrases: Array<[RegExp, string]> = [
+    [/\bdragon scale (?:mail|armou?r)\b/gi, `${motifName} Armor`],
+    [/\bdragon scale\b/gi, motifName],
+  ];
+  for (const token of tokens) {
+    phrases.push([new RegExp(`\\b${escapeRe(token)} scale (?:mail|armou?r)\\b`, 'gi'), `${motifName} Armor`]);
+    phrases.push([new RegExp(`\\b${escapeRe(token)}s?\\b`, 'gi'), motifName]);
+  }
+  for (const [pattern, replacement] of phrases) {
+    next = next.replace(pattern, replacement);
+  }
+  next = next.replace(new RegExp(`\\b(${escapeRe(motifName)})(?:\\s+\\1)+\\b`, 'gi'), '$1');
+  next = next.replace(/\s+/g, ' ').trim();
+  if (!next || next.toLowerCase() === name.toLowerCase()) {
+    if (new RegExp(`\\b${escapeRe(motifName)}\\b`, 'i').test(name)) return name;
+    next = `${motifName} ${name}`;
+  }
+  return next;
 }
 
 function fitsRarity(item: CompendiumItem, tier: LootTier): boolean {
@@ -581,44 +671,55 @@ function keywordVariants(word: string): string[] {
   return [...new Set(out)];
 }
 
-function matchesKeywords(item: CompendiumItem, keywords: string[]): boolean {
-  if (keywords.length === 0) return false;
-  const blob = `${item.name} ${item.type} ${item.description ?? ''}`.toLowerCase().slice(0, 900);
-  return keywords.some((word) => keywordVariants(word).some((variant) => {
-    try {
-      return new RegExp(`\\b${variant}\\b`).test(blob);
-    } catch {
-      return blob.includes(variant);
-    }
-  }));
+function wordIn(text: string, variant: string): boolean {
+  try {
+    return new RegExp(`\\b${variant}\\b`).test(text);
+  } catch {
+    return text.includes(variant);
+  }
 }
 
-function pickThemedItem(
+function themeScore(item: CompendiumItem, keywords: string[]): number {
+  if (keywords.length === 0) return 0;
+  const name = item.name.toLowerCase();
+  const type = item.type.toLowerCase();
+  const desc = (item.description ?? '').toLowerCase().slice(0, 900);
+  let score = 0;
+  for (const word of keywords) {
+    for (const variant of keywordVariants(word)) {
+      if (wordIn(name, variant)) score += 8;
+      else if (wordIn(type, variant)) score += 4;
+      else if (wordIn(desc, variant)) score += 1;
+    }
+  }
+  return score;
+}
+
+function pickBestThemedItem(
   candidates: CompendiumItem[],
-  tier: LootTier,
   keywords: string[],
   used: Set<string>,
-  keywordGroups: string[][] = [],
+  tier: LootTier | null,
+  minScore: number,
+): CompendiumItem | null {
+  if (keywords.length === 0) return null;
+  const available = candidates.filter((item) => !used.has(item.id) && (tier == null || fitsRarity(item, tier)));
+  const scored = available
+    .map((item) => ({ item, score: themeScore(item, keywords) }))
+    .filter((row) => row.score >= minScore);
+  if (scored.length === 0) return null;
+  scored.sort((a, b) => b.score - a.score);
+  const top = scored.slice(0, Math.max(4, Math.ceil(scored.length * 0.35)));
+  const chosen = pickWeighted(top.map((row) => ({ weight: row.score, item: row.item })));
+  return chosen?.item ?? top[0]!.item;
+}
+
+function pickUnthemedItem(
+  candidates: CompendiumItem[],
+  tier: LootTier,
+  used: Set<string>,
 ): CompendiumItem | null {
   const available = candidates.filter((item) => !used.has(item.id) && fitsRarity(item, tier));
-  const groups = (keywordGroups.length > 0 ? keywordGroups : [keywords])
-    .filter((group) => group.length > 0);
-  if (groups.length > 0) {
-    const order = [...groups];
-    for (let i = order.length - 1; i > 0; i -= 1) {
-      const j = rollInt(0, i);
-      const swap = order[i]!;
-      order[i] = order[j]!;
-      order[j] = swap;
-    }
-    for (const group of order) {
-      const hit = pickIndex(available.filter((item) => matchesKeywords(item, group)));
-      if (hit) return hit;
-    }
-    const anyTheme = pickIndex(available.filter((item) => matchesKeywords(item, groups.flat())));
-    if (anyTheme) return anyTheme;
-    return null;
-  }
   const pools = tier.pools
     .map((pool) => ({
       weight: pool.weight,
@@ -651,44 +752,120 @@ export function rollLootFromItems(
   const source = sourceParts.length > 0
     ? mergeSources(sourceParts, extras)
     : resolveSource(sourceId, subjectName);
-  const keywordGroups = [
-    ...sourceParts.map((part) => part.keywords),
-    ...extras.map((word) => [word]),
-  ];
+  const motifParts = sourceParts.filter(isMotifSource);
+  const creatureParts = sourceParts.filter((part) => !isMotifSource(part));
+  const motifKeywords = [...motifParts.flatMap((part) => part.keywords), ...extras];
+  const creatureKeywords = creatureParts.flatMap((part) => part.keywords);
   const count = rollInt(low, high);
   const candidates = items.filter(isLootCandidate);
   const used = new Set<string>();
   const usedFlavor = new Set<string>();
   const drops: LootDrop[] = [];
+  const from = subjectName.trim() || source.label;
+  const motifFlavor = motifScraps(motifParts, extras);
+  const allFlavor = motifFlavor.length > 0
+    ? [...motifFlavor, ...creatureParts.flatMap((part) => part.flavor)]
+    : source.flavor;
+
+  let themeSeq = 0;
+  const pushFlavor = (preferMotif: boolean) => {
+    const pool = preferMotif && motifFlavor.length > 0 ? motifFlavor : allFlavor;
+    const fresh = pool.filter((name) => !usedFlavor.has(name));
+    const name = pickIndex(fresh.length > 0 ? fresh : pool);
+    if (!name) return false;
+    usedFlavor.add(name);
+    drops.push({ kind: 'flavor', name, detail: `Taken from ${from}.` });
+    return true;
+  };
+
+  const pushThemeItem = () => {
+    const pool = motifFlavor.length > 0 ? motifFlavor : allFlavor;
+    const fresh = pool.filter((name) => !usedFlavor.has(name));
+    const name = pickIndex(fresh.length > 0 ? fresh : pool);
+    if (!name) return false;
+    usedFlavor.add(name);
+    themeSeq += 1;
+    const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40);
+    const rarity = rarityForTier(tier);
+    drops.push({
+      kind: 'item',
+      id: `loot-theme-${slug || 'scrap'}-${themeSeq}`,
+      name,
+      type: 'Treasure',
+      ...(rarity ? { rarity } : {}),
+      source: 'Loot',
+    });
+    return true;
+  };
+
+  const tryMotifItem = () => (
+    pickBestThemedItem(candidates, motifKeywords, used, tier, 4)
+    ?? pickBestThemedItem(candidates, motifKeywords, used, null, 4)
+    ?? pickBestThemedItem(candidates, motifKeywords, used, null, 2)
+  );
+
+  const tryCreatureItem = () => (
+    pickBestThemedItem(candidates, creatureKeywords, used, tier, 4)
+    ?? pickBestThemedItem(candidates, creatureKeywords, used, tier, 1)
+  );
+
+  const motifLabel = (motifParts[0]?.label || extras[0] || '').trim();
+  const skipIdentity = new Set(['claw', 'fang', 'hide', 'pelt', 'fur', 'bone', 'skull', 'gem', 'jewel']);
+  const identityWords = [
+    ...creatureParts.map((part) => part.label),
+    ...creatureParts.map((part) => part.id),
+    ...creatureKeywords,
+  ].filter((word) => word.length >= 3 && !skipIdentity.has(word.toLowerCase()));
+
+  const tryReflavorItem = (): CompendiumItem | null => {
+    const gear = candidates.filter((item) => isGearItem(item));
+    const pool = gear.length > 0 ? gear : candidates;
+    return pickBestThemedItem(pool, creatureKeywords.length > 0 ? creatureKeywords : ['armor', 'mail', 'weapon', 'sword', 'shield', 'ring', 'cloak'], used, tier, 1)
+      ?? pickBestThemedItem(pool, ['armor', 'mail', 'weapon', 'sword', 'shield'], used, null, 1)
+      ?? pickUnthemedItem(pool, tier, used);
+  };
+
+  const pushItem = (item: CompendiumItem | null, reflavor = false) => {
+    if (!item) return false;
+    used.add(item.id);
+    const name = reflavor && motifLabel ? reflavorItemName(item.name, motifLabel, identityWords) : item.name;
+    drops.push(toItemDrop(item, name));
+    return true;
+  };
+
   const itemChance = Math.max(0.12, 1 - source.flavorChance - source.coinChance);
+  const hasMotif = motifKeywords.length > 0;
 
   for (let i = 0; i < count; i += 1) {
     const roll = Math.random();
-    const from = subjectName.trim() || source.label;
-    const pushFlavor = () => {
-      const fresh = source.flavor.filter((name) => !usedFlavor.has(name));
-      const name = pickIndex(fresh.length > 0 ? fresh : source.flavor);
-      if (!name) return false;
-      usedFlavor.add(name);
-      drops.push({ kind: 'flavor', name, detail: `Taken from ${from}.` });
-      return true;
-    };
-    if (roll < source.flavorChance) {
-      if (pushFlavor()) continue;
+    if (hasMotif) {
+      const forceCatalog = count >= 2 && i === 0;
+      const forceThemeItem = count >= 2 && i === 1;
+      if (forceCatalog) {
+        if (pushItem(tryReflavorItem(), true) || pushItem(tryMotifItem()) || pushThemeItem()) continue;
+      } else if (forceThemeItem) {
+        if (pushItem(tryMotifItem()) || pushThemeItem()) continue;
+      } else if (roll < 0.36) {
+        if (pushItem(tryReflavorItem(), true) || pushItem(tryMotifItem())) continue;
+      } else if (roll < 0.54) {
+        if (pushItem(tryMotifItem()) || pushThemeItem()) continue;
+      } else if (roll < 0.7) {
+        if (pushThemeItem()) continue;
+      } else if (roll < 0.84) {
+        if (pushFlavor(true)) continue;
+      } else if (roll < 0.93) {
+        if (pushItem(tryCreatureItem(), true) || pushThemeItem()) continue;
+      }
+    } else if (roll < source.flavorChance) {
+      if (pushFlavor(false)) continue;
     } else if (roll < source.flavorChance + itemChance) {
-      let item = pickThemedItem(candidates, tier, source.keywords, used, keywordGroups);
-      if (!item && (source.id === 'this' || source.id.includes('+'))) {
-        item = pickThemedItem(candidates, tier, [], used);
-      }
-      if (item) {
-        used.add(item.id);
-        drops.push(toItemDrop(item));
-        continue;
-      }
-      if (source.keywords.length > 0 && source.id !== 'this' && pushFlavor()) continue;
+      const item = pickBestThemedItem(candidates, source.keywords, used, tier, 1)
+        ?? (source.id === 'this' ? pickUnthemedItem(candidates, tier, used) : null);
+      if (pushItem(item) || (source.keywords.length > 0 && source.id !== 'this' && pushFlavor(false))) continue;
     }
     const gp = Math.max(1, Math.round(rollInt(tier.gpMin, tier.gpMax) * source.gpScale));
-    drops.push({ kind: 'currency', label: formatCoins(gp, level, source.coinPrefix) });
+    const coinPrefix = motifParts[0]?.coinPrefix ?? source.coinPrefix;
+    drops.push({ kind: 'currency', label: formatCoins(gp, level, coinPrefix) });
   }
 
   return {

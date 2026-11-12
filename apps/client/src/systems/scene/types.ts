@@ -213,7 +213,7 @@ export interface TokenItem extends BaseItem {
     items: Array<{ name: string; quantity: number }>;
     drops?: Array<
       | { kind: 'currency'; label: string }
-      | { kind: 'item'; id?: string; name: string; type?: string; rarity?: string; source?: string }
+      | { kind: 'item'; id?: string; name: string; type?: string; rarity?: string; source?: string; reflavoredFrom?: string }
       | { kind: 'flavor'; name: string; detail?: string }
     >;
     claimed?: boolean;

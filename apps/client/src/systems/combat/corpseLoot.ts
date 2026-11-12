@@ -106,6 +106,7 @@ function normalizeDrop(drop: SceneDrop): LootDrop {
       type: drop.type ?? '',
       ...(drop.rarity ? { rarity: drop.rarity } : {}),
       ...(drop.source ? { source: drop.source } : {}),
+      ...(drop.reflavoredFrom ? { reflavoredFrom: drop.reflavoredFrom } : {}),
     };
   }
   return { kind: 'flavor', name: drop.name, detail: drop.detail ?? '' };

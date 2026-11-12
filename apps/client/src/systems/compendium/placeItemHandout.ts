@@ -13,7 +13,11 @@ export interface HandoutPosition {
   y: number;
 }
 
-export async function placeItemHandout(item: CompendiumItem, at?: HandoutPosition): Promise<HandoutItem | null> {
+export async function placeItemHandout(
+  item: CompendiumItem,
+  at?: HandoutPosition,
+  overlay?: { name?: string; note?: string },
+): Promise<HandoutItem | null> {
   const map = getActiveMap();
   if (!map) return null;
 
@@ -59,9 +63,12 @@ export async function placeItemHandout(item: CompendiumItem, at?: HandoutPositio
     zIndex: 0,
     locked: false,
     visible: false,
-    name: item.name,
+    name: overlay?.name?.trim() || item.name,
     compendiumItemId: item.id,
-    description: synthesizeCompendiumItemDescription(item) || item.description || item.flavor || '',
+    description: [
+      overlay?.note?.trim() || '',
+      synthesizeCompendiumItemDescription(item) || item.description || item.flavor || '',
+    ].filter(Boolean).join('\n\n'),
     ...(item.type ? { itemType: item.type } : {}),
     ...(item.rarity ? { rarity: item.rarity } : {}),
     ...(item.source ? { source: item.source } : {}),

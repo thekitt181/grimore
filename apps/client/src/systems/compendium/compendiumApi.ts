@@ -147,6 +147,7 @@ export interface LootItemDrop {
   type: string;
   rarity?: string;
   source?: string;
+  reflavoredFrom?: string;
 }
 
 export interface LootFlavorDrop {

@@ -48,7 +48,12 @@ function dropNote(drop: LootDrop): string {
       type: drop.type,
       ...(drop.rarity ? { rarity: drop.rarity } : {}),
     });
-    return [drop.rarity, drop.type, price ? formatItemMarketLine(price) : null].filter(Boolean).join(' · ') || 'Codex item';
+    return [
+      drop.rarity,
+      drop.type,
+      drop.reflavoredFrom ? `was ${drop.reflavoredFrom}` : null,
+      price ? formatItemMarketLine(price) : null,
+    ].filter(Boolean).join(' · ') || 'Codex item';
   }
   if (drop.kind === 'flavor') return 'Flavor';
   return 'Coins';

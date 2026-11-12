@@ -81,9 +81,28 @@ export async function placeLootDrops(drops: LootDrop[], aroundId?: string): Prom
       : stackPoint(map.gridSize, map, stack);
     stack += 1;
     if (drop.kind === 'item') {
-      const item = await getItem(drop.id);
-      const placed = await placeItemHandout(item, at);
-      if (!placed) return false;
+      if (drop.id && !drop.id.startsWith('loot-theme-')) {
+        try {
+          const item = await getItem(drop.id);
+          const renamed = drop.reflavoredFrom || (drop.name && drop.name !== item.name);
+          const placed = await placeItemHandout(item, at, renamed ? {
+            name: drop.name,
+            note: drop.reflavoredFrom
+              ? `Reflavored ${drop.reflavoredFrom}.`
+              : undefined,
+          } : undefined);
+          if (placed) continue;
+        } catch {
+          // Homebrew / themed loot still places as a handout.
+        }
+      }
+      if (!placePlainHandout(
+        drop.name,
+        [drop.rarity, drop.type].filter(Boolean).join(' · ') || `Taken as loot.`,
+        drop.type || 'Treasure',
+        at,
+        drop.source || 'Loot',
+      )) return false;
       continue;
     }
     if (drop.kind === 'currency') {
