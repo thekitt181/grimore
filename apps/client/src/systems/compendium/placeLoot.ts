@@ -84,13 +84,14 @@ export async function placeLootDrops(drops: LootDrop[], aroundId?: string): Prom
       if (drop.id && !drop.id.startsWith('loot-theme-')) {
         try {
           const item = await getItem(drop.id);
-          const renamed = drop.reflavoredFrom || (drop.name && drop.name !== item.name);
-          const placed = await placeItemHandout(item, at, renamed ? {
-            name: drop.name,
-            note: drop.reflavoredFrom
-              ? `Reflavored ${drop.reflavoredFrom}.`
-              : undefined,
-          } : undefined);
+          const renamed = Boolean(drop.reflavoredFrom) || (Boolean(drop.name) && drop.name !== item.name);
+          const overlay = renamed
+            ? {
+                name: drop.name,
+                ...(drop.reflavoredFrom ? { note: `Reflavored ${drop.reflavoredFrom}.` } : {}),
+              }
+            : undefined;
+          const placed = await placeItemHandout(item, at, overlay);
           if (placed) continue;
         } catch {
           // Homebrew / themed loot still places as a handout.
