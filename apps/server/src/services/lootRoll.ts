@@ -631,6 +631,61 @@ function isGearItem(item: CompendiumItem): boolean {
   return GEAR_RE.test(`${item.name} ${item.type}`);
 }
 
+const FLAVOR_FILLER = /\b(raw|sealed|humming|fractured|cracked|glow-?veined|warped|purple|prismatic|alien|tainted|vial of|powdered|rough|a|the|of)\b/gi;
+const PIECE_WORDS = new Set(['fragment', 'shard', 'chip', 'crystal', 'geode', 'splinter', 'cluster', 'dust']);
+const PIECE_ALIASES: Record<string, string[]> = {
+  splinter: ['fragment', 'shard', 'splinter'],
+  dust: ['chip', 'dust', 'crystal'],
+  needle: ['shard', 'chip'],
+};
+
+function normalizeLootName(name: string): string {
+  FLAVOR_FILLER.lastIndex = 0;
+  return name
+    .toLowerCase()
+    .replace(/['’]/g, '')
+    .replace(FLAVOR_FILLER, ' ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .replace(/\s+/g, ' ');
+}
+
+function pieceAliases(word: string): string[] {
+  return PIECE_ALIASES[word] ?? [word];
+}
+
+function catalogItemForScrap(
+  scrap: string,
+  candidates: CompendiumItem[],
+  used: Set<string>,
+): CompendiumItem | null {
+  const available = candidates.filter((item) => !used.has(item.id));
+  if (available.length === 0) return null;
+  const norm = normalizeLootName(scrap);
+  if (!norm) return null;
+  const exact = available.find((item) => normalizeLootName(item.name) === norm);
+  if (exact) return exact;
+  const words = norm.split(' ').filter(Boolean);
+  const last = words[words.length - 1] ?? '';
+  if (!PIECE_WORDS.has(last) && last !== 'needle') return null;
+  for (const mat of pieceAliases(last)) {
+    const target = [...words.slice(0, -1), mat].join(' ');
+    const hit = available.find((item) => normalizeLootName(item.name) === target);
+    if (hit) return hit;
+  }
+  const short = available
+    .filter((item) => {
+      const n = normalizeLootName(item.name);
+      const parts = n.split(' ');
+      if (parts.length > 4) return false;
+      const hasMotif = words.slice(0, -1).every((w) => n.includes(w));
+      const hasPiece = pieceAliases(last).some((a) => parts.includes(a));
+      return hasMotif && hasPiece;
+    })
+    .sort((a, b) => a.name.length - b.name.length);
+  return short[0] ?? null;
+}
+
 function reflavorItemName(name: string, motif: string, identity: string[]): string {
   const motifName = capitalizeWord(motif.trim());
   if (!motifName || !name.trim()) return name;
@@ -777,6 +832,12 @@ export function rollLootFromItems(
     const name = pickIndex(fresh.length > 0 ? fresh : pool);
     if (!name) return false;
     usedFlavor.add(name);
+    const catalog = catalogItemForScrap(name, candidates, used);
+    if (catalog) {
+      used.add(catalog.id);
+      drops.push(toItemDrop(catalog));
+      return true;
+    }
     drops.push({ kind: 'flavor', name, detail: `Taken from ${from}.` });
     return true;
   };
@@ -787,6 +848,12 @@ export function rollLootFromItems(
     const name = pickIndex(fresh.length > 0 ? fresh : pool);
     if (!name) return false;
     usedFlavor.add(name);
+    const catalog = catalogItemForScrap(name, candidates, used);
+    if (catalog) {
+      used.add(catalog.id);
+      drops.push(toItemDrop(catalog));
+      return true;
+    }
     themeSeq += 1;
     const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40);
     const rarity = rarityForTier(tier);

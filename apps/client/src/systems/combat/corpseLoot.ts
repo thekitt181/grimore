@@ -60,6 +60,26 @@ export function parseGoldLabel(label: string): number {
   return parseCoins(label).gp;
 }
 
+/** Official D&D Beyond name for a drop; reflavors keep table name in the notes. */
+export function ddbGiveFromDrop(
+  drop: LootDrop,
+  lootedFrom: string,
+): { name: string; description: string; itemType?: string } | null {
+  if (drop.kind === 'currency') return null;
+  if (drop.kind === 'item' && drop.reflavoredFrom) {
+    return {
+      name: drop.reflavoredFrom,
+      description: `Table name: ${drop.name}. Official item: ${drop.reflavoredFrom}. Looted from ${lootedFrom}.`,
+      ...(drop.type ? { itemType: drop.type } : {}),
+    };
+  }
+  return {
+    name: drop.name,
+    description: `Looted from ${lootedFrom}.`,
+    ...(drop.kind === 'item' && drop.type ? { itemType: drop.type } : {}),
+  };
+}
+
 export function parseItemStack(raw: string): { name: string; quantity: number } {
   const text = raw.trim();
   const m = text.match(/^(.*?)\s*[×x]\s*(\d+)\s*$/i)
@@ -196,7 +216,7 @@ export async function takeCorpseLoot(
 
   const lines: string[] = [];
   let character: GrimoireCharacter | undefined;
-  const items: Array<{ name: string; quantity: number }> = [];
+  const items: Array<{ name: string; quantity: number; description: string; itemType?: string }> = [];
   const purse: CoinShare = { ...EMPTY_COINS };
   for (const drop of selected) {
     if (drop.kind === 'currency') {
@@ -207,7 +227,15 @@ export async function takeCorpseLoot(
       purse.gp += coins.gp;
       purse.pp += coins.pp;
     } else {
-      items.push(parseItemStack(drop.name));
+      const give = ddbGiveFromDrop(drop, token.name);
+      if (!give) continue;
+      const stack = parseItemStack(drop.name);
+      items.push({
+        name: give.name,
+        description: give.description,
+        quantity: stack.quantity,
+        ...(give.itemType ? { itemType: give.itemType } : {}),
+      });
     }
   }
 
@@ -221,7 +249,8 @@ export async function takeCorpseLoot(
   for (const it of items) {
     const given = await giveDdbInventoryItem(ddbCharacterId, {
       name: it.name,
-      description: `Looted from ${token.name}`,
+      description: it.description,
+      ...(it.itemType ? { itemType: it.itemType } : {}),
       ...(it.quantity > 1 ? { quantity: it.quantity } : {}),
     });
     lines.push(given.message);
@@ -263,7 +292,7 @@ export async function splitCorpseLoot(
   const n = recipients.length;
   const leftover: LootDrop[] = [];
   const purses: CoinShare[] = recipients.map(() => ({ ...EMPTY_COINS }));
-  const stacks: Array<Array<{ name: string; quantity: number }>> = recipients.map(() => []);
+  const stacks: Array<Array<{ name: string; quantity: number; description: string; itemType?: string }>> = recipients.map(() => []);
   let splitAny = false;
 
   for (const drop of selected) {
@@ -278,8 +307,9 @@ export async function splitCorpseLoot(
       });
       continue;
     }
+    const give = ddbGiveFromDrop(drop, token.name);
     const stack = parseItemStack(drop.name);
-    if (stack.quantity <= 1) {
+    if (!give || stack.quantity <= 1) {
       leftover.push(drop);
       continue;
     }
@@ -287,7 +317,12 @@ export async function splitCorpseLoot(
     shares.forEach((share, i) => {
       if (share <= 0) return;
       splitAny = true;
-      stacks[i]!.push({ name: stack.name, quantity: share });
+      stacks[i]!.push({
+        name: give.name,
+        quantity: share,
+        description: `${give.description} (split)`,
+        ...(give.itemType ? { itemType: give.itemType } : {}),
+      });
     });
   }
 
@@ -314,7 +349,8 @@ export async function splitCorpseLoot(
     for (const it of stacks[i]!) {
       const given = await giveDdbInventoryItem(pc.ddbCharacterId, {
         name: it.name,
-        description: `Looted from ${token.name} (split)`,
+        description: it.description,
+        ...(it.itemType ? { itemType: it.itemType } : {}),
         ...(it.quantity > 1 ? { quantity: it.quantity } : {}),
       });
       bits.push(given.ok ? `${it.quantity}× ${it.name}` : given.message);
